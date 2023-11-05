@@ -12,9 +12,9 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "eframe template",
+        "Scotland Yard Visualisation",
         native_options,
-        Box::new(|cc| Box::new(scotland_yard_egui::TemplateApp::new(cc))),
+        Box::new(|cc| Box::new(scotland_yard_egui::VisualizedGraph::new(cc))),
     )
 }
 
@@ -31,7 +31,7 @@ fn main() {
             .start(
                 "the_canvas_id", // hardcode it
                 web_options,
-                Box::new(|cc| Box::new(scotland_yard_egui::TemplateApp::new(cc))),
+                Box::new(|cc| Box::new(scotland_yard_egui::VisualizedGraph::new(cc))),
             )
             .await
             .expect("failed to start eframe");
