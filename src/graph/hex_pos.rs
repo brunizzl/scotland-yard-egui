@@ -12,6 +12,12 @@ pub struct HexPos {
     pub descending: isize,
 }
 
+impl std::fmt::Debug for HexPos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { 
+        write!(f, "[{}, {}, {}]", self.horizontal, self.ascending, self.descending)
+    }
+}
+
 impl HexPos {
     pub const fn new(horizontal: isize, ascending: isize, descending: isize) -> HexPos {
         HexPos{ horizontal, ascending, descending }
@@ -106,7 +112,7 @@ impl HexPos {
         const COS_60_DEG: f32 = 0.5;
         const UNIT_H_DIR: Vec2 = Vec2::new(1.0, 0.0);
         const UNIT_A_DIR: Vec2 = Vec2::new(COS_60_DEG, -SIN_60_DEG); //y-axis points down
-        const UNIT_D_DIR: Vec2 = Vec2::new(-COS_60_DEG, SIN_60_DEG); //y-axis points down
+        const UNIT_D_DIR: Vec2 = Vec2::new(COS_60_DEG, SIN_60_DEG); //y-axis points down
         
         origin 
             + self.horizontal as f32 * scale * UNIT_H_DIR
