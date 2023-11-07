@@ -36,9 +36,9 @@ impl HexPos {
 
     pub fn is_normalized(&self) -> bool {
         match (self.horizontal, self.ascending, self.descending) {
-            (0, a, d) => a.is_positive() != d.is_positive(),
-            (h, 0, d) => h.is_positive() == d.is_positive(),
-            (h, a, 0) => h.is_positive() == a.is_positive(),
+            (0, a, d) => a * d <= 0,
+            (h, 0, d) => h * d >= 0,
+            (h, a, 0) => h * a >= 0,
             _ => false,
         }
     }
@@ -48,7 +48,7 @@ impl HexPos {
         let h = self.horizontal + self.descending;
         let a = self.ascending - self.descending;
 
-        if h.is_positive() == a.is_positive() { 
+        let res = if h * a >= 0 { 
             //we are already in one of the two sectors spanned by h and a, thus done
             //(these are the upper right sector and the lower left sector)
             HexPos::new(h, a, 0)
@@ -60,7 +60,9 @@ impl HexPos {
         else {
             //upper left sector or lower right sector
             HexPos::new(h + a, 0, -a)
-        }
+        };
+        debug_assert!(res.is_normalized());
+        res
     }
 
     //distance from origin, thus same as "level"
