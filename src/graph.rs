@@ -5,8 +5,6 @@ use std::collections::VecDeque;
 
 use egui::Pos2;
 
-use super::Bool3;
-
 pub struct Graph {
     positions: Vec<Pos2>,
 
@@ -15,6 +13,11 @@ pub struct Graph {
 }
 
 impl Graph {
+    pub fn len(&self) -> usize {
+        debug_assert_eq!(self.positions.len(), self.neighbors.len());
+        self.positions.len()
+    }
+
     pub fn empty() -> Self {
         Graph { positions: Vec::new(), neighbors: Vec::new() }
     }
@@ -68,10 +71,6 @@ impl Graph {
         Graph { positions, neighbors }
     }
 
-    pub fn mut_nodes(&mut self) -> &mut [Pos2] {
-        &mut self.positions
-    }
-
     pub fn nodes(&self) -> &[Pos2] {
         &self.positions
     }
@@ -86,25 +85,35 @@ impl Graph {
                     .map(move |i2| (&self.positions[i1], &self.positions[*i2])))        
     }
 
+    pub fn neighbors(&self, node: usize) -> &[usize] {
+        &self.neighbors[node]
+    } 
+
     pub fn neigbors_of(&self, node: usize) -> impl Iterator<Item = (usize, &Pos2)> {
         self.neighbors[node].iter().map(move |i| (*i, &self.positions[*i]))
     }
 
-    //to save on allocations, this function expects both the storage place for 
-    //  the result and the used queue to come provided.
-    pub fn calc_distances_to(&self, pos: usize, distances: &mut Vec<usize>, queue: &mut VecDeque<usize>) {
-        distances.clear();
-        distances.resize(self.nodes().len(), usize::MAX);
-        distances[pos] = 0;
-
-        queue.clear();
-        queue.push_back(pos);
-
+    //everything in queue is starting point and expected to already have the correct distance
+    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<usize>) {
         while let Some(node) = queue.pop_front() {
             let dist = distances[node];
             for &neigh in &self.neighbors[node] {
                 if distances[neigh] > dist + 1 {
                     distances[neigh] = dist + 1;
+                    queue.push_back(neigh);
+                }
+            }
+        }
+    }
+
+    //paintbucket tool
+    pub fn recolor_region<Color: Eq + Clone>(&self, (old, new): (Color, Color), 
+        colors: &mut [Color], queue: &mut VecDeque<usize>) {
+
+        while let Some(node) = queue.pop_front() {
+            for &neigh in self.neighbors(node) {
+                if colors[neigh] == old {
+                    colors[neigh] = new.clone();
                     queue.push_back(neigh);
                 }
             }
