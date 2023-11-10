@@ -11,7 +11,7 @@ use super::graph::Graph;
 pub enum InSet { No, Perhaps, Yes, NewlyAdded }
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum GraphShape { RegularNGon(usize), Random }
+pub enum GraphShape { RegularPolygon(usize), Random }
 
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates
@@ -24,16 +24,12 @@ pub struct Character {
 }
 
 impl Character {
-    fn new(is_cop: bool, pos: Pos2) -> Self {
-        Character { is_cop, on_node: false, nearest_node: 0, pos, distances: Vec::new() }
-    }
-
     fn new_cop(pos: Pos2) -> Self {
-        Self::new(true, pos)
+        Character { is_cop: true, on_node: false, nearest_node: 0, pos, distances: Vec::new() }
     }
 
     fn new_robber(pos: Pos2) -> Self {
-        Self::new(false, pos)
+        Character { is_cop: false, on_node: false, nearest_node: 0, pos, distances: Vec::new() }
     }
 
     //go through all neighbors of current nearest node, if any neigbor is closer than current nearest node, 
@@ -41,7 +37,7 @@ impl Character {
     //(converges to globally nearest node only for "convex" graphs, 
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
     fn update(&mut self, tolerance: f32, map: &Graph, queue: &mut VecDeque<usize>) {
-        let nearest_pos = map.nodes()[self.nearest_node];
+        let nearest_pos = map.positions()[self.nearest_node];
         let mut nearest_dist = (nearest_pos - self.pos).length_sq();
         let mut change = false;
         let mut maybe_neighbor_closer = true;
@@ -123,23 +119,19 @@ impl State {
 
     fn recompute_graph(&mut self) {
         self.map = match self.map_shape {
-            GraphShape::RegularNGon(n) => Graph::new_plane_tiles_regular_ngon(
+            GraphShape::RegularPolygon(n) => Graph::new_triangulated_regular_polygon(
                 n, 
-                self.map_radius, 
-                pos2(1.0, 1.0), 
-                0.99),
+                self.map_radius),
             //TODO: implement function to build random graph
-            GraphShape::Random => Graph::new_plane_tiles_regular_ngon(
+            GraphShape::Random => Graph::new_triangulated_regular_polygon(
                 6, 
-                self.map_radius, 
-                pos2(1.0, 1.0), 
-                0.99),
+                self.map_radius),
         };
         for char in &mut self.characters {
             char.nearest_node = 0;
             char.update(self.tolerance, &self.map, &mut self.queue);
         }
-        self.extreme_vertices = Self::compute_extreme_vertices(self.map.nodes());
+        self.extreme_vertices = Self::compute_extreme_vertices(self.map.positions());
         self.update_min_cop_dist();
         self.update_convex_cop_hull();
         self.update_dist_to_outside_hull();
@@ -149,7 +141,7 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = State { 
             map: Graph::empty(),
-            map_shape: GraphShape::RegularNGon(6),
+            map_shape: GraphShape::RegularPolygon(6),
             map_radius: 8,
 
             extreme_vertices: [0; 4],
@@ -163,9 +155,9 @@ impl State {
             show_escapeable_nodes: false,
             
             characters: vec![
-                Character::new_robber(pos2(0.1, 0.1)),
-                Character::new_cop(pos2(0.75, 1.0)),
-                Character::new_cop(pos2(1.25, 1.0))],
+                Character::new_robber(Pos2::ZERO),
+                Character::new_cop(pos2(0.25, 0.0)),
+                Character::new_cop(pos2(-0.25, 0.0))],
             tolerance: 0.1,
             queue: VecDeque::new(),
          };
@@ -284,11 +276,11 @@ impl eframe::App for State {
                 //adjust underlying graph
                 ui.collapsing("Form", |ui| {
                     let prev_shape = self.map_shape;
-                    let is_n_gon = matches!(self.map_shape, GraphShape::RegularNGon(_));
+                    let is_n_gon = matches!(self.map_shape, GraphShape::RegularPolygon(_));
                     if ui.add(RadioButton::new(is_n_gon, "ReguläresPolygon")).clicked() {                        
-                        self.map_shape = GraphShape::RegularNGon(6);
+                        self.map_shape = GraphShape::RegularPolygon(6);
                     }
-                    if let GraphShape::RegularNGon(n) = &mut self.map_shape {
+                    if let GraphShape::RegularPolygon(n) = &mut self.map_shape {
                         ui.add(egui::Slider::new(n, 3..=10).text("Seiten"));
                     }
                     ui.radio_value(&mut self.map_shape, GraphShape::Random, "Zufallsverteilt");
@@ -309,7 +301,7 @@ impl eframe::App for State {
                         self.characters.pop();
                     }
                     if ui.button("+ Cop").clicked() {
-                        let mut new = Character::new_cop(pos2(1.0, 1.0));
+                        let mut new = Character::new_cop(Pos2::ZERO);
                         new.update(self.tolerance, &self.map, &mut self.queue);
                         self.characters.push(new);
                     }
@@ -335,7 +327,7 @@ impl eframe::App for State {
                 Vec2::new(ui.available_width(), ui.available_height()), Sense::hover());            
 
             let (to_screen, scale) = {
-                let from = Rect::from_min_max(Pos2::ZERO, pos2(2.0, 2.0));
+                let from = Rect::from_min_max(pos2(-1.05, -1.05), pos2(1.05, 1.05));
 
                 let rect_len = f32::min(response.rect.height(), response.rect.width());
                 let to_middle = (response.rect.width() - rect_len) / 2.0;
@@ -358,7 +350,7 @@ impl eframe::App for State {
 
             if self.show_convex_hull {
                 let hull_color = Color32::from_rgb(100, 100, 230);
-                for (&in_hull, &pos) in self.in_convex_cop_hull.iter().zip(self.map.nodes()) {
+                for (&in_hull, &pos) in self.in_convex_cop_hull.iter().zip(self.map.positions()) {
                     if in_hull == InSet::Yes  {
                         let draw_pos = to_screen.transform_pos(pos);
                         let marker_circle = Shape::circle_filled(draw_pos, scale * 10.0, hull_color);
@@ -369,7 +361,7 @@ impl eframe::App for State {
             if self.show_robber_closer {                
                 let robber_closer_color = Color32::from_rgb(80, 210, 80);
                 let dist_vs = self.robber().distances.iter().zip(self.min_cop_dist.iter());
-                for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.nodes()) {
+                for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
                     if r_dist < c_dist  {
                         let draw_pos = to_screen.transform_pos(pos);
                         let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, robber_closer_color);
@@ -380,7 +372,7 @@ impl eframe::App for State {
             if self.show_escapeable_nodes {
                 let escapable_color = Color32::from_rgb(150, 210, 50);
                 let dist_vs = self.dist_to_outside_hull.iter().zip(self.min_cop_dist.iter());
-                for ((o_dist, c_dist), &pos) in dist_vs.zip(self.map.nodes()) {
+                for ((o_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
                     if o_dist < c_dist  {
                         let draw_pos = to_screen.transform_pos(pos);
                         let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, escapable_color);
@@ -395,7 +387,7 @@ impl eframe::App for State {
 
                 let real_screen_pos = to_screen.transform_pos(character.pos);                
                 let draw_pos = if character.on_node {
-                    let nearest_node_pos = to_screen.transform_pos(self.map.nodes()[character.nearest_node]);
+                    let nearest_node_pos = to_screen.transform_pos(self.map.positions()[character.nearest_node]);
                     let marker_circle = Shape::circle_stroke(nearest_node_pos, marker_size, edge_stroke);
                     painter.add(marker_circle);
                     nearest_node_pos
