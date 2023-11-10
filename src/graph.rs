@@ -1,6 +1,4 @@
 
-pub mod hex_pos;
-
 use std::collections::VecDeque;
 
 use egui::{Pos2, vec2};
@@ -23,105 +21,52 @@ impl Graph {
         Graph { positions: Vec::new(), neighbors: Vec::new() }
     }
 
-    pub fn new_plane_tiles_hexagon(levels: usize, origin: Pos2, radius: f32) -> Self {
-        let mut positions = Vec::new();
-        let mut neighbors = Vec::new();
-
-        use hex_pos::*;
-
-        //push origin
-        positions.push(origin);
-        neighbors.push(if levels > 0 {
-            vec![1, 2, 3, 4, 5, 6]
-        }
-        else {
-            Vec::new()
-        });
-
-        //same formula as in HexPos::index::level_start
-        //gaussian sum formula n * (n - 1) / 2, then times 6 because hexagon 
-        //  and plus 1 because level 0 also has one vertex
-        let total_nodes = levels * (levels + 1) * 3 + 1;
-        let edge_length = radius / std::cmp::max(1, levels) as f32;
-
-        //push all remaining nodes
-        for level in 1..levels + 1 {
-            for sector in 0..6 {
-                let nr_nodes_in_sector = level;
-                for steps_from_sector_start in 0..nr_nodes_in_sector {
-                    let name = HexPos::new_from(level, sector, steps_from_sector_start);
-                    let pos = name.to_cartesian(edge_length, origin);
-                    positions.push(pos);
-                    let this_neighbors = [
-                        name + HexPos::UNIT_H,
-                        name - HexPos::UNIT_H,
-                        name + HexPos::UNIT_A,
-                        name - HexPos::UNIT_A,
-                        name + HexPos::UNIT_D,
-                        name - HexPos::UNIT_D,
-                    ].map(|n| n.normalize().index());
-
-                    if level < levels {
-                        neighbors.push(this_neighbors.into());
-                    }
-                    else { //only keep neigbors on same and lower levels
-                        let without_next_level = this_neighbors.into_iter().filter(|id| id < &&total_nodes).collect();
-                        neighbors.push(without_next_level);
-                    }
-                }
-            }
-        }
-
-        Graph { positions, neighbors }
+    pub fn add_vertex(&mut self, pos: Pos2) -> usize {
+        let new_index = self.len();
+        self.positions.push(pos);
+        self.neighbors.push(Vec::new());
+        new_index
     }
 
-    pub fn new_plane_tiles_pentagon(levels: usize, origin: Pos2, radius: f32) -> Self {
-        let mut positions = Vec::new();
-        let mut neighbors = Vec::<Vec<_>>::new();
+    pub fn add_edge(&mut self, v1: usize, v2: usize) {
+        self.neighbors[v1].push(v2);
+        self.neighbors[v2].push(v1);
+    }
 
-        let add_edge = |neighs: &mut Vec<Vec<_>>, v1: usize, v2: usize| {
-            neighs[v1].push(v2);
-            neighs[v2].push(v1);
-        };
-        let add_edges_between = |neighs: &mut Vec<Vec<_>>, vertices: &[usize]| {
-            for (&v1, &v2) in vertices.iter().tuple_windows() {
-                add_edge(neighs, v1, v2);
-            }
-        };
-
-        //push origin
-        positions.push(origin);
-        neighbors.push(Vec::new());
-        if levels < 1 {
-            return Graph { positions, neighbors };
+    pub fn add_edges_between<'a>(&mut self, vs: impl Iterator<Item = &'a usize>) {
+        for (&v1, &v2) in vs.tuple_windows() {
+            self.add_edge(v1, v2);
         }
-        let mut next_free_index = 1;
+    }
+
+    pub fn new_plane_tiles_regular_ngon(sides: usize, levels: usize, origin: Pos2, radius: f32) -> Self {
+        let mut graph = Self::empty();
+        graph.add_vertex(origin);
+        if levels < 1 {
+            return graph;
+        }
 
         //idea: build sector by sector, first the nodes on the sector borders
         let edge_length = radius / std::cmp::max(1, levels) as f32;
         let mut sector_borders = Vec::new();
-        for border_nr in 0..5 {
+        for border_nr in 0..sides {
+            let next_free_index = graph.len();
             let border = std::iter::once(0)
                 .chain(next_free_index..(next_free_index + levels))
                 .collect::<Vec<_>>();
-            next_free_index += levels;
-            let angle = 2.0 * std::f32::consts::PI * (border_nr as f32) / 5.0;
+            let angle = 2.0 * std::f32::consts::PI * (border_nr as f32) / (sides as f32);
             let unit_dir = vec2(angle.cos(), angle.sin()) * edge_length;
             sector_borders.push((border, unit_dir));
             for dist_to_origin in 1..(levels + 1) {
-                positions.push(origin + (dist_to_origin as f32) * unit_dir);
-                neighbors.push(Vec::new());
+                graph.add_vertex(origin + (dist_to_origin as f32) * unit_dir);
             }
-            debug_assert_eq!(positions.len(), neighbors.len());
-            debug_assert_eq!(positions.len(), next_free_index);
         }
         for ((b1, u1), (b2, u2)) in sector_borders.iter().circular_tuple_windows() {
+            //add all edges within the (fist) border itself
+            graph.add_edges_between(b1.iter());
+            graph.add_edge(b1[1], b2[1]);
+
             let unit_diff = *u2 - *u1;
-
-            //add all edges within the border itself
-            add_edges_between(&mut neighbors, &b1);
-            add_edge(&mut neighbors, b1[1], b2[1]);
-
             let mut last_levels_nodes = vec![b1[1], b2[1]];
             for level in 2..(levels + 1) {
                 let level_start_pos = origin + (level as f32) * *u1;
@@ -129,32 +74,23 @@ impl Graph {
                 let mut this_levels_nodes = vec![b1[level]];
                 let nr_inner_nodes = level - 1;
                 for node in 1..(nr_inner_nodes + 1) {
-                    this_levels_nodes.push(next_free_index);                    
-                    next_free_index += 1;
-
-                    positions.push(level_start_pos + (node as f32) * unit_diff);
-                    neighbors.push(Vec::new());
-
-                    debug_assert_eq!(positions.len(), neighbors.len());
-                    debug_assert_eq!(positions.len(), next_free_index);
+                    let node_pos = level_start_pos + (node as f32) * unit_diff;
+                    let node_index = graph.add_vertex(node_pos);
+                    this_levels_nodes.push(node_index);
                 }
                 this_levels_nodes.push(b2[level]);
 
                 //connext level to itself
-                add_edges_between(&mut neighbors, &this_levels_nodes);
+                graph.add_edges_between(this_levels_nodes.iter());
                 //connect level to previous levels
-                for ((v_last1, v_last2), v_curr) in last_levels_nodes.iter()
-                    .tuple_windows()
-                    .zip(this_levels_nodes[1..(nr_inner_nodes + 1)].iter()) {
-                    
-                        add_edge(&mut neighbors, *v_last1, *v_curr);
-                        add_edge(&mut neighbors, *v_last2, *v_curr);
-                }
+                graph.add_edges_between(last_levels_nodes.iter()
+                    .interleave(this_levels_nodes[1..(nr_inner_nodes + 1)].iter()));
+                
                 last_levels_nodes = this_levels_nodes;
             }
         }
 
-        Graph { positions, neighbors }
+        graph
     }
 
     pub fn nodes(&self) -> &[Pos2] {
