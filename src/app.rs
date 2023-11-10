@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use egui::*;
 
-use super::graph;
+use super::graph::Graph;
 
 
 
@@ -40,17 +40,17 @@ impl Character {
     //  change to that neighbor
     //(converges to globally nearest node only for "convex" graphs, 
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
-    fn update(&mut self, tolerance: f32, map: &graph::Graph, queue: &mut VecDeque<usize>) {
+    fn update(&mut self, tolerance: f32, map: &Graph, queue: &mut VecDeque<usize>) {
         let nearest_pos = map.nodes()[self.nearest_node];
         let mut nearest_dist = (nearest_pos - self.pos).length_sq();
         let mut change = false;
         let mut maybe_neighbor_closer = true;
         while maybe_neighbor_closer {
             maybe_neighbor_closer = false;
-            for (i, &neigh) in map.neigbors_of(self.nearest_node) {
-                let neigh_dist = (neigh - self.pos).length_sq();
+            for (neigh, &neigh_pos) in map.neigbors_with_positions(self.nearest_node) {
+                let neigh_dist = (neigh_pos - self.pos).length_sq();
                 if neigh_dist < nearest_dist {
-                    self.nearest_node = i;
+                    self.nearest_node = neigh;
                     nearest_dist = neigh_dist;
                     maybe_neighbor_closer = true;
                     change = true;
@@ -71,13 +71,13 @@ impl Character {
 }
 
 pub struct State {
-    map: graph::Graph,
+    map: Graph,
 
     //overall map shape: == 2 is line, == 3 triangle, == 4 square, == 5 pentagon etc.
     map_shape: GraphShape,
     map_radius: usize, //(approx.) shortest path length from origin to rim
 
-    extreme_points: [usize; 4], //indices of vertices with extreme coodinates
+    extreme_vertices: [usize; 4], //indices of vertices with extreme coodinates
 
     //state kept for each node in map
     in_convex_cop_hull: Vec<InSet>, 
@@ -97,7 +97,7 @@ pub struct State {
 
 impl State {
 
-    fn compute_extreme_points(points: &[Pos2]) -> [usize; 4] {
+    fn compute_extreme_vertices(points: &[Pos2]) -> [usize; 4] {
         let mut res = [0; 4];
         let mut res_vals = [points[0]; 4];
         for (i, p) in points.iter().enumerate() {
@@ -123,23 +123,23 @@ impl State {
 
     fn recompute_graph(&mut self) {
         self.map = match self.map_shape {
-            GraphShape::RegularNGon(n) => graph::Graph::new_plane_tiles_regular_ngon(
+            GraphShape::RegularNGon(n) => Graph::new_plane_tiles_regular_ngon(
                 n, 
                 self.map_radius, 
                 pos2(1.0, 1.0), 
-                1.0),
+                0.99),
             //TODO: implement function to build random graph
-            GraphShape::Random => graph::Graph::new_plane_tiles_regular_ngon(
+            GraphShape::Random => Graph::new_plane_tiles_regular_ngon(
                 6, 
                 self.map_radius, 
                 pos2(1.0, 1.0), 
-                1.0),
+                0.99),
         };
         for char in &mut self.characters {
             char.nearest_node = 0;
             char.update(self.tolerance, &self.map, &mut self.queue);
         }
-        self.extreme_points = Self::compute_extreme_points(self.map.nodes());
+        self.extreme_vertices = Self::compute_extreme_vertices(self.map.nodes());
         self.update_min_cop_dist();
         self.update_convex_cop_hull();
         self.update_dist_to_outside_hull();
@@ -148,11 +148,11 @@ impl State {
     /// Called once before the first frame.
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = State { 
-            map: graph::Graph::empty(),
+            map: Graph::empty(),
             map_shape: GraphShape::RegularNGon(6),
             map_radius: 8,
 
-            extreme_points: [0; 4],
+            extreme_vertices: [0; 4],
 
             in_convex_cop_hull: Vec::new(),
             dist_to_outside_hull: Vec::new(),
@@ -249,7 +249,7 @@ impl State {
             }
         }
         //color outside as InSet::No (note: this might miss some edge cases; best to not place cops at rim)
-        for p in self.extreme_points {
+        for p in self.extreme_vertices {
             if in_hull[p] == InSet::Perhaps {
                 in_hull[p] = InSet::No;
                 self.queue.push_back(p);
@@ -281,10 +281,11 @@ impl eframe::App for State {
                 ui.heading("Optionen");
                 widgets::global_dark_light_mode_buttons(ui);
 
+                //adjust underlying graph
                 ui.collapsing("Form", |ui| {
                     let prev_shape = self.map_shape;
                     let is_n_gon = matches!(self.map_shape, GraphShape::RegularNGon(_));
-                    if ui.add(RadioButton::new(is_n_gon, "Reguläres N-Gon")).clicked() {                        
+                    if ui.add(RadioButton::new(is_n_gon, "ReguläresPolygon")).clicked() {                        
                         self.map_shape = GraphShape::RegularNGon(6);
                     }
                     if let GraphShape::RegularNGon(n) = &mut self.map_shape {
@@ -302,6 +303,7 @@ impl eframe::App for State {
                         self.recompute_graph();
                     }
                 }
+                //adjust nr of cops
                 ui.horizontal(|ui| {
                     if ui.button("- Cop").clicked() && self.characters.len() > 1 {
                         self.characters.pop();
@@ -312,11 +314,15 @@ impl eframe::App for State {
                         self.characters.push(new);
                     }
                 });
-                ui.add(Checkbox::new(&mut self.show_robber_closer, "markiere für Räuber\n nähere Knoten"));
+
+                //settings to draw extra information
+                ui.radio_value(&mut self.show_robber_closer, true, 
+                    "markiere für Räuber\n nähere Knoten");
                 if self.show_robber_closer {
                     self.show_escapeable_nodes = false;
                 }
-                ui.add(Checkbox::new(&mut self.show_escapeable_nodes, "zeige Punkte näher an\n Hüllenrand als an Cops"));
+                ui.radio_value(&mut self.show_escapeable_nodes, true, 
+                    "zeige Punkte näher an\n Hüllenrand als an Cops");
                 if self.show_escapeable_nodes {
                     self.show_robber_closer = false;
                 }
@@ -329,7 +335,7 @@ impl eframe::App for State {
                 Vec2::new(ui.available_width(), ui.available_height()), Sense::hover());            
 
             let (to_screen, scale) = {
-                let from = Rect{ min: Pos2::ZERO, max: pos2(2.0, 2.0) };
+                let from = Rect::from_min_max(Pos2::ZERO, pos2(2.0, 2.0));
 
                 let rect_len = f32::min(response.rect.height(), response.rect.width());
                 let to_middle = (response.rect.width() - rect_len) / 2.0;

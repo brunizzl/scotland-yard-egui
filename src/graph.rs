@@ -29,12 +29,14 @@ impl Graph {
     }
 
     pub fn add_edge(&mut self, v1: usize, v2: usize) {
+        debug_assert!(!self.neighbors[v1].contains(&v2));
+        debug_assert!(!self.neighbors[v2].contains(&v1));
         self.neighbors[v1].push(v2);
         self.neighbors[v2].push(v1);
     }
 
-    pub fn add_edges_between<'a>(&mut self, vs: impl Iterator<Item = &'a usize>) {
-        for (&v1, &v2) in vs.tuple_windows() {
+    pub fn add_path_edges<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
+        for (&v1, &v2) in path.tuple_windows() {
             self.add_edge(v1, v2);
         }
     }
@@ -54,7 +56,7 @@ impl Graph {
             let border = std::iter::once(0)
                 .chain(next_free_index..(next_free_index + levels))
                 .collect::<Vec<_>>();
-            let angle = 2.0 * std::f32::consts::PI * (border_nr as f32) / (sides as f32);
+            let angle = 2.0 * std::f32::consts::PI * ((border_nr as f32 + 0.5) / (sides as f32) + 0.25);
             let unit_dir = vec2(angle.cos(), angle.sin()) * edge_length;
             sector_borders.push((border, unit_dir));
             for dist_to_origin in 1..(levels + 1) {
@@ -62,13 +64,9 @@ impl Graph {
             }
         }
         for ((b1, u1), (b2, u2)) in sector_borders.iter().circular_tuple_windows() {
-            //add all edges within the (fist) border itself
-            graph.add_edges_between(b1.iter());
-            graph.add_edge(b1[1], b2[1]);
-
             let unit_diff = *u2 - *u1;
-            let mut last_levels_nodes = vec![b1[1], b2[1]];
-            for level in 2..(levels + 1) {
+            let mut last_levels_nodes = vec![0]; //lowest level contains only origin
+            for level in 1..(levels + 1) {
                 let level_start_pos = origin + (level as f32) * *u1;
 
                 let mut this_levels_nodes = vec![b1[level]];
@@ -80,11 +78,15 @@ impl Graph {
                 }
                 this_levels_nodes.push(b2[level]);
 
-                //connext level to itself
-                graph.add_edges_between(this_levels_nodes.iter());
-                //connect level to previous levels
-                graph.add_edges_between(last_levels_nodes.iter()
-                    .interleave(this_levels_nodes[1..(nr_inner_nodes + 1)].iter()));
+                //connect level to itself
+                graph.add_path_edges(this_levels_nodes.iter());
+
+                //connect level to previous level
+                //note: the last added edge connects b2's nodes
+                //e.g. for upper sector we see the following paths added (all drawn right to left):
+                //level 1: \      2: \/\     3: \/\/\     4: \/\/\/\       ...
+                graph.add_path_edges(last_levels_nodes.iter()
+                    .interleave(this_levels_nodes[1..].iter()));
                 
                 last_levels_nodes = this_levels_nodes;
             }
@@ -111,7 +113,7 @@ impl Graph {
         &self.neighbors[node]
     } 
 
-    pub fn neigbors_of(&self, node: usize) -> impl Iterator<Item = (usize, &Pos2)> {
+    pub fn neigbors_with_positions(&self, node: usize) -> impl Iterator<Item = (usize, &Pos2)> {
         self.neighbors[node].iter().map(move |i| (*i, &self.positions[*i]))
     }
 
