@@ -11,7 +11,7 @@ use super::graph;
 pub enum InSet { No, Perhaps, Yes, NewlyAdded }
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum GraphShape { Hexagon, Pentagon }
+pub enum GraphShape { RegularNGon(usize), Random }
 
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates
@@ -72,6 +72,8 @@ impl Character {
 
 pub struct State {
     map: graph::Graph,
+
+    //overall map shape: == 2 is line, == 3 triangle, == 4 square, == 5 pentagon etc.
     map_shape: GraphShape,
     map_radius: usize, //(approx.) shortest path length from origin to rim
 
@@ -121,17 +123,18 @@ impl State {
 
     fn recompute_graph(&mut self) {
         self.map = match self.map_shape {
-            GraphShape::Hexagon => 
-                graph::Graph::new_plane_tiles_hexagon(
-                    self.map_radius, 
-                    pos2(1.0, 1.0), 
-                    1.0),
-            GraphShape::Pentagon => 
-                graph::Graph::new_plane_tiles_pentagon(
-                    self.map_radius, 
-                    pos2(1.0, 1.0), 
-                    1.0),
-        };   
+            GraphShape::RegularNGon(n) => graph::Graph::new_plane_tiles_regular_ngon(
+                n, 
+                self.map_radius, 
+                pos2(1.0, 1.0), 
+                1.0),
+            //TODO: implement function to build random graph
+            GraphShape::Random => graph::Graph::new_plane_tiles_regular_ngon(
+                6, 
+                self.map_radius, 
+                pos2(1.0, 1.0), 
+                1.0),
+        };
         for char in &mut self.characters {
             char.nearest_node = 0;
             char.update(self.tolerance, &self.map, &mut self.queue);
@@ -146,7 +149,7 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = State { 
             map: graph::Graph::empty(),
-            map_shape: GraphShape::Hexagon,
+            map_shape: GraphShape::RegularNGon(6),
             map_radius: 8,
 
             extreme_points: [0; 4],
@@ -278,34 +281,37 @@ impl eframe::App for State {
                 ui.heading("Optionen");
                 widgets::global_dark_light_mode_buttons(ui);
 
-                {
+                ui.collapsing("Form", |ui| {
                     let prev_shape = self.map_shape;
-                    ui.collapsing("Form", |ui| {
-                        ui.radio_value(&mut self.map_shape, GraphShape::Hexagon, "Hexagon");
-                        ui.radio_value(&mut self.map_shape, GraphShape::Pentagon, "Pentagon");
-                    });
+                    let is_n_gon = matches!(self.map_shape, GraphShape::RegularNGon(_));
+                    if ui.add(RadioButton::new(is_n_gon, "Reguläres N-Gon")).clicked() {                        
+                        self.map_shape = GraphShape::RegularNGon(6);
+                    }
+                    if let GraphShape::RegularNGon(n) = &mut self.map_shape {
+                        ui.add(egui::Slider::new(n, 3..=10).text("Seiten"));
+                    }
+                    ui.radio_value(&mut self.map_shape, GraphShape::Random, "Zufallsverteilt");
                     if prev_shape != self.map_shape {
                         self.recompute_graph();
                     }
-                }
-
+                });
                 { //adjust radius
-                    let prev_radius = self.map_radius;
-                    ui.horizontal(|ui| {
-                        ui.label("Radius: ");
-                        ui.add(
-                            DragValue::new(&mut self.map_radius)
-                            .clamp_range(std::ops::RangeInclusive::new(1, 100)));
-                    });
+                    let prev_radius = self.map_radius;    
+                    ui.add(egui::Slider::new(&mut self.map_radius, 1..=100).text("Radius"));
                     if prev_radius != self.map_radius {
                         self.recompute_graph();
                     }
                 }
-                if ui.button("neuer Cop").clicked() {
-                    let mut new = Character::new_cop(pos2(1.0, 1.0));
-                    new.update(self.tolerance, &self.map, &mut self.queue);
-                    self.characters.push(new);
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("- Cop").clicked() && self.characters.len() > 1 {
+                        self.characters.pop();
+                    }
+                    if ui.button("+ Cop").clicked() {
+                        let mut new = Character::new_cop(pos2(1.0, 1.0));
+                        new.update(self.tolerance, &self.map, &mut self.queue);
+                        self.characters.push(new);
+                    }
+                });
                 ui.add(Checkbox::new(&mut self.show_robber_closer, "markiere für Räuber\n nähere Knoten"));
                 if self.show_robber_closer {
                     self.show_escapeable_nodes = false;
