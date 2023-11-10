@@ -10,7 +10,8 @@ use super::graph;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InSet { No, Perhaps, Yes, NewlyAdded }
 
-pub enum GraphShape { Hexagon, }
+#[derive(Clone, Copy, PartialEq)]
+pub enum GraphShape { Hexagon, Pentagon }
 
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates
@@ -23,8 +24,16 @@ pub struct Character {
 }
 
 impl Character {
-    fn new(is_cop: bool, pos: Pos2) -> Character {
+    fn new(is_cop: bool, pos: Pos2) -> Self {
         Character { is_cop, on_node: false, nearest_node: 0, pos, distances: Vec::new() }
+    }
+
+    fn new_cop(pos: Pos2) -> Self {
+        Self::new(true, pos)
+    }
+
+    fn new_robber(pos: Pos2) -> Self {
+        Self::new(false, pos)
     }
 
     //go through all neighbors of current nearest node, if any neigbor is closer than current nearest node, 
@@ -110,11 +119,19 @@ impl State {
         res
     }
 
-    fn resize(&mut self, radius: usize) {
-        let map = graph::Graph::new_plane_tiles_hexagon(radius, Pos2::new(1.0, 1.0), 1.0);
-        self.map_shape = GraphShape::Hexagon;
-        self.map = map;
-        self.map_radius = radius;      
+    fn recompute_graph(&mut self) {
+        self.map = match self.map_shape {
+            GraphShape::Hexagon => 
+                graph::Graph::new_plane_tiles_hexagon(
+                    self.map_radius, 
+                    pos2(1.0, 1.0), 
+                    1.0),
+            GraphShape::Pentagon => 
+                graph::Graph::new_plane_tiles_pentagon(
+                    self.map_radius, 
+                    pos2(1.0, 1.0), 
+                    1.0),
+        };   
         for char in &mut self.characters {
             char.nearest_node = 0;
             char.update(self.tolerance, &self.map, &mut self.queue);
@@ -130,7 +147,7 @@ impl State {
         let mut res = State { 
             map: graph::Graph::empty(),
             map_shape: GraphShape::Hexagon,
-            map_radius: 0,
+            map_radius: 8,
 
             extreme_points: [0; 4],
 
@@ -138,18 +155,18 @@ impl State {
             dist_to_outside_hull: Vec::new(),
             min_cop_dist: Vec::new(),
 
-            show_robber_closer: true,
-            show_convex_hull: true,
-            show_escapeable_nodes: true,
+            show_robber_closer: false,
+            show_convex_hull: false,
+            show_escapeable_nodes: false,
             
             characters: vec![
-                Character::new(false, pos2(0.1, 0.1)),
-                Character::new(true, pos2(0.9, 1.0)),
-                Character::new(true, pos2(1.1, 1.0))],
+                Character::new_robber(pos2(0.1, 0.1)),
+                Character::new_cop(pos2(0.75, 1.0)),
+                Character::new_cop(pos2(1.25, 1.0))],
             tolerance: 0.1,
             queue: VecDeque::new(),
          };
-         res.resize(8);
+         res.recompute_graph();
          res
     }
 
@@ -256,35 +273,48 @@ impl eframe::App for State {
         // Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
-        TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            widgets::global_dark_light_mode_buttons(ui);
-        });
-
-
-
         SidePanel::left("left_panel").show(ctx, |ui| {
             ui.vertical(|ui| {
                 ui.heading("Optionen");
+                widgets::global_dark_light_mode_buttons(ui);
+
+                {
+                    let prev_shape = self.map_shape;
+                    ui.collapsing("Form", |ui| {
+                        ui.radio_value(&mut self.map_shape, GraphShape::Hexagon, "Hexagon");
+                        ui.radio_value(&mut self.map_shape, GraphShape::Pentagon, "Pentagon");
+                    });
+                    if prev_shape != self.map_shape {
+                        self.recompute_graph();
+                    }
+                }
 
                 { //adjust radius
-                    let mut new_radius = self.map_radius;
+                    let prev_radius = self.map_radius;
                     ui.horizontal(|ui| {
                         ui.label("Radius: ");
-                        ui.add(DragValue::new(&mut new_radius));
+                        ui.add(
+                            DragValue::new(&mut self.map_radius)
+                            .clamp_range(std::ops::RangeInclusive::new(1, 100)));
                     });
-                    new_radius = usize::max(1, usize::min(new_radius, 100));
-                    if new_radius != self.map_radius {
-                        self.resize(new_radius);
+                    if prev_radius != self.map_radius {
+                        self.recompute_graph();
                     }
                 }
                 if ui.button("neuer Cop").clicked() {
-                    let mut new = Character::new(true, pos2(1.0, 1.0));
+                    let mut new = Character::new_cop(pos2(1.0, 1.0));
                     new.update(self.tolerance, &self.map, &mut self.queue);
                     self.characters.push(new);
                 }
                 ui.add(Checkbox::new(&mut self.show_robber_closer, "markiere für Räuber\n nähere Knoten"));
-                ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Convexe Hüll\n um Cops"));
+                if self.show_robber_closer {
+                    self.show_escapeable_nodes = false;
+                }
                 ui.add(Checkbox::new(&mut self.show_escapeable_nodes, "zeige Punkte näher an\n Hüllenrand als an Cops"));
+                if self.show_escapeable_nodes {
+                    self.show_robber_closer = false;
+                }
+                ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
             });
         });
 
@@ -293,7 +323,7 @@ impl eframe::App for State {
                 Vec2::new(ui.available_width(), ui.available_height()), Sense::hover());            
 
             let (to_screen, scale) = {
-                let from = Rect{ min: Pos2::ZERO, max: Pos2::new(2.0, 2.0) };
+                let from = Rect{ min: Pos2::ZERO, max: pos2(2.0, 2.0) };
 
                 let rect_len = f32::min(response.rect.height(), response.rect.width());
                 let to_middle = (response.rect.width() - rect_len) / 2.0;
@@ -301,7 +331,7 @@ impl eframe::App for State {
                 let to = Rect::from_min_size(screen_min, vec2(rect_len, rect_len));
 
                 let to_screen = emath::RectTransform::from_to(from, to);
-                let scale = rect_len / self.map_radius as f32 * 0.015;
+                let scale = f32::min(rect_len / self.map_radius as f32 * 0.015, 4.0);
                 (to_screen, scale)
             };
             
@@ -351,7 +381,7 @@ impl eframe::App for State {
                 let character_size = f32::max(8.0, scale * 8.0);
                 let marker_size = character_size + 4.0 * scale;
 
-                let real_screen_pos = to_screen.transform_pos(character.pos);
+                let real_screen_pos = to_screen.transform_pos(character.pos);                
                 let draw_pos = if character.on_node {
                     let nearest_node_pos = to_screen.transform_pos(self.map.nodes()[character.nearest_node]);
                     let marker_circle = Shape::circle_stroke(nearest_node_pos, marker_size, edge_stroke);
@@ -361,6 +391,7 @@ impl eframe::App for State {
                 else {
                     real_screen_pos
                 };
+
                 let point_rect = Rect::from_center_size(draw_pos, vec2(marker_size, marker_size));
                 let character_id = response.id.with(i);
                 let point_response = ui.interact(point_rect, character_id, Sense::drag());
@@ -376,9 +407,15 @@ impl eframe::App for State {
                 let character_circle = Shape::circle_filled(draw_pos, character_size, fill_color);
                 painter.add(character_circle);
             }
-            self.update_convex_cop_hull();
-            self.update_min_cop_dist();
-            self.update_dist_to_outside_hull();
+            if self.show_convex_hull || self.show_escapeable_nodes || self.show_robber_closer {
+                self.update_min_cop_dist();
+            }
+            if self.show_convex_hull || self.show_escapeable_nodes {
+                self.update_convex_cop_hull();
+            }
+            if self.show_escapeable_nodes {
+                self.update_dist_to_outside_hull();
+            }
         });
     }
 }
