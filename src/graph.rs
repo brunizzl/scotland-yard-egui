@@ -41,15 +41,16 @@ impl Graph {
         }
     }
 
-    pub fn new_plane_tiles_regular_ngon(sides: usize, levels: usize, origin: Pos2, radius: f32) -> Self {
+    //centered at zero, contained in -1.0..1.0 x -1.0..1.0
+    pub fn new_triangulated_regular_polygon(sides: usize, levels: usize) -> Self {
         let mut graph = Self::empty();
-        graph.add_vertex(origin);
+        graph.add_vertex(Pos2::ZERO);
         if levels < 1 {
             return graph;
         }
 
         //idea: build sector by sector, first the nodes on the sector borders
-        let edge_length = radius / std::cmp::max(1, levels) as f32;
+        let edge_length = 1.0 / std::cmp::max(1, levels) as f32;
         let mut sector_borders = Vec::new();
         for border_nr in 0..sides {
             let next_free_index = graph.len();
@@ -60,14 +61,14 @@ impl Graph {
             let unit_dir = vec2(angle.cos(), angle.sin()) * edge_length;
             sector_borders.push((border, unit_dir));
             for dist_to_origin in 1..(levels + 1) {
-                graph.add_vertex(origin + (dist_to_origin as f32) * unit_dir);
+                graph.add_vertex(Pos2::ZERO + (dist_to_origin as f32) * unit_dir);
             }
         }
         for ((b1, u1), (b2, u2)) in sector_borders.iter().circular_tuple_windows() {
             let unit_diff = *u2 - *u1;
             let mut last_levels_nodes = vec![0]; //lowest level contains only origin
             for level in 1..(levels + 1) {
-                let level_start_pos = origin + (level as f32) * *u1;
+                let level_start_pos = Pos2::ZERO + (level as f32) * *u1;
 
                 let mut this_levels_nodes = vec![b1[level]];
                 let nr_inner_nodes = level - 1;
@@ -95,7 +96,7 @@ impl Graph {
         graph
     }
 
-    pub fn nodes(&self) -> &[Pos2] {
+    pub fn positions(&self) -> &[Pos2] {
         &self.positions
     }
 
@@ -130,7 +131,7 @@ impl Graph {
         }
     }
 
-    //paintbucket tool
+    //paintbucket tool, all in queue are starting vertices
     pub fn recolor_region<Color: Eq + Clone>(&self, (old, new): (Color, Color), 
         colors: &mut [Color], queue: &mut VecDeque<usize>) {
 
