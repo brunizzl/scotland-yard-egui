@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use egui::*;
 
-use super::graph::Graph;
+use super::{ graph::Graph, graph };
 
 
 
@@ -37,32 +37,18 @@ impl Character {
     //(converges to globally nearest node only for "convex" graphs, 
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
     fn update(&mut self, tolerance: f32, map: &Graph, queue: &mut VecDeque<usize>) {
-        let nearest_pos = map.positions()[self.nearest_node];
-        let mut nearest_dist = (nearest_pos - self.pos).length_sq();
-        let mut change = false;
-        let mut maybe_neighbor_closer = true;
-        while maybe_neighbor_closer {
-            maybe_neighbor_closer = false;
-            for (neigh, &neigh_pos) in map.neigbors_with_positions(self.nearest_node) {
-                let neigh_dist = (neigh_pos - self.pos).length_sq();
-                if neigh_dist < nearest_dist {
-                    self.nearest_node = neigh;
-                    nearest_dist = neigh_dist;
-                    maybe_neighbor_closer = true;
-                    change = true;
-                }
-            }
-        }
-        self.on_node = nearest_dist <= tolerance * tolerance;
+        let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos, self.nearest_node);
 
-        if change || self.distances.len() != map.len() {
+        if nearest_node != self.nearest_node || self.distances.len() != map.len() {
             queue.clear();
-            queue.push_back(self.nearest_node);
+            queue.push_back(nearest_node);
             self.distances.clear();
             self.distances.resize(map.len(), usize::MAX);
-            self.distances[self.nearest_node] = 0;
+            self.distances[nearest_node] = 0;
             map.calc_distances_to(queue, &mut self.distances);
         }
+        self.nearest_node = nearest_node;
+        self.on_node = nearest_dist_sq <= tolerance * tolerance;
     }
 }
 
@@ -119,13 +105,11 @@ impl State {
 
     fn recompute_graph(&mut self) {
         self.map = match self.map_shape {
-            GraphShape::RegularPolygon(n) => Graph::new_triangulated_regular_polygon(
+            GraphShape::RegularPolygon(n) => graph::triangulated_regular_polygon(
                 n, 
                 self.map_radius),
             //TODO: implement function to build random graph
-            GraphShape::Random => Graph::new_triangulated_regular_polygon(
-                6, 
-                self.map_radius),
+            GraphShape::Random => graph::random_triangulated(4 * self.map_radius * self.map_radius),
         };
         for char in &mut self.characters {
             char.nearest_node = 0;
