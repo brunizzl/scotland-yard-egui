@@ -1,7 +1,7 @@
 
 use std::collections::VecDeque;
 
-use egui::{Pos2, vec2};
+use egui::{Pos2, pos2, vec2};
 use itertools::Itertools;
 
 pub struct Graph {
@@ -39,61 +39,6 @@ impl Graph {
         for (&v1, &v2) in path.tuple_windows() {
             self.add_edge(v1, v2);
         }
-    }
-
-    //centered at zero, contained in -1.0..1.0 x -1.0..1.0
-    pub fn new_triangulated_regular_polygon(sides: usize, levels: usize) -> Self {
-        let mut graph = Self::empty();
-        graph.add_vertex(Pos2::ZERO);
-        if levels < 1 {
-            return graph;
-        }
-
-        //idea: build sector by sector, first the nodes on the sector borders
-        let edge_length = 1.0 / std::cmp::max(1, levels) as f32;
-        let mut sector_borders = Vec::new();
-        for border_nr in 0..sides {
-            let next_free_index = graph.len();
-            let border = std::iter::once(0)
-                .chain(next_free_index..(next_free_index + levels))
-                .collect::<Vec<_>>();
-            let angle = 2.0 * std::f32::consts::PI * ((border_nr as f32 + 0.5) / (sides as f32) + 0.25);
-            let unit_dir = vec2(angle.cos(), angle.sin()) * edge_length;
-            sector_borders.push((border, unit_dir));
-            for dist_to_origin in 1..(levels + 1) {
-                graph.add_vertex(Pos2::ZERO + (dist_to_origin as f32) * unit_dir);
-            }
-        }
-        for ((b1, u1), (b2, u2)) in sector_borders.iter().circular_tuple_windows() {
-            let unit_diff = *u2 - *u1;
-            let mut last_levels_nodes = vec![0]; //lowest level contains only origin
-            for level in 1..(levels + 1) {
-                let level_start_pos = Pos2::ZERO + (level as f32) * *u1;
-
-                let mut this_levels_nodes = vec![b1[level]];
-                let nr_inner_nodes = level - 1;
-                for node in 1..(nr_inner_nodes + 1) {
-                    let node_pos = level_start_pos + (node as f32) * unit_diff;
-                    let node_index = graph.add_vertex(node_pos);
-                    this_levels_nodes.push(node_index);
-                }
-                this_levels_nodes.push(b2[level]);
-
-                //connect level to itself
-                graph.add_path_edges(this_levels_nodes.iter());
-
-                //connect level to previous level
-                //note: the last added edge connects b2's nodes
-                //e.g. for upper sector we see the following paths added (all drawn right to left):
-                //level 1: \      2: \/\     3: \/\/\     4: \/\/\/\       ...
-                graph.add_path_edges(last_levels_nodes.iter()
-                    .interleave(this_levels_nodes[1..].iter()));
-                
-                last_levels_nodes = this_levels_nodes;
-            }
-        }
-
-        graph
     }
 
     pub fn positions(&self) -> &[Pos2] {
@@ -143,7 +88,108 @@ impl Graph {
                 }
             }
         }
+    }    
+
+    //returns node index and distance to that index squared
+    pub fn find_nearest_node(&self, pos: Pos2, node_hint: usize) -> (usize, f32) {
+        let mut nearest = node_hint;
+        let mut nearest_dist = (self.positions()[node_hint] - pos).length_sq();
+        let mut maybe_neighbor_closer = true;
+        while maybe_neighbor_closer {
+            maybe_neighbor_closer = false;
+            for (neigh, &neigh_pos) in self.neigbors_with_positions(nearest) {
+                let neigh_dist = (neigh_pos - pos).length_sq();
+                if neigh_dist < nearest_dist {
+                    nearest = neigh;
+                    nearest_dist = neigh_dist;
+                    maybe_neighbor_closer = true;
+                }
+            }
+        }
+        (nearest, nearest_dist)
     }
+
+} //impl Graph
+
+//centered at zero, contained in -1.0..1.0 x -1.0..1.0
+pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Graph {
+    let mut graph = Graph::empty();
+    graph.add_vertex(Pos2::ZERO);
+    if levels < 1 {
+        return graph;
+    }
+    //idea: build sector by sector, first the nodes on the sector borders
+    let edge_length = 1.0 / std::cmp::max(1, levels) as f32;
+    let mut sector_borders = Vec::new();
+    for border_nr in 0..sides {
+        let next_free_index = graph.len();
+        let border = std::iter::once(0)
+            .chain(next_free_index..(next_free_index + levels))
+            .collect::<Vec<_>>();
+        let angle = std::f32::consts::TAU * ((border_nr as f32 + 0.5) / (sides as f32) + 0.25);
+        let unit_dir = vec2(angle.cos(), angle.sin()) * edge_length;
+        sector_borders.push((border, unit_dir));
+        for dist_to_origin in 1..(levels + 1) {
+            graph.add_vertex(Pos2::ZERO + (dist_to_origin as f32) * unit_dir);
+        }
+    }
+    for ((b1, u1), (b2, u2)) in sector_borders.iter().circular_tuple_windows() {
+        let unit_diff = *u2 - *u1;
+        let mut last_levels_nodes = vec![0]; //lowest level contains only origin
+        for level in 1..(levels + 1) {
+            let level_start_pos = Pos2::ZERO + (level as f32) * *u1;
+            let mut this_levels_nodes = vec![b1[level]];
+            let nr_inner_nodes = level - 1;
+            for node in 1..(nr_inner_nodes + 1) {
+                let node_pos = level_start_pos + (node as f32) * unit_diff;
+                let node_index = graph.add_vertex(node_pos);
+                this_levels_nodes.push(node_index);
+            }
+            this_levels_nodes.push(b2[level]);
+            //connect level to itself
+            graph.add_path_edges(this_levels_nodes.iter());
+            //connect level to previous level
+            //note: the last added edge connects b2's nodes
+            //e.g. for upper sector we see the following paths added (all drawn right to left):
+            //level 1: \      2: \/\     3: \/\/\     4: \/\/\/\       ...
+            graph.add_path_edges(last_levels_nodes.iter()
+                .interleave(this_levels_nodes[1..].iter()));
+            
+            last_levels_nodes = this_levels_nodes;
+        }
+    }
+    graph
 }
 
+pub fn random_triangulated(_nr_nodes: usize) -> Graph {
+    //start with square with unit circle in middle
+    let mut graph = Graph::empty();
+    let v1 = graph.add_vertex(pos2(10.0, 10.0));
+    let v2 = graph.add_vertex(pos2(10.0, -10.0));
+    let v3 = graph.add_vertex(pos2(-10.0, -10.0));
+    let v4 = graph.add_vertex(pos2(-10.0, 10.0));
+    graph.add_edge(v1, v2);
+    graph.add_edge(v2, v3);
+    graph.add_edge(v3, v4);
+    graph.add_edge(v4, v1);
+    //square must already be triangulation
+    graph.add_edge(v1, v3);
 
+    use rand::distributions::{Distribution, Uniform};
+    let mut rng = rand::thread_rng();
+    let coordinate_generator = Uniform::from(-1.0..1.0);
+    let mut random_point = || {
+        loop {
+            let x = coordinate_generator.sample(&mut rng);
+            let y = coordinate_generator.sample(&mut rng);
+            if x * x + y * y < 1.0 {
+                return pos2(x, y);
+            }
+        }
+    };
+    let v5 = graph.add_vertex(random_point());
+    graph.add_edge(v1, v5);
+    graph.add_edge(v3, v5);
+
+    graph
+}
