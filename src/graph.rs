@@ -129,9 +129,9 @@ impl Graph {
             let mut next_line = curr_line;
             for (neigh, &neigh_pos) in self.neigbors_with_positions(curr) {
                 let neigh_line = geo::line_from_to(curr_pos, neigh_pos);
-                if (geo::left_of_line(curr_line, neigh_pos)
-                 && geo::left_of_line(next_line, neigh_pos)
-                 && geo::left_of_line(neigh_line, point)) {
+                if geo::left_of_line(curr_line, neigh_pos)
+                && geo::left_of_line(next_line, neigh_pos)
+                && geo::left_of_line(neigh_line, point) {
                     next = neigh;
                     next_pos = neigh_pos;
                     next_line = neigh_line;
