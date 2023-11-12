@@ -404,6 +404,14 @@ impl eframe::App for State {
             if self.show_escapeable_nodes {
                 self.update_dist_to_outside_hull();
             }
+
+            let face = self.map.find_face_of(self.robber().pos);
+            for v in face {
+                let hull_color = Color32::from_rgb(100, 100, 230);
+                let draw_pos = to_screen.transform_pos(self.map.positions()[v]);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 10.0, hull_color);
+                painter.add(marker_circle);
+            }
         });
     }
 }

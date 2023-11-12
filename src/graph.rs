@@ -1,7 +1,7 @@
 
 use std::collections::VecDeque;
 
-use egui::{Pos2, pos2, vec2};
+use egui::{Pos2, Vec2, pos2, vec2};
 use itertools::Itertools;
 
 pub struct Graph {
@@ -33,6 +33,13 @@ impl Graph {
         debug_assert!(!self.neighbors[v2].contains(&v1));
         self.neighbors[v1].push(v2);
         self.neighbors[v2].push(v1);
+    }
+
+    pub fn remove_edge(&mut self, v1: usize, v2: usize) {
+        debug_assert!(self.neighbors[v1].contains(&v2));
+        debug_assert!(self.neighbors[v2].contains(&v1));
+        self.neighbors[v1].retain(|&v| v != v2);
+        self.neighbors[v2].retain(|&v| v != v1);
     }
 
     pub fn add_path_edges<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
@@ -109,6 +116,40 @@ impl Graph {
         (nearest, nearest_dist)
     }
 
+    //assumes point to be in convex face.
+    pub fn find_face_of(&self, point: Pos2) -> Vec<usize> {
+        //caution: nearest node may not be on face boundary
+        let (mut curr, _) = self.find_nearest_node(point, 0);
+        let mut curr_pos = self.positions[curr];
+        let mut curr_line = geo::line_from_to(point, curr_pos);
+        let mut res = vec![curr];
+        loop {
+            let mut next = usize::MAX;
+            let mut next_pos = Pos2::ZERO;
+            let mut next_line = curr_line;
+            for (neigh, &neigh_pos) in self.neigbors_with_positions(curr) {
+                let neigh_line = geo::line_from_to(curr_pos, neigh_pos);
+                if (geo::left_of_line(curr_line, neigh_pos)
+                 && geo::left_of_line(next_line, neigh_pos)
+                 && geo::left_of_line(neigh_line, point)) {
+                    next = neigh;
+                    next_pos = neigh_pos;
+                    next_line = neigh_line;
+                }
+            }
+            if next == usize::MAX {
+                return Vec::new();
+            }
+            if let Some(start) = res.iter().position(|&v| v == next) {                
+                return res[start..].into();
+            }
+            res.push(next);
+            curr = next;
+            curr_pos = next_pos;
+            curr_line = next_line;
+        }
+    }
+
 } //impl Graph
 
 //centered at zero, contained in -1.0..1.0 x -1.0..1.0
@@ -161,7 +202,50 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Graph {
     graph
 }
 
-pub fn random_triangulated(_nr_nodes: usize) -> Graph {
+//short for geometry
+mod geo {
+    use super::*;
+
+    type Line = (Pos2, Vec2);
+
+    pub fn line_from_to(from: Pos2, to: Pos2) -> Line {
+        (from, to - from)
+    }
+
+    pub fn left_of_line((a, dir): Line, p: Pos2) -> bool {
+        dir.x * (p.y - a.y) - dir.y * (p.x - a.x) > 0.0
+    }
+}
+
+struct Triangualtion {
+    graph: Graph,
+    //todo: add indirection, else everything is linear in graph size
+    faces: Vec<[usize; 3]>, //all enumerated counterclockwise
+}
+
+impl Triangualtion {
+    pub fn empty() -> Self {
+        //start with (invisible) square
+        let mut graph = Graph::empty();
+        let v1 = graph.add_vertex(pos2(10.0, 10.0));
+        let v2 = graph.add_vertex(pos2(10.0, -10.0));
+        let v3 = graph.add_vertex(pos2(-10.0, -10.0));
+        let v4 = graph.add_vertex(pos2(-10.0, 10.0));
+        graph.add_edge(v1, v2);
+        graph.add_edge(v2, v3);
+        graph.add_edge(v3, v4);
+        graph.add_edge(v4, v1);
+        //square must already be triangulation
+        graph.add_edge(v1, v3);
+        let faces = vec![
+            [v1, v4, v3],
+            [v3, v2, v1]
+        ];
+        Self { graph, faces }
+    }
+}
+
+pub fn random_triangulated(nr_nodes: usize) -> Graph {
     //start with square with unit circle in middle
     let mut graph = Graph::empty();
     let v1 = graph.add_vertex(pos2(10.0, 10.0));
@@ -187,9 +271,14 @@ pub fn random_triangulated(_nr_nodes: usize) -> Graph {
             }
         }
     };
-    let v5 = graph.add_vertex(random_point());
-    graph.add_edge(v1, v5);
-    graph.add_edge(v3, v5);
+    for _ in 0..nr_nodes {
+        let pos = random_point();
+        let node = graph.add_vertex(pos);
+        let neighbors = graph.find_face_of(pos);
+        for &neigh in &neighbors {
+            graph.add_edge(neigh, node);
+        }
+    }
 
     graph
 }
