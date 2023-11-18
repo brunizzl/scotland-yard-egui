@@ -217,47 +217,180 @@ mod geo {
     }
 }
 
-struct Triangualtion {
+pub struct Triangualtion {
     graph: Graph,
-    //todo: add indirection, else everything is linear in graph size
-    faces: Vec<[usize; 3]>, //all enumerated counterclockwise
 }
 
 impl Triangualtion {
-    pub fn empty() -> Self {
-        //start with (invisible) square
+    const MAX_RADIUS: f32 = 10.0;
+
+    pub fn new_base_square() -> Self {
+        const R: f32 = Triangualtion::MAX_RADIUS;
         let mut graph = Graph::empty();
-        let v1 = graph.add_vertex(pos2(10.0, 10.0));
-        let v2 = graph.add_vertex(pos2(10.0, -10.0));
-        let v3 = graph.add_vertex(pos2(-10.0, -10.0));
-        let v4 = graph.add_vertex(pos2(-10.0, 10.0));
-        graph.add_edge(v1, v2);
-        graph.add_edge(v2, v3);
-        graph.add_edge(v3, v4);
-        graph.add_edge(v4, v1);
-        //square must already be triangulation
-        graph.add_edge(v1, v3);
-        let faces = vec![
-            [v1, v4, v3],
-            [v3, v2, v1]
-        ];
-        Self { graph, faces }
+        let v0 = graph.add_vertex(pos2(0.0, 0.0));
+        let v1 = graph.add_vertex(pos2(R, R));
+        let v2 = graph.add_vertex(pos2(R, -R));
+        let v3 = graph.add_vertex(pos2(-R, -R));
+        let v4 = graph.add_vertex(pos2(-R, R));
+        //outer edges
+        graph.add_path_edges([v1, v2, v3, v4, v1].iter());
+        //to center
+        graph.add_edge(v0, v1);
+        graph.add_edge(v0, v2);
+        graph.add_edge(v0, v3);
+        graph.add_edge(v0, v4);
+        Self { graph }
     }
-}
+
+    pub fn remove_base_square(mut self) -> Graph {
+        for neighs in &mut self.graph.neighbors {
+            neighs.retain(|&v| v == 0 || v > 4);
+        }
+        for corner in 1..=4 {
+            self.graph.neighbors[corner].clear();
+        }
+        self.graph
+    }
+
+    pub fn is_face(&self, v1: usize, v2: usize, v3: usize) -> bool {
+        self.graph.neighbors[v1].contains(&v2) &&
+        self.graph.neighbors[v2].contains(&v3) &&
+        self.graph.neighbors[v3].contains(&v1)        
+    }
+
+    //assumes edge of (v1, v2) and vertex v3 form a face, 
+    //returns other face adjacent to edge
+    pub fn neighbor_face_vertex(&self, (v1, v2): (usize, usize), v3: usize) -> usize {
+        debug_assert!(self.is_face(v1, v2, v3));
+
+        let v1_neighbors = self.graph.neighbors(v1);
+        let v2_neighbors = self.graph.neighbors(v2);
+        let v1_pos = self.graph.positions[v1];        
+        let v2_pos = self.graph.positions[v2];
+        let v3_pos = self.graph.positions[v3];
+
+        let mut best = usize::MAX;
+        let mut best_dist = f32::MAX;
+        let edge = geo::line_from_to(v1_pos, v2_pos);
+        let v3_left = geo::left_of_line(edge, v3_pos);
+        for &n1 in v1_neighbors {
+            let n1_pos = self.graph.positions[n1];
+            let dist = (v1_pos - n1_pos).length_sq();
+
+            if dist < best_dist 
+            && v2_neighbors.contains(&n1)
+            && (geo::left_of_line(edge, n1_pos) != v3_left) {
+                best = n1;
+                best_dist = dist;
+            }
+        }
+        best
+    }
+
+    pub fn find_face_of(&self, point: Pos2) -> Option<[usize; 3]> {        
+        let (start, _) = self.graph.find_nearest_node(point, 0);
+        let mut curr_pos = self.graph.positions[start];
+        let mut curr_line = geo::line_from_to(point, curr_pos);
+        
+        let mut res = [start, usize::MAX, usize::MAX];
+        let mut i = 0; //index in res
+        let mut __i = 0;
+        loop {
+            __i += 1;
+            let mut next = usize::MAX;
+            let mut next_pos = Pos2::ZERO;
+            let mut next_line = curr_line;
+            let i_next = if i == 2 { 0 } else { i + 1 };
+            for (neigh, &neigh_pos) in self.graph.neigbors_with_positions(res[i]) {  
+                let neigh_line = geo::line_from_to(curr_pos, neigh_pos);
+                if geo::left_of_line(curr_line, neigh_pos)
+                && geo::left_of_line(next_line, neigh_pos)
+                && geo::left_of_line(neigh_line, point) {              
+                    if res[i_next] == neigh {
+                        return Some(res);
+                    }
+                    next = neigh;
+                    next_pos = neigh_pos;
+                    next_line = neigh_line;
+                }
+            }
+            if next == usize::MAX || __i > 10 {
+                return None;
+            }
+            res[i_next] = next;
+            i = i_next;
+            curr_pos = next_pos;
+            curr_line = next_line;
+        }
+    }
+
+    pub fn add_vertex(&mut self, new_pos: Pos2) -> usize {
+        debug_assert!(new_pos.x.abs() <= Self::MAX_RADIUS);
+        debug_assert!(new_pos.y.abs() <= Self::MAX_RADIUS);
+
+        if let Some(face) = self.find_face_of(new_pos) {
+            let new = self.graph.add_vertex(new_pos);
+            for &v in face.iter() {
+                self.graph.add_edge(new, v);
+            }
+            //we are now again a valid triangulation.
+            //following from here is just an attempt to improve the quality,
+            //e.g. make the triangles less slim. we do this by proxy: the goal is to find
+            //  shortest possible sides for our triangles.
+            let mut queue = VecDeque::new();
+            for (&v1, &v2) in face.iter().circular_tuple_windows() {                
+                queue.push_back(((v1, v2), new));
+                debug_assert!({
+                    let v1_pos = self.graph.positions[v1];
+                    let v2_pos = self.graph.positions[v2];
+                    let edge = geo::line_from_to(v1_pos, v2_pos);
+                    println!("lelele");
+                    geo::left_of_line(edge, new_pos)
+                });
+            }
+            while let Some(((v1, v2), v0)) = queue.pop_front() {
+                if !self.is_face(v1, v2, v0) {
+                    continue;
+                }
+                let v3 = self.neighbor_face_vertex((v1, v2), v0);
+                if v3 == usize::MAX {
+                    continue;
+                }
+                let v0_pos = self.graph.positions[v0];
+                let v1_pos = self.graph.positions[v1];
+                let v2_pos = self.graph.positions[v2];
+                let v3_pos = self.graph.positions[v3];
+
+                let new_edge = geo::line_from_to(v0_pos, v3_pos);
+                //test if connection from v0 to v3 crosses edge from v1 to v2
+                if geo::left_of_line(new_edge, v1_pos) 
+                == geo::left_of_line(new_edge, v2_pos) {
+                    continue;
+                }
+                //test if edge from v0 to v3 would be shorter than edge from v1 to v2
+                //if so: use new edge instead
+                let old_len = (v1_pos - v2_pos).length_sq();
+                let new_len = (v0_pos - v3_pos).length_sq();
+                if new_len < old_len {
+                    self.graph.remove_edge(v1, v2);
+                    self.graph.add_edge(v0, v3);
+                    queue.push_back(((v2, v3), v0));
+                    queue.push_back(((v1, v3), v0));
+                    queue.push_back(((v2, v0), v3));
+                    queue.push_back(((v1, v0), v3));
+                }
+            }
+
+            return new;
+        }
+
+        usize::MAX     
+    }
+} //impl Triangulation
 
 pub fn random_triangulated(nr_nodes: usize) -> Graph {
     //start with square with unit circle in middle
-    let mut graph = Graph::empty();
-    let v1 = graph.add_vertex(pos2(10.0, 10.0));
-    let v2 = graph.add_vertex(pos2(10.0, -10.0));
-    let v3 = graph.add_vertex(pos2(-10.0, -10.0));
-    let v4 = graph.add_vertex(pos2(-10.0, 10.0));
-    graph.add_edge(v1, v2);
-    graph.add_edge(v2, v3);
-    graph.add_edge(v3, v4);
-    graph.add_edge(v4, v1);
-    //square must already be triangulation
-    graph.add_edge(v1, v3);
+    let mut triangulation = Triangualtion::new_base_square();
 
     use rand::distributions::{Distribution, Uniform};
     let mut rng = rand::thread_rng();
@@ -272,13 +405,13 @@ pub fn random_triangulated(nr_nodes: usize) -> Graph {
         }
     };
     for _ in 0..nr_nodes {
-        let pos = random_point();
-        let node = graph.add_vertex(pos);
-        let neighbors = graph.find_face_of(pos);
-        for &neigh in &neighbors {
-            graph.add_edge(neigh, node);
+        for _ in 0..10 {
+            let pos = random_point();
+            if triangulation.add_vertex(pos) != usize::MAX {
+                break;
+            }
         }
     }
 
-    graph
+    triangulation.remove_base_square()
 }

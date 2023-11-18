@@ -125,8 +125,8 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = State { 
             map: Graph::empty(),
-            map_shape: GraphShape::RegularPolygon(6),
-            map_radius: 8,
+            map_shape: GraphShape::Random,//GraphShape::RegularPolygon(6),
+            map_radius: 1,
 
             extreme_vertices: [0; 4],
 
@@ -322,9 +322,14 @@ impl eframe::App for State {
                 let scale = f32::min(rect_len / self.map_radius as f32 * 0.015, 4.0);
                 (to_screen, scale)
             };
-            
-            let edge_stroke = Stroke::new(scale, Color32::from_rgb(150, 150, 150));
-            for (&v1, &v2) in self.map.edges() {                   
+            let mut state: u64 = 27812618621;
+            let mut rnd = || {
+                state = state.wrapping_mul(1827817281627151);
+                (64 + (state / (1 << 15) % 128)) as u8
+            };
+            let edge_stroke = Stroke::new(scale, Color32::from_rgb(150, 150, 150));  
+            for (&v1, &v2) in self.map.edges() {  
+                let edge_stroke = Stroke::new(scale, Color32::from_rgb(rnd(), rnd(), rnd()));                 
                 let edge = [
                     to_screen.transform_pos(v1), 
                     to_screen.transform_pos(v2)];
