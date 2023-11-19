@@ -56,14 +56,27 @@ impl Graph {
         &self.positions
     }
 
-    pub fn edges(&self) -> impl Iterator<Item = (&Pos2, &Pos2)> {
-        self.neighbors
-            .iter()
-            .enumerate()
-            .flat_map(move |(i1, neighbors)| 
-                neighbors
-                    .iter()
-                    .map(move |i2| (&self.positions[i1], &self.positions[*i2])))        
+    pub fn for_each_edge(&self, mut f: impl FnMut(Pos2, Pos2)) {
+        for (v1, neighs) in self.neighbors.iter().enumerate() {
+            let p1 = self.positions[v1];
+            for &v2 in neighs {
+                if v2 < v1 {
+                    continue;
+                }
+                let p2 = self.positions[v2];
+                f(p1, p2);
+            }
+        }
+    }
+
+    pub fn sort_neigbors(&mut self) {
+        for (v1, neighs) in self.neighbors.iter_mut().enumerate() {
+            let p1 = self.positions[v1];
+            neighs.sort_by_key(|&v2| {
+                let p2 = self.positions[v2];
+                ((p2 - p1).angle() * 10000000.0) as isize //floats dont implement Ord :(
+            });
+        }
     }
 
     pub fn neighbors(&self, node: usize) -> &[usize] {
@@ -207,7 +220,7 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Graph {
 }
 
 //short for geometry
-mod geo {
+pub mod geo {
     use super::*;
 
     type Line = (Pos2, Vec2);
@@ -223,6 +236,10 @@ mod geo {
     //assumes dir to be normalized.
     pub fn signed_dist((a, dir): Line, p: Pos2) -> f32 {
         dir.x * (a.y - p.y) - dir.y * (a.x - p.x)
+    }
+
+    pub fn project_to_line((a, dir): Line, p: Pos2) -> Pos2 {
+        a + Vec2::dot(p - a, dir) / dir.length_sq() * dir
     }
 }
 
@@ -317,6 +334,80 @@ impl Triangualtion {
         best
     }
 
+    //move every a step into the center of its neighbors positions average
+    //requires neighbors to be sorted
+    pub fn move_vertices_apart(&self) -> Vec<Pos2> {
+        let mut res = self.graph.positions.clone();
+        for _simulation_steps in 0..20 {
+            'step: for (v, neighs) in self.graph.neighbors.iter().enumerate() {
+                for corner in 1..=4 {
+                    if neighs.contains(&corner) { //dont wanna move the outher points
+                        continue 'step;
+                    }
+                }
+                let mut cum_pos = Vec2::ZERO; //average over the edges connecting the neighbors
+                let mut cum_dist = 0.0;
+                for (&n1, &n2) in neighs.iter().circular_tuple_windows() {
+                    //assume sorted neighbors
+                    debug_assert!(self.graph.has_edge(n1, n2));
+                    let p1 = self.graph.positions[n1].to_vec2();
+                    let p2 = self.graph.positions[n2].to_vec2();
+                    let length = (p1 - p2).length();
+                    cum_dist += 2.0 * length;
+                    cum_pos += p1 * length;
+                    cum_pos += p2 * length;
+                }
+                let average = cum_pos / cum_dist;
+                res[v] = Pos2::ZERO + 0.9 * res[v].to_vec2() + 0.1 * average;
+            }
+        }
+        
+        res
+    }
+
+    pub fn avg_edge_len(&self) -> f32 {
+        let mut acc: f64 = 0.0;
+        let mut nr = 0;
+        for (v1, neighs) in self.graph.neighbors.iter().enumerate().skip(5) {
+            let v1_pos = self.graph.positions[v1];
+            for &v2 in neighs {
+                if v2 < v1 {
+                    continue;
+                }
+                let v2_pos = self.graph.positions[v2];
+                acc += (v1_pos - v2_pos).length() as f64;
+                nr += 1;
+            }
+        }
+        (acc / (nr as f64)) as f32
+    }
+
+    pub fn divide_longest_edges(&mut self) {
+        let avg_len = self.avg_edge_len();
+        let mut queue = VecDeque::new();
+        let mut v1_neighbors = Vec::new();
+        let mut _i = 0;
+        for _pass in 0..2 {
+            for v1 in 5..self.graph.len() {
+                let v1_pos = self.graph.positions[v1];
+                v1_neighbors.clone_from(&self.graph.neighbors[v1]);
+                for &v2 in &v1_neighbors {
+                    if (v2 != 0 && v2 <= 4) || v2 < v1 {
+                        continue; //dont divide edges to outher square and dont divide same edge twice
+                    }
+                    let v2_pos = self.graph.positions[v2];
+                    let dir = v2_pos - v1_pos;
+                    if dir.length() > avg_len * 1.2 {
+                        _i += 1;
+                        let new_pos = v1_pos + 0.5 * dir;
+                        self.add_vertex(new_pos, &mut queue);
+                    }
+                }
+            }
+        }
+        dbg!(_i);
+    }
+
     pub fn find_face_of(&self, point: Pos2) -> Option<[usize; 3]> {        
         let (start, _) = self.graph.find_nearest_node(point, 0);
         let mut curr_pos = self.graph.positions[start];
@@ -381,7 +472,6 @@ impl Triangualtion {
             }
             while let Some(((v1, v2), v0)) = queue.pop_front() {
                 if !self.has_face(v1, v2, v0) {
-                    dbg!((v1, v2, v0));
                     continue;
                 }
                 let v3 = self.neighbor_face_vertex((v1, v2), v0);
@@ -446,6 +536,14 @@ pub fn random_triangulated(nr_nodes: usize) -> Graph {
                 break;
             }
         }
+    }
+    triangulation.divide_longest_edges();
+    triangulation.graph.sort_neigbors();
+
+    let new_positions = triangulation.move_vertices_apart();
+    triangulation.graph.add_vertex(new_positions[0]); 
+    for &pos in new_positions.iter().skip(5) {
+        triangulation.graph.add_vertex(pos); 
     }
 
     triangulation.remove_base_square()
