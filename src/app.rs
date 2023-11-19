@@ -27,12 +27,8 @@ pub struct Character {
 }
 
 impl Character {
-    fn new_cop(pos: Pos2) -> Self {
-        Character { is_cop: true, on_node: false, nearest_node: 0, pos, distances: Vec::new() }
-    }
-
-    fn new_robber(pos: Pos2) -> Self {
-        Character { is_cop: false, on_node: false, nearest_node: 0, pos, distances: Vec::new() }
+    fn new(is_cop: bool, pos: Pos2) -> Self {
+        Character { is_cop, on_node: false, nearest_node: 0, pos, distances: Vec::new() }
     }
 
     //go through all neighbors of current nearest node, if any neigbor is closer than current nearest node, 
@@ -71,6 +67,7 @@ pub struct State {
 
     robber_info: RobberInfo,
     show_convex_hull: bool,
+    debug_info: bool,
 
     //first is robber, rest are cops
     characters: Vec<Character>,
@@ -81,6 +78,7 @@ pub struct State {
 
 impl State {
 
+    //really shitty approximation of convex hull.
     fn compute_extreme_vertices(points: &[Pos2]) -> [usize; 4] {
         let mut res = [0; 4];
         let mut res_vals = [points[0]; 4];
@@ -111,8 +109,8 @@ impl State {
                 n, 
                 self.map_radius),
             GraphShape::Random => {
-                //good integer approximation of pi r^2
                 let pi_times_1024 = 3217;
+                //good integer approximation of pi r^2
                 let nr_nodes = (pi_times_1024 * self.map_radius * self.map_radius) / 1024;
                 graph::random_triangulated(nr_nodes)
             },
@@ -143,11 +141,12 @@ impl State {
 
             robber_info: RobberInfo::None,
             show_convex_hull: false,
+            debug_info: false,
             
             characters: vec![
-                Character::new_robber(Pos2::ZERO),
-                //Character::new_cop(pos2(0.25, 0.0)),
-                //Character::new_cop(pos2(-0.25, 0.0))
+                Character::new(false, Pos2::ZERO),
+                //Character::new(true, pos2(0.25, 0.0)),
+                //Character::new(true, pos2(-0.25, 0.0))
                 ],
             tolerance: 0.1,
             queue: VecDeque::new(),
@@ -156,12 +155,13 @@ impl State {
          res
     }
 
-    pub fn robber(&self) -> &Character {
-        & self.characters[0]
+    pub fn robber(&self) -> Option<&Character> {
+        self.characters.first()
     }
 
     pub fn active_cops(&self) -> impl Iterator<Item = &Character> {
-        self.characters[1..].iter().filter(|c| c.on_node)
+        let start = usize::min(1, self.characters.len());
+        self.characters[start..].iter().filter(|c| c.on_node)
     }
 
     fn update_min_cop_dist(&mut self) {
@@ -288,13 +288,14 @@ impl eframe::App for State {
                         self.recompute_graph();
                     }
                 }
-                //adjust nr of cops
+                //adjust nr of currently computed figures
                 ui.horizontal(|ui| {
-                    if ui.button("- Cop").clicked() && self.characters.len() > 1 {
+                    if ui.button("- Figur").clicked() {
                         self.characters.pop();
                     }
-                    if ui.button("+ Cop").clicked() {
-                        let mut new = Character::new_cop(Pos2::ZERO);
+                    if ui.button("+ Figur").clicked() {
+                        let is_cop = self.characters.len() > 0;
+                        let mut new = Character::new(is_cop, Pos2::ZERO);
                         new.update(self.tolerance, &self.map, &mut self.queue);
                         self.characters.push(new);
                     }
@@ -308,6 +309,7 @@ impl eframe::App for State {
                 ui.radio_value(&mut self.robber_info, RobberInfo::None, "Weder Noch");
 
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
+                ui.add(Checkbox::new(&mut self.debug_info, "zeige Debugginginformation"));
             });
         });
 
@@ -327,30 +329,40 @@ impl eframe::App for State {
                 let scale = f32::min(rect_len / self.map_radius as f32 * 0.015, 4.0);
                 (to_screen, scale)
             };
-            let mut state: u64 = 27812618621;
-            let mut rnd = || {
-                state = state.wrapping_mul(1827817281627151);
-                (64 + (state / (1 << 15) % 128)) as u8
-            };
-            let edge_stroke = Stroke::new(scale, Color32::from_rgb(150, 150, 150));  
-            for (&v1, &v2) in self.map.edges() {  
-                let edge_stroke = Stroke::new(scale, Color32::from_rgb(rnd(), rnd(), rnd()));                 
-                let edge = [
-                    to_screen.transform_pos(v1), 
-                    to_screen.transform_pos(v2)];
-                let line = Shape::LineSegment { points: edge, stroke: edge_stroke };
-                painter.add(line);
+
+            let grey_stroke = Stroke::new(scale, Color32::from_rgb(150, 150, 150));
+            if let (true, Some(r)) = (self.debug_info, self.robber()) {
+                let face = self.map.find_face_of(r.pos);
+                let screen_face: Vec<_> = face.iter().map(|&v| {
+                    to_screen.transform_pos(self.map.positions()[v])
+                }).collect();
+                let stroke = Stroke::new(0.0, grey_stroke.color);
+                let fill = Color32::from_rgb(150, 0, 0);
+                let poly = Shape::convex_polygon(screen_face, fill, stroke);                
+                painter.add(poly);
             }
 
-            if self.map_radius < 10 {
-                let text_color = Color32::from_rgb(255, 255, 255);
-                for (i, &pos) in self.map.positions().iter().enumerate() {
-                    let layout_job = LayoutJob::simple(i.to_string(), FontId::default(), text_color, 100.0);
-                    let galley = ui.fonts(|f| f.layout_job(layout_job));
-                    let screen_pos = to_screen.transform_pos(pos);
-                    let text = Shape::Text(TextShape::new(screen_pos, galley));
-                    painter.add(text);
+            { //draw edges
+                let mut state: u64 = 27812618621;
+                let mut rnd = || {
+                    state = state.wrapping_mul(1827817281627151).wrapping_add(1927839172376);
+                    (64 + (state / (1 << 15) % 128)) as u8
+                };
+
+                let mut edge_stroke = || if self.debug_info {
+                    Stroke::new(scale, Color32::from_rgb(rnd(), rnd(), rnd()))
                 }
+                else {
+                    grey_stroke
+                };
+
+                self.map.for_each_edge(|p1, p2| { 
+                    let edge = [
+                        to_screen.transform_pos(p1), 
+                        to_screen.transform_pos(p2)];
+                    let line = Shape::LineSegment { points: edge, stroke: edge_stroke() };
+                    painter.add(line);
+                });
             }
 
             if self.show_convex_hull {
@@ -363,9 +375,9 @@ impl eframe::App for State {
                     }
                 }
             }
-            if self.robber_info == RobberInfo::NearNodes {                
+            if let (RobberInfo::NearNodes, Some(r)) = (self.robber_info, self.robber()) {                
                 let robber_closer_color = Color32::from_rgb(80, 210, 80);
-                let dist_vs = self.robber().distances.iter().zip(self.min_cop_dist.iter());
+                let dist_vs = r.distances.iter().zip(self.min_cop_dist.iter());
                 for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
                     if r_dist < c_dist  {
                         let draw_pos = to_screen.transform_pos(pos);
@@ -385,6 +397,18 @@ impl eframe::App for State {
                     }
                 }
             }
+            if self.debug_info {
+                let text_color = Color32::from_rgb(255, 255, 255);
+                let divide = self.map.len() / 2;
+                for (i, &pos) in self.map.positions().iter().enumerate() {
+                    let txt = if i < divide { i.to_string() } else { (i - divide).to_string() + "'" };
+                    let layout_job = LayoutJob::simple(txt, FontId::default(), text_color, 100.0);
+                    let galley = ui.fonts(|f| f.layout_job(layout_job));
+                    let screen_pos = to_screen.transform_pos(pos);
+                    let text = Shape::Text(TextShape::new(screen_pos, galley));
+                    painter.add(text);
+                }
+            }
 
             for (i, character) in self.characters.iter_mut().enumerate() {                
                 let character_size = f32::max(8.0, scale * 8.0);
@@ -393,7 +417,7 @@ impl eframe::App for State {
                 let real_screen_pos = to_screen.transform_pos(character.pos);                
                 let draw_pos = if character.on_node {
                     let nearest_node_pos = to_screen.transform_pos(self.map.positions()[character.nearest_node]);
-                    let marker_circle = Shape::circle_stroke(nearest_node_pos, marker_size, edge_stroke);
+                    let marker_circle = Shape::circle_stroke(nearest_node_pos, marker_size, grey_stroke);
                     painter.add(marker_circle);
                     nearest_node_pos
                 }
@@ -425,14 +449,6 @@ impl eframe::App for State {
             if self.robber_info == RobberInfo::EscapableNodes {
                 self.update_dist_to_outside_hull();
             }
-
-            //let face = self.map.find_face_of(self.robber().pos);
-            //for v in face {
-            //    let hull_color = Color32::from_rgb(100, 100, 230);
-            //    let draw_pos = to_screen.transform_pos(self.map.positions()[v]);
-            //    let marker_circle = Shape::circle_filled(draw_pos, scale * 10.0, hull_color);
-            //    painter.add(marker_circle);
-            //}
         });
     }
 }
