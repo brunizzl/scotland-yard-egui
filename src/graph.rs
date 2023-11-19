@@ -74,7 +74,7 @@ impl Graph {
             let p1 = self.positions[v1];
             neighs.sort_by_key(|&v2| {
                 let p2 = self.positions[v2];
-                ((p2 - p1).angle() * 10000000.0) as isize //floats dont implement Ord :(
+                ((p2 - p1).angle() * 100000000000.0) as isize //floats dont implement Ord :(
             });
         }
     }
@@ -245,56 +245,28 @@ pub mod geo {
 
 pub struct Triangualtion {
     graph: Graph,
-    radius: f32,
+    circumference: usize, //nr of edges on the outher rim
 }
 
 impl Triangualtion {
-
-    pub fn new_base_square(r: f32) -> Self {
+    pub fn new_wheel(circumference: usize) -> Self {
         let mut graph = Graph::empty();
-        let v0 = graph.add_vertex(pos2(0.0, 0.0));
-        let v1 = graph.add_vertex(pos2(r, r));
-        let v2 = graph.add_vertex(pos2(r, -r));
-        let v3 = graph.add_vertex(pos2(-r, -r));
-        let v4 = graph.add_vertex(pos2(-r, r));
-        //outer edges
-        graph.add_path_edges([v1, v2, v3, v4, v1].iter());
-        //to center
-        graph.add_edge(v0, v1);
-        graph.add_edge(v0, v2);
-        graph.add_edge(v0, v3);
-        graph.add_edge(v0, v4);
-        Self { graph, radius: r }
-    }
+        for v in 0..circumference {
+            let angle = std::f32::consts::TAU * (v as f32) / (circumference as f32);
+            let pos = pos2(angle.cos(), angle.sin());
+            let new = graph.add_vertex(pos);
+            debug_assert!(v == new);
+        }
+        for (v1, v2) in (0..circumference).circular_tuple_windows() {
+            graph.add_edge(v1, v2);
+        }
 
-    pub fn remove_base_square(mut self) -> Graph {
-        { //delete vertices of surrounding square
-            let mut i = 0;      
-            self.graph.neighbors.retain(|_| {
-                let keep = i == 0 || i > 4;
-                i += 1;
-                keep
-            });
-            i = 0;
-            self.graph.positions.retain(|_| {
-                let keep = i == 0 || i > 4;
-                i += 1;
-                keep
-            });
+        graph.add_vertex(Pos2::ZERO);
+        for v in 0..circumference {
+            graph.add_edge(circumference, v);
         }
-        //delete edges to vertives of surrounding square
-        for neighs in &mut self.graph.neighbors {
-            neighs.retain(|&v| v == 0 || v > 4);
-        }
-        //adjust edge indices
-        for neighs in &mut self.graph.neighbors {
-            for neigh in neighs {
-                if *neigh != 0 {
-                    *neigh -= 4;
-                }
-            }
-        }
-        self.graph
+
+        Self { graph, circumference }
     }
 
     pub fn has_face(&self, v1: usize, v2: usize, v3: usize) -> bool {
@@ -308,8 +280,8 @@ impl Triangualtion {
     pub fn neighbor_face_vertex(&self, (v1, v2): (usize, usize), v3: usize) -> usize {
         debug_assert!(self.has_face(v1, v2, v3));
 
-        let v1_neighbors = self.graph.neighbors(v1);
-        let v2_neighbors = self.graph.neighbors(v2);
+        let v1_neighs = self.graph.neighbors(v1);
+        let v2_neighs = self.graph.neighbors(v2);
         let v1_pos = self.graph.positions[v1];        
         let v2_pos = self.graph.positions[v2];
         let v3_pos = self.graph.positions[v3];
@@ -317,20 +289,20 @@ impl Triangualtion {
         let mut best = usize::MAX;
         let mut best_dist = f32::MAX;
         let edge = geo::line_from_to(v1_pos, v2_pos);
-        let v3_dist_sign = geo::signed_dist(edge, v3_pos).signum();
-        for &neigh in v1_neighbors {
-            let n1_pos = self.graph.positions[neigh];
+        let v3_sign = geo::signed_dist(edge, v3_pos).signum();
+        for &n1 in v1_neighs {
+            let n1_pos = self.graph.positions[n1];
             let (sign, abs) = {
                 let dist = geo::signed_dist(edge, n1_pos);
                 (dist.signum(), dist.abs())
             };
-            if sign != v3_dist_sign
-            && abs < best_dist
-            && v2_neighbors.contains(&neigh) {
-                best = neigh;
+            if sign != v3_sign && abs < best_dist && v2_neighs.contains(&n1) {
+                best = n1;
                 best_dist = abs;
             }
         }
+        debug_assert!(best == usize::MAX || self.has_face(v1, v2, best));
+
         best
     }
 
@@ -338,18 +310,16 @@ impl Triangualtion {
     //requires neighbors to be sorted
     pub fn move_vertices_apart(&self) -> Vec<Pos2> {
         let mut res = self.graph.positions.clone();
-        for _simulation_steps in 0..20 {
-            'step: for (v, neighs) in self.graph.neighbors.iter().enumerate() {
-                for corner in 1..=4 {
-                    if neighs.contains(&corner) { //dont wanna move the outher points
-                        continue 'step;
-                    }
-                }
-                let mut cum_pos = Vec2::ZERO; //average over the edges connecting the neighbors
+        for _simulation_steps in 0..8 {
+            //dont wanna move the outher points -> skip circumference
+            'step: for (v, neighs) in self.graph.neighbors.iter().enumerate().skip(self.circumference) {
+                let mut cum_pos = Vec2::ZERO;
                 let mut cum_dist = 0.0;
                 for (&n1, &n2) in neighs.iter().circular_tuple_windows() {
-                    //assume sorted neighbors
-                    debug_assert!(self.graph.has_edge(n1, n2));
+                    //TODO: why is this needed? 
+                    if !self.graph.has_edge(n1, n2) {
+                        continue 'step; 
+                    }
                     let p1 = self.graph.positions[n1].to_vec2();
                     let p2 = self.graph.positions[n2].to_vec2();
                     let length = (p1 - p2).length();
@@ -365,59 +335,34 @@ impl Triangualtion {
         res
     }
 
-    pub fn avg_edge_len(&self) -> f32 {
-        let mut acc: f64 = 0.0;
-        let mut nr = 0;
-        for (v1, neighs) in self.graph.neighbors.iter().enumerate().skip(5) {
-            let v1_pos = self.graph.positions[v1];
-            for &v2 in neighs {
-                if v2 < v1 {
-                    continue;
-                }
-                let v2_pos = self.graph.positions[v2];
-                acc += (v1_pos - v2_pos).length() as f64;
-                nr += 1;
-            }
-        }
-        (acc / (nr as f64)) as f32
-    }
-
     pub fn divide_longest_edges(&mut self) {
-        let avg_len = self.avg_edge_len();
+        let avg_len = std::f32::consts::TAU / (self.circumference as f32);
         let mut queue = VecDeque::new();
         let mut v1_neighbors = Vec::new();
-        let mut _i = 0;
-        for _pass in 0..2 {
-            for v1 in 5..self.graph.len() {
-                let v1_pos = self.graph.positions[v1];
-                v1_neighbors.clone_from(&self.graph.neighbors[v1]);
-                for &v2 in &v1_neighbors {
-                    if (v2 != 0 && v2 <= 4) || v2 < v1 {
-                        continue; //dont divide edges to outher square and dont divide same edge twice
-                    }
-                    let v2_pos = self.graph.positions[v2];
-                    let dir = v2_pos - v1_pos;
-                    if dir.length() > avg_len * 1.2 {
-                        _i += 1;
-                        let new_pos = v1_pos + 0.5 * dir;
-                        self.add_vertex(new_pos, &mut queue);
-                    }
+        for v1 in 5..self.graph.len() {
+            let v1_pos = self.graph.positions[v1];
+            v1_neighbors.clone_from(&self.graph.neighbors[v1]);
+            for &v2 in &v1_neighbors {
+                let v2_pos = self.graph.positions[v2];
+                let dir = v2_pos - v1_pos;
+                if dir.length() > avg_len * 1.8 {
+                    let new_pos = v1_pos + 0.5 * dir;
+                    self.add_vertex(new_pos, &mut queue);
                 }
             }
         }
-        dbg!(_i);
     }
 
     pub fn find_face_of(&self, point: Pos2) -> Option<[usize; 3]> {        
-        let (start, _) = self.graph.find_nearest_node(point, 0);
+        let (start, _) = self.graph.find_nearest_node(point, self.circumference);
         let mut curr_pos = self.graph.positions[start];
         let mut curr_line = geo::line_from_to(point, curr_pos);
         
         let mut res = [start, usize::MAX, usize::MAX];
         let mut i = 0; //index in res
-        let mut __i = 0;
+        let mut nr_steps = 0;
         loop {
-            __i += 1;
+            nr_steps += 1;
             let mut next = usize::MAX;
             let mut next_pos = Pos2::ZERO;
             let mut next_line = curr_line;
@@ -435,7 +380,7 @@ impl Triangualtion {
                     next_line = neigh_line;
                 }
             }
-            if next == usize::MAX || __i > 20 {
+            if next == usize::MAX || nr_steps > 8 {
                 return None;
             }
             res[i_next] = next;
@@ -445,10 +390,43 @@ impl Triangualtion {
         }
     }
 
-    pub fn add_vertex(&mut self, new_pos: Pos2, queue: &mut VecDeque<((usize, usize), usize)>) -> usize {
-        debug_assert!(new_pos.x.abs() <= self.radius);
-        debug_assert!(new_pos.y.abs() <= self.radius);
+    pub fn update_edges(&mut self, queue: &mut VecDeque<((usize, usize), usize)>) {
+        while let Some(((v1, v2), v0)) = queue.pop_front() {
+            if !self.has_face(v1, v2, v0) {
+                continue;
+            }
+            let v3 = self.neighbor_face_vertex((v1, v2), v0);
+            if v3 == usize::MAX {
+                continue;
+            }
+            debug_assert!(self.has_face(v1, v2, v3));
+            let v0_pos = self.graph.positions[v0];
+            let v1_pos = self.graph.positions[v1];
+            let v2_pos = self.graph.positions[v2];
+            let v3_pos = self.graph.positions[v3];
 
+            let new_edge = geo::line_from_to(v0_pos, v3_pos);
+            //test if connection from v0 to v3 crosses edge from v1 to v2
+            if geo::left_of_line(new_edge, v1_pos) 
+            == geo::left_of_line(new_edge, v2_pos) {
+                continue;
+            }
+            //test if edge from v0 to v3 would be shorter than edge from v1 to v2
+            //if so: use new edge instead
+            let old_len = (v1_pos - v2_pos).length_sq();
+            let new_len = (v0_pos - v3_pos).length_sq();
+            if new_len < old_len {
+                self.graph.remove_edge(v1, v2);
+                self.graph.add_edge(v0, v3);
+                queue.push_back(((v2, v3), v0));
+                queue.push_back(((v1, v3), v0));
+                queue.push_back(((v2, v0), v3));
+                queue.push_back(((v1, v0), v3));
+            }
+        }
+    }
+
+    pub fn add_vertex(&mut self, new_pos: Pos2, queue: &mut VecDeque<((usize, usize), usize)>) -> usize {
         if let Some(face) = self.find_face_of(new_pos) {
             let new = self.graph.add_vertex(new_pos);
             for &v in face.iter() {
@@ -464,103 +442,79 @@ impl Triangualtion {
                 debug_assert!({
                     let v1_pos = self.graph.positions[v1];
                     let v2_pos = self.graph.positions[v2];
-                    let fw_edge = geo::line_from_to(v1_pos, v2_pos);
-                    let bw_edge = geo::line_from_to(v2_pos, v1_pos);
-                    geo::left_of_line(fw_edge, new_pos)
-                    && !geo::left_of_line(bw_edge, new_pos)
+                    let edge = geo::line_from_to(v1_pos, v2_pos);
+                    geo::signed_dist(edge, new_pos) <= 0.0
                 });
             }
-            while let Some(((v1, v2), v0)) = queue.pop_front() {
-                if !self.has_face(v1, v2, v0) {
-                    continue;
-                }
-                let v3 = self.neighbor_face_vertex((v1, v2), v0);
-                if v3 == usize::MAX {
-                    continue;
-                }
-                debug_assert!(self.has_face(v1, v2, v3));
-                let v0_pos = self.graph.positions[v0];
-                let v1_pos = self.graph.positions[v1];
-                let v2_pos = self.graph.positions[v2];
-                let v3_pos = self.graph.positions[v3];
-
-                let new_edge = geo::line_from_to(v0_pos, v3_pos);
-                //test if connection from v0 to v3 crosses edge from v1 to v2
-                if geo::left_of_line(new_edge, v1_pos) 
-                == geo::left_of_line(new_edge, v2_pos) {
-                    continue;
-                }
-                //test if edge from v0 to v3 would be shorter than edge from v1 to v2
-                //if so: use new edge instead
-                let old_len = (v1_pos - v2_pos).length_sq();
-                let new_len = (v0_pos - v3_pos).length_sq();
-                if new_len < old_len {
-                    self.graph.remove_edge(v1, v2);
-                    self.graph.add_edge(v0, v3);
-                    queue.push_back(((v2, v3), v0));
-                    queue.push_back(((v1, v3), v0));
-                    queue.push_back(((v2, v0), v3));
-                    queue.push_back(((v1, v0), v3));
-                }
-            }
+            self.update_edges(queue);
 
             return new;
         }
 
         usize::MAX     
     }
-} //impl Triangulation
 
-pub fn random_triangulated(nr_nodes: usize) -> Graph {
-    //start with square with unit circle in middle
-    let mut triangulation = Triangualtion::new_base_square(10.0);
-
-    use rand::distributions::{Distribution, Uniform};
-    let mut rng = rand::thread_rng();
-    let coordinate_generator = Uniform::from(-1.0..1.0);
-    let mut random_point = || {
-        loop {
-            let x = coordinate_generator.sample(&mut rng);
-            let y = coordinate_generator.sample(&mut rng);
-            if x * x + y * y < 1.0 {
-                return pos2(x, y);
+    pub fn new_from_positions(positions :&[Pos2], circumference: usize) -> Triangualtion {
+        let mut discarded = Vec::new();
+        let mut queue = VecDeque::new();
+        let mut res = Self::new_wheel(circumference);
+        for &pos in positions {
+            if res.add_vertex(pos, &mut queue) == usize::MAX {
+                discarded.push(pos);
             }
         }
-    };
-    let mut queue = VecDeque::new();
-    for _ in 0..nr_nodes {
-        let pos = random_point();
-        for _ in 0..3 {
-            let new = triangulation.add_vertex(pos, &mut queue);
-            if new != usize::MAX {
+        for pos in discarded {
+            res.add_vertex(pos, &mut queue);
+        }
+
+        res
+    }
+
+    pub fn new_random(nr_nodes: usize, circumference: usize) -> Self {
+        //start with square with unit circle in middle
+        let mut res = Self::new_wheel(circumference);
+
+        use rand::distributions::{Distribution, Uniform};
+        let mut rng = rand::thread_rng();
+        let coordinate_generator = Uniform::from(-1.0..1.0);
+        let mut random_point = || {
+            loop {
+                let x = coordinate_generator.sample(&mut rng);
+                let y = coordinate_generator.sample(&mut rng);
+                if x * x + y * y < 1.0 {
+                    return pos2(x, y);
+                }
+            }
+        };
+        let mut queue = VecDeque::new();
+        let final_node_index = nr_nodes + res.graph.len();
+        for _ in 0..(nr_nodes * 2) {
+            let pos = random_point();
+            let new = res.add_vertex(pos, &mut queue);
+            if new == final_node_index {
                 break;
             }
         }
+        res
     }
-    triangulation.divide_longest_edges();
-    triangulation.graph.sort_neigbors();
+} //impl Triangulation
 
-    let new_positions = triangulation.move_vertices_apart();
-    triangulation.graph.add_vertex(new_positions[0]); 
-    for &pos in new_positions.iter().skip(5) {
-        triangulation.graph.add_vertex(pos); 
+pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Graph {
+    let r = radius as f32;
+    let circumference = (std::f32::consts::TAU * r) as usize;
+    let nr_nodes = (std::f32::consts::PI * r * r) as usize;
+    let mut tri = Triangualtion::new_random(nr_nodes, circumference);
+    for _ in 0..nr_refine_steps {
+        tri.divide_longest_edges();
+        tri.graph.sort_neigbors();
+        let new_vertices = tri.move_vertices_apart();
+        let without_wheel = &new_vertices[(circumference + 1)..];
+        tri = Triangualtion::new_from_positions(without_wheel, circumference);
     }
 
-    triangulation.remove_base_square()
+    tri.graph
 }
 
 pub fn debugging_graph() -> Graph {
-    let mut triangulation = Triangualtion::new_base_square(10.0);
-    let mut queue = VecDeque::new();
-    let positions = [
-        pos2(-0.143388033, 0.978398561),
-        pos2(0.263813496, 0.514246702),
-        pos2(0.74604845, 0.300056696),
-        pos2(0.256795406, -0.64158415),
-    ];
-    for pos in positions {
-        let new = triangulation.add_vertex(pos, &mut queue);
-        assert!(new != usize::MAX);
-    }
-    triangulation.remove_base_square()
+    Triangualtion::new_wheel(10).graph
 }

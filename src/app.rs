@@ -108,12 +108,7 @@ impl State {
             GraphShape::RegularPolygon(n) => graph::triangulated_regular_polygon(
                 n, 
                 self.map_radius),
-            GraphShape::Random => {
-                let pi_times_1024 = 3217;
-                //good integer approximation of pi r^2
-                let nr_nodes = (pi_times_1024 * self.map_radius * self.map_radius) / 1024;
-                graph::random_triangulated(nr_nodes)
-            },
+            GraphShape::Random => graph::random_triangulated(self.map_radius, 10),
             GraphShape::Debug => graph::debugging_graph(),
         };
         for char in &mut self.characters {
@@ -397,11 +392,10 @@ impl eframe::App for State {
                     }
                 }
             }
-            if self.debug_info {
+            if self.debug_info && self.map_radius < 20 {
                 let text_color = Color32::from_rgb(255, 255, 255);
-                let divide = self.map.len() / 2;
                 for (i, &pos) in self.map.positions().iter().enumerate() {
-                    let txt = if i < divide { i.to_string() } else { (i - divide).to_string() + "'" };
+                    let txt = i.to_string();
                     let layout_job = LayoutJob::simple(txt, FontId::default(), text_color, 100.0);
                     let galley = ui.fonts(|f| f.layout_job(layout_job));
                     let screen_pos = to_screen.transform_pos(pos);
