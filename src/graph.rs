@@ -28,16 +28,20 @@ impl Graph {
         new_index
     }
 
+    pub fn has_edge(&self, v1: usize, v2: usize) -> bool {
+        let res = self.neighbors[v1].contains(&v2);
+        debug_assert!((self.neighbors[v2].contains(&v1)) == res);
+        res
+    }
+
     pub fn add_edge(&mut self, v1: usize, v2: usize) {
-        debug_assert!(!self.neighbors[v1].contains(&v2));
-        debug_assert!(!self.neighbors[v2].contains(&v1));
+        debug_assert!(!self.has_edge(v1, v2));
         self.neighbors[v1].push(v2);
         self.neighbors[v2].push(v1);
     }
 
     pub fn remove_edge(&mut self, v1: usize, v2: usize) {
-        debug_assert!(self.neighbors[v1].contains(&v2));
-        debug_assert!(self.neighbors[v2].contains(&v1));
+        debug_assert!(self.has_edge(v1, v2));
         self.neighbors[v1].retain(|&v| v != v2);
         self.neighbors[v2].retain(|&v| v != v1);
     }
@@ -215,23 +219,27 @@ mod geo {
     pub fn left_of_line((a, dir): Line, p: Pos2) -> bool {
         dir.x * (p.y - a.y) - dir.y * (p.x - a.x) > 0.0
     }
+
+    //assumes dir to be normalized.
+    pub fn signed_dist((a, dir): Line, p: Pos2) -> f32 {
+        dir.x * (a.y - p.y) - dir.y * (a.x - p.x)
+    }
 }
 
 pub struct Triangualtion {
     graph: Graph,
+    radius: f32,
 }
 
 impl Triangualtion {
-    const MAX_RADIUS: f32 = 10.0;
 
-    pub fn new_base_square() -> Self {
-        const R: f32 = Triangualtion::MAX_RADIUS;
+    pub fn new_base_square(r: f32) -> Self {
         let mut graph = Graph::empty();
         let v0 = graph.add_vertex(pos2(0.0, 0.0));
-        let v1 = graph.add_vertex(pos2(R, R));
-        let v2 = graph.add_vertex(pos2(R, -R));
-        let v3 = graph.add_vertex(pos2(-R, -R));
-        let v4 = graph.add_vertex(pos2(-R, R));
+        let v1 = graph.add_vertex(pos2(r, r));
+        let v2 = graph.add_vertex(pos2(r, -r));
+        let v3 = graph.add_vertex(pos2(-r, -r));
+        let v4 = graph.add_vertex(pos2(-r, r));
         //outer edges
         graph.add_path_edges([v1, v2, v3, v4, v1].iter());
         //to center
@@ -239,29 +247,49 @@ impl Triangualtion {
         graph.add_edge(v0, v2);
         graph.add_edge(v0, v3);
         graph.add_edge(v0, v4);
-        Self { graph }
+        Self { graph, radius: r }
     }
 
     pub fn remove_base_square(mut self) -> Graph {
+        { //delete vertices of surrounding square
+            let mut i = 0;      
+            self.graph.neighbors.retain(|_| {
+                let keep = i == 0 || i > 4;
+                i += 1;
+                keep
+            });
+            i = 0;
+            self.graph.positions.retain(|_| {
+                let keep = i == 0 || i > 4;
+                i += 1;
+                keep
+            });
+        }
+        //delete edges to vertives of surrounding square
         for neighs in &mut self.graph.neighbors {
             neighs.retain(|&v| v == 0 || v > 4);
         }
-        for corner in 1..=4 {
-            self.graph.neighbors[corner].clear();
+        //adjust edge indices
+        for neighs in &mut self.graph.neighbors {
+            for neigh in neighs {
+                if *neigh != 0 {
+                    *neigh -= 4;
+                }
+            }
         }
         self.graph
     }
 
-    pub fn is_face(&self, v1: usize, v2: usize, v3: usize) -> bool {
-        self.graph.neighbors[v1].contains(&v2) &&
-        self.graph.neighbors[v2].contains(&v3) &&
-        self.graph.neighbors[v3].contains(&v1)        
+    pub fn has_face(&self, v1: usize, v2: usize, v3: usize) -> bool {
+        self.graph.has_edge(v1, v2) &&
+        self.graph.has_edge(v2, v3) &&
+        self.graph.has_edge(v3, v1)
     }
 
     //assumes edge of (v1, v2) and vertex v3 form a face, 
     //returns other face adjacent to edge
     pub fn neighbor_face_vertex(&self, (v1, v2): (usize, usize), v3: usize) -> usize {
-        debug_assert!(self.is_face(v1, v2, v3));
+        debug_assert!(self.has_face(v1, v2, v3));
 
         let v1_neighbors = self.graph.neighbors(v1);
         let v2_neighbors = self.graph.neighbors(v2);
@@ -272,16 +300,18 @@ impl Triangualtion {
         let mut best = usize::MAX;
         let mut best_dist = f32::MAX;
         let edge = geo::line_from_to(v1_pos, v2_pos);
-        let v3_left = geo::left_of_line(edge, v3_pos);
-        for &n1 in v1_neighbors {
-            let n1_pos = self.graph.positions[n1];
-            let dist = (v1_pos - n1_pos).length_sq();
-
-            if dist < best_dist 
-            && v2_neighbors.contains(&n1)
-            && (geo::left_of_line(edge, n1_pos) != v3_left) {
-                best = n1;
-                best_dist = dist;
+        let v3_dist_sign = geo::signed_dist(edge, v3_pos).signum();
+        for &neigh in v1_neighbors {
+            let n1_pos = self.graph.positions[neigh];
+            let (sign, abs) = {
+                let dist = geo::signed_dist(edge, n1_pos);
+                (dist.signum(), dist.abs())
+            };
+            if sign != v3_dist_sign
+            && abs < best_dist
+            && v2_neighbors.contains(&neigh) {
+                best = neigh;
+                best_dist = abs;
             }
         }
         best
@@ -314,7 +344,7 @@ impl Triangualtion {
                     next_line = neigh_line;
                 }
             }
-            if next == usize::MAX || __i > 10 {
+            if next == usize::MAX || __i > 20 {
                 return None;
             }
             res[i_next] = next;
@@ -324,9 +354,9 @@ impl Triangualtion {
         }
     }
 
-    pub fn add_vertex(&mut self, new_pos: Pos2) -> usize {
-        debug_assert!(new_pos.x.abs() <= Self::MAX_RADIUS);
-        debug_assert!(new_pos.y.abs() <= Self::MAX_RADIUS);
+    pub fn add_vertex(&mut self, new_pos: Pos2, queue: &mut VecDeque<((usize, usize), usize)>) -> usize {
+        debug_assert!(new_pos.x.abs() <= self.radius);
+        debug_assert!(new_pos.y.abs() <= self.radius);
 
         if let Some(face) = self.find_face_of(new_pos) {
             let new = self.graph.add_vertex(new_pos);
@@ -337,25 +367,28 @@ impl Triangualtion {
             //following from here is just an attempt to improve the quality,
             //e.g. make the triangles less slim. we do this by proxy: the goal is to find
             //  shortest possible sides for our triangles.
-            let mut queue = VecDeque::new();
+            queue.clear();
             for (&v1, &v2) in face.iter().circular_tuple_windows() {                
                 queue.push_back(((v1, v2), new));
                 debug_assert!({
                     let v1_pos = self.graph.positions[v1];
                     let v2_pos = self.graph.positions[v2];
-                    let edge = geo::line_from_to(v1_pos, v2_pos);
-                    println!("lelele");
-                    geo::left_of_line(edge, new_pos)
+                    let fw_edge = geo::line_from_to(v1_pos, v2_pos);
+                    let bw_edge = geo::line_from_to(v2_pos, v1_pos);
+                    geo::left_of_line(fw_edge, new_pos)
+                    && !geo::left_of_line(bw_edge, new_pos)
                 });
             }
             while let Some(((v1, v2), v0)) = queue.pop_front() {
-                if !self.is_face(v1, v2, v0) {
+                if !self.has_face(v1, v2, v0) {
+                    dbg!((v1, v2, v0));
                     continue;
                 }
                 let v3 = self.neighbor_face_vertex((v1, v2), v0);
                 if v3 == usize::MAX {
                     continue;
                 }
+                debug_assert!(self.has_face(v1, v2, v3));
                 let v0_pos = self.graph.positions[v0];
                 let v1_pos = self.graph.positions[v1];
                 let v2_pos = self.graph.positions[v2];
@@ -390,7 +423,7 @@ impl Triangualtion {
 
 pub fn random_triangulated(nr_nodes: usize) -> Graph {
     //start with square with unit circle in middle
-    let mut triangulation = Triangualtion::new_base_square();
+    let mut triangulation = Triangualtion::new_base_square(10.0);
 
     use rand::distributions::{Distribution, Uniform};
     let mut rng = rand::thread_rng();
@@ -404,14 +437,32 @@ pub fn random_triangulated(nr_nodes: usize) -> Graph {
             }
         }
     };
+    let mut queue = VecDeque::new();
     for _ in 0..nr_nodes {
-        for _ in 0..10 {
-            let pos = random_point();
-            if triangulation.add_vertex(pos) != usize::MAX {
+        let pos = random_point();
+        for _ in 0..3 {
+            let new = triangulation.add_vertex(pos, &mut queue);
+            if new != usize::MAX {
                 break;
             }
         }
     }
 
+    triangulation.remove_base_square()
+}
+
+pub fn debugging_graph() -> Graph {
+    let mut triangulation = Triangualtion::new_base_square(10.0);
+    let mut queue = VecDeque::new();
+    let positions = [
+        pos2(-0.143388033, 0.978398561),
+        pos2(0.263813496, 0.514246702),
+        pos2(0.74604845, 0.300056696),
+        pos2(0.256795406, -0.64158415),
+    ];
+    for pos in positions {
+        let new = triangulation.add_vertex(pos, &mut queue);
+        assert!(new != usize::MAX);
+    }
     triangulation.remove_base_square()
 }

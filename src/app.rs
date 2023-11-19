@@ -1,7 +1,7 @@
 
 use std::collections::VecDeque;
 
-use egui::*;
+use egui::{*, epaint::TextShape, text::LayoutJob};
 
 use super::{ graph::Graph, graph };
 
@@ -10,8 +10,11 @@ use super::{ graph::Graph, graph };
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InSet { No, Perhaps, Yes, NewlyAdded }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RobberInfo { EscapableNodes, NearNodes, None }
+
 #[derive(Clone, Copy, PartialEq)]
-pub enum GraphShape { RegularPolygon(usize), Random }
+pub enum GraphShape { RegularPolygon(usize), Random, Debug }
 
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates
@@ -66,9 +69,8 @@ pub struct State {
     dist_to_outside_hull: Vec<usize>, //minimum dist to nearest point in convex cop hull
     min_cop_dist: Vec<usize>, //elementwise minimum of .distance of active cops in self.characters
 
-    show_robber_closer: bool,
+    robber_info: RobberInfo,
     show_convex_hull: bool,
-    show_escapeable_nodes: bool, //all nodes closer to the outside of the convex hull than to the next cop
 
     //first is robber, rest are cops
     characters: Vec<Character>,
@@ -108,8 +110,13 @@ impl State {
             GraphShape::RegularPolygon(n) => graph::triangulated_regular_polygon(
                 n, 
                 self.map_radius),
-            //TODO: implement function to build random graph
-            GraphShape::Random => graph::random_triangulated(4 * self.map_radius * self.map_radius),
+            GraphShape::Random => {
+                //good integer approximation of pi r^2
+                let pi_times_1024 = 3217;
+                let nr_nodes = (pi_times_1024 * self.map_radius * self.map_radius) / 1024;
+                graph::random_triangulated(nr_nodes)
+            },
+            GraphShape::Debug => graph::debugging_graph(),
         };
         for char in &mut self.characters {
             char.nearest_node = 0;
@@ -125,7 +132,7 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = State { 
             map: Graph::empty(),
-            map_shape: GraphShape::Random,//GraphShape::RegularPolygon(6),
+            map_shape: GraphShape::Debug,//GraphShape::RegularPolygon(6),
             map_radius: 1,
 
             extreme_vertices: [0; 4],
@@ -134,14 +141,14 @@ impl State {
             dist_to_outside_hull: Vec::new(),
             min_cop_dist: Vec::new(),
 
-            show_robber_closer: false,
+            robber_info: RobberInfo::None,
             show_convex_hull: false,
-            show_escapeable_nodes: false,
             
             characters: vec![
                 Character::new_robber(Pos2::ZERO),
-                Character::new_cop(pos2(0.25, 0.0)),
-                Character::new_cop(pos2(-0.25, 0.0))],
+                //Character::new_cop(pos2(0.25, 0.0)),
+                //Character::new_cop(pos2(-0.25, 0.0))
+                ],
             tolerance: 0.1,
             queue: VecDeque::new(),
          };
@@ -268,13 +275,15 @@ impl eframe::App for State {
                         ui.add(egui::Slider::new(n, 3..=10).text("Seiten"));
                     }
                     ui.radio_value(&mut self.map_shape, GraphShape::Random, "Zufallsverteilt");
+                    ui.radio_value(&mut self.map_shape, GraphShape::Debug, "Debugging");
+
                     if prev_shape != self.map_shape {
                         self.recompute_graph();
                     }
                 });
                 { //adjust radius
                     let prev_radius = self.map_radius;    
-                    ui.add(egui::Slider::new(&mut self.map_radius, 1..=100).text("Radius"));
+                    ui.add(egui::Slider::new(&mut self.map_radius, 0..=100).text("Radius"));
                     if prev_radius != self.map_radius {
                         self.recompute_graph();
                     }
@@ -292,16 +301,12 @@ impl eframe::App for State {
                 });
 
                 //settings to draw extra information
-                ui.radio_value(&mut self.show_robber_closer, true, 
+                ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
                     "markiere für Räuber\n nähere Knoten");
-                if self.show_robber_closer {
-                    self.show_escapeable_nodes = false;
-                }
-                ui.radio_value(&mut self.show_escapeable_nodes, true, 
+                ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
                     "zeige Punkte näher an\n Hüllenrand als an Cops");
-                if self.show_escapeable_nodes {
-                    self.show_robber_closer = false;
-                }
+                ui.radio_value(&mut self.robber_info, RobberInfo::None, "Weder Noch");
+
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
             });
         });
@@ -337,6 +342,17 @@ impl eframe::App for State {
                 painter.add(line);
             }
 
+            if self.map_radius < 10 {
+                let text_color = Color32::from_rgb(255, 255, 255);
+                for (i, &pos) in self.map.positions().iter().enumerate() {
+                    let layout_job = LayoutJob::simple(i.to_string(), FontId::default(), text_color, 100.0);
+                    let galley = ui.fonts(|f| f.layout_job(layout_job));
+                    let screen_pos = to_screen.transform_pos(pos);
+                    let text = Shape::Text(TextShape::new(screen_pos, galley));
+                    painter.add(text);
+                }
+            }
+
             if self.show_convex_hull {
                 let hull_color = Color32::from_rgb(100, 100, 230);
                 for (&in_hull, &pos) in self.in_convex_cop_hull.iter().zip(self.map.positions()) {
@@ -347,7 +363,7 @@ impl eframe::App for State {
                     }
                 }
             }
-            if self.show_robber_closer {                
+            if self.robber_info == RobberInfo::NearNodes {                
                 let robber_closer_color = Color32::from_rgb(80, 210, 80);
                 let dist_vs = self.robber().distances.iter().zip(self.min_cop_dist.iter());
                 for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
@@ -358,7 +374,7 @@ impl eframe::App for State {
                     }
                 }
             }
-            if self.show_escapeable_nodes {
+            if self.robber_info == RobberInfo::EscapableNodes {
                 let escapable_color = Color32::from_rgb(150, 210, 50);
                 let dist_vs = self.dist_to_outside_hull.iter().zip(self.min_cop_dist.iter());
                 for ((o_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
@@ -400,23 +416,23 @@ impl eframe::App for State {
                 let character_circle = Shape::circle_filled(draw_pos, character_size, fill_color);
                 painter.add(character_circle);
             }
-            if self.show_convex_hull || self.show_escapeable_nodes || self.show_robber_closer {
+            if self.show_convex_hull || self.robber_info != RobberInfo::None {
                 self.update_min_cop_dist();
             }
-            if self.show_convex_hull || self.show_escapeable_nodes {
+            if self.show_convex_hull || self.robber_info == RobberInfo::EscapableNodes {
                 self.update_convex_cop_hull();
             }
-            if self.show_escapeable_nodes {
+            if self.robber_info == RobberInfo::EscapableNodes {
                 self.update_dist_to_outside_hull();
             }
 
-            let face = self.map.find_face_of(self.robber().pos);
-            for v in face {
-                let hull_color = Color32::from_rgb(100, 100, 230);
-                let draw_pos = to_screen.transform_pos(self.map.positions()[v]);
-                let marker_circle = Shape::circle_filled(draw_pos, scale * 10.0, hull_color);
-                painter.add(marker_circle);
-            }
+            //let face = self.map.find_face_of(self.robber().pos);
+            //for v in face {
+            //    let hull_color = Color32::from_rgb(100, 100, 230);
+            //    let draw_pos = to_screen.transform_pos(self.map.positions()[v]);
+            //    let marker_circle = Shape::circle_filled(draw_pos, scale * 10.0, hull_color);
+            //    painter.add(marker_circle);
+            //}
         });
     }
 }
