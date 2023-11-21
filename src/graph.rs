@@ -79,8 +79,8 @@ impl Graph {
         }
     }
 
-    pub fn neighbors(&self, node: usize) -> &[usize] {
-        &self.neighbors[node]
+    pub fn neighbors(&self) -> &[Vec<usize>] {
+        &self.neighbors
     } 
 
     pub fn neigbors_with_positions(&self, node: usize) -> impl Iterator<Item = (usize, &Pos2)> {
@@ -88,7 +88,7 @@ impl Graph {
     }
 
     //everything in queue is starting point and expected to already have the correct distance
-    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<usize>) {
+    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<isize>) {
         while let Some(node) = queue.pop_front() {
             let dist = distances[node];
             for &neigh in &self.neighbors[node] {
@@ -105,7 +105,7 @@ impl Graph {
         colors: &mut [Color], queue: &mut VecDeque<usize>) {
 
         while let Some(node) = queue.pop_front() {
-            for &neigh in self.neighbors(node) {
+            for &neigh in &self.neighbors[node] {
                 if colors[neigh] == old {
                     colors[neigh] = new.clone();
                     queue.push_back(neigh);
@@ -280,8 +280,8 @@ impl Triangualtion {
     pub fn neighbor_face_vertex(&self, (v1, v2): (usize, usize), v3: usize) -> usize {
         debug_assert!(self.has_face(v1, v2, v3));
 
-        let v1_neighs = self.graph.neighbors(v1);
-        let v2_neighs = self.graph.neighbors(v2);
+        let v1_neighs = &self.graph.neighbors[v1];
+        let v2_neighs = &self.graph.neighbors[v2];
         let v1_pos = self.graph.positions[v1];        
         let v2_pos = self.graph.positions[v2];
         let v3_pos = self.graph.positions[v3];
