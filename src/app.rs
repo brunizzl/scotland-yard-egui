@@ -9,6 +9,9 @@ use super::{ graph::Graph, graph };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InSet { No, Perhaps, Yes, NewlyAdded }
+impl InSet {
+    pub fn yes(self) -> bool { self == InSet::Yes }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RobberInfo { EscapableNodes, NearNodes, None }
@@ -23,7 +26,7 @@ pub struct Character {
     on_node: bool,
     pub nearest_node: usize,
     pos: Pos2,
-    distances: Vec<usize>,
+    distances: Vec<isize>,
 }
 
 impl Character {
@@ -42,7 +45,7 @@ impl Character {
             queue.clear();
             queue.push_back(nearest_node);
             self.distances.clear();
-            self.distances.resize(map.len(), usize::MAX);
+            self.distances.resize(map.len(), isize::MAX);
             self.distances[nearest_node] = 0;
             map.calc_distances_to(queue, &mut self.distances);
         }
@@ -62,8 +65,8 @@ pub struct State {
 
     //state kept for each node in map
     in_convex_cop_hull: Vec<InSet>, 
-    dist_to_outside_hull: Vec<usize>, //minimum dist to nearest point in convex cop hull
-    min_cop_dist: Vec<usize>, //elementwise minimum of .distance of active cops in self.characters
+    min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
+    cop_advantage: Vec<isize>,
 
     robber_info: RobberInfo,
     show_convex_hull: bool,
@@ -118,7 +121,7 @@ impl State {
         self.extreme_vertices = Self::compute_extreme_vertices(self.map.positions());
         self.update_min_cop_dist();
         self.update_convex_cop_hull();
-        self.update_dist_to_outside_hull();
+        self.update_cop_advantage();
     }
 
     /// Called once before the first frame.
@@ -131,8 +134,8 @@ impl State {
             extreme_vertices: [0; 4],
 
             in_convex_cop_hull: Vec::new(),
-            dist_to_outside_hull: Vec::new(),
             min_cop_dist: Vec::new(),
+            cop_advantage: Vec::new(),
 
             robber_info: RobberInfo::None,
             show_convex_hull: false,
@@ -143,7 +146,7 @@ impl State {
                 //Character::new(true, pos2(0.25, 0.0)),
                 //Character::new(true, pos2(-0.25, 0.0))
                 ],
-            tolerance: 0.1,
+            tolerance: 0.25,
             queue: VecDeque::new(),
          };
          res.recompute_graph();
@@ -162,7 +165,7 @@ impl State {
     fn update_min_cop_dist(&mut self) {
         let mut min_cop_dist = std::mem::take(&mut self.min_cop_dist);
         min_cop_dist.clear();
-        min_cop_dist.resize(self.map.len(), usize::MAX);
+        min_cop_dist.resize(self.map.len(), isize::MAX);
         for cop in self.active_cops() {
             for (this, curr_min) in cop.distances.iter().zip(min_cop_dist.iter_mut()) {
                 if this < curr_min {
@@ -173,25 +176,27 @@ impl State {
         self.min_cop_dist = min_cop_dist;
     }
 
-    fn update_dist_to_outside_hull(&mut self) {
-        let in_hull = &self.in_convex_cop_hull;
-        let mut hull_depth = std::mem::take(&mut self.dist_to_outside_hull);
-        hull_depth.resize(self.map.len(), usize::MAX);
-        for (depth, &in_) in hull_depth.iter_mut().zip(in_hull.iter()) {
-            *depth = if in_ == InSet::No { 0 } else { usize::MAX }
-        }
-
-
+    fn update_cop_advantage(&mut self) {
+        let in_cop_hull = &self.in_convex_cop_hull;
+        let mut advantage = std::mem::take(&mut self.cop_advantage);
+        advantage.resize(self.map.len(), isize::MAX);        
         let mut queue = std::mem::take(&mut self.queue);
         queue.clear();
-        for (node, &in_set) in in_hull.iter().enumerate() {
-            if in_set == InSet::Yes && self.map.neighbors(node).iter().any(|&n| in_hull[n] == InSet::No) {
+
+        let zipped = itertools::izip!(0.., 
+            in_cop_hull.iter(), 
+            advantage.iter_mut(), 
+            self.min_cop_dist.iter(), 
+            self.map.neighbors());
+        for (node, &in_hull, adv, &dist, neighs) in zipped {
+            debug_assert!(matches!(in_hull, InSet::Yes | InSet::No));
+            if !in_hull.yes() && neighs.iter().any(|&n| in_cop_hull[n].yes()) {
                 queue.push_back(node);
-                hull_depth[node] = 1;
             }
+            *adv = if in_hull.yes() { isize::MAX } else { -dist };
         }
-        self.map.calc_distances_to(&mut queue, &mut hull_depth);
-        self.dist_to_outside_hull = hull_depth;
+        self.map.calc_distances_to(&mut queue, &mut advantage);
+        self.cop_advantage = advantage;
         self.queue = queue;
     }
 
@@ -212,7 +217,7 @@ impl State {
                 self.queue.push_back(cop_i.nearest_node);
                 while let Some(node) = self.queue.pop_front() {
                     let curr_dist_to_j = cop_j.distances[node];
-                    for &neigh in self.map.neighbors(node) {
+                    for &neigh in &self.map.neighbors()[node] {
                         if cop_j.distances[neigh] < curr_dist_to_j && in_hull[neigh] != InSet::NewlyAdded {
                             in_hull[neigh] = InSet::NewlyAdded;
                             self.queue.push_back(neigh);
@@ -300,7 +305,7 @@ impl eframe::App for State {
                 ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
                     "markiere für Räuber\n nähere Knoten");
                 ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
-                    "zeige Punkte näher an\n Hüllenrand als an Cops");
+                    "zeige Punkte mit direkter\n Fluchtoption");
                 ui.radio_value(&mut self.robber_info, RobberInfo::None, "Weder Noch");
 
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
@@ -383,9 +388,8 @@ impl eframe::App for State {
             }
             if self.robber_info == RobberInfo::EscapableNodes {
                 let escapable_color = Color32::from_rgb(150, 210, 50);
-                let dist_vs = self.dist_to_outside_hull.iter().zip(self.min_cop_dist.iter());
-                for ((o_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
-                    if o_dist < c_dist  {
+                for (&adv, &pos) in self.cop_advantage.iter().zip(self.map.positions()) {
+                    if adv < -1  {
                         let draw_pos = to_screen.transform_pos(pos);
                         let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, escapable_color);
                         painter.add(marker_circle);
@@ -441,7 +445,7 @@ impl eframe::App for State {
                 self.update_convex_cop_hull();
             }
             if self.robber_info == RobberInfo::EscapableNodes {
-                self.update_dist_to_outside_hull();
+                self.update_cop_advantage();
             }
         });
     }
