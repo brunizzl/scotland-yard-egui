@@ -220,6 +220,7 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Graph {
 }
 
 //short for geometry
+#[allow(dead_code)]
 pub mod geo {
     use super::*;
 
@@ -239,6 +240,7 @@ pub mod geo {
     }
 
     pub fn project_to_line((a, dir): Line, p: Pos2) -> Pos2 {
+        //dividing by length squared normalized both occurences of dir at once.
         a + Vec2::dot(p - a, dir) / dir.length_sq() * dir
     }
 }
