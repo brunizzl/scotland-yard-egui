@@ -10,7 +10,10 @@ use super::{ graph::Graph, graph };
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InSet { No, Perhaps, Yes, NewlyAdded }
 impl InSet {
-    pub fn yes(self) -> bool { self == InSet::Yes }
+    pub fn yes(self) -> bool { 
+        debug_assert!(matches!(self, InSet::No | InSet::Yes));
+        self == InSet::Yes 
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -122,14 +125,15 @@ impl State {
         self.update_min_cop_dist();
         self.update_convex_cop_hull();
         self.update_cop_advantage();
+        self.tolerance = f32::min(0.25, 0.75 / self.map_radius as f32);
     }
 
     /// Called once before the first frame.
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = State { 
             map: Graph::empty(),
-            map_shape: GraphShape::Debug,//GraphShape::RegularPolygon(6),
-            map_radius: 1,
+            map_shape: GraphShape::RegularPolygon(6),
+            map_radius: 6,
 
             extreme_vertices: [0; 4],
 
@@ -189,7 +193,6 @@ impl State {
             self.min_cop_dist.iter(), 
             self.map.neighbors());
         for (node, &in_hull, adv, &dist, neighs) in zipped {
-            debug_assert!(matches!(in_hull, InSet::Yes | InSet::No));
             if !in_hull.yes() && neighs.iter().any(|&n| in_cop_hull[n].yes()) {
                 queue.push_back(node);
             }
@@ -330,15 +333,16 @@ impl eframe::App for State {
                 (to_screen, scale)
             };
 
-            let grey_stroke = Stroke::new(scale, Color32::from_rgb(150, 150, 150));
+            const GREY: Color32 = Color32::from_rgb(130, 130, 150);
+            let grey_stroke = Stroke::new(scale, GREY);
             if let (true, Some(r)) = (self.debug_info, self.robber()) {
                 let face = self.map.find_face_of(r.pos);
                 let screen_face: Vec<_> = face.iter().map(|&v| {
                     to_screen.transform_pos(self.map.positions()[v])
                 }).collect();
-                let stroke = Stroke::new(0.0, grey_stroke.color);
+                let stroke = Stroke::new(0.0, GREY);
                 let fill = Color32::from_rgb(150, 0, 0);
-                let poly = Shape::convex_polygon(screen_face, fill, stroke);                
+                let poly = Shape::convex_polygon(screen_face, fill, stroke);         
                 painter.add(poly);
             }
 
@@ -368,7 +372,7 @@ impl eframe::App for State {
             if self.show_convex_hull {
                 let hull_color = Color32::from_rgb(100, 100, 230);
                 for (&in_hull, &pos) in self.in_convex_cop_hull.iter().zip(self.map.positions()) {
-                    if in_hull == InSet::Yes  {
+                    if in_hull.yes()  {
                         let draw_pos = to_screen.transform_pos(pos);
                         let marker_circle = Shape::circle_filled(draw_pos, scale * 10.0, hull_color);
                         painter.add(marker_circle);
@@ -410,33 +414,36 @@ impl eframe::App for State {
 
             for (i, character) in self.characters.iter_mut().enumerate() {                
                 let character_size = f32::max(8.0, scale * 8.0);
-                let marker_size = character_size + 4.0 * scale;
 
-                let real_screen_pos = to_screen.transform_pos(character.pos);                
-                let draw_pos = if character.on_node {
-                    let nearest_node_pos = to_screen.transform_pos(self.map.positions()[character.nearest_node]);
-                    let marker_circle = Shape::circle_stroke(nearest_node_pos, marker_size, grey_stroke);
-                    painter.add(marker_circle);
-                    nearest_node_pos
-                }
-                else {
-                    real_screen_pos
-                };
+                let real_screen_pos = to_screen.transform_pos(character.pos);    
+                let node_pos = self.map.positions()[character.nearest_node];
+                let node_screen_pos = to_screen.transform_pos(node_pos);
+                let draw_screen_pos = if character.on_node { node_screen_pos } else { real_screen_pos };
 
-                let point_rect = Rect::from_center_size(draw_pos, vec2(marker_size, marker_size));
+                let rect_len = 3.0 * character_size + self.tolerance;
+                let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
                 let character_id = response.id.with(i);
                 let point_response = ui.interact(point_rect, character_id, Sense::drag());
                 character.pos = to_screen.inverse().transform_pos(real_screen_pos + point_response.drag_delta());
+                if point_response.drag_released() && character.on_node {
+                    character.pos = node_pos; //snap actual character postion to node where he was dragged
+                }
                 
                 character.update(self.tolerance, &self.map, &mut self.queue);
 
-                let fill_color = if character.is_cop {
-                    Color32::from_rgb(10, 50, 190)
-                } else {
-                    Color32::from_rgb(200, 50, 50)
-                };
-                let character_circle = Shape::circle_filled(draw_pos, character_size, fill_color);
+                const COP_BLUE: Color32 = Color32::from_rgb(10, 50, 170);
+                const ROBBER_RED: Color32 = Color32::from_rgb(170, 40, 40);
+                const BLUE_GLOW: Color32 = Color32::from_rgb(60, 120, 235);
+                const RED_GLOW: Color32 = Color32::from_rgb(235, 120, 120);
+                let fill_color = if character.is_cop { COP_BLUE } else { ROBBER_RED };
+                let character_circle = Shape::circle_filled(draw_screen_pos, character_size, fill_color);
                 painter.add(character_circle);
+                if character.on_node {
+                    let stroke_color = if character.is_cop { BLUE_GLOW } else { RED_GLOW };
+                    let stroke = Stroke::new(scale * 3.0, stroke_color);
+                    let marker_circle = Shape::circle_stroke(node_screen_pos, character_size, stroke);
+                    painter.add(marker_circle);
+                }
             }
             if self.show_convex_hull || self.robber_info != RobberInfo::None {
                 self.update_min_cop_dist();
