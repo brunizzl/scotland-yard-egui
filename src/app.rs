@@ -17,10 +17,13 @@ impl InSet {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RobberInfo { EscapableNodes, NearNodes, None }
+pub enum RobberInfo { None, EscapableNodes, NearNodes }
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum GraphShape { RegularPolygon(usize), Random, Debug }
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum DrawNumbers { None, Indices, RobberAdvantage, MinCopDist }
 
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates
@@ -42,9 +45,13 @@ impl Character {
     //(converges to globally nearest node only for "convex" graphs, 
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
     fn update(&mut self, tolerance: f32, map: &Graph, queue: &mut VecDeque<usize>) {
-        let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos, self.nearest_node);
+        let safe_start = if map.len() > self.nearest_node { self.nearest_node } else { 0 };
+        let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos, safe_start);
+        self.on_node = nearest_dist_sq <= tolerance * tolerance;
 
-        if nearest_node != self.nearest_node || self.distances.len() != map.len() {
+        let need_dist_update = self.distances.len() != map.len() || 
+            (self.on_node && nearest_node != self.nearest_node);
+        if need_dist_update {
             queue.clear();
             queue.push_back(nearest_node);
             self.distances.clear();
@@ -53,7 +60,6 @@ impl Character {
             map.calc_distances_to(queue, &mut self.distances);
         }
         self.nearest_node = nearest_node;
-        self.on_node = nearest_dist_sq <= tolerance * tolerance;
     }
 }
 
@@ -72,6 +78,7 @@ pub struct State {
     cop_advantage: Vec<isize>,
 
     robber_info: RobberInfo,
+    vertex_info: DrawNumbers,
     show_convex_hull: bool,
     debug_info: bool,
 
@@ -142,12 +149,13 @@ impl State {
             cop_advantage: Vec::new(),
 
             robber_info: RobberInfo::None,
+            vertex_info: DrawNumbers::None,
             show_convex_hull: false,
             debug_info: false,
             
             characters: vec![
                 Character::new(false, Pos2::ZERO),
-                //Character::new(true, pos2(0.25, 0.0)),
+                Character::new(true, pos2(0.25, 0.0)),
                 //Character::new(true, pos2(-0.25, 0.0))
                 ],
             tolerance: 0.25,
@@ -192,11 +200,11 @@ impl State {
             advantage.iter_mut(), 
             self.min_cop_dist.iter(), 
             self.map.neighbors());
-        for (node, &in_hull, adv, &dist, neighs) in zipped {
+        for (node, &in_hull, adv, &cop_dist, neighs) in zipped {
             if !in_hull.yes() && neighs.iter().any(|&n| in_cop_hull[n].yes()) {
                 queue.push_back(node);
             }
-            *adv = if in_hull.yes() { isize::MAX } else { -dist };
+            *adv = if in_hull.yes() { isize::MAX } else { -cop_dist };
         }
         self.map.calc_distances_to(&mut queue, &mut advantage);
         self.cop_advantage = advantage;
@@ -252,6 +260,22 @@ impl State {
     }
 }
 
+//returns if val was changed
+fn add_drag(ui: &mut Ui, val: &mut usize, name: &str, min: usize, max: usize) -> bool {    
+    ui.horizontal(|ui| { 
+        let prev = *val;  
+        ui.label(name);                     
+        if ui.button(" - ").clicked() && prev > min {
+            *val -= 1;
+        }                     
+        ui.add(DragValue::new(val).clamp_range(min..=max));   
+        if ui.button(" + ").clicked() && prev < max {
+            *val += 1;
+        }
+        prev != *val
+    }).inner
+}
+
 impl eframe::App for State {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
@@ -275,7 +299,7 @@ impl eframe::App for State {
                         self.map_shape = GraphShape::RegularPolygon(6);
                     }
                     if let GraphShape::RegularPolygon(n) = &mut self.map_shape {
-                        ui.add(egui::Slider::new(n, 3..=10).text("Seiten"));
+                        add_drag(ui, n, "Seiten: ", 3, 10);
                     }
                     ui.radio_value(&mut self.map_shape, GraphShape::Random, "Zufallsverteilt");
                     ui.radio_value(&mut self.map_shape, GraphShape::Debug, "Debugging");
@@ -284,13 +308,28 @@ impl eframe::App for State {
                         self.recompute_graph();
                     }
                 });
-                { //adjust radius
-                    let prev_radius = self.map_radius;    
-                    ui.add(egui::Slider::new(&mut self.map_radius, 0..=100).text("Radius"));
-                    if prev_radius != self.map_radius {
-                        self.recompute_graph();
-                    }
+                if add_drag(ui, &mut self.map_radius, "Radius: ", 0, 100) {
+                    self.recompute_graph();
                 }
+                ui.collapsing("Grün", |ui|{                    
+                    //settings to draw extra information
+                    ui.radio_value(&mut self.robber_info, RobberInfo::None, 
+                        "keine Marker");
+                    ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
+                        "markiere für Räuber\n nähere Knoten");
+                    ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
+                        "zeige Punkte mit direkter\n Fluchtoption");
+                });
+                ui.collapsing("Zahl an Knoten", |ui|{
+                    ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
+                        "Keine");
+                    ui.radio_value(&mut self.vertex_info, DrawNumbers::Indices, 
+                        "Knotenindices");
+                    ui.radio_value(&mut self.vertex_info, DrawNumbers::RobberAdvantage, 
+                        "Räubervorteil");
+                    ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
+                        "minimaler Cop Abstand");
+                });
                 //adjust nr of currently computed figures
                 ui.horizontal(|ui| {
                     if ui.button("- Figur").clicked() {
@@ -304,17 +343,19 @@ impl eframe::App for State {
                     }
                 });
 
-                //settings to draw extra information
-                ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
-                    "markiere für Räuber\n nähere Knoten");
-                ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
-                    "zeige Punkte mit direkter\n Fluchtoption");
-                ui.radio_value(&mut self.robber_info, RobberInfo::None, "Weder Noch");
-
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
-                ui.add(Checkbox::new(&mut self.debug_info, "zeige Debugginginformation"));
+                ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
             });
         });
+
+        let require_update = self.show_convex_hull 
+            || self.robber_info != RobberInfo::None 
+            || self.vertex_info != DrawNumbers::None;
+        if require_update {
+            self.update_min_cop_dist();
+            self.update_convex_cop_hull();
+            self.update_cop_advantage();
+        }
 
         CentralPanel::default().show(ctx, |ui| {
             let (response, painter) = ui.allocate_painter(
@@ -370,41 +411,46 @@ impl eframe::App for State {
             }
 
             if self.show_convex_hull {
-                let hull_color = Color32::from_rgb(100, 100, 230);
+                const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
                 for (&in_hull, &pos) in self.in_convex_cop_hull.iter().zip(self.map.positions()) {
                     if in_hull.yes()  {
                         let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 10.0, hull_color);
+                        let marker_circle = Shape::circle_filled(draw_pos, scale * 9.0, LIGHT_BLUE);
                         painter.add(marker_circle);
                     }
                 }
             }
             if let (RobberInfo::NearNodes, Some(r)) = (self.robber_info, self.robber()) {                
-                let robber_closer_color = Color32::from_rgb(80, 210, 80);
+                const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
                 let dist_vs = r.distances.iter().zip(self.min_cop_dist.iter());
                 for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
                     if r_dist < c_dist  {
                         let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, robber_closer_color);
+                        let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, GREEN);
                         painter.add(marker_circle);
                     }
                 }
             }
             if self.robber_info == RobberInfo::EscapableNodes {
-                let escapable_color = Color32::from_rgb(150, 210, 50);
+                const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
                 for (&adv, &pos) in self.cop_advantage.iter().zip(self.map.positions()) {
                     if adv < -1  {
                         let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, escapable_color);
+                        let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, GREEN);
                         painter.add(marker_circle);
                     }
                 }
             }
-            if self.debug_info && self.map_radius < 20 {
-                let text_color = Color32::from_rgb(255, 255, 255);
+            if self.map_radius < 20 && self.vertex_info != DrawNumbers::None {
+                const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
                 for (i, &pos) in self.map.positions().iter().enumerate() {
-                    let txt = i.to_string();
-                    let layout_job = LayoutJob::simple(txt, FontId::default(), text_color, 100.0);
+                    let txt = match self.vertex_info {
+                        DrawNumbers::Indices => { i.to_string() }
+                        DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
+                        DrawNumbers::None => { panic!() }
+                        DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
+                    };
+                    let layout_job = LayoutJob::simple(txt, FontId::default(), WHITE, 100.0);
                     let galley = ui.fonts(|f| f.layout_job(layout_job));
                     let screen_pos = to_screen.transform_pos(pos);
                     let text = Shape::Text(TextShape::new(screen_pos, galley));
@@ -444,15 +490,6 @@ impl eframe::App for State {
                     let marker_circle = Shape::circle_stroke(node_screen_pos, character_size, stroke);
                     painter.add(marker_circle);
                 }
-            }
-            if self.show_convex_hull || self.robber_info != RobberInfo::None {
-                self.update_min_cop_dist();
-            }
-            if self.show_convex_hull || self.robber_info == RobberInfo::EscapableNodes {
-                self.update_convex_cop_hull();
-            }
-            if self.robber_info == RobberInfo::EscapableNodes {
-                self.update_cop_advantage();
             }
         });
     }
