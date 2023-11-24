@@ -17,7 +17,7 @@ impl InSet {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RobberInfo { None, EscapableNodes, NearNodes }
+pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist }
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum GraphShape { RegularPolygon(usize), Random, Debug }
@@ -121,11 +121,10 @@ impl State {
             GraphShape::RegularPolygon(n) => graph::triangulated_regular_polygon(
                 n, 
                 self.map_radius),
-            GraphShape::Random => graph::random_triangulated(self.map_radius, 10),
+            GraphShape::Random => graph::random_triangulated(self.map_radius, 8),
             GraphShape::Debug => graph::debugging_graph(),
         };
         for char in &mut self.characters {
-            char.nearest_node = 0;
             char.update(self.tolerance, &self.map, &mut self.queue);
         }
         self.extreme_vertices = Self::compute_extreme_vertices(self.map.positions());
@@ -302,6 +301,11 @@ impl eframe::App for State {
                         add_drag(ui, n, "Seiten: ", 3, 10);
                     }
                     ui.radio_value(&mut self.map_shape, GraphShape::Random, "Zufallsverteilt");
+                    if self.map_shape == GraphShape::Random {
+                        if ui.button("neu berechnen").clicked() {
+                            self.recompute_graph();
+                        }
+                    }
                     ui.radio_value(&mut self.map_shape, GraphShape::Debug, "Debugging");
 
                     if prev_shape != self.map_shape {
@@ -316,15 +320,31 @@ impl eframe::App for State {
                     ui.radio_value(&mut self.robber_info, RobberInfo::None, 
                         "keine Marker");
                     ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
-                        "markiere für Räuber\n nähere Knoten");
+                        "markiere für Räuber\nnähere Knoten");
                     ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
-                        "zeige Punkte mit direkter\n Fluchtoption");
+                        "markiere Punkte mit\ndirekter Fluchtoption");
+                    ui.radio_value(&mut self.robber_info, RobberInfo::SmallRobberDist, 
+                        "markiere Punkte nah\nan Räuber");
+                    if let (RobberInfo::SmallRobberDist, Some(r)) = (self.robber_info, self.robber())  {
+                        let r_pos = self.map.positions()[r.nearest_node];
+                        let mut max_dist = f32::MIN;
+                        let mut min_dist = f32::MAX;
+                        for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
+                            if (dist as usize) == (self.map_radius * 3) / 4 {
+                                let new_dist = (r_pos - pos).length();
+                                max_dist = f32::max(max_dist, new_dist);
+                                min_dist = f32::min(min_dist, new_dist);
+                            }
+                        }
+                        ui.label(format!("min dist:   {}\nmax dist:   {}\nmin / max: {}", 
+                            min_dist, max_dist, min_dist / max_dist));
+                    }
                 });
-                ui.collapsing("Zahl an Knoten", |ui|{
+                ui.collapsing("Zahlen", |ui|{
                     ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
                         "Keine");
                     ui.radio_value(&mut self.vertex_info, DrawNumbers::Indices, 
-                        "Knotenindices");
+                        "Knotenindizes");
                     ui.radio_value(&mut self.vertex_info, DrawNumbers::RobberAdvantage, 
                         "Räubervorteil");
                     ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
@@ -388,24 +408,22 @@ impl eframe::App for State {
             }
 
             { //draw edges
-                let mut state: u64 = 27812618621;
-                let mut rnd = || {
-                    state = state.wrapping_mul(1827817281627151).wrapping_add(1927839172376);
-                    (64 + (state / (1 << 15) % 128)) as u8
-                };
-
-                let mut edge_stroke = || if self.debug_info {
+                let edge_stroke = |v1: usize, v2: usize| if self.debug_info {
+                    let seed = v1 * v2 + 100;
+                    let mut gen = super::rand::LCG::new(seed as u64);
+                    gen.waste(5);
+                    let mut rnd = || (64 + (gen.next() % 128)) as u8;
                     Stroke::new(scale, Color32::from_rgb(rnd(), rnd(), rnd()))
                 }
                 else {
                     grey_stroke
                 };
 
-                self.map.for_each_edge(|p1, p2| { 
+                self.map.for_each_edge(|v1, p1, v2, p2| { 
                     let edge = [
                         to_screen.transform_pos(p1), 
                         to_screen.transform_pos(p2)];
-                    let line = Shape::LineSegment { points: edge, stroke: edge_stroke() };
+                    let line = Shape::LineSegment { points: edge, stroke: edge_stroke(v1, v2) };
                     painter.add(line);
                 });
             }
@@ -420,13 +438,43 @@ impl eframe::App for State {
                     }
                 }
             }
+            { //draw green circles        
+                const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
+                let draw_circle_at = |pos: Pos2|{
+                    let draw_pos = to_screen.transform_pos(pos);
+                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
+                    painter.add(marker_circle);
+                };
+                match (self.robber_info, self.robber()) {
+                    (RobberInfo::NearNodes, Some(r)) => 
+                        for (r_dist, c_dist, &pos) in 
+                        itertools::izip!(r.distances.iter(), self.min_cop_dist.iter(), self.map.positions()) {
+                            if r_dist < c_dist {
+                                draw_circle_at(pos);
+                            }
+                        },
+                    (RobberInfo::EscapableNodes, _) => 
+                        for (&adv, &pos) in self.cop_advantage.iter().zip(self.map.positions()) {
+                            if adv < -1 {
+                                draw_circle_at(pos);
+                            }
+                        },
+                    (RobberInfo::SmallRobberDist, Some(r)) => 
+                        for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
+                            if (dist as usize) < (self.map_radius * 3) / 4 {
+                                draw_circle_at(pos);
+                            }
+                        },
+                    _ => {},
+                }
+            }
             if let (RobberInfo::NearNodes, Some(r)) = (self.robber_info, self.robber()) {                
                 const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
                 let dist_vs = r.distances.iter().zip(self.min_cop_dist.iter());
                 for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
                     if r_dist < c_dist  {
                         let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, GREEN);
+                        let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
                         painter.add(marker_circle);
                     }
                 }
@@ -436,11 +484,12 @@ impl eframe::App for State {
                 for (&adv, &pos) in self.cop_advantage.iter().zip(self.map.positions()) {
                     if adv < -1  {
                         let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, GREEN);
+                        let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
                         painter.add(marker_circle);
                     }
                 }
             }
+
             if self.map_radius < 20 && self.vertex_info != DrawNumbers::None {
                 const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
                 for (i, &pos) in self.map.positions().iter().enumerate() {
@@ -474,8 +523,9 @@ impl eframe::App for State {
                 if point_response.drag_released() && character.on_node {
                     character.pos = node_pos; //snap actual character postion to node where he was dragged
                 }
-                
-                character.update(self.tolerance, &self.map, &mut self.queue);
+                if point_response.dragged() {
+                    character.update(self.tolerance, &self.map, &mut self.queue);
+                }
 
                 const COP_BLUE: Color32 = Color32::from_rgb(10, 50, 170);
                 const ROBBER_RED: Color32 = Color32::from_rgb(170, 40, 40);
