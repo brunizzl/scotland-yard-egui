@@ -5,3 +5,8 @@ pub use app::State;
 
 mod graph;
 
+#[allow(dead_code)]
+mod geo;
+
+mod rand;
+

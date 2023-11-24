@@ -4,11 +4,19 @@ use std::collections::VecDeque;
 use egui::{Pos2, Vec2, pos2, vec2};
 use itertools::Itertools;
 
+use super::geo;
+
 pub struct Graph {
     positions: Vec<Pos2>,
 
     //position i lists all neighbors of node i
     neighbors: Vec<Vec<usize>>,
+}
+
+impl Default for Graph {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 impl Graph {
@@ -56,7 +64,7 @@ impl Graph {
         &self.positions
     }
 
-    pub fn for_each_edge(&self, mut f: impl FnMut(Pos2, Pos2)) {
+    pub fn for_each_edge(&self, mut f: impl FnMut(usize, Pos2, usize, Pos2)) {
         for (v1, neighs) in self.neighbors.iter().enumerate() {
             let p1 = self.positions[v1];
             for &v2 in neighs {
@@ -64,7 +72,7 @@ impl Graph {
                     continue;
                 }
                 let p2 = self.positions[v2];
-                f(p1, p2);
+                f(v1, p1, v2, p2);
             }
         }
     }
@@ -219,32 +227,6 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Graph {
     graph
 }
 
-//short for geometry
-#[allow(dead_code)]
-pub mod geo {
-    use super::*;
-
-    type Line = (Pos2, Vec2);
-
-    pub fn line_from_to(from: Pos2, to: Pos2) -> Line {
-        (from, to - from)
-    }
-
-    pub fn left_of_line((a, dir): Line, p: Pos2) -> bool {
-        dir.x * (p.y - a.y) - dir.y * (p.x - a.x) > 0.0
-    }
-
-    //assumes dir to be normalized.
-    pub fn signed_dist((a, dir): Line, p: Pos2) -> f32 {
-        dir.x * (a.y - p.y) - dir.y * (a.x - p.x)
-    }
-
-    pub fn project_to_line((a, dir): Line, p: Pos2) -> Pos2 {
-        //dividing by length squared normalized both occurences of dir at once.
-        a + Vec2::dot(p - a, dir) / dir.length_sq() * dir
-    }
-}
-
 pub struct Triangualtion {
     graph: Graph,
     circumference: usize, //nr of edges on the outher rim
@@ -308,37 +290,62 @@ impl Triangualtion {
         best
     }
 
+    //each neighbor pushes v away from its position depending on their distance
+    fn neighbor_push_force(&self, v: usize, one_over_avg_edge_len_sq: f32) -> Vec2 {
+        let v_pos = self.graph.positions[v];
+        let mut force = Vec2::ZERO;
+        for &neigh in &self.graph.neighbors[v] {
+            let n_pos = self.graph.positions[neigh];
+            let to_v = v_pos - n_pos;
+            force += to_v / (to_v.length_sq() * one_over_avg_edge_len_sq + 0.1); 
+        }
+        force * 0.15
+    }
+
     //move every a step into the center of its neighbors positions average
     //requires neighbors to be sorted
-    pub fn move_vertices_apart(&self) -> Vec<Pos2> {
+    pub fn move_vertices_apart(&self, heat: f32) -> Vec<Pos2> {
         let mut res = self.graph.positions.clone();
-        for _simulation_steps in 0..8 {
-            //dont wanna move the outher points -> skip circumference
-            'step: for (v, neighs) in self.graph.neighbors.iter().enumerate().skip(self.circumference) {
-                let mut cum_pos = Vec2::ZERO;
-                let mut cum_dist = 0.0;
-                for (&n1, &n2) in neighs.iter().circular_tuple_windows() {
-                    //TODO: why is this needed? 
-                    if !self.graph.has_edge(n1, n2) {
-                        continue 'step; 
+        let avg_len = self.avg_edge_len();
+        let one_over_avg_edge_len_sq = 1.0 / (avg_len * avg_len);
+        //dont wanna move the outher points -> skip circumference
+        'step: for (v, neighs) in self.graph.neighbors.iter().enumerate().skip(self.circumference) {
+            let mut cum_pos = Vec2::ZERO;
+            let mut cum_dist = 0.0;
+            for (&n1, &n2) in neighs.iter().circular_tuple_windows() {
+                //sometimes the angle isnt able to order the neighbors accurately, because numerics.
+                //in that case we have a fallback to move this bad vertex into the middle of its neighbors.
+                if !self.graph.has_edge(n1, n2) {
+                    cum_pos = Vec2::ZERO;
+                    for &n in &self.graph.neighbors[v] {
+                        cum_pos += self.graph.positions[n].to_vec2();
                     }
-                    let p1 = self.graph.positions[n1].to_vec2();
-                    let p2 = self.graph.positions[n2].to_vec2();
-                    let length = (p1 - p2).length();
-                    cum_dist += 2.0 * length;
-                    cum_pos += p1 * length;
-                    cum_pos += p2 * length;
+                    cum_dist = self.graph.neighbors[v].len() as f32;
+                    res[v] = Pos2::ZERO + cum_pos / cum_dist;
+                    continue 'step;
                 }
-                let average = cum_pos / cum_dist;
-                res[v] = Pos2::ZERO + 0.9 * res[v].to_vec2() + 0.1 * average;
+                //if all neighbors are sorted correctly, we move the vertex to the average position of 
+                //the edges connecting its neighbors.
+                let p1 = self.graph.positions[n1].to_vec2();
+                let p2 = self.graph.positions[n2].to_vec2();
+                let length = (p1 - p2).length();
+                cum_dist += 2.0 * length;
+                cum_pos += p1 * length;
+                cum_pos += p2 * length;
             }
+            let push_force = heat * self.neighbor_push_force(v, one_over_avg_edge_len_sq);
+            res[v] = Pos2::ZERO + cum_pos / cum_dist + push_force;
         }
-        
+
         res
     }
 
+    pub fn avg_edge_len(&self) -> f32 {
+        std::f32::consts::TAU / (self.circumference as f32)
+    }
+
     pub fn divide_longest_edges(&mut self) {
-        let avg_len = std::f32::consts::TAU / (self.circumference as f32);
+        let avg_len = self.avg_edge_len();
         let mut queue = VecDeque::new();
         let mut v1_neighbors = Vec::new();
         for v1 in 5..self.graph.len() {
@@ -382,7 +389,7 @@ impl Triangualtion {
                     next_line = neigh_line;
                 }
             }
-            if next == usize::MAX || nr_steps > 8 {
+            if next == usize::MAX || nr_steps > 12 {
                 return None;
             }
             res[i_next] = next;
@@ -506,10 +513,14 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Graph {
     let circumference = (std::f32::consts::TAU * r) as usize;
     let nr_nodes = (std::f32::consts::PI * r * r) as usize;
     let mut tri = Triangualtion::new_random(nr_nodes, circumference);
-    for _ in 0..nr_refine_steps {
+
+    let heat_step = 1.0 / nr_refine_steps as f32;
+    for step in 0..nr_refine_steps {
         tri.divide_longest_edges();
         tri.graph.sort_neigbors();
-        let new_vertices = tri.move_vertices_apart();
+        let heat = 1.0 - step as f32 * heat_step;
+        debug_assert!(heat >= 0.0);
+        let new_vertices = tri.move_vertices_apart(heat);
         let without_wheel = &new_vertices[(circumference + 1)..];
         tri = Triangualtion::new_from_positions(without_wheel, circumference);
     }
