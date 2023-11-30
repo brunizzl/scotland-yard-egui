@@ -81,11 +81,13 @@ pub struct State {
     //state kept for each node in map
     in_convex_cop_hull: Vec<InSet>, 
     min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
+    muliple_min_dist_cops: Vec<bool>,
     cop_advantage: Vec<isize>,
 
     robber_info: RobberInfo,
     vertex_info: DrawNumbers,
     show_convex_hull: bool,
+    show_dominating_cop: bool, //mark positions where (alt least) two cops have minimum distance
     debug_info: bool,
 
     //first is robber, rest are cops
@@ -151,11 +153,13 @@ impl State {
 
             in_convex_cop_hull: Vec::new(),
             min_cop_dist: Vec::new(),
+            muliple_min_dist_cops: Vec::new(),
             cop_advantage: Vec::new(),
 
             robber_info: RobberInfo::None,
             vertex_info: DrawNumbers::None,
             show_convex_hull: false,
+            show_dominating_cop: false,
             debug_info: false,
             
             characters: vec![
@@ -183,14 +187,24 @@ impl State {
         let mut min_cop_dist = std::mem::take(&mut self.min_cop_dist);
         min_cop_dist.clear();
         min_cop_dist.resize(self.map.len(), isize::MAX);
+        let mut multiple = std::mem::take(&mut self.muliple_min_dist_cops);
+        multiple.clear();
+        multiple.resize(self.map.len(), false);
         for cop in self.active_cops() {
-            for (this, curr_min) in cop.distances.iter().zip(min_cop_dist.iter_mut()) {
+            let tripels = itertools::izip!(
+                cop.distances.iter(), min_cop_dist.iter_mut(), multiple.iter_mut());
+            for (this, curr_min, shared) in tripels {
                 if this < curr_min {
                     *curr_min = *this;
+                    *shared = false;
+                }
+                else if this == curr_min {
+                    *shared = true;
                 }
             }
         }
         self.min_cop_dist = min_cop_dist;
+        self.muliple_min_dist_cops = multiple;
     }
 
     fn update_cop_advantage(&mut self) {
@@ -378,11 +392,13 @@ impl eframe::App for State {
                 });
 
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
+                ui.add(Checkbox::new(&mut self.show_dominating_cop, "zeige Punkte mit\nmehreren nächsten Cops"));
                 ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
             });
         });
 
         let require_update = self.show_convex_hull 
+            || self.show_dominating_cop
             || self.robber_info != RobberInfo::None 
             || self.vertex_info != DrawNumbers::None;
         if require_update {
@@ -520,6 +536,17 @@ impl eframe::App for State {
                     let screen_pos = to_screen.transform_pos(pos);
                     let text = Shape::Text(TextShape::new(screen_pos, galley));
                     painter.add(text);
+                }
+            }
+
+            if self.show_dominating_cop {
+                const RED: Color32 = Color32::from_rgb(230, 100, 100);
+                for (&multiple, &pos) in self.muliple_min_dist_cops.iter().zip(self.map.positions()) {
+                    if multiple  {
+                        let draw_pos = to_screen.transform_pos(pos);
+                        let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, RED);
+                        painter.add(marker_circle);
+                    }
                 }
             }
 
