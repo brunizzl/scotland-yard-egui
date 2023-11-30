@@ -17,7 +17,13 @@ impl InSet {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist }
+pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist(usize) }
+
+impl RobberInfo {
+    fn scale_small_dist_with_radius(dist: usize, radius: usize) -> usize {
+        (dist * radius) / 100
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum GraphShape { RegularPolygon(usize), Random, Debug }
@@ -323,14 +329,22 @@ impl eframe::App for State {
                         "markiere für Räuber\nnähere Knoten");
                     ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
                         "markiere Punkte mit\ndirekter Fluchtoption");
-                    ui.radio_value(&mut self.robber_info, RobberInfo::SmallRobberDist, 
+                    let robber_dist_button = egui::RadioButton::new(
+                        matches!(self.robber_info, RobberInfo::SmallRobberDist(_)), 
                         "markiere Punkte nah\nan Räuber");
-                    if let (RobberInfo::SmallRobberDist, Some(r)) = (self.robber_info, self.robber())  {
+                    if ui.add(robber_dist_button).clicked() {
+                        self.robber_info = RobberInfo::SmallRobberDist(50);
+                    }
+                    if let RobberInfo::SmallRobberDist(bnd) = &mut self.robber_info {
+                        add_drag(ui, bnd, "% Radius: ", 1, 100);
+                    }
+                    if let (RobberInfo::SmallRobberDist(bnd), Some(r)) = (self.robber_info, self.robber()) {
                         let r_pos = self.map.positions()[r.nearest_node];
                         let mut max_dist = f32::MIN;
                         let mut min_dist = f32::MAX;
+                        let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
                         for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
-                            if (dist as usize) == (self.map_radius * 3) / 4 {
+                            if (dist as usize) == bnd {
                                 let new_dist = (r_pos - pos).length();
                                 max_dist = f32::max(max_dist, new_dist);
                                 min_dist = f32::min(min_dist, new_dist);
@@ -459,12 +473,14 @@ impl eframe::App for State {
                                 draw_circle_at(pos);
                             }
                         },
-                    (RobberInfo::SmallRobberDist, Some(r)) => 
+                    (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
+                        let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
                         for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
-                            if (dist as usize) < (self.map_radius * 3) / 4 {
+                            if (dist as usize) <= bnd {
                                 draw_circle_at(pos);
                             }
-                        },
+                        }
+                    },
                     _ => {},
                 }
             }
