@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
-use super::{ graph::Graph, graph };
+use super::{ graph::GraphDrawing, graph };
 
 
 
@@ -50,7 +50,7 @@ impl Character {
     //  change to that neighbor
     //(converges to globally nearest node only for "convex" graphs, 
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
-    fn update(&mut self, tolerance: f32, map: &Graph, queue: &mut VecDeque<usize>) {
+    fn update(&mut self, tolerance: f32, map: &GraphDrawing, queue: &mut VecDeque<usize>) {
         let safe_start = if map.len() > self.nearest_node { self.nearest_node } else { 0 };
         let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos, safe_start);
         self.on_node = nearest_dist_sq <= tolerance * tolerance;
@@ -70,7 +70,7 @@ impl Character {
 }
 
 pub struct State {
-    map: Graph,
+    map: GraphDrawing,
 
     //overall map shape: == 2 is line, == 3 triangle, == 4 square, == 5 pentagon etc.
     map_shape: GraphShape,
@@ -145,7 +145,7 @@ impl State {
     /// Called once before the first frame.
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = State { 
-            map: Graph::empty(),
+            map: GraphDrawing::empty(),
             map_shape: GraphShape::RegularPolygon(6),
             map_radius: 6,
 
@@ -224,8 +224,8 @@ impl State {
             advantage.iter_mut(), 
             self.min_cop_dist.iter(), 
             self.map.neighbors());
-        for (node, &in_hull, adv, &cop_dist, neighs) in zipped {
-            if !in_hull.yes() && neighs.iter().any(|&n| in_cop_hull[n].yes()) {
+        for (node, &in_hull, adv, &cop_dist, mut neighs) in zipped {
+            if !in_hull.yes() && neighs.any(|n| in_cop_hull[n].yes()) {
                 queue.push_back(node);
             }
             *adv = if in_hull.yes() { isize::MAX } else { -cop_dist };
@@ -252,7 +252,7 @@ impl State {
                 self.queue.push_back(cop_i.nearest_node);
                 while let Some(node) = self.queue.pop_front() {
                     let curr_dist_to_j = cop_j.distances[node];
-                    for &neigh in &self.map.neighbors()[node] {
+                    for neigh in self.map.neighbors_of(node) {
                         if cop_j.distances[neigh] < curr_dist_to_j && in_hull[neigh] != InSet::NewlyAdded {
                             in_hull[neigh] = InSet::NewlyAdded;
                             self.queue.push_back(neigh);
