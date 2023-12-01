@@ -1,128 +1,112 @@
 
 use std::collections::VecDeque;
+use std::iter::Map;
+use std::slice::{Chunks, Iter};
 
 use egui::{Pos2, Vec2, pos2, vec2};
 use itertools::Itertools;
 
 use super::geo;
 
-pub struct Graph {
-    positions: Vec<Pos2>,
+pub mod edgelist;
+use edgelist::*;
 
-    //position i lists all neighbors of node i
-    neighbors: Vec<Vec<usize>>,
+
+pub struct GraphDrawing {
+    positions: Vec<Pos2>,
+    edges: EdgeList,
 }
 
-impl Default for Graph {
+impl Default for GraphDrawing {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl Graph {
+impl GraphDrawing {
     pub fn len(&self) -> usize {
-        debug_assert_eq!(self.positions.len(), self.neighbors.len());
+        debug_assert_eq!(self.positions.len(), self.edges.len());
         self.positions.len()
     }
 
     pub fn empty() -> Self {
-        Graph { positions: Vec::new(), neighbors: Vec::new() }
+        GraphDrawing { positions: Vec::new(), edges: EdgeList::empty() }
     }
 
     pub fn add_vertex(&mut self, pos: Pos2) -> usize {
         let new_index = self.len();
         self.positions.push(pos);
-        self.neighbors.push(Vec::new());
+        self.edges.push();
         new_index
     }
 
     pub fn has_edge(&self, v1: usize, v2: usize) -> bool {
-        let res = self.neighbors[v1].contains(&v2);
-        debug_assert!((self.neighbors[v2].contains(&v1)) == res);
-        res
+        self.edges.has_edge(v1, v2)
     }
 
     pub fn add_edge(&mut self, v1: usize, v2: usize) {
-        debug_assert!(!self.has_edge(v1, v2));
-        self.neighbors[v1].push(v2);
-        self.neighbors[v2].push(v1);
+        self.edges.add_edge(v1, v2)
     }
 
     pub fn remove_edge(&mut self, v1: usize, v2: usize) {
-        debug_assert!(self.has_edge(v1, v2));
-        self.neighbors[v1].retain(|&v| v != v2);
-        self.neighbors[v2].retain(|&v| v != v1);
+        self.edges.remove_edge(v1, v2)
     }
 
     pub fn add_path_edges<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
-        for (&v1, &v2) in path.tuple_windows() {
-            self.add_edge(v1, v2);
-        }
+        self.edges.add_path_edges(path)
     }
 
     pub fn positions(&self) -> &[Pos2] {
         &self.positions
     }
 
+    pub fn neighbors(&self) -> 
+        Map<Chunks<'_, Index>, fn(&[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize>> {
+        self.edges.neighbors()
+    }
+
+    pub fn neighbors_of(&self, v: usize) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
+        self.edges.neighbors_of(v)
+    }
+
     pub fn for_each_edge(&self, mut f: impl FnMut(usize, Pos2, usize, Pos2)) {
-        for (v1, neighs) in self.neighbors.iter().enumerate() {
+        self.edges.for_each_edge(|v1, v2| {
             let p1 = self.positions[v1];
-            for &v2 in neighs {
-                if v2 < v1 {
-                    continue;
-                }
-                let p2 = self.positions[v2];
-                f(v1, p1, v2, p2);
-            }
-        }
+            let p2 = self.positions[v2];
+            f(v1, p1, v2, p2)
+        });
     }
 
     pub fn sort_neigbors(&mut self) {
-        for (v1, neighs) in self.neighbors.iter_mut().enumerate() {
+        for (v1, neighs) in self.edges.neighbors_mut().enumerate() {
             let p1 = self.positions[v1];
             neighs.sort_by_key(|&v2| {
-                let p2 = self.positions[v2];
-                ((p2 - p1).angle() * 100000000000.0) as isize //floats dont implement Ord :(
+                if let Some(v) = v2.get() {
+                    let p2 = self.positions[v];
+                    ((p2 - p1).angle() * 100000000000.0) as isize //floats dont implement Ord :(
+                }
+                else { 10000000000000 }
             });
         }
     }
 
-    pub fn neighbors(&self) -> &[Vec<usize>] {
-        &self.neighbors
-    } 
-
     pub fn neigbors_with_positions(&self, node: usize) -> impl Iterator<Item = (usize, &Pos2)> {
-        self.neighbors[node].iter().map(move |i| (*i, &self.positions[*i]))
+        self.edges.neighbors_of(node).map(move |i| (i, &self.positions[i]))
     }
 
-    //everything in queue is starting point and expected to already have the correct distance
+    /// everything in queue is starting point and expected to already have the correct distance
     pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<isize>) {
-        while let Some(node) = queue.pop_front() {
-            let dist = distances[node];
-            for &neigh in &self.neighbors[node] {
-                if distances[neigh] > dist + 1 {
-                    distances[neigh] = dist + 1;
-                    queue.push_back(neigh);
-                }
-            }
-        }
+        self.edges.calc_distances_to(queue, distances)
     }
 
-    //paintbucket tool, all in queue are starting vertices
+    /// paintbucket tool, all in queue are starting vertices
     pub fn recolor_region<Color: Eq + Clone>(&self, (old, new): (Color, Color), 
         colors: &mut [Color], queue: &mut VecDeque<usize>) {
 
-        while let Some(node) = queue.pop_front() {
-            for &neigh in &self.neighbors[node] {
-                if colors[neigh] == old {
-                    colors[neigh] = new.clone();
-                    queue.push_back(neigh);
-                }
-            }
-        }
-    }    
+        self.edges.recolor_region((old, new), colors, queue)
+    }
 
-    //returns node index and distance to that index squared
+    /// returns node index and distance to that index squared
     pub fn find_nearest_node(&self, pos: Pos2, node_hint: usize) -> (usize, f32) {
         let mut nearest = node_hint;
         let mut nearest_dist = (self.positions()[node_hint] - pos).length_sq();
@@ -178,8 +162,8 @@ impl Graph {
 } //impl Graph
 
 //centered at zero, contained in -1.0..1.0 x -1.0..1.0
-pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Graph {
-    let mut graph = Graph::empty();
+pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> GraphDrawing {
+    let mut graph = GraphDrawing::empty();
     graph.add_vertex(Pos2::ZERO);
     if levels < 1 {
         return graph;
@@ -228,13 +212,13 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Graph {
 }
 
 pub struct Triangualtion {
-    graph: Graph,
+    graph: GraphDrawing,
     circumference: usize, //nr of edges on the outher rim
 }
 
 impl Triangualtion {
     pub fn new_wheel(circumference: usize) -> Self {
-        let mut graph = Graph::empty();
+        let mut graph = GraphDrawing::empty();
         for v in 0..circumference {
             let angle = std::f32::consts::TAU * (v as f32) / (circumference as f32);
             let pos = pos2(angle.cos(), angle.sin());
@@ -264,8 +248,8 @@ impl Triangualtion {
     pub fn neighbor_face_vertex(&self, (v1, v2): (usize, usize), v3: usize) -> usize {
         debug_assert!(self.has_face(v1, v2, v3));
 
-        let v1_neighs = &self.graph.neighbors[v1];
-        let v2_neighs = &self.graph.neighbors[v2];
+        let v1_neighs = self.graph.edges.neighbors_of(v1);
+        let v2_neighs = self.graph.edges.neighbors_of(v2);
         let v1_pos = self.graph.positions[v1];        
         let v2_pos = self.graph.positions[v2];
         let v3_pos = self.graph.positions[v3];
@@ -274,13 +258,13 @@ impl Triangualtion {
         let mut best_dist = f32::MAX;
         let edge = geo::line_from_to(v1_pos, v2_pos);
         let v3_sign = geo::signed_dist(edge, v3_pos).signum();
-        for &n1 in v1_neighs {
+        for n1 in v1_neighs {
             let n1_pos = self.graph.positions[n1];
             let (sign, abs) = {
                 let dist = geo::signed_dist(edge, n1_pos);
                 (dist.signum(), dist.abs())
             };
-            if sign != v3_sign && abs < best_dist && v2_neighs.contains(&n1) {
+            if sign != v3_sign && abs < best_dist && v2_neighs.clone().contains(&n1) {
                 best = n1;
                 best_dist = abs;
             }
@@ -294,7 +278,7 @@ impl Triangualtion {
     fn neighbor_push_force(&self, v: usize, one_over_avg_edge_len_sq: f32) -> Vec2 {
         let v_pos = self.graph.positions[v];
         let mut force = Vec2::ZERO;
-        for &neigh in &self.graph.neighbors[v] {
+        for neigh in self.graph.edges.neighbors_of(v) {
             let n_pos = self.graph.positions[neigh];
             let to_v = v_pos - n_pos;
             force += to_v / (to_v.length_sq() * one_over_avg_edge_len_sq + 0.1); 
@@ -309,18 +293,18 @@ impl Triangualtion {
         let avg_len = self.avg_edge_len();
         let one_over_avg_edge_len_sq = 1.0 / (avg_len * avg_len);
         //dont wanna move the outher points -> skip circumference
-        'step: for (v, neighs) in self.graph.neighbors.iter().enumerate().skip(self.circumference) {
+        'step: for (v, neighs) in self.graph.edges.neighbors().enumerate().skip(self.circumference) {
             let mut cum_pos = Vec2::ZERO;
             let mut cum_dist = 0.0;
-            for (&n1, &n2) in neighs.iter().circular_tuple_windows() {
+            for (n1, n2) in neighs.circular_tuple_windows() {
                 //sometimes the angle isnt able to order the neighbors accurately, because numerics.
                 //in that case we have a fallback to move this bad vertex into the middle of its neighbors.
                 if !self.graph.has_edge(n1, n2) {
                     cum_pos = Vec2::ZERO;
-                    for &n in &self.graph.neighbors[v] {
+                    for n in self.graph.edges.neighbors_of(v) {
                         cum_pos += self.graph.positions[n].to_vec2();
+                        cum_dist += 1.0;
                     }
-                    cum_dist = self.graph.neighbors[v].len() as f32;
                     res[v] = Pos2::ZERO + cum_pos / cum_dist;
                     continue 'step;
                 }
@@ -350,7 +334,8 @@ impl Triangualtion {
         let mut v1_neighbors = Vec::new();
         for v1 in 5..self.graph.len() {
             let v1_pos = self.graph.positions[v1];
-            v1_neighbors.clone_from(&self.graph.neighbors[v1]);
+            v1_neighbors.clear();
+            v1_neighbors.extend(self.graph.edges.neighbors_of(v1));
             for &v2 in &v1_neighbors {
                 let v2_pos = self.graph.positions[v2];
                 let dir = v2_pos - v1_pos;
@@ -504,11 +489,12 @@ impl Triangualtion {
                 break;
             }
         }
+        dbg!(res.graph.edges.max_neighbors());
         res
     }
 } //impl Triangulation
 
-pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Graph {
+pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> GraphDrawing {
     let r = radius as f32;
     let circumference = (std::f32::consts::TAU * r) as usize;
     let nr_nodes = (std::f32::consts::PI * r * r) as usize;
@@ -528,6 +514,6 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Graph {
     tri.graph
 }
 
-pub fn debugging_graph() -> Graph {
+pub fn debugging_graph() -> GraphDrawing {
     Triangualtion::new_wheel(10).graph
 }
