@@ -510,7 +510,7 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> GraphDrawin
         let without_wheel = &new_vertices[(circumference + 1)..];
         tri = Triangualtion::new_from_positions(without_wheel, circumference);
     }
-
+    tri.graph.edges.maybe_shrink_capacity(0);
     tri.graph
 }
 

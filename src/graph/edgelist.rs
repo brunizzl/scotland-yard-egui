@@ -60,7 +60,10 @@ fn take_active(xs: &[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
 
 /// works great if most vertices have degree close to the maximum degree, as every vertex
 /// allocates the same space for potential neighbors
+/// CAUTION: if not most vertices have close to the maximum degree (e.g. with one central vertex),
+/// this structre is way worse than using a vector for each vertices' neighbors.
 pub struct EdgeList {
+    next_shrink_check_len: usize,
     max_neighbors: usize,
     length: usize,
     entries: Vec<Index>,
@@ -76,10 +79,15 @@ impl EdgeList {
         self.max_neighbors
     }
 
+    pub fn max_degree(&self) -> usize {
+        self.neighbors().fold(0, |a, b| usize::max(a, b.len()))
+    }
+
     pub fn new(max_neighbors: usize, length: usize) -> Self {
         let vec_len = max_neighbors * length;
         let entries = vec![Index::NONE; vec_len];
-        Self { max_neighbors, length, entries }
+        let next_shrink_check_len = (length * 3) / 2 + 10;
+        Self { next_shrink_check_len, max_neighbors, length, entries }
     }
 
     pub fn empty() -> Self {
@@ -101,9 +109,35 @@ impl EdgeList {
         self.entries = new_entries;
     }
 
+    pub fn maybe_shrink_capacity(&mut self, allowed_excess: usize) {
+        let new_max_neighs = self.max_degree() + allowed_excess;
+        if new_max_neighs < self.max_neighbors {            
+            let mut old_start = 0;
+            let mut old_end = self.max_neighbors;
+            let mut new_start = 0;
+            let mut new_end = new_max_neighs;
+            for _v in 0..self.length {
+                for (old_i, new_i) in (old_start..old_end).zip(new_start..new_end) {
+                    self.entries[new_i] = self.entries[old_i];
+                }
+                old_start = old_end;
+                old_end += self.max_neighbors;
+                new_start = new_end;
+                new_end += new_max_neighs;
+            }
+            self.max_neighbors = new_max_neighs;
+            self.entries.truncate(new_max_neighs * self.length);
+        }
+    }
+
     pub fn push(&mut self) {
+        let new_len = self.length + 1;
+        if self.next_shrink_check_len <= new_len {
+            self.maybe_shrink_capacity(2);
+            self.next_shrink_check_len = (new_len * 3) / 2;
+        }
         self.entries.resize(self.entries.len() + self.max_neighbors, Index::NONE);
-        self.length += 1;
+        self.length = new_len;
     }
 
     fn potential_neighbors(&self) -> Chunks<'_, Index> {
