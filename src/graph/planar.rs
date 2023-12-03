@@ -76,12 +76,15 @@ impl GraphDrawing {
     pub fn sort_neigbors(&mut self) {
         for (v1, neighs) in self.edges.neighbors_mut().enumerate() {
             let p1 = self.positions[v1];
+            //angles below range from -pi to pi. making them as distinct as possible while fitting into an isize integer
+            //gives this scale.
+            const SCALE: f32 = (isize::MAX / 4) as f32;
             neighs.sort_by_key(|&v2| {
                 if let Some(v) = v2.get() {
                     let p2 = self.positions[v];
-                    ((p2 - p1).angle() * 10000000.0) as isize //floats dont implement Ord :(
+                    ((p2 - p1).angle() * SCALE) as isize //floats dont implement Ord :(
                 }
-                else { 1000000000 }
+                else { isize::MAX }
             });
         }
     }
@@ -122,6 +125,7 @@ impl GraphDrawing {
     }
 
     //assumes point to be in convex face.
+    #[allow(dead_code)]
     pub fn find_face_of(&self, point: Pos2) -> Vec<usize> {
         //caution: nearest node may not be on face boundary
         let (mut curr, _) = self.find_nearest_node(point, 0);

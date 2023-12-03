@@ -99,7 +99,7 @@ pub struct State {
 
 impl State {
 
-    //really shitty approximation of convex hull.
+    /// really shitty approximation of convex hull.
     fn compute_extreme_vertices(points: &[Pos2]) -> [usize; 4] {
         let mut res = [0; 4];
         let mut res_vals = [points[0]; 4];
@@ -336,10 +336,10 @@ impl eframe::App for State {
                     if prev_shape != self.map_shape {
                         self.recompute_graph();
                     }
+                    if add_drag(ui, &mut self.map_radius, "Radius: ", 0, 100) {
+                        self.recompute_graph();
+                    }
                 });
-                if add_drag(ui, &mut self.map_radius, "Radius: ", 0, 100) {
-                    self.recompute_graph();
-                }
                 ui.collapsing("Grün", |ui|{                    
                     //settings to draw extra information
                     ui.radio_value(&mut self.robber_info, RobberInfo::None, 
@@ -373,7 +373,7 @@ impl eframe::App for State {
                             min_dist, max_dist, min_dist / max_dist));
                     }
                 });
-                ui.collapsing("Zahlen", |ui|{
+                ui.collapsing("Zahlen (Radius < 20)", |ui|{
                     ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
                         "Keine");
                     ui.radio_value(&mut self.vertex_info, DrawNumbers::Indices, 
