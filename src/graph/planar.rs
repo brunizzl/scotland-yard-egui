@@ -79,9 +79,9 @@ impl GraphDrawing {
             neighs.sort_by_key(|&v2| {
                 if let Some(v) = v2.get() {
                     let p2 = self.positions[v];
-                    ((p2 - p1).angle() * 100000000000.0) as isize //floats dont implement Ord :(
+                    ((p2 - p1).angle() * 10000000.0) as isize //floats dont implement Ord :(
                 }
-                else { 10000000000000 }
+                else { 1000000000 }
             });
         }
     }
