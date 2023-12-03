@@ -431,17 +431,6 @@ impl eframe::App for State {
 
             const GREY: Color32 = Color32::from_rgb(130, 130, 150);
             let grey_stroke = Stroke::new(scale, GREY);
-            if let (true, Some(r)) = (self.debug_info, self.robber()) {
-                let face = self.map.find_face_of(r.pos);
-                let screen_face: Vec<_> = face.iter().map(|&v| {
-                    to_screen.transform_pos(self.map.positions()[v])
-                }).collect();
-                let stroke = Stroke::new(0.0, GREY);
-                let fill = Color32::from_rgb(150, 0, 0);
-                let poly = Shape::convex_polygon(screen_face, fill, stroke);         
-                painter.add(poly);
-            }
-
             { //draw edges
                 let edge_stroke = |v1: usize, v2: usize| if self.debug_info {
                     let seed = v1 * v2 + 100;
