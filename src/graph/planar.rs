@@ -6,11 +6,7 @@ use std::slice::{Chunks, Iter};
 use egui::{Pos2, Vec2, pos2, vec2};
 use itertools::Itertools;
 
-use super::geo;
-
-pub mod edgelist;
-use edgelist::*;
-
+use super::*;
 
 pub struct GraphDrawing {
     positions: Vec<Pos2>,
@@ -301,6 +297,7 @@ impl Triangualtion {
                 //in that case we have a fallback to move this bad vertex into the middle of its neighbors.
                 if !self.graph.has_edge(n1, n2) {
                     cum_pos = Vec2::ZERO;
+                    cum_dist = 0.0;
                     for n in self.graph.edges.neighbors_of(v) {
                         cum_pos += self.graph.positions[n].to_vec2();
                         cum_dist += 1.0;
