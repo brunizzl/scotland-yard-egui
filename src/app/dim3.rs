@@ -38,7 +38,6 @@ impl State {
         ui.horizontal(|ui| { 
             ui.label("coming soon!");
         });
-        geo::gram_schmidt_3d(&mut self.camera_axes);
     }
 
     fn build_to_screen(&self, response: &Response) -> geo::ToScreen {
