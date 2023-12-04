@@ -5,18 +5,18 @@ use crate::{ graph::ConvexPolyhedron, app::*, geo::{Vec3, vec3, self} };
 
 pub struct State {
     map: ConvexPolyhedron,
-    rotated_axes: [Vec3; 3],
+    camera_axes: [Vec3; 3],
 }
 
 impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let start_axes = [Vec3::X, Vec3::Y, Vec3::Z];
         let len = 1.0 / f32::sqrt(3.0);
-        Self { map: ConvexPolyhedron::new_cube(len), rotated_axes: start_axes }
+        Self { map: ConvexPolyhedron::new_cube(len), camera_axes: start_axes }
     }
 
     fn update_axes(&mut self, mut f: impl FnMut(Vec3) -> Vec3) {
-        for axis in &mut self.rotated_axes {
+        for axis in &mut self.camera_axes {
             *axis = f(*axis);
         }
     }
@@ -29,6 +29,7 @@ impl State {
         self.update_axes(|v| v.rotate_y(angle))
     }
 
+    #[allow(dead_code)]
     fn rotate_axes_z(&mut self, angle: f32) {
         self.update_axes(|v| v.rotate_z(angle))
     }
@@ -37,10 +38,9 @@ impl State {
         ui.horizontal(|ui| { 
             ui.label("coming soon!");
         });
-        geo::gram_schmidt_3d(&mut self.rotated_axes);
+        geo::gram_schmidt_3d(&mut self.camera_axes);
     }
 
-    /// fst maps graph coordinates to screen, snd defines scale to draw edges etc. at
     fn build_to_screen(&self, response: &Response) -> geo::ToScreen {
 
         let from = Rect::from_min_max(pos2(-1.05, -1.05), pos2(1.05, 1.05));
@@ -51,7 +51,11 @@ impl State {
         let to = Rect::from_min_size(screen_min, vec2(rect_len, rect_len));
 
         let to_screen = emath::RectTransform::from_to(from, to);
-        let axes = self.rotated_axes.clone();
+
+        //we actually really would love the rotation to be inverted, thus we invert it.
+        //(because the implementation is a bit weird, 
+        // as in draw_graph the camera is dragged, instead of the graph's axes)
+        let axes = self.camera_axes.clone();
         let v1 = vec3(axes[0].x, axes[1].x, axes[2].x);
         let v2 = vec3(axes[0].y, axes[1].y, axes[2].y);
         let v3 = vec3(axes[0].z, axes[1].z, axes[2].z);
@@ -69,7 +73,7 @@ impl State {
         let point_response = ui.interact(*to_screen.move_rect.to(), background_id, Sense::drag());
         self.rotate_axes_x(point_response.drag_delta().y * -0.004);
         self.rotate_axes_y(point_response.drag_delta().x * -0.004);
-        geo::gram_schmidt_3d(&mut self.rotated_axes);
+        geo::gram_schmidt_3d(&mut self.camera_axes);
 
         let grey_stroke = Stroke::new(1.0, GREY);
         self.map.draw_visible_edges(&to_screen, &painter, grey_stroke);
