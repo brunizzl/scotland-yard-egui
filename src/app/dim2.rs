@@ -3,8 +3,7 @@ use std::collections::VecDeque;
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
-use super::{ graph::GraphDrawing, graph };
-
+use crate::{ graph::GraphDrawing, graph, app::* };
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -282,28 +281,291 @@ impl State {
             }
         }
     }
-}
 
-//returns if val was changed
-fn add_drag(ui: &mut Ui, val: &mut usize, name: &str, min: usize, max: usize) -> bool {    
-    ui.horizontal(|ui| { 
-        let prev = *val;  
-        ui.label(name);                     
-        if ui.button(" - ").clicked() && prev > min {
-            *val -= 1;
-        }                     
-        ui.add(DragValue::new(val).clamp_range(min..=max));   
-        if ui.button(" + ").clicked() && prev < max {
-            *val += 1;
+    pub fn draw_menu(&mut self, ui: &mut Ui) {
+        //adjust underlying graph
+        ui.collapsing("Form", |ui| {
+            let prev_shape = self.map_shape;
+            let is_n_gon = matches!(self.map_shape, GraphShape::RegularPolygon(_));
+            if ui.add(RadioButton::new(is_n_gon, "ReguläresPolygon")).clicked() {                        
+                self.map_shape = GraphShape::RegularPolygon(6);
+            }
+            if let GraphShape::RegularPolygon(n) = &mut self.map_shape {
+                super::add_drag_value(ui, n, "Seiten: ", 3, 10);
+            }
+            ui.radio_value(&mut self.map_shape, GraphShape::Random, "Zufallsverteilt");
+            if self.map_shape == GraphShape::Random {
+                if ui.button("neu berechnen").clicked() {
+                    self.recompute_graph();
+                }
+            }
+            ui.radio_value(&mut self.map_shape, GraphShape::Debug, "Debugging");
+            if prev_shape != self.map_shape {
+                self.recompute_graph();
+            }
+            if add_drag_value(ui, &mut self.map_radius, "Radius: ", 0, 100) {
+                self.recompute_graph();
+            }
+        });
+        ui.collapsing("Grün", |ui|{                    
+            //settings to draw extra information
+            ui.radio_value(&mut self.robber_info, RobberInfo::None, 
+                "keine Marker");
+            ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
+                "markiere für Räuber\nnähere Knoten");
+            ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
+                "markiere Punkte mit\ndirekter Fluchtoption");
+            let robber_dist_button = egui::RadioButton::new(
+                matches!(self.robber_info, RobberInfo::SmallRobberDist(_)), 
+                "markiere Punkte nah\nan Räuber");
+            if ui.add(robber_dist_button).clicked() {
+                self.robber_info = RobberInfo::SmallRobberDist(50);
+            }
+            if let RobberInfo::SmallRobberDist(bnd) = &mut self.robber_info {
+                add_drag_value(ui, bnd, "% Radius: ", 1, 100);
+            }
+            if let (RobberInfo::SmallRobberDist(bnd), Some(r)) = (self.robber_info, self.robber()) {
+                let r_pos = self.map.positions()[r.nearest_node];
+                let mut max_dist = f32::MIN;
+                let mut min_dist = f32::MAX;
+                let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
+                for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
+                    if (dist as usize) == bnd {
+                        let new_dist = (r_pos - pos).length();
+                        max_dist = f32::max(max_dist, new_dist);
+                        min_dist = f32::min(min_dist, new_dist);
+                    }
+                }
+                ui.label(format!("min dist:   {}\nmax dist:   {}\nmin / max: {}", 
+                    min_dist, max_dist, min_dist / max_dist));
+            }
+        });
+        ui.collapsing("Zahlen (Radius < 20)", |ui|{
+            ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
+                "Keine");
+            ui.radio_value(&mut self.vertex_info, DrawNumbers::Indices, 
+                "Knotenindizes");
+            ui.radio_value(&mut self.vertex_info, DrawNumbers::RobberAdvantage, 
+                "Räubervorteil");
+            ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
+                "minimaler Cop Abstand");
+        });
+        //adjust nr of currently computed figures
+        ui.horizontal(|ui| {
+            if ui.button("- Figur").clicked() {
+                self.characters.pop();
+            }
+            if ui.button("+ Figur").clicked() {
+                let is_cop = self.characters.len() > 0;
+                let mut new = Character::new(is_cop, Pos2::ZERO);
+                new.update(self.tolerance, &self.map, &mut self.queue);
+                self.characters.push(new);
+            }
+        });
+        ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
+        ui.add(Checkbox::new(&mut self.show_cop_voronoi, "zeige Punkte mit\nmehreren nächsten Cops"));
+        ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
+    }
+
+    fn draw_edges(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
+
+        let grey_stroke = Stroke::new(scale, GREY);
+        let edge_stroke = |v1: usize, v2: usize| if self.debug_info {
+            let seed = v1 * v2 + 100;
+            let mut gen = crate::rand::LCG::new(seed as u64);
+            gen.waste(5);
+            let mut rnd = || (64 + (gen.next() % 128)) as u8;
+            Stroke::new(scale, Color32::from_rgb(rnd(), rnd(), rnd()))
         }
-        prev != *val
-    }).inner
+        else {
+            grey_stroke
+        };
+
+        self.map.for_each_edge(|v1, p1, v2, p2| { 
+            let edge = [
+                to_screen.transform_pos(p1), 
+                to_screen.transform_pos(p2)];
+            let line = Shape::LineSegment { points: edge, stroke: edge_stroke(v1, v2) };
+            painter.add(line);
+        });
+    }
+
+    fn draw_convex_cop_hull(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
+        for (&in_hull, &pos) in self.in_convex_cop_hull.iter().zip(self.map.positions()) {
+            if in_hull.yes()  {
+                let draw_pos = to_screen.transform_pos(pos);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 9.0, LIGHT_BLUE);
+                painter.add(marker_circle);
+            }
+        }
+    }
+
+    fn draw_green_circles(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {     
+        let draw_circle_at = |pos: Pos2|{
+            let draw_pos = to_screen.transform_pos(pos);
+            let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
+            painter.add(marker_circle);
+        };
+        match (self.robber_info, self.robber()) {
+            (RobberInfo::NearNodes, Some(r)) => 
+                for (r_dist, c_dist, &pos) in 
+                itertools::izip!(r.distances.iter(), self.min_cop_dist.iter(), self.map.positions()) {
+                    if r_dist < c_dist {
+                        draw_circle_at(pos);
+                    }
+                },
+            (RobberInfo::EscapableNodes, _) => 
+                for (&adv, &pos) in self.cop_advantage.iter().zip(self.map.positions()) {
+                    if adv < -1 {
+                        draw_circle_at(pos);
+                    }
+                },
+            (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
+                let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
+                for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
+                    if (dist as usize) <= bnd {
+                        draw_circle_at(pos);
+                    }
+                }
+            },
+            _ => {},
+        }
+    }
+
+    fn draw_robber_info(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
+        if let (RobberInfo::NearNodes, Some(r)) = (self.robber_info, self.robber()) { 
+            let dist_vs = r.distances.iter().zip(self.min_cop_dist.iter());
+            for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
+                if r_dist < c_dist  {
+                    let draw_pos = to_screen.transform_pos(pos);
+                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
+                    painter.add(marker_circle);
+                }
+            }
+        }
+        if self.robber_info == RobberInfo::EscapableNodes {
+            for (&adv, &pos) in self.cop_advantage.iter().zip(self.map.positions()) {
+                if adv < -1  {
+                    let draw_pos = to_screen.transform_pos(pos);
+                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
+                    painter.add(marker_circle);
+                }
+            }
+        }
+    }
+
+    fn draw_numbers(&self, ui: &mut Ui, painter: &Painter, to_screen: emath::RectTransform, _scale: f32) {
+        for (i, &pos) in self.map.positions().iter().enumerate() {
+            let txt = match self.vertex_info {
+                DrawNumbers::Indices => { i.to_string() }
+                DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
+                DrawNumbers::None => { panic!() }
+                DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
+            };
+            let layout_job = LayoutJob::simple(txt, FontId::default(), WHITE, 100.0);
+            let galley = ui.fonts(|f| f.layout_job(layout_job));
+            let screen_pos = to_screen.transform_pos(pos);
+            let text = Shape::Text(TextShape::new(screen_pos, galley));
+            painter.add(text);
+        }
+    }
+
+    fn draw_cop_voronoi(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
+        for (&multiple, &pos) in self.muliple_min_dist_cops.iter().zip(self.map.positions()) {
+            if multiple  {
+                let draw_pos = to_screen.transform_pos(pos);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, RED);
+                painter.add(marker_circle);
+            }
+        }
+    }
+
+    fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
+        for (i, character) in self.characters.iter_mut().enumerate() {                
+            let character_size = f32::max(8.0, scale * 8.0);
+
+            let real_screen_pos = to_screen.transform_pos(character.pos);    
+            let node_pos = self.map.positions()[character.nearest_node];
+            let node_screen_pos = to_screen.transform_pos(node_pos);
+            let draw_screen_pos = if character.on_node { node_screen_pos } else { real_screen_pos };
+
+            let rect_len = 3.0 * character_size + self.tolerance;
+            let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
+            let character_id = response.id.with(i);
+            let point_response = ui.interact(point_rect, character_id, Sense::drag());
+            character.pos = to_screen.inverse().transform_pos(real_screen_pos + point_response.drag_delta());
+            if point_response.drag_released() && character.on_node {
+                character.pos = node_pos; //snap actual character postion to node where he was dragged
+            }
+            if point_response.dragged() {
+                character.update(self.tolerance, &self.map, &mut self.queue);
+            }
+
+            let fill_color = if character.is_cop { COP_BLUE } else { ROBBER_RED };
+            let character_circle = Shape::circle_filled(draw_screen_pos, character_size, fill_color);
+            painter.add(character_circle);
+            if character.on_node {
+                let stroke_color = if character.is_cop { BLUE_GLOW } else { RED_GLOW };
+                let stroke = Stroke::new(scale * 3.0, stroke_color);
+                let marker_circle = Shape::circle_stroke(node_screen_pos, character_size, stroke);
+                painter.add(marker_circle);
+            }
+        }
+    }
+
+    fn maybe_update(&mut self) {
+        let require_update = self.show_convex_hull 
+            || self.show_cop_voronoi
+            || self.robber_info != RobberInfo::None 
+            || self.vertex_info != DrawNumbers::None;
+        if require_update {
+            self.update_min_cop_dist();
+            self.update_convex_cop_hull();
+            self.update_cop_advantage();
+        }
+    }
+
+    /// fst maps graph coordinates to screen, snd defines scale to draw edges etc. at
+    fn build_to_screen(&self, response: &Response) -> (emath::RectTransform, f32) {
+
+        let from = Rect::from_min_max(pos2(-1.05, -1.05), pos2(1.05, 1.05));
+
+        let rect_len = f32::min(response.rect.height(), response.rect.width());
+        let to_middle = (response.rect.width() - rect_len) / 2.0;
+        let screen_min = response.rect.min + vec2(to_middle, 0.0);
+        let to = Rect::from_min_size(screen_min, vec2(rect_len, rect_len));
+
+        let to_screen = emath::RectTransform::from_to(from, to);
+        let scale = f32::min(rect_len / self.map_radius as f32 * 0.015, 4.0);
+        (to_screen, scale)
+    }
+
+    pub fn draw_graph(&mut self, ui: &mut Ui) {
+        self.maybe_update();
+
+        let draw_space = Vec2::new(ui.available_width(), ui.available_height());
+        let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());    
+
+        let (to_screen, scale) = self.build_to_screen(&response);
+
+        self.draw_edges(&painter, to_screen, scale);
+        if self.show_convex_hull {
+            self.draw_convex_cop_hull(&painter, to_screen, scale);
+        }
+        self.draw_green_circles(&painter, to_screen, scale);
+        self.draw_robber_info(&painter, to_screen, scale);
+
+        if self.map_radius < 20 && self.vertex_info != DrawNumbers::None {
+            self.draw_numbers(ui, &painter, to_screen, scale);
+        }
+        if self.show_cop_voronoi {
+            self.draw_cop_voronoi(&painter, to_screen, scale);
+        }
+        self.draw_characters(ui, &response, &painter, to_screen, scale);
+    }
 }
 
 impl eframe::App for State {
-    /// Called by the frame work to save state before shutdown.
-    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-    }
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
@@ -314,270 +576,12 @@ impl eframe::App for State {
             ui.vertical(|ui| {
                 ui.heading("Optionen");
                 widgets::global_dark_light_mode_buttons(ui);
-
-                //adjust underlying graph
-                ui.collapsing("Form", |ui| {
-                    let prev_shape = self.map_shape;
-                    let is_n_gon = matches!(self.map_shape, GraphShape::RegularPolygon(_));
-                    if ui.add(RadioButton::new(is_n_gon, "ReguläresPolygon")).clicked() {                        
-                        self.map_shape = GraphShape::RegularPolygon(6);
-                    }
-                    if let GraphShape::RegularPolygon(n) = &mut self.map_shape {
-                        add_drag(ui, n, "Seiten: ", 3, 10);
-                    }
-                    ui.radio_value(&mut self.map_shape, GraphShape::Random, "Zufallsverteilt");
-                    if self.map_shape == GraphShape::Random {
-                        if ui.button("neu berechnen").clicked() {
-                            self.recompute_graph();
-                        }
-                    }
-                    ui.radio_value(&mut self.map_shape, GraphShape::Debug, "Debugging");
-
-                    if prev_shape != self.map_shape {
-                        self.recompute_graph();
-                    }
-                    if add_drag(ui, &mut self.map_radius, "Radius: ", 0, 100) {
-                        self.recompute_graph();
-                    }
-                });
-                ui.collapsing("Grün", |ui|{                    
-                    //settings to draw extra information
-                    ui.radio_value(&mut self.robber_info, RobberInfo::None, 
-                        "keine Marker");
-                    ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
-                        "markiere für Räuber\nnähere Knoten");
-                    ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
-                        "markiere Punkte mit\ndirekter Fluchtoption");
-                    let robber_dist_button = egui::RadioButton::new(
-                        matches!(self.robber_info, RobberInfo::SmallRobberDist(_)), 
-                        "markiere Punkte nah\nan Räuber");
-                    if ui.add(robber_dist_button).clicked() {
-                        self.robber_info = RobberInfo::SmallRobberDist(50);
-                    }
-                    if let RobberInfo::SmallRobberDist(bnd) = &mut self.robber_info {
-                        add_drag(ui, bnd, "% Radius: ", 1, 100);
-                    }
-                    if let (RobberInfo::SmallRobberDist(bnd), Some(r)) = (self.robber_info, self.robber()) {
-                        let r_pos = self.map.positions()[r.nearest_node];
-                        let mut max_dist = f32::MIN;
-                        let mut min_dist = f32::MAX;
-                        let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
-                        for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
-                            if (dist as usize) == bnd {
-                                let new_dist = (r_pos - pos).length();
-                                max_dist = f32::max(max_dist, new_dist);
-                                min_dist = f32::min(min_dist, new_dist);
-                            }
-                        }
-                        ui.label(format!("min dist:   {}\nmax dist:   {}\nmin / max: {}", 
-                            min_dist, max_dist, min_dist / max_dist));
-                    }
-                });
-                ui.collapsing("Zahlen (Radius < 20)", |ui|{
-                    ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
-                        "Keine");
-                    ui.radio_value(&mut self.vertex_info, DrawNumbers::Indices, 
-                        "Knotenindizes");
-                    ui.radio_value(&mut self.vertex_info, DrawNumbers::RobberAdvantage, 
-                        "Räubervorteil");
-                    ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
-                        "minimaler Cop Abstand");
-                });
-                //adjust nr of currently computed figures
-                ui.horizontal(|ui| {
-                    if ui.button("- Figur").clicked() {
-                        self.characters.pop();
-                    }
-                    if ui.button("+ Figur").clicked() {
-                        let is_cop = self.characters.len() > 0;
-                        let mut new = Character::new(is_cop, Pos2::ZERO);
-                        new.update(self.tolerance, &self.map, &mut self.queue);
-                        self.characters.push(new);
-                    }
-                });
-
-                ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
-                ui.add(Checkbox::new(&mut self.show_cop_voronoi, "zeige Punkte mit\nmehreren nächsten Cops"));
-                ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
+                self.draw_menu(ui);
             });
         });
 
-        let require_update = self.show_convex_hull 
-            || self.show_cop_voronoi
-            || self.robber_info != RobberInfo::None 
-            || self.vertex_info != DrawNumbers::None;
-        if require_update {
-            self.update_min_cop_dist();
-            self.update_convex_cop_hull();
-            self.update_cop_advantage();
-        }
-
         CentralPanel::default().show(ctx, |ui| {
-            let (response, painter) = ui.allocate_painter(
-                Vec2::new(ui.available_width(), ui.available_height()), Sense::hover());            
-
-            let (to_screen, scale) = {
-                let from = Rect::from_min_max(pos2(-1.05, -1.05), pos2(1.05, 1.05));
-
-                let rect_len = f32::min(response.rect.height(), response.rect.width());
-                let to_middle = (response.rect.width() - rect_len) / 2.0;
-                let screen_min = response.rect.min + vec2(to_middle, 0.0);
-                let to = Rect::from_min_size(screen_min, vec2(rect_len, rect_len));
-
-                let to_screen = emath::RectTransform::from_to(from, to);
-                let scale = f32::min(rect_len / self.map_radius as f32 * 0.015, 4.0);
-                (to_screen, scale)
-            };
-
-            const GREY: Color32 = Color32::from_rgb(130, 130, 150);
-            let grey_stroke = Stroke::new(scale, GREY);
-            { //draw edges
-                let edge_stroke = |v1: usize, v2: usize| if self.debug_info {
-                    let seed = v1 * v2 + 100;
-                    let mut gen = super::rand::LCG::new(seed as u64);
-                    gen.waste(5);
-                    let mut rnd = || (64 + (gen.next() % 128)) as u8;
-                    Stroke::new(scale, Color32::from_rgb(rnd(), rnd(), rnd()))
-                }
-                else {
-                    grey_stroke
-                };
-
-                self.map.for_each_edge(|v1, p1, v2, p2| { 
-                    let edge = [
-                        to_screen.transform_pos(p1), 
-                        to_screen.transform_pos(p2)];
-                    let line = Shape::LineSegment { points: edge, stroke: edge_stroke(v1, v2) };
-                    painter.add(line);
-                });
-            }
-
-            if self.show_convex_hull {
-                const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
-                for (&in_hull, &pos) in self.in_convex_cop_hull.iter().zip(self.map.positions()) {
-                    if in_hull.yes()  {
-                        let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 9.0, LIGHT_BLUE);
-                        painter.add(marker_circle);
-                    }
-                }
-            }
-            { //draw green circles        
-                const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
-                let draw_circle_at = |pos: Pos2|{
-                    let draw_pos = to_screen.transform_pos(pos);
-                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-                    painter.add(marker_circle);
-                };
-                match (self.robber_info, self.robber()) {
-                    (RobberInfo::NearNodes, Some(r)) => 
-                        for (r_dist, c_dist, &pos) in 
-                        itertools::izip!(r.distances.iter(), self.min_cop_dist.iter(), self.map.positions()) {
-                            if r_dist < c_dist {
-                                draw_circle_at(pos);
-                            }
-                        },
-                    (RobberInfo::EscapableNodes, _) => 
-                        for (&adv, &pos) in self.cop_advantage.iter().zip(self.map.positions()) {
-                            if adv < -1 {
-                                draw_circle_at(pos);
-                            }
-                        },
-                    (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
-                        let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
-                        for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
-                            if (dist as usize) <= bnd {
-                                draw_circle_at(pos);
-                            }
-                        }
-                    },
-                    _ => {},
-                }
-            }
-            if let (RobberInfo::NearNodes, Some(r)) = (self.robber_info, self.robber()) {                
-                const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
-                let dist_vs = r.distances.iter().zip(self.min_cop_dist.iter());
-                for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
-                    if r_dist < c_dist  {
-                        let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-                        painter.add(marker_circle);
-                    }
-                }
-            }
-            if self.robber_info == RobberInfo::EscapableNodes {
-                const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
-                for (&adv, &pos) in self.cop_advantage.iter().zip(self.map.positions()) {
-                    if adv < -1  {
-                        let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-                        painter.add(marker_circle);
-                    }
-                }
-            }
-
-            if self.map_radius < 20 && self.vertex_info != DrawNumbers::None {
-                const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
-                for (i, &pos) in self.map.positions().iter().enumerate() {
-                    let txt = match self.vertex_info {
-                        DrawNumbers::Indices => { i.to_string() }
-                        DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
-                        DrawNumbers::None => { panic!() }
-                        DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
-                    };
-                    let layout_job = LayoutJob::simple(txt, FontId::default(), WHITE, 100.0);
-                    let galley = ui.fonts(|f| f.layout_job(layout_job));
-                    let screen_pos = to_screen.transform_pos(pos);
-                    let text = Shape::Text(TextShape::new(screen_pos, galley));
-                    painter.add(text);
-                }
-            }
-
-            if self.show_cop_voronoi {
-                const RED: Color32 = Color32::from_rgb(230, 50, 50);
-                for (&multiple, &pos) in self.muliple_min_dist_cops.iter().zip(self.map.positions()) {
-                    if multiple  {
-                        let draw_pos = to_screen.transform_pos(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, RED);
-                        painter.add(marker_circle);
-                    }
-                }
-            }
-
-            for (i, character) in self.characters.iter_mut().enumerate() {                
-                let character_size = f32::max(8.0, scale * 8.0);
-
-                let real_screen_pos = to_screen.transform_pos(character.pos);    
-                let node_pos = self.map.positions()[character.nearest_node];
-                let node_screen_pos = to_screen.transform_pos(node_pos);
-                let draw_screen_pos = if character.on_node { node_screen_pos } else { real_screen_pos };
-
-                let rect_len = 3.0 * character_size + self.tolerance;
-                let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
-                let character_id = response.id.with(i);
-                let point_response = ui.interact(point_rect, character_id, Sense::drag());
-                character.pos = to_screen.inverse().transform_pos(real_screen_pos + point_response.drag_delta());
-                if point_response.drag_released() && character.on_node {
-                    character.pos = node_pos; //snap actual character postion to node where he was dragged
-                }
-                if point_response.dragged() {
-                    character.update(self.tolerance, &self.map, &mut self.queue);
-                }
-
-                const COP_BLUE: Color32 = Color32::from_rgb(10, 50, 170);
-                const ROBBER_RED: Color32 = Color32::from_rgb(170, 40, 40);
-                const BLUE_GLOW: Color32 = Color32::from_rgb(60, 120, 235);
-                const RED_GLOW: Color32 = Color32::from_rgb(235, 120, 120);
-                let fill_color = if character.is_cop { COP_BLUE } else { ROBBER_RED };
-                let character_circle = Shape::circle_filled(draw_screen_pos, character_size, fill_color);
-                painter.add(character_circle);
-                if character.on_node {
-                    let stroke_color = if character.is_cop { BLUE_GLOW } else { RED_GLOW };
-                    let stroke = Stroke::new(scale * 3.0, stroke_color);
-                    let marker_circle = Shape::circle_stroke(node_screen_pos, character_size, stroke);
-                    painter.add(marker_circle);
-                }
-            }
+            self.draw_graph(ui);
         });
     }
 }
