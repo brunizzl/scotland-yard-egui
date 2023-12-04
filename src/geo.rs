@@ -46,9 +46,9 @@ pub struct Project3To2 {
 impl Project3To2 {
     pub fn new(new_x: Vec3, new_y: Vec3, new_z: Vec3) -> Self {
         // assume normalized
-        debug_assert!(new_x.length().abs() < 1e-5);
-        debug_assert!(new_y.length().abs() < 1e-5);
-        debug_assert!(new_z.length().abs() < 1e-5);
+        debug_assert!(new_x.length().abs() - 1.0 < 1e-5);
+        debug_assert!(new_y.length().abs() - 1.0 < 1e-5);
+        debug_assert!(new_z.length().abs() - 1.0 < 1e-5);
 
         //assume orthogonal
         debug_assert!(new_x.dot(new_y).abs() < 1e-5);
@@ -77,22 +77,28 @@ impl Project3To2 {
 }
 
 pub struct ToScreen {
-    pub project: Project3To2,
-    pub to_screen: RectTransform,
+    pub to_plane: Project3To2,
+    pub move_rect: RectTransform,
 }
 
 impl ToScreen {
     pub fn new(project: Project3To2, to_screen: RectTransform) -> Self {
-        Self { project, to_screen }
+        Self { to_plane: project, move_rect: to_screen }
     }
 
     pub fn apply(&self, pos: Pos3) -> Pos2 {
-        let projected = self.project.project_pos(pos);
-        self.to_screen.transform_pos(projected)
+        let projected = self.to_plane.project_pos(pos);
+        self.move_rect.transform_pos(projected)
     }
 
     pub fn visible(&self, face_normal: Vec3) -> bool {
-        self.project.signed_dist(face_normal) > 0.0
+        self.to_plane.signed_dist(face_normal) > 0.0
     }
+}
+
+pub fn gram_schmidt_3d([v1, v2, v3]: &mut [Vec3; 3]) {
+    *v1 = v1.normalized();
+    *v2 = (*v2 - v1.dot(*v2) * *v1).normalized();
+    *v3 = (*v3 - v1.dot(*v3) * *v1 - v2.dot(*v3) * *v2).normalized();
 }
 
