@@ -92,7 +92,7 @@ impl ConvexPolyhedron {
         Self { vertex_positions, vertex_neighbors, face_neighbors, face_boundary_vertices, face_normals }
     }
 
-    pub fn draw_visible_edges(&self, to_screen: &geo::ToScreen, painter: Painter, stroke: Stroke) 
+    pub fn draw_visible_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
     {
         for (&normal, boundary) in self.face_normals.iter().zip(self.face_boundary_vertices.iter()) {
             if to_screen.visible(normal) {

@@ -140,6 +140,42 @@ impl Vec3 {
             z: self.z.clamp(min.z, max.z),
         }
     }
+
+    #[must_use]
+    #[inline]
+    pub fn rotate_x(self, angle: f32) -> Self {
+        let cos = angle.cos();
+        let sin = angle.sin();
+        Vec3 {
+            x: self.x,
+            y: cos * self.y - sin * self.z,
+            z: sin * self.y + cos * self.z,
+        }
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn rotate_y(self, angle: f32) -> Self {
+        let cos = angle.cos();
+        let sin = angle.sin();
+        Vec3 {
+            x: cos * self.x - sin * self.z,
+            y: self.y,
+            z: sin * self.x + cos * self.z,
+        }
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn rotate_z(self, angle: f32) -> Self {
+        let cos = angle.cos();
+        let sin = angle.sin();
+        Vec3 {
+            x: cos * self.x - sin * self.y,
+            y: sin * self.x + cos * self.y,
+            z: self.z,
+        }
+    }
 }
 
 impl std::ops::Index<usize> for Vec3 {

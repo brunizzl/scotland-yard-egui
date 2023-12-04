@@ -35,13 +35,18 @@ fn add_drag_value(ui: &mut Ui, val: &mut usize, name: &str, min: usize, max: usi
 
 pub struct State {
     state_2d: dim2::State,
+    state_3d: dim3::State,
     show_2d: bool, //else show 3d
 }
 
 impl State {
     /// Called once before the first frame.
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self { state_2d: dim2::State::new(_cc), show_2d: true }
+        Self { 
+            state_2d: dim2::State::new(_cc), 
+            state_3d: dim3::State::new(_cc), 
+            show_2d: true,
+        }
     }
 }
 
@@ -59,12 +64,12 @@ impl eframe::App for State {
                 if ui.button(button_switch_text).clicked() {
                     self.show_2d = !self.show_2d;
                 }
-                
+
                 if self.show_2d {
                     self.state_2d.draw_menu(ui);
                 }
                 else {
-                    //TODO: show 3d menu
+                    self.state_3d.draw_menu(ui);
                 }
             });
         });
@@ -74,7 +79,7 @@ impl eframe::App for State {
                 self.state_2d.draw_graph(ui);
             }
             else {
-                //TODO: show 3d graph
+                self.state_3d.draw_graph(ui);
             }
         });
     }
