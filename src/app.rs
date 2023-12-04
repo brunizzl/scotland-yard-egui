@@ -60,6 +60,7 @@ impl eframe::App for State {
         SidePanel::left("left_panel").show(ctx, |ui| {
             ui.vertical(|ui| {
                 ui.heading("Optionen");
+                widgets::global_dark_light_mode_buttons(ui);
                 let button_switch_text = if self.show_2d { "Zeige 3D" } else { "Zeige 2D" };
                 if ui.button(button_switch_text).clicked() {
                     self.show_2d = !self.show_2d;
