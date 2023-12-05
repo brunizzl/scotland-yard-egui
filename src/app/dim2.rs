@@ -66,6 +66,15 @@ impl Character {
         }
         self.nearest_node = nearest_node;
     }
+    
+    //options to draw cops and robber as emojies: 
+    //👮🛂🛃👿🚴🏃
+    const COP_EMOJI: &str = "👮";
+    const ROBBER_EMOJI: &str = "🏃";
+
+    pub fn emoji(&self) -> &str {
+        if self.is_cop { Self::COP_EMOJI } else { Self::ROBBER_EMOJI }
+    }
 }
 
 pub struct State {
@@ -352,10 +361,17 @@ impl State {
         });
         //adjust nr of currently computed figures
         ui.horizontal(|ui| {
-            if ui.button("- Figur").clicked() {
+            let (minus_emoji, plus_emoji) = match self.characters.len() {
+                0 => ("🚫", Character::ROBBER_EMOJI),
+                1 => (Character::ROBBER_EMOJI, Character::COP_EMOJI),
+                _ => (Character::COP_EMOJI, Character::COP_EMOJI),
+            };
+            let minus_text = format!("- Figur ({minus_emoji})");
+            let plus_text = format!("+ Figur ({plus_emoji})");
+            if ui.button(minus_text).clicked() {
                 self.characters.pop();
             }
-            if ui.button("+ Figur").clicked() {
+            if ui.button(plus_text).clicked() {
                 let is_cop = self.characters.len() > 0;
                 let mut new = Character::new(is_cop, Pos2::ZERO);
                 new.update(self.tolerance, &self.map, &mut self.queue);
@@ -510,6 +526,15 @@ impl State {
                 let marker_circle = Shape::circle_stroke(node_screen_pos, character_size, stroke);
                 painter.add(marker_circle);
             }
+            //draw emoji
+            let font = FontId::proportional(character_size * 2.0);
+            let emoji_pos = draw_screen_pos - character_size * vec2(0.0, 1.3);
+            let emoji_str = character.emoji().to_string();
+            let mut layout_job = LayoutJob::simple(emoji_str, font, WHITE, 100.0);
+            layout_job.halign = Align::Center;
+            let galley = ui.fonts(|f| f.layout_job(layout_job));
+            let emoji = Shape::Text(TextShape::new(emoji_pos, galley));
+            painter.add(emoji);
         }
     }
 
