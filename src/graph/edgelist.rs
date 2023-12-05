@@ -54,7 +54,6 @@ fn next_unused(xs: &mut [Index]) -> Option<&mut Index> {
 fn take_active(xs: &[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
     let end = xs.iter().position(Index::is_none).unwrap_or(xs.len());
     debug_assert!(xs[end..].iter().all(Index::is_none));
-    debug_assert!(!xs[..end].iter().any(Index::is_none));
     xs[..end].iter().map(|n| n.val as usize)
 }
 
@@ -80,7 +79,11 @@ impl EdgeList {
     }
 
     pub fn max_degree(&self) -> usize {
-        self.neighbors().fold(0, |a, b| usize::max(a, b.len()))
+        self.neighbors().fold(0, |acc, neighs| usize::max(acc, neighs.len()))
+    }
+
+    pub fn min_degree(&self) -> usize {
+        self.neighbors().fold(usize::MAX, |acc, neighs| usize::min(acc, neighs.len()))
     }
 
     pub fn new(max_neighbors: usize, length: usize) -> Self {
@@ -88,6 +91,20 @@ impl EdgeList {
         let entries = vec![Index::NONE; vec_len];
         let next_shrink_check_len = (length * 3) / 2 + 10;
         Self { next_shrink_check_len, max_neighbors, length, entries }
+    }
+
+    pub fn from_iter(iter: impl ExactSizeIterator<Item = impl Iterator<Item = usize> + Clone>, 
+        max_neighbors: usize) -> Self 
+    {
+        let length = iter.len();
+        let mut res = Self::new(max_neighbors, length);
+        for (slots, neighs) in res.potential_neighbors_mut().zip(iter) {
+            debug_assert!(neighs.clone().count() <= max_neighbors);
+            for (slot, neigh) in slots.iter_mut().zip(neighs) {
+                *slot = Index::new(neigh);
+            }
+        }
+        res
     }
 
     pub fn empty() -> Self {
@@ -130,7 +147,8 @@ impl EdgeList {
         }
     }
 
-    pub fn push(&mut self) {
+    pub fn push(&mut self) -> usize {
+        let new_index = self.length;
         let new_len = self.length + 1;
         if self.next_shrink_check_len <= new_len {
             self.maybe_shrink_capacity(2);
@@ -138,6 +156,7 @@ impl EdgeList {
         }
         self.entries.resize(self.entries.len() + self.max_neighbors, Index::NONE);
         self.length = new_len;
+        new_index
     }
 
     fn potential_neighbors(&self) -> Chunks<'_, Index> {
@@ -148,8 +167,22 @@ impl EdgeList {
         self.potential_neighbors().map(take_active)
     }
 
-    pub fn neighbors_mut(&mut self) -> std::slice::ChunksMut<'_, Index> {
+    pub fn count(&self) -> usize {
+        self.neighbors().fold(0, |acc, neigh| acc + neigh.len())
+    }
+
+    pub fn potential_neighbors_mut(&mut self) -> std::slice::ChunksMut<'_, Index> {
         self.entries.chunks_mut(self.max_neighbors)
+    }
+
+    pub fn neighbors_mut(&mut self) -> 
+        impl ExactSizeIterator<Item = &mut [Index]> + '_ 
+    {
+        self.potential_neighbors_mut().map(|chunk| {            
+            let end = chunk.iter().position(Index::is_none).unwrap_or(chunk.len());
+            debug_assert!(chunk[end..].iter().all(Index::is_none));
+            &mut chunk[..end]
+        })
     }
 
     pub fn neighbors_of(&self, v: usize) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
@@ -167,16 +200,40 @@ impl EdgeList {
         &mut self.entries[start..end]
     }
 
+    pub fn has_directed_edge(&self, v1: usize, v2: usize) -> bool {
+        self.neighbors_of(v1).contains(&v2.into())
+    }
+
     pub fn has_edge(&self, v1: usize, v2: usize) -> bool {
-        let res = self.neighbors_of(v1).contains(&v2.into());
-        debug_assert!(res == self.neighbors_of(v2).contains(&v1.into()));
+        let res = self.has_directed_edge(v1, v2);
+        debug_assert!(res == self.has_directed_edge(v2, v1));
         res
     }
 
-    pub fn add_edge(&mut self, v1: usize, v2: usize) {
-        debug_assert!(!self.has_edge(v1, v2));
-        debug_assert_ne!(v1, v2);
-        let i1 = Index::new(v1);
+    pub fn has_edge_(&self, v1: Index, v2: Index) -> bool {
+        match (v1.get(), v2.get()) {
+            (Some(u1), Some(u2)) => self.has_edge(u1, u2),
+            _ => false
+        }
+    }
+
+    /// depends on self.max_neighbors
+    pub fn edge_direction_index(&self, v1: usize, v2: usize) -> Option<usize> {
+        self.neighbors_of(v1).position(|v| v == v2).map(|v2_pos| {
+            let v1_neighs_range_start = v1 * self.max_neighbors;
+            v1_neighs_range_start + v2_pos
+        })
+    }
+
+    pub fn edge_at_index(&self, index: usize) -> (usize, usize) {
+        let v1 = index / self.max_neighbors;
+        let v2_pos = index % self.max_neighbors;
+        let v2 = self.neighbors_of(v1).nth(v2_pos).unwrap();
+        (v1, v2)
+    }
+
+    pub fn add_directed_edge(&mut self, v1: usize, v2: usize) {
+        debug_assert!(!self.has_directed_edge(v1, v2));
         let i2 = Index::new(v2);
         loop {
             if let Some(e1) = next_unused(self.neighbors_mut_of(v1)) {
@@ -186,14 +243,11 @@ impl EdgeList {
             //guarantees next iteration to exit
             self.increase_capacity(self.max_neighbors + 2);
         }
-        loop {
-            if let Some(e2) = next_unused(self.neighbors_mut_of(v2)) {
-                *e2 = i1;
-                break;
-            }
-            //guarantees next iteration to exit
-            self.increase_capacity(self.max_neighbors + 2);
-        }
+    }
+
+    pub fn add_edge(&mut self, v1: usize, v2: usize) {
+        self.add_directed_edge(v1, v2);
+        self.add_directed_edge(v2, v1);
     }
 
     pub fn remove_edge(&mut self, v1: usize, v2: usize) {

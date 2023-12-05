@@ -176,6 +176,20 @@ impl Vec3 {
             z: self.z,
         }
     }
+
+    pub fn angle_between(self, other: Self) -> f32 {
+        let l1 = self.length();
+        let l2 = other.length();
+        f32::acos(self.dot(other) / (l1 * l2))
+    }
+
+    pub fn cross(self, other: Self) -> Self {
+        Vec3 {
+            x: self.y * other.z - self.z * other.y,
+            y: self.z * other.x - self.x * other.z,
+            z: self.x * other.y - self.y * other.x,
+        }
+    }
 }
 
 impl std::ops::Index<usize> for Vec3 {

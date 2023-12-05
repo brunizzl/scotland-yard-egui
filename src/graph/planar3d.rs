@@ -4,22 +4,21 @@ use itertools::Itertools;
 
 use crate::geo::{Pos3, Vec3, pos3, self};
 
+use crate::graph::*;
+
 
 pub struct ConvexPolyhedron {
     vertex_positions: Vec<Pos3>,
 
-    /// indices of neighboring vertices 
-    vertex_neighbors: Vec<Vec<usize>>, 
-
-    /// indices of neighboring faces
-    face_neighbors: Vec<Vec<usize>>, 
-
-    /// indices of vertices surrounding face
-    face_boundary_vertices: Vec<Vec<usize>>, 
-
     /// outher unit normal of each face
     /// this entry decides if a face is rendered or not: only camera-facing faces are.
     face_normals: Vec<Vec3>, 
+
+    /// indices of neighboring vertices 
+    vertex_neighbors: EdgeList, 
+
+    /// indices of vertices surrounding face
+    face_boundary_vertices: EdgeList, 
 }
 
 macro_rules! find_related {
@@ -29,33 +28,180 @@ macro_rules! find_related {
         .map(|&x| $ys
             .iter()
             .enumerate()
-            .filter_map(|(i, &y)| if $f(x, y) { Some(i) } else { None })
-            .collect()
-        ).collect()
+            .filter_map(move |(i, &y)| if $f(x, y) { Some(i) } else { None }))
     };
 }
 
 /// expect boundary to form a circle, order vertices in circle s.t. neighboring vertices follow each other
-fn order_face_boundary(boundary: &mut [usize], neighbors: &[Vec<usize>]) {
+fn order_face_boundary(boundary: &mut [Index], neighbors: &EdgeList) {
     debug_assert!(boundary.len() > 2);
-
-    'outher: for i1 in 0..(boundary.len() - 1) {
+    let last = boundary.len() - 1;
+    'outher: for i1 in 0..last {
         let v1 = boundary[i1];
-        let v1_neighbors = &neighbors[v1][..];
         let i2 = i1 + 1;
-        for search_i in i2..boundary.len() {
+        for search_i in i2..=last {
             let v = boundary[search_i];
-            if v1_neighbors.contains(&v) {
+            if neighbors.has_edge_(v1, v) {
                 boundary.swap(i2, search_i);
                 continue 'outher;
             }
         }
         panic!("vertex boundary is not closed");
     }
-    debug_assert!(neighbors[boundary[0]].contains(boundary.last().unwrap()));
+    debug_assert!(neighbors.has_edge_(boundary[0], boundary[last]));
+}
+
+fn is_small(x: f32) -> bool {
+    x.abs() < 1e-4
 }
 
 impl ConvexPolyhedron {
+    fn discover_platonic_solid_faces(vertex_positions: &[Pos3], vertex_neighbors: &EdgeList) 
+        -> (EdgeList, Vec<Vec3>) 
+    {
+
+        let degree = vertex_neighbors.min_degree();
+        assert_eq!(degree, vertex_neighbors.max_neighbors());
+        assert!(degree >= 3);
+
+        let nr_edge_directions = degree * vertex_positions.len(); //handshaking lemma
+        let mut edge_direction_used = vec![false; nr_edge_directions];
+
+        let mut face_boundary_vertices = EdgeList::new(6, 0);
+        let mut normals = Vec::new();
+        //idea: find a cycle of unused edge directions where at the first intersection 
+        //  we turn as hard as possible and on all further intersections 
+        //  we choose the vertex on the same plane as the first three.
+        //also: we need to discover all faces in the same rotation direction, else we cant use the
+        //  edge directions approach.
+        'discover_faces: while let Some(edge_index) = edge_direction_used.iter().position(|&e| !e) {
+            edge_direction_used[edge_index] = true;
+            let (v1, v2) = vertex_neighbors.edge_at_index(edge_index);
+            let new_face = face_boundary_vertices.push();
+            face_boundary_vertices.add_directed_edge(new_face, v1);
+            face_boundary_vertices.add_directed_edge(new_face, v2);
+            let v1_pos = vertex_positions[v1];
+            let v2_pos = vertex_positions[v2];
+            let dir_1_2 = v2_pos - v1_pos;
+
+            //see coment above 'discover_faces loop: we choose the rotation by taking v3
+            //as having positive component in direction_check_vec's direction
+            let direction_check_vec = v1_pos.to_vec3().cross(v2_pos.to_vec3());
+
+            let mut v3 = usize::MAX;
+            let mut angle_1_2_3 = f32::MAX;
+            for v3_candidate in vertex_neighbors.neighbors_of(v2) {
+                if v3_candidate == v1 {
+                    continue;
+                }
+                let index_2_3 = vertex_neighbors.edge_direction_index(v2, v3_candidate).unwrap();
+                if edge_direction_used[index_2_3] {
+                    continue;
+                }
+                let candidate_pos = vertex_positions[v3_candidate];
+                if direction_check_vec.dot(candidate_pos.to_vec3()) < 0.0 {
+                    continue;
+                }
+                let dir_3_2 = v2_pos - candidate_pos;
+                let new_angle = Vec3::angle_between(dir_1_2, dir_3_2);
+                if new_angle < angle_1_2_3 {
+                    v3 = v3_candidate;
+                    angle_1_2_3 = new_angle;
+                }
+            }
+            assert_ne!(v3, usize::MAX);
+            let index_2_3 = vertex_neighbors.edge_direction_index(v2, v3).unwrap();
+            edge_direction_used[index_2_3] = true;
+            face_boundary_vertices.add_directed_edge(new_face, v3);
+            let v3_pos = vertex_positions[v3];
+            let dir_2_3 = v3_pos - v2_pos;
+            let face_normal = Vec3::cross(dir_1_2, dir_2_3).normalized();
+            normals.push(face_normal);
+
+            let mut snd_last_v = v2;
+            let mut last_v = v3;
+            let mut last_pos = v3_pos;
+            'next_vertex: loop {
+                for v in vertex_neighbors.neighbors_of(last_v) {
+                    if v == snd_last_v {
+                        continue;
+                    }
+                    let edge_i = vertex_neighbors.edge_direction_index(last_v, v).unwrap();
+                    if v == v1 {
+                        assert!(!edge_direction_used[edge_i]);
+                        edge_direction_used[edge_i] = true;
+                        continue 'discover_faces;
+                    }
+                    if edge_direction_used[edge_i] {
+                        continue;
+                    }
+                    let pos = vertex_positions[v];
+                    let dir = pos - last_pos;
+                    if is_small(face_normal.dot(dir)) {
+                        face_boundary_vertices.add_directed_edge(new_face, v);
+                        edge_direction_used[edge_i] = true;
+                        snd_last_v = last_v;
+                        last_v = v;
+                        last_pos = pos;
+                        continue 'next_vertex;
+                    }
+                }
+                panic!("found dead end!");
+            }
+        }
+        face_boundary_vertices.maybe_shrink_capacity(0);
+        (face_boundary_vertices, normals)
+    }
+
+    fn compute_platonic_face_normals(vertex_positions: &[Pos3], face_boundary_vertices: &EdgeList) -> Vec<Vec3> {
+        face_boundary_vertices.neighbors().map(|boundary| {
+            boundary
+                .map(|v| vertex_positions[v].to_vec3())
+                .fold(Vec3::ZERO, std::ops::Add::add)
+                .normalized()
+        }).collect_vec()
+    }
+
+
+    /// connects the closest vertices to have edges,
+    /// posissions are assumed to lie centered around the origin
+    fn new_platonic_solid_from_positions(vertex_positions: Vec<Pos3>) -> Self 
+    {
+        debug_assert!(vertex_positions.len() >= 4); //this is supposed to form a platonic solid after all
+
+        let neighbor_vertex_dist = {
+            let v1 = vertex_positions[0];
+            vertex_positions[1..].iter().fold(f32::MAX, 
+                |acc, &v| f32::min((v - v1).length(), acc))
+        };
+
+        let mut vertex_neighbors = EdgeList::from_iter(
+            find_related!(vertex_positions, vertex_positions, 
+                |p1: Pos3, p2: Pos3| is_small((p1 - p2).length() - neighbor_vertex_dist)), 6);
+        vertex_neighbors.maybe_shrink_capacity(0);
+
+        let (face_boundary_vertices, face_normals) = 
+            Self::discover_platonic_solid_faces(
+                &vertex_positions, &vertex_neighbors);
+
+        debug_assert!({
+            let also_normals = Self::compute_platonic_face_normals(
+                &vertex_positions, &face_boundary_vertices);
+            let diff = also_normals
+                .iter()
+                .zip(face_normals.iter())
+                .fold(0.0, |acc, (&n1, &n2)| acc + (n1 - n2).length_sq());
+            is_small(diff) && also_normals.len() == face_normals.len()
+        });
+
+        Self { 
+            vertex_positions, 
+            vertex_neighbors, 
+            face_boundary_vertices, 
+            face_normals 
+        }
+    }
+
     pub fn new_cube(scale: f32) -> Self {
         let p = scale;
         let n = -scale;
@@ -69,34 +215,34 @@ impl ConvexPolyhedron {
             pos3(n, n, p),
             pos3(n, n, n),
         ];
-        let face_normals = vec![
-            Vec3::X,
-            -Vec3::X,
-            Vec3::Y,
-            -Vec3::Y,
-            Vec3::Z,
-            -Vec3::Z,
+        Self::new_platonic_solid_from_positions(vertex_positions)
+    }
+
+    pub fn new_icosahedron(scale: f32) -> Self {        
+        let a = scale;
+        let c = scale * (1.0 + f32::sqrt(5.0)) / 2.0;
+        let vertex_positions = vec![
+            pos3(0.0, a, c),
+            pos3(0.0, a, -c),
+            pos3(0.0, -a, c),
+            pos3(0.0, -a, -c),
+            pos3(a, c, 0.0),
+            pos3(a, -c, 0.0),
+            pos3(-a, c, 0.0),
+            pos3(-a, -c, 0.0),
+            pos3(c, 0.0, a),
+            pos3(c, 0.0, -a),
+            pos3(-c, 0.0, a),
+            pos3(-c, 0.0, -a),
         ];
-        let vertex_neighbors: Vec<Vec<usize>> = find_related!(vertex_positions, vertex_positions, 
-            |p1: Pos3, p2: Pos3| (1.9 * scale .. 2.1 * scale).contains(&(p1 - p2).length()));
-
-        let face_neighbors: Vec<Vec<usize>> = find_related!(face_normals, face_normals, 
-            |v1: Vec3, v2: Vec3| Vec3::dot(v1, v2) == 0.0);
-            
-        let mut face_boundary_vertices: Vec<Vec<usize>> = find_related!(face_normals, vertex_positions,
-            |v1: Vec3, p2: Pos3| Vec3::dot(v1, p2.to_vec3()) > 0.0);
-        for boundary in &mut face_boundary_vertices {
-            order_face_boundary(boundary, &vertex_neighbors);
-        }
-
-        Self { vertex_positions, vertex_neighbors, face_neighbors, face_boundary_vertices, face_normals }
+        Self::new_platonic_solid_from_positions(vertex_positions)
     }
 
     pub fn draw_visible_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
     {
-        for (&normal, boundary) in self.face_normals.iter().zip(self.face_boundary_vertices.iter()) {
+        for (&normal, boundary) in self.face_normals.iter().zip(self.face_boundary_vertices.neighbors()) {
             if to_screen.visible(normal) {
-                for (&v1, &v2) in boundary.iter().circular_tuple_windows() {
+                for (v1, v2) in boundary.circular_tuple_windows() {
                     let p1 = self.vertex_positions[v1];
                     let p2 = self.vertex_positions[v2];
 

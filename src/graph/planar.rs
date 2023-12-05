@@ -74,7 +74,7 @@ impl GraphDrawing {
     }
 
     pub fn sort_neigbors(&mut self) {
-        for (v1, neighs) in self.edges.neighbors_mut().enumerate() {
+        for (v1, neighs) in self.edges.potential_neighbors_mut().enumerate() {
             let p1 = self.positions[v1];
             //angles below range from -pi to pi. making them as distinct as possible while fitting into an isize integer
             //gives this scale.
