@@ -76,16 +76,19 @@ impl GraphDrawing {
     pub fn sort_neigbors(&mut self) {
         for (v1, neighs) in self.edges.potential_neighbors_mut().enumerate() {
             let p1 = self.positions[v1];
-            //angles below range from -pi to pi. making them as distinct as possible while fitting into an isize integer
-            //gives this scale.
-            const SCALE: f32 = (isize::MAX / 4) as f32;
-            neighs.sort_by_key(|&v2| {
-                if let Some(v) = v2.get() {
-                    let p2 = self.positions[v];
-                    ((p2 - p1).angle() * SCALE) as isize //floats dont implement Ord :(
-                }
-                else { isize::MAX }
-            });
+
+            let angle = |&i2:&Index| if let Some(v2) = i2.get() {
+                let p2 = self.positions[v2];
+                (p2 - p1).angle()
+            }
+            else { f32::MAX };
+
+            let order_floats = |f1: f32, f2: f32| 
+                if f1 < f2 { std::cmp::Ordering::Less }
+                else if f1 > f2 { std::cmp::Ordering::Greater }
+                else { std::cmp::Ordering::Equal };
+
+            neighs.sort_by(|n1, n2| order_floats(angle(n1), angle(n2)));
         }
     }
 

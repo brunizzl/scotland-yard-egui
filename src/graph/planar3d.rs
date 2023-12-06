@@ -162,6 +162,17 @@ impl ConvexPolyhedron {
         }).collect_vec()
     }
 
+    fn for_each_vertex_position(&mut self, mut f: impl FnMut(Pos3) -> Pos3) {
+        for v in &mut self.vertex_positions {
+            *v = f(*v);
+        }
+    }
+
+    fn rescale_vectices(mut self, scale: f32) -> Self {
+        self.for_each_vertex_position(|v| (v.to_vec3() * scale).to_pos3());
+        self
+    }
+
 
     /// connects the closest vertices to have edges,
     /// posissions are assumed to lie centered around the origin
@@ -202,9 +213,35 @@ impl ConvexPolyhedron {
         }
     }
 
+    pub fn new_tetrahedron(scale: f32) -> Self {
+        let a = 1.0;
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        let vs = vec![
+            pos3(a, 0.0, -s),
+            pos3(-a, 0.0, -s),
+            pos3(0.0, a, s),
+            pos3(0.0, -a, s),
+        ];
+        Self::new_platonic_solid_from_positions(vs)
+            .rescale_vectices(scale)
+    }
+
+    pub fn new_octahedron(scale: f32) -> Self {
+        let vs = vec![
+            pos3(1.0, 0.0, 0.0),
+            pos3(-1.0, 0.0, 0.0),
+            pos3(0.0, 1.0, 0.0),
+            pos3(0.0, -1.0, 0.0),
+            pos3(0.0, 0.0, 1.0),
+            pos3(0.0, 0.0, -1.0),
+        ];
+        Self::new_platonic_solid_from_positions(vs)
+            .rescale_vectices(scale)
+    }
+
     pub fn new_cube(scale: f32) -> Self {
-        let p = scale;
-        let n = -scale;
+        let p = 1.0;
+        let n = -1.0;
         let vertex_positions = vec![
             pos3(p, p, p),
             pos3(p, p, n),
@@ -216,12 +253,43 @@ impl ConvexPolyhedron {
             pos3(n, n, n),
         ];
         Self::new_platonic_solid_from_positions(vertex_positions)
+            .rescale_vectices(scale)
+    }
+
+    pub fn new_dodecahedron(scale: f32) -> Self {
+        let a = 1.0;
+        let p = (1.0 + f32::sqrt(5.0)) / 2.0;
+        let d = 2.0 / (1.0 + f32::sqrt(5.0));
+        let vs = vec![
+            pos3(a, a, a),
+            pos3(a, a, -a),
+            pos3(a, -a, a),
+            pos3(a, -a, -a),
+            pos3(-a, a, a),
+            pos3(-a, a, -a),
+            pos3(-a, -a, a),
+            pos3(-a, -a, -a),
+            pos3(0.0, p, d),
+            pos3(0.0, p, -d),
+            pos3(0.0, -p, d),
+            pos3(0.0, -p, -d),
+            pos3(d, 0.0, p),
+            pos3(d, 0.0, -p),
+            pos3(-d, 0.0, p),
+            pos3(-d, 0.0, -p),
+            pos3(p, d, 0.0),
+            pos3(p, -d, 0.0),
+            pos3(-p, d, 0.0),
+            pos3(-p, -d, 0.0),
+        ];
+        Self::new_platonic_solid_from_positions(vs)
+            .rescale_vectices(scale)
     }
 
     pub fn new_icosahedron(scale: f32) -> Self {        
-        let a = scale;
-        let c = scale * (1.0 + f32::sqrt(5.0)) / 2.0;
-        let vertex_positions = vec![
+        let a = 1.0;
+        let c = (1.0 + f32::sqrt(5.0)) / 2.0;
+        let vs = vec![
             pos3(0.0, a, c),
             pos3(0.0, a, -c),
             pos3(0.0, -a, c),
@@ -235,7 +303,8 @@ impl ConvexPolyhedron {
             pos3(-c, 0.0, a),
             pos3(-c, 0.0, -a),
         ];
-        Self::new_platonic_solid_from_positions(vertex_positions)
+        Self::new_platonic_solid_from_positions(vs)
+            .rescale_vectices(scale)
     }
 
     pub fn draw_visible_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
