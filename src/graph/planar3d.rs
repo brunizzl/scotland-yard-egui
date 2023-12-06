@@ -56,16 +56,10 @@ fn is_small(x: f32) -> bool {
 }
 
 impl ConvexPolyhedron {
-    fn discover_platonic_solid_faces(vertex_positions: &[Pos3], vertex_neighbors: &EdgeList) 
+    fn discover_flat_faces(vertex_positions: &[Pos3], vertex_neighbors: &EdgeList) 
         -> (EdgeList, Vec<Vec3>) 
     {
-
-        let degree = vertex_neighbors.min_degree();
-        assert_eq!(degree, vertex_neighbors.max_neighbors());
-        assert!(degree >= 3);
-
-        let nr_edge_directions = degree * vertex_positions.len(); //handshaking lemma
-        let mut edge_direction_used = vec![false; nr_edge_directions];
+        let mut unused_edges = vertex_neighbors.all_valid_edge_indices();
 
         let mut face_boundary_vertices = EdgeList::new(6, 0);
         let mut normals = Vec::new();
@@ -74,8 +68,8 @@ impl ConvexPolyhedron {
         //  we choose the vertex on the same plane as the first three.
         //also: we need to discover all faces in the same rotation direction, else we cant use the
         //  edge directions approach.
-        'discover_faces: while let Some(edge_index) = edge_direction_used.iter().position(|&e| !e) {
-            edge_direction_used[edge_index] = true;
+        'discover_faces: while let Some(edge_index) = unused_edges.iter().position(|&e| e) {
+            unused_edges[edge_index] = false;
             let (v1, v2) = vertex_neighbors.edge_at_index(edge_index);
             let new_face = face_boundary_vertices.push();
             face_boundary_vertices.add_directed_edge(new_face, v1);
@@ -95,7 +89,7 @@ impl ConvexPolyhedron {
                     continue;
                 }
                 let index_2_3 = vertex_neighbors.edge_direction_index(v2, v3_candidate).unwrap();
-                if edge_direction_used[index_2_3] {
+                if !unused_edges[index_2_3] {
                     continue;
                 }
                 let candidate_pos = vertex_positions[v3_candidate];
@@ -111,7 +105,7 @@ impl ConvexPolyhedron {
             }
             assert_ne!(v3, usize::MAX);
             let index_2_3 = vertex_neighbors.edge_direction_index(v2, v3).unwrap();
-            edge_direction_used[index_2_3] = true;
+            unused_edges[index_2_3] = false;
             face_boundary_vertices.add_directed_edge(new_face, v3);
             let v3_pos = vertex_positions[v3];
             let dir_2_3 = v3_pos - v2_pos;
@@ -128,18 +122,18 @@ impl ConvexPolyhedron {
                     }
                     let edge_i = vertex_neighbors.edge_direction_index(last_v, v).unwrap();
                     if v == v1 {
-                        assert!(!edge_direction_used[edge_i]);
-                        edge_direction_used[edge_i] = true;
+                        assert!(unused_edges[edge_i]);
+                        unused_edges[edge_i] = false;
                         continue 'discover_faces;
                     }
-                    if edge_direction_used[edge_i] {
+                    if !unused_edges[edge_i] {
                         continue;
                     }
                     let pos = vertex_positions[v];
                     let dir = pos - last_pos;
                     if is_small(face_normal.dot(dir)) {
                         face_boundary_vertices.add_directed_edge(new_face, v);
-                        edge_direction_used[edge_i] = true;
+                        unused_edges[edge_i] = false;
                         snd_last_v = last_v;
                         last_v = v;
                         last_pos = pos;
@@ -192,7 +186,7 @@ impl ConvexPolyhedron {
         vertex_neighbors.maybe_shrink_capacity(0);
 
         let (face_boundary_vertices, face_normals) = 
-            Self::discover_platonic_solid_faces(
+            Self::discover_flat_faces(
                 &vertex_positions, &vertex_neighbors);
 
         debug_assert!({
@@ -307,10 +301,10 @@ impl ConvexPolyhedron {
             .rescale_vectices(scale)
     }
 
-    pub fn draw_visible_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
+    pub fn draw_visible_faces(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
     {
         for (&normal, boundary) in self.face_normals.iter().zip(self.face_boundary_vertices.neighbors()) {
-            if to_screen.visible(normal) {
+            if to_screen.faces_camera(normal) {
                 for (v1, v2) in boundary.circular_tuple_windows() {
                     let p1 = self.vertex_positions[v1];
                     let p2 = self.vertex_positions[v2];
@@ -323,6 +317,26 @@ impl ConvexPolyhedron {
                 }
             }
         }
+    }
+
+    //draws edges on camera-facing half with strokes[0], others with strokes[1]
+    pub fn draw_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, strokes: [Stroke; 2]) {
+        for (v1, neighs) in self.vertex_neighbors.neighbors().enumerate() {
+            let p1 = self.vertex_positions[v1];
+            for v2 in neighs {
+                if v2 <= v1 { //skip edges already drawn the other way around
+                    continue;
+                }
+                let p2 = self.vertex_positions[v2];
+                let edge = [
+                    to_screen.apply(p1), 
+                    to_screen.apply(p2)];
+                let mid = p1.lerp(p2, 0.5).to_vec3();
+                let stroke = strokes[to_screen.faces_camera(mid) as usize];
+                let line = Shape::LineSegment { points: edge, stroke };
+                painter.add(line);
+            }
+        } 
     }
 }
 
