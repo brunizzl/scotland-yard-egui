@@ -477,7 +477,9 @@ impl State {
         }
     }
 
-    fn draw_numbers(&self, ui: &mut Ui, painter: &Painter, to_screen: emath::RectTransform, _scale: f32) {
+    fn draw_numbers(&self, ui: &mut Ui, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
+        let font = FontId::proportional(scale * 8.0);
+        let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
         for (i, &pos) in self.map.positions().iter().enumerate() {
             let txt = match self.vertex_info {
                 DrawNumbers::Indices => { i.to_string() }
@@ -485,7 +487,8 @@ impl State {
                 DrawNumbers::None => { panic!() }
                 DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
             };
-            let layout_job = LayoutJob::simple(txt, FontId::default(), WHITE, 100.0);
+            let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * scale);
+            layout_job.halign = Align::Center;
             let galley = ui.fonts(|f| f.layout_job(layout_job));
             let screen_pos = to_screen.transform_pos(pos);
             let text = Shape::Text(TextShape::new(screen_pos, galley));
