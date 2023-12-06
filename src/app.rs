@@ -10,6 +10,7 @@ const GREY: Color32 = Color32::from_rgb(130, 130, 150);
 const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
 const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
 const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
+const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
 const RED: Color32 = Color32::from_rgb(230, 50, 50);
 
 const COP_BLUE: Color32 = Color32::from_rgb(10, 50, 170);
@@ -51,9 +52,7 @@ impl Camera2D {
         }
     }
 
-    /// zoom changes happen with the cursor position as fixed point, thus 
-    /// with zooming we also change the offset
-    fn update_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
+    fn update(&mut self, ui: &mut Ui, response: Option<&Response>) {        
         ui.input(|info| {
             if info.pointer.button_down(PointerButton::Secondary) {
                 self.offset += info.pointer.delta();
@@ -63,27 +62,30 @@ impl Camera2D {
             let zoom_delta = info.zoom_delta();
             self.zoom *= zoom_delta;
             if zoom_delta != 1.0 {
-                if let Some(ptr_pos) = info.pointer.latest_pos() {
+                if let (Some(ptr_pos), Some(resp)) = (info.pointer.latest_pos(), response) {
                     //keep fixed point of zoom at mouse pointer
-                    let draw_mid = response.rect.center();
+                    let draw_mid = resp.rect.center();
                     let mid_to_ptr = ptr_pos - draw_mid;
                     let mut zoom_center = self.offset - mid_to_ptr;
                     zoom_center *= zoom_delta;
                     self.offset = zoom_center + mid_to_ptr;
                 }
             }
+            if let Some(drag) = info.multi_touch() {
+                self.offset += drag.translation_delta;
+            }
         });
+    }
+
+    /// zoom changes happen with the cursor position as fixed point, thus 
+    /// with zooming we also change the offset
+    fn update_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
+        self.update(ui, Some(response));
     }
 
     /// zoom changes don't change the offset at all
     fn update_screen_centered(&mut self, ui: &mut Ui) {
-        ui.input(|info| {
-            if info.pointer.button_down(PointerButton::Secondary) {
-                self.offset += info.pointer.delta();
-            }
-            self.offset += info.scroll_delta;
-            self.zoom *= info.zoom_delta();
-        });
+        self.update(ui, None);
     }
 
     fn reset(&mut self) {
