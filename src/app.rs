@@ -51,7 +51,9 @@ impl Camera2D {
         }
     }
 
-    fn update(&mut self, ui: &mut Ui, response: &Response) {
+    /// zoom changes happen with the cursor position as fixed point, thus 
+    /// with zooming we also change the offset
+    fn update_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
         ui.input(|info| {
             if info.pointer.button_down(PointerButton::Secondary) {
                 self.offset += info.pointer.delta();
@@ -59,7 +61,7 @@ impl Camera2D {
             self.offset += info.scroll_delta;
 
             let zoom_delta = info.zoom_delta();
-            self.zoom *= info.zoom_delta();
+            self.zoom *= zoom_delta;
             if zoom_delta != 1.0 {
                 if let Some(ptr_pos) = info.pointer.latest_pos() {
                     //keep fixed point of zoom at mouse pointer
@@ -70,6 +72,17 @@ impl Camera2D {
                     self.offset = zoom_center + mid_to_ptr;
                 }
             }
+        });
+    }
+
+    /// zoom changes don't change the offset at all
+    fn update_screen_centered(&mut self, ui: &mut Ui) {
+        ui.input(|info| {
+            if info.pointer.button_down(PointerButton::Secondary) {
+                self.offset += info.pointer.delta();
+            }
+            self.offset += info.scroll_delta;
+            self.zoom *= info.zoom_delta();
         });
     }
 

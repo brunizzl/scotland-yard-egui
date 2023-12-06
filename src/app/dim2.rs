@@ -579,7 +579,7 @@ impl State {
 
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());   
-        self.camera.update(ui, &response); 
+        self.camera.update_cursor_centered(ui, &response); 
 
         let (to_screen, scale) = self.build_to_screen(&response);
 
