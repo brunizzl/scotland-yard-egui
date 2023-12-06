@@ -12,7 +12,7 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let start_axes = [Vec3::X, Vec3::Y, Vec3::Z];
         let len = 0.5;
-        Self { map: ConvexPolyhedron::new_icosahedron(len), camera_axes: start_axes }
+        Self { map: ConvexPolyhedron::new_dodecahedron(len), camera_axes: start_axes }
     }
 
     fn update_axes(&mut self, mut f: impl FnMut(Vec3) -> Vec3) {
