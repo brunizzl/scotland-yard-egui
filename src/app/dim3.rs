@@ -1,22 +1,30 @@
 
 use egui::*;
 
-use crate::{ graph::ConvexPolyhedron, app::*, geo::{Vec3, vec3, self} };
+use crate::{ graph::ConvexPolyhedron, app::*, geo::{Vec3, self} };
+
+
+#[derive(Clone, Copy, PartialEq)]
+enum Platonic { Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron }
 
 pub struct State {
     map: ConvexPolyhedron,
-    camera_axes: [Vec3; 3],
+    map_shape: Platonic,
+    map_axes: [Vec3; 3], //rotated by dragging picture
 }
 
 impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let start_axes = [Vec3::X, Vec3::Y, Vec3::Z];
         let len = 0.5;
-        Self { map: ConvexPolyhedron::new_dodecahedron(len), camera_axes: start_axes }
+        Self { 
+            map: ConvexPolyhedron::new_cube(len), 
+            map_shape: Platonic::Cube, 
+            map_axes: [Vec3::X, Vec3::Y, Vec3::Z], 
+        }
     }
 
     fn update_axes(&mut self, mut f: impl FnMut(Vec3) -> Vec3) {
-        for axis in &mut self.camera_axes {
+        for axis in &mut self.map_axes {
             *axis = f(*axis);
         }
     }
@@ -34,9 +42,31 @@ impl State {
         self.update_axes(|v| v.rotate_z(angle))
     }
 
+    pub fn recompute_graph(&mut self) {
+        let scale = 0.5;
+        self.map = match self.map_shape {
+            Platonic::Cube => ConvexPolyhedron::new_cube(scale),
+            Platonic::Dodecahedron => ConvexPolyhedron::new_dodecahedron(scale),
+            Platonic::Icosahedron => ConvexPolyhedron::new_icosahedron(scale),
+            Platonic::Octahedron => ConvexPolyhedron::new_octahedron(scale),
+            Platonic::Tetrahedron => ConvexPolyhedron::new_tetrahedron(scale),
+        };
+    }
+
     pub fn draw_menu(&mut self, ui: &mut Ui) { 
         ui.horizontal(|ui| { 
             ui.label("coming soon!");
+        });
+        ui.collapsing("Form", |ui| {
+            let old_shape = self.map_shape;
+            ui.radio_value(&mut self.map_shape, Platonic::Tetrahedron, "Tetraeder");
+            ui.radio_value(&mut self.map_shape, Platonic::Octahedron, "Oktaeder");
+            ui.radio_value(&mut self.map_shape, Platonic::Cube, "Würfel");
+            ui.radio_value(&mut self.map_shape, Platonic::Icosahedron, "Ikosaeder");
+            ui.radio_value(&mut self.map_shape, Platonic::Dodecahedron, "Dodekaeder");
+            if self.map_shape != old_shape {
+                self.recompute_graph();
+            }
         });
     }
 
@@ -51,14 +81,9 @@ impl State {
 
         let to_screen = emath::RectTransform::from_to(from, to);
 
-        //we actually really would love the rotation to be inverted, thus we invert it.
-        //(because the implementation is a bit weird, 
-        // as in draw_graph the camera is dragged, instead of the graph's axes)
-        let axes = self.camera_axes.clone();
-        let v1 = vec3(axes[0].x, axes[1].x, axes[2].x);
-        let v2 = vec3(axes[0].y, axes[1].y, axes[2].y);
-        let v3 = vec3(axes[0].z, axes[1].z, axes[2].z);
-        let project = geo::Project3To2::new(v1, v2, v3);
+        //something something project is to camera coordinates,
+        //so we need to invert the axe's rotation or something
+        let project = geo::Project3To2::new_transposed(&self.map_axes);
         geo::ToScreen::new(project, to_screen)
     }
 
@@ -72,10 +97,10 @@ impl State {
         let point_response = ui.interact(*to_screen.move_rect.to(), background_id, Sense::drag());
         self.rotate_axes_x(point_response.drag_delta().y * -0.004);
         self.rotate_axes_y(point_response.drag_delta().x * -0.004);
-        geo::gram_schmidt_3d(&mut self.camera_axes);
+        geo::gram_schmidt_3d(&mut self.map_axes);
 
         let grey_stroke = Stroke::new(1.0, GREY);
-        self.map.draw_visible_edges(&to_screen, &painter, grey_stroke);
+        self.map.draw_visible_faces(&to_screen, &painter, grey_stroke);
     }
 
 }

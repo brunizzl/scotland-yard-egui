@@ -44,17 +44,24 @@ pub struct Project3To2 {
 }
 
 impl Project3To2 {
-    pub fn new(new_x: Vec3, new_y: Vec3, new_z: Vec3) -> Self {
+    pub fn new([a, b, c]: &[Vec3; 3]) -> Self {
         // assume normalized
-        debug_assert!(new_x.length().abs() - 1.0 < 1e-5);
-        debug_assert!(new_y.length().abs() - 1.0 < 1e-5);
-        debug_assert!(new_z.length().abs() - 1.0 < 1e-5);
+        debug_assert!(a.length().abs() - 1.0 < 1e-5);
+        debug_assert!(b.length().abs() - 1.0 < 1e-5);
+        debug_assert!(c.length().abs() - 1.0 < 1e-5);
 
         //assume orthogonal
-        debug_assert!(new_x.dot(new_y).abs() < 1e-5);
-        debug_assert!(new_x.dot(new_z).abs() < 1e-5);
-        debug_assert!(new_y.dot(new_z).abs() < 1e-5);
-        Self { new_x, new_y, new_z }
+        debug_assert!(a.dot(*b).abs() < 1e-5);
+        debug_assert!(a.dot(*c).abs() < 1e-5);
+        debug_assert!(b.dot(*c).abs() < 1e-5);
+        Self { new_x: *a, new_y: *b, new_z: *c }
+    }
+
+    pub fn new_transposed([a, b, c]: &[Vec3; 3]) -> Self {
+        let u = vec3(a.x, b.x, c.x);
+        let v = vec3(a.y, b.y, c.y);
+        let w = vec3(a.z, b.z, c.z);
+        Self::new(&[u, v, w])
     }
 
     /// positive if vec is in front of plane, negative if behind, zero if on subspace
@@ -91,7 +98,7 @@ impl ToScreen {
         self.move_rect.transform_pos(projected)
     }
 
-    pub fn visible(&self, face_normal: Vec3) -> bool {
+    pub fn faces_camera(&self, face_normal: Vec3) -> bool {
         self.to_plane.signed_dist(face_normal) > 0.0
     }
 }
