@@ -19,9 +19,9 @@ pub struct State {
 
 impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let len = 0.5;
+        let scale = 1.0;
         Self { 
-            map: ConvexPolyhedron::new_cube(len), 
+            map: ConvexPolyhedron::new_cube(scale), 
             map_shape: Platonic::Cube, 
             map_axes: DEFAULT_AXES, 
 
@@ -49,7 +49,7 @@ impl State {
     }
 
     pub fn recompute_graph(&mut self) {
-        let scale = 0.5;
+        let scale = 1.0;
         self.map = match self.map_shape {
             Platonic::Cube => ConvexPolyhedron::new_cube(scale),
             Platonic::Dodecahedron => ConvexPolyhedron::new_dodecahedron(scale),
