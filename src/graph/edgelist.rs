@@ -167,7 +167,8 @@ impl EdgeList {
         self.potential_neighbors().map(take_active)
     }
 
-    pub fn count(&self) -> usize {
+    #[allow(dead_code)]
+    pub fn count_entries(&self) -> usize {
         self.neighbors().fold(0, |acc, neigh| acc + neigh.len())
     }
 
@@ -175,6 +176,7 @@ impl EdgeList {
         self.entries.chunks_mut(self.max_neighbors)
     }
 
+    #[allow(dead_code)]
     pub fn neighbors_mut(&mut self) -> 
         impl ExactSizeIterator<Item = &mut [Index]> + '_ 
     {
@@ -223,6 +225,11 @@ impl EdgeList {
             let v1_neighs_range_start = v1 * self.max_neighbors;
             v1_neighs_range_start + v2_pos
         })
+    }
+
+    #[allow(dead_code)]
+    pub fn all_valid_edge_indices(&self) -> Vec<bool> {
+        self.entries.iter().map(|e| !e.is_none()).collect()
     }
 
     pub fn edge_at_index(&self, index: usize) -> (usize, usize) {
