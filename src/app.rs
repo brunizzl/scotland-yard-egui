@@ -33,6 +33,51 @@ fn add_drag_value(ui: &mut Ui, val: &mut usize, name: &str, min: usize, max: usi
     }).inner
 }
 
+#[derive(Clone, Copy)]
+struct Camera2D {
+    /// == 1.0 -> no change
+    /// < 1.0  -> zoomed out
+    /// > 1.0  -> zoomed in
+    zoom: f32, 
+    /// offset of center independent of zoom
+    offset: Vec2,
+}
+
+impl Camera2D {
+    fn new() -> Self {
+        Self { 
+            zoom: 1.0, 
+            offset: Vec2::new(0.0, 0.0), 
+        }
+    }
+
+    fn update(&mut self, ui: &mut Ui, response: &Response) {
+        ui.input(|info| {
+            if info.pointer.button_down(PointerButton::Secondary) {
+                self.offset += info.pointer.delta();
+            }
+            self.offset += info.scroll_delta;
+
+            let zoom_delta = info.zoom_delta();
+            self.zoom *= info.zoom_delta();
+            if zoom_delta != 1.0 {
+                if let Some(ptr_pos) = info.pointer.latest_pos() {
+                    //keep fixed point of zoom at mouse pointer
+                    let draw_mid = response.rect.center();
+                    let mid_to_ptr = ptr_pos - draw_mid;
+                    let mut zoom_center = self.offset - mid_to_ptr;
+                    zoom_center *= zoom_delta;
+                    self.offset = zoom_center + mid_to_ptr;
+                }
+            }
+        });
+    }
+
+    fn reset(&mut self) {
+        *self = Self::new();
+    }
+}
+
 pub struct State {
     state_2d: dim2::State,
     state_3d: dim3::State,
@@ -56,6 +101,7 @@ impl eframe::App for State {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+
 
         SidePanel::left("left_panel").show(ctx, |ui| {
             ui.vertical(|ui| {

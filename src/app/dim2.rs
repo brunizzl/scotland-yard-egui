@@ -103,6 +103,8 @@ pub struct State {
     tolerance: f32, //how close must a character be to a vertex to count as beeing on thet vertex
 
     queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
+
+    camera: Camera2D,
 }
 
 impl State {
@@ -177,6 +179,8 @@ impl State {
                 ],
             tolerance: 0.25,
             queue: VecDeque::new(),
+
+            camera: Camera2D::new(),
          };
          res.recompute_graph();
          res
@@ -292,6 +296,9 @@ impl State {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) {
+        if ui.button("🏠 Position").clicked() {
+            self.camera.reset();
+        }
         //adjust underlying graph
         ui.collapsing("Form", |ui| {
             let prev_shape = self.map_shape;
@@ -509,12 +516,12 @@ impl State {
             let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
             let character_id = response.id.with(i);
             let point_response = ui.interact(point_rect, character_id, Sense::drag());
-            character.pos = to_screen.inverse().transform_pos(real_screen_pos + point_response.drag_delta());
-            if point_response.drag_released() && character.on_node {
-                character.pos = node_pos; //snap actual character postion to node where he was dragged
-            }
-            if point_response.dragged() {
+            if point_response.dragged_by(PointerButton::Primary) {
+                character.pos = to_screen.inverse().transform_pos(real_screen_pos + point_response.drag_delta());
                 character.update(self.tolerance, &self.map, &mut self.queue);
+            }
+            if point_response.drag_released_by(PointerButton::Primary) && character.on_node {
+                character.pos = node_pos; //snap actual character postion to node where he was dragged
             }
 
             let fill_color = if character.is_cop { COP_BLUE } else { ROBBER_RED };
@@ -552,24 +559,27 @@ impl State {
 
     /// fst maps graph coordinates to screen, snd defines scale to draw edges etc. at
     fn build_to_screen(&self, response: &Response) -> (emath::RectTransform, f32) {
-
-        let from = Rect::from_min_max(pos2(-1.05, -1.05), pos2(1.05, 1.05));
+        let camera = self.camera;
+        let rect_min = vec2(-1.0, -1.0) / camera.zoom;
+        let rect_max = vec2(1.0, 1.0) / camera.zoom;
+        let from = Rect::from_min_max(rect_min.to_pos2(), rect_max.to_pos2());
 
         let rect_len = f32::min(response.rect.height(), response.rect.width());
         let to_middle = (response.rect.width() - rect_len) / 2.0;
-        let screen_min = response.rect.min + vec2(to_middle, 0.0);
+        let screen_min = response.rect.min + vec2(to_middle, 0.0) + camera.offset;
         let to = Rect::from_min_size(screen_min, vec2(rect_len, rect_len));
 
         let to_screen = emath::RectTransform::from_to(from, to);
         let scale = f32::min(rect_len / self.map_radius as f32 * 0.015, 4.0);
-        (to_screen, scale)
+        (to_screen, scale * camera.zoom)
     }
 
     pub fn draw_graph(&mut self, ui: &mut Ui) {
         self.maybe_update();
 
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
-        let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());    
+        let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());   
+        self.camera.update(ui, &response); 
 
         let (to_screen, scale) = self.build_to_screen(&response);
 
@@ -587,26 +597,5 @@ impl State {
             self.draw_cop_voronoi(&painter, to_screen, scale);
         }
         self.draw_characters(ui, &response, &painter, to_screen, scale);
-    }
-}
-
-impl eframe::App for State {
-
-    /// Called each time the UI needs repainting, which may be many times per second.
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
-
-        SidePanel::left("left_panel").show(ctx, |ui| {
-            ui.vertical(|ui| {
-                ui.heading("Optionen");
-                widgets::global_dark_light_mode_buttons(ui);
-                self.draw_menu(ui);
-            });
-        });
-
-        CentralPanel::default().show(ctx, |ui| {
-            self.draw_graph(ui);
-        });
     }
 }
