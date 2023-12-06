@@ -100,10 +100,10 @@ impl State {
 
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover()); 
-        self.camera_2d.update(ui, &response); 
 
         //use offset tu update rotation -> state is remembered by self.map_axes
         // -> offset can then be set back to 0.
+        self.camera_2d.update_screen_centered(ui); 
         self.rotate_axes_x(self.camera_2d.offset.y * -0.002 / self.camera_2d.zoom);
         self.rotate_axes_y(self.camera_2d.offset.x * -0.002 / self.camera_2d.zoom);
         geo::gram_schmidt_3d(&mut self.map_axes);
