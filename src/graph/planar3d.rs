@@ -216,8 +216,9 @@ impl ConvexPolyhedron {
             pos3(0.0, a, s),
             pos3(0.0, -a, s),
         ];
+        let corrected_scale = scale / vs[0].to_vec3().length();
         Self::new_platonic_solid_from_positions(vs)
-            .rescale_vectices(scale)
+            .rescale_vectices(corrected_scale)
     }
 
     pub fn new_octahedron(scale: f32) -> Self {
@@ -229,14 +230,15 @@ impl ConvexPolyhedron {
             pos3(0.0, 0.0, 1.0),
             pos3(0.0, 0.0, -1.0),
         ];
+        let corrected_scale = scale / vs[0].to_vec3().length();
         Self::new_platonic_solid_from_positions(vs)
-            .rescale_vectices(scale)
+            .rescale_vectices(corrected_scale)
     }
 
     pub fn new_cube(scale: f32) -> Self {
         let p = 1.0;
         let n = -1.0;
-        let vertex_positions = vec![
+        let vs = vec![
             pos3(p, p, p),
             pos3(p, p, n),
             pos3(p, n, p),
@@ -246,8 +248,9 @@ impl ConvexPolyhedron {
             pos3(n, n, p),
             pos3(n, n, n),
         ];
-        Self::new_platonic_solid_from_positions(vertex_positions)
-            .rescale_vectices(scale)
+        let corrected_scale = scale / vs[0].to_vec3().length();
+        Self::new_platonic_solid_from_positions(vs)
+            .rescale_vectices(corrected_scale)
     }
 
     pub fn new_dodecahedron(scale: f32) -> Self {
@@ -276,8 +279,9 @@ impl ConvexPolyhedron {
             pos3(-p, d, 0.0),
             pos3(-p, -d, 0.0),
         ];
+        let corrected_scale = scale / vs[0].to_vec3().length();
         Self::new_platonic_solid_from_positions(vs)
-            .rescale_vectices(scale)
+            .rescale_vectices(corrected_scale)
     }
 
     pub fn new_icosahedron(scale: f32) -> Self {        
@@ -297,8 +301,9 @@ impl ConvexPolyhedron {
             pos3(-c, 0.0, a),
             pos3(-c, 0.0, -a),
         ];
+        let corrected_scale = scale / vs[0].to_vec3().length();
         Self::new_platonic_solid_from_positions(vs)
-            .rescale_vectices(scale)
+            .rescale_vectices(corrected_scale)
     }
 
     pub fn draw_visible_faces(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
