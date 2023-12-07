@@ -8,25 +8,25 @@ use itertools::Itertools;
 
 use super::*;
 
-pub struct GraphDrawing {
+pub struct Embedding2D {
     positions: Vec<Pos2>,
     edges: EdgeList,
 }
 
-impl Default for GraphDrawing {
+impl Default for Embedding2D {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl GraphDrawing {
+impl Embedding2D {
     pub fn len(&self) -> usize {
         debug_assert_eq!(self.positions.len(), self.edges.len());
         self.positions.len()
     }
 
     pub fn empty() -> Self {
-        GraphDrawing { positions: Vec::new(), edges: EdgeList::empty() }
+        Embedding2D { positions: Vec::new(), edges: EdgeList::empty() }
     }
 
     pub fn add_vertex(&mut self, pos: Pos2) -> usize {
@@ -165,8 +165,8 @@ impl GraphDrawing {
 } //impl Graph
 
 /// centered at zero, contained in -1.0..1.0 x -1.0..1.0
-pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> GraphDrawing {
-    let mut graph = GraphDrawing::empty();
+pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Embedding2D {
+    let mut graph = Embedding2D::empty();
     graph.add_vertex(Pos2::ZERO);
     if levels < 1 {
         return graph;
@@ -215,13 +215,13 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> GraphDrawing
 }
 
 pub struct Triangualtion {
-    graph: GraphDrawing,
+    graph: Embedding2D,
     circumference: usize, //nr of edges on the outher rim
 }
 
 impl Triangualtion {
     pub fn new_wheel(circumference: usize) -> Self {
-        let mut graph = GraphDrawing::empty();
+        let mut graph = Embedding2D::empty();
         for v in 0..circumference {
             let angle = std::f32::consts::TAU * (v as f32) / (circumference as f32);
             let pos = pos2(angle.cos(), angle.sin());
@@ -498,7 +498,7 @@ impl Triangualtion {
     }
 } //impl Triangulation
 
-pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> GraphDrawing {
+pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Embedding2D {
     let r = radius as f32;
     let circumference = (std::f32::consts::TAU * r) as usize;
     let nr_nodes = (std::f32::consts::PI * r * r) as usize;
@@ -518,6 +518,6 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> GraphDrawin
     tri.graph
 }
 
-pub fn debugging_graph() -> GraphDrawing {
+pub fn debugging_graph() -> Embedding2D {
     Triangualtion::new_wheel(10).graph
 }
