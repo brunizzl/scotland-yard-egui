@@ -541,9 +541,13 @@ impl Embedding3D {
         }
     }
 
-    pub fn new_subdivided_icosahedron(divisions: usize) -> Self {
-        let ico = ConvexPolyhedron::new_icosahedron(1.0);
+    pub fn new_subdivided_icosahedron(scale: f32, divisions: usize) -> Self {
+        let ico = ConvexPolyhedron::new_icosahedron(scale);
         Self::subdivide_platonic_with_triangles(ico, divisions)
+    }
+
+    fn is_corner_vertex(&self, v: usize) -> bool {
+        v < self.surface.vertex_positions.len()
     }
 
     fn is_inner_vertex(&self, v: usize) -> bool {
@@ -566,7 +570,10 @@ impl Embedding3D {
             (false, true) => v2_visible,
             (true, false) => v1_visible,
             //works for all but corner vertices
-            (false, false) => v1_visible || v2_visible,
+            (false, false) => {
+                let corner = self.is_corner_vertex(v1) || self.is_corner_vertex(v2);
+                !corner && (v1_visible || v2_visible)
+            },
         }
     }
 
@@ -583,6 +590,15 @@ impl Embedding3D {
                 if self.edge_visible(v1, v2) {
                     visible_vertices[v1] = true;
                     visible_vertices[v2] = true;
+                }
+            }
+        }
+        let surface_face_iter = self.surface.face_boundary_vertices.neighbors()
+            .zip(self.surface.face_normals.iter());
+        for (boundary, &normal) in surface_face_iter {
+            if to_screen.faces_camera(normal) {
+                for v in boundary {
+                    visible_vertices[v] = true;
                 }
             }
         }
