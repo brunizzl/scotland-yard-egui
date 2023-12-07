@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
-use crate::{ graph::GraphDrawing, graph, app::* };
+use crate::{ graph::Embedding2D, graph, app::* };
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -49,7 +49,7 @@ impl Character {
     //  change to that neighbor
     //(converges to globally nearest node only for "convex" graphs, 
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
-    fn update(&mut self, tolerance: f32, map: &GraphDrawing, queue: &mut VecDeque<usize>) {
+    fn update(&mut self, tolerance: f32, map: &Embedding2D, queue: &mut VecDeque<usize>) {
         let safe_start = if map.len() > self.nearest_node { self.nearest_node } else { 0 };
         let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos, safe_start);
         self.on_node = nearest_dist_sq <= tolerance * tolerance;
@@ -78,7 +78,7 @@ impl Character {
 }
 
 pub struct State {
-    map: GraphDrawing,
+    map: Embedding2D,
 
     //overall map shape: == 2 is line, == 3 triangle, == 4 square, == 5 pentagon etc.
     map_shape: GraphShape,
@@ -155,7 +155,7 @@ impl State {
     /// Called once before the first frame.
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = State { 
-            map: GraphDrawing::empty(),
+            map: Embedding2D::empty(),
             map_shape: GraphShape::RegularPolygon(6),
             map_radius: 6,
 

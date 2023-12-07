@@ -61,6 +61,7 @@ fn take_active(xs: &[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
 /// allocates the same space for potential neighbors
 /// CAUTION: if not most vertices have close to the maximum degree (e.g. with one central vertex),
 /// this structre is way worse than using a vector for each vertices' neighbors.
+#[derive(Clone)]
 pub struct EdgeList {
     next_shrink_check_len: usize,
     max_neighbors: usize,
