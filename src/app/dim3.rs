@@ -1,7 +1,7 @@
 
 use egui::*;
 
-use crate::{ graph::{ConvexPolyhedron, Embedding3D}, app::*, geo::{Vec3, self} };
+use crate::{ graph::Embedding3D, app::*, geo::{Vec3, self} };
 
 
 #[derive(Clone, Copy, PartialEq)]
@@ -22,7 +22,7 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let scale = 1.0;
         Self { 
-            map: Embedding3D::new_subdivided_icosahedron(scale, 0), 
+            map: Embedding3D::new_subdivided_icosahedron(scale, 100), 
             map_shape: MapShape::Cube, 
             map_axes: DEFAULT_AXES, 
 
@@ -106,12 +106,9 @@ impl State {
         self.camera_2d.offset = Vec2::ZERO;
 
         let to_screen = self.build_to_screen(&response);
-        self.map.update_visibility(&to_screen);
 
         let grey_stroke = Stroke::new(1.0, GREY);
         self.map.draw_visible_edges(&to_screen, &painter, grey_stroke);
-        self.map.display_owning_face(&to_screen, ui, &painter, self.camera_2d.zoom);
-        //self.map.draw_visible_faces(&to_screen, &painter, grey_stroke);
     }
 
 }

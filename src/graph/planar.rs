@@ -49,7 +49,7 @@ impl Embedding2D {
     }
 
     pub fn add_path_edges<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
-        self.edges.add_path_edges(path)
+        self.edges.add_path_edges_ref(path)
     }
 
     pub fn positions(&self) -> &[Pos2] {
