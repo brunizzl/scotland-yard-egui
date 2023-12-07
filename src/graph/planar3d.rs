@@ -1,5 +1,8 @@
 
+use std::iter;
+
 use egui::*;
+use getrandom::Error;
 use itertools::Itertools;
 
 use crate::geo::{Pos3, Vec3, pos3, self};
@@ -391,23 +394,25 @@ impl ConvexPolyhedron {
     }
 }
 
+//range fst..lst, but also if 
+struct BidirectionalRange {
+    start: usize,
+    end: usize,
+}
+
 pub struct Embedding3D {
     /// all vertices are expected to lie on this surface.
     surface: ConvexPolyhedron,
-    /// which faces of surface are currently visible, 
-    /// thus needs update every frame
-    visible_faces: Vec<bool>, 
+    /// maps edges of surface to the sequence of vertex indices of self.vertices dividing that edge
+    /// (beginning and end vertices have the same index in self.vertices and self.surface.vertex_positions)
+    /// Vec is indexed by surface.vertex_neighbors.edge_direction_index
+    edge_dividing_vertices: Vec<std::ops::Range<usize>>,
+    /// indexed by surface's face index
+    inner_vertices: Vec<std::ops::Range<usize>>,
 
     /// position of each vertex
     vertices: Vec<Pos3>,
-    /// assumes to have all the boundary vertices listed in the beginning,
-    /// thus all vertices after this are inner vertices.
-    first_inner_vertex: usize,
-    /// index of face where that vertex lies inside (if that is the case)
-    /// else some face, where vertex is on boundary (not specified which)
-    owning_face: Vec<u16>,
-    visible_vertices: Vec<bool>,
-
+    /// neighbors of each vertex
     edges: EdgeList,
 }
 
@@ -417,13 +422,10 @@ impl Embedding3D {
         assert_eq!(surface.face_boundary_vertices.max_degree(), 3);
         let mut vertices = surface.vertex_positions.clone();
         let mut edges = EdgeList::new(6, vertices.len());
-        let mut owning_face = vec![u16::MAX; vertices.len()];
+        let mut edge_dividing_vertices = vec![0..0; surface.vertex_neighbors.used_space()];
+        let mut inner_vertices = Vec::new();
 
         let scaled_dir = |p1, p2| (p2 - p1) / ((divisions + 1) as f32);
-
-        //the indices of vertices lying on edges of the original icosahedron, grouped by on which edge they lie.
-        //edges are indexed by their edge index, however only the direction (v1, v2) where v1 < v2 is used.
-        let mut edge_vertices = vec![Vec::new(); surface.vertex_neighbors.used_space()];
         for boundary in surface.face_boundary_vertices.neighbors() {
             for (v1, v2) in boundary.circular_tuple_windows() {
                 if v1 > v2 {
@@ -432,56 +434,36 @@ impl Embedding3D {
                 let p1 = vertices[v1];
                 let p2 = vertices[v2];
                 let dir = scaled_dir(p1, p2);
-                let mut edge = vec![v1];
+                let fst_inner_edge_vertex = vertices.len();
                 for steps in 1..=divisions {
                     let p = p1 + (steps as f32) * dir;
                     let v = edges.push();
                     debug_assert_eq!(v, vertices.len());
-                    debug_assert_eq!(v, owning_face.len());
                     vertices.push(p);
-                    owning_face.push(u16::MAX);
-
-                    edge.push(v);
                 }
-                edge.push(v2);
-                edges.add_path_edges(edge.iter());
-                let edge_index = surface.vertex_neighbors.edge_direction_index(v1, v2);
-                edge_vertices[edge_index] = edge;
+                let inner = fst_inner_edge_vertex..(vertices.len());
+                let fw_edge = surface.vertex_neighbors.edge_direction_index(v1, v2);
+                let bw_edge = surface.vertex_neighbors.edge_direction_index(v2, v1);
+                edge_dividing_vertices[fw_edge] = inner.clone();
+                edge_dividing_vertices[bw_edge] = inner.clone();
+                edges.add_path_edges(iter::once(v1).chain(inner).chain(iter::once(v2)));
             }
         }
-        let first_inner_vertex = vertices.len();
-        assert_eq!(first_inner_vertex, owning_face.len());
-        assert_eq!(first_inner_vertex, edges.len());
+        assert_eq!(vertices.len(), edges.len());
 
         let mut boundary_vec = Vec::new(); //temporary to collect the boundary vertices in
-        for (face, boundary) in surface.face_boundary_vertices.neighbors().enumerate() {
-            let face = face as u16;
+        for boundary in surface.face_boundary_vertices.neighbors() {
             boundary_vec.clear();
             boundary_vec.extend(boundary);
             boundary_vec.sort();
             if let [v1, v2, v3] = boundary_vec[..] {
+                let fst_inner_face_vertex = vertices.len();
                 let edge_1_2_index = surface.vertex_neighbors.edge_direction_index(v1, v2);
                 let edge_1_3_index = surface.vertex_neighbors.edge_direction_index(v1, v3);
                 let edge_2_3_index = surface.vertex_neighbors.edge_direction_index(v2, v3);
-                let edge_1_2 = &edge_vertices[edge_1_2_index]; 
-                let edge_1_3 = &edge_vertices[edge_1_3_index];
-                let edge_2_3 = &edge_vertices[edge_2_3_index];
-                debug_assert_eq!(edge_1_2.first(), Some(&v1));
-                debug_assert_eq!(edge_1_2.last(), Some(&v2));
-                debug_assert_eq!(edge_1_3.first(), Some(&v1));
-                debug_assert_eq!(edge_1_3.last(), Some(&v3));
-                debug_assert_eq!(edge_2_3.first(), Some(&v2));
-                debug_assert_eq!(edge_2_3.last(), Some(&v3));
-                for edge in [edge_1_2, edge_1_3, edge_2_3] {
-                    let middle_v = edge[edge.len() / 2];
-                    //interlace boundary vertices between faces, that way only the 
-                    //edges at a corner ar not guaranteed to have one vertex in the visible
-                    //face
-                    let step = if owning_face[middle_v] == u16::MAX { 1 } else { 2 };
-                    for &v in edge.iter().step_by(step) {
-                        owning_face[v] = face;
-                    }
-                }
+                let edge_1_2 = edge_dividing_vertices[edge_1_2_index].clone(); 
+                let edge_1_3 = edge_dividing_vertices[edge_1_3_index].clone();
+                let edge_2_3 = edge_dividing_vertices[edge_2_3_index].clone();
 
                 let mut last_levels_nodes = vec![v1];
                 let p1 = vertices[v1];
@@ -490,22 +472,21 @@ impl Embedding3D {
                 let dir_1_2 = scaled_dir(p1, p2);
                 let dir_2_3 = scaled_dir(p2, p3);
                 //taken more or less directly from GraphDrawing::triangulated_regular_polygon
-                if divisions > 0 {                    
-                    for level in 1..=divisions {
+                if divisions > 0 {          
+                    for (bd_1_2, bd_2_3, level) in itertools::izip!(edge_1_2, edge_1_3, 1..) {
                         let level_start_pos = p1 + (level as f32) * dir_1_2;
-                        let mut this_levels_nodes =vec![edge_1_2[level]];
+                        let mut this_levels_nodes =vec![bd_1_2];
                         let nr_inner_nodes = level - 1;
                         for node in 1..=nr_inner_nodes {
                             let node_pos = level_start_pos + (node as f32) * dir_2_3;
                             let node_index = edges.push();
                             debug_assert_eq!(node_index, vertices.len());
                             vertices.push(node_pos);
-                            owning_face.push(face);
                             this_levels_nodes.push(node_index);
                         }
-                        this_levels_nodes.push(edge_1_3[level]);
+                        this_levels_nodes.push(bd_2_3);
                         //connect level to itself
-                        edges.add_path_edges(this_levels_nodes.iter());
+                        edges.add_path_edges_ref(this_levels_nodes.iter());
                         //connect level to previous level
                         //note: this differs from GraphDrawing::triangulated_regular_polygon, because we 
                         //  dont know how often we see an ico-edge as one of edge_1_2 and edge_2_3. 
@@ -513,30 +494,28 @@ impl Embedding3D {
                         //  they where constructed.
                         //level 1: none      2: /\     3: /\/\     4: /\/\/\       ...
                         let window = &this_levels_nodes[1..(this_levels_nodes.len() - 1)];
-                        edges.add_path_edges(last_levels_nodes.iter()
+                        edges.add_path_edges_ref(last_levels_nodes.iter()
                             .interleave(window.iter()));
 
                         last_levels_nodes = this_levels_nodes;
                     }
                 }
                 //connect last inner level to upper edge, e.g. edge_2_3
-                let window = &edge_2_3[1..(edge_2_3.len() - 1)];
-                edges.add_path_edges(last_levels_nodes.iter()
-                        .interleave(window.iter()));
+                edges.add_path_edges(last_levels_nodes.into_iter().interleave(edge_2_3));
+
+                let faces_inner = fst_inner_face_vertex..(vertices.len());
+                inner_vertices.push(faces_inner);
             }
             else {
                 panic!("expected input to only have treeangles as faces");
             }
         }
-        debug_assert!(owning_face.iter().all(|&f| f != u16::MAX));
 
         Self { 
             surface,
-            visible_faces: Vec::new(),
+            edge_dividing_vertices,
+            inner_vertices,
             vertices, 
-            first_inner_vertex,
-            owning_face,
-            visible_vertices: Vec::new(),
             edges,
         }
     }
@@ -546,99 +525,52 @@ impl Embedding3D {
         Self::subdivide_platonic_with_triangles(ico, divisions)
     }
 
-    fn is_corner_vertex(&self, v: usize) -> bool {
-        v < self.surface.vertex_positions.len()
-    }
-
-    fn is_inner_vertex(&self, v: usize) -> bool {
-        v >= self.first_inner_vertex
-    }
-
-    fn owning_face_of(&self, v: usize) -> usize {
-        self.owning_face[v] as usize
-    }
-
-    /// assumes no edges cross face boundaries
-    /// and that vertices subdividing a boundary alternate in which face they belong to.
-    /// this function is somewhat imprecise, as it only requires self.visible_faces to be up-to-date
-    /// and thus is only used as a helper in update_visibility
-    fn edge_visible(&self, v1: usize, v2: usize) -> bool {
-        let v1_visible = self.visible_faces[self.owning_face_of(v1)];
-        let v2_visible = self.visible_faces[self.owning_face_of(v2)];
-        match (self.is_inner_vertex(v1), self.is_inner_vertex(v2)) {
-            (true, true) => v1_visible && v2_visible,
-            (false, true) => v2_visible,
-            (true, false) => v1_visible,
-            //works for all but corner vertices
-            (false, false) => {
-                let corner = self.is_corner_vertex(v1) || self.is_corner_vertex(v2);
-                !corner && (v1_visible || v2_visible)
-            },
-        }
-    }
-
-    /// needs to be run at the start of each frame
-    pub fn update_visibility(&mut self, to_screen: &geo::ToScreen) {
-        self.visible_faces.clear();
-        self.visible_faces.extend(
-            self.surface.face_normals.iter().map(|&n| to_screen.faces_camera(n)));
-        let mut visible_vertices = std::mem::take(&mut self.visible_vertices);
-        visible_vertices.clear();
-        visible_vertices.resize(self.vertices.len(), false);
-        for (v1, neighs) in self.edges.neighbors().enumerate() {
-            for v2 in neighs {
-                if self.edge_visible(v1, v2) {
-                    visible_vertices[v1] = true;
-                    visible_vertices[v2] = true;
-                }
-            }
-        }
-        let surface_face_iter = self.surface.face_boundary_vertices.neighbors()
-            .zip(self.surface.face_normals.iter());
-        for (boundary, &normal) in surface_face_iter {
-            if to_screen.faces_camera(normal) {
-                for v in boundary {
-                    visible_vertices[v] = true;
-                }
-            }
-        }
-        self.visible_vertices = visible_vertices;
-    }
-
     pub fn draw_visible_edges(&mut self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) {
-        for (v1, neighs) in self.edges.neighbors().enumerate() {
-            for v2 in neighs {
-                if self.visible_vertices[v1] && self.visible_vertices[v2] {
-                    let p1 = self.vertices[v1];
-                    let p2 = self.vertices[v2];
-                    let edge = [
-                        to_screen.apply(p1), 
-                        to_screen.apply(p2)];
-                    let line = Shape::LineSegment { points: edge, stroke };
-                    painter.add(line);
-                }
-            }
-        }
-    }
-
-    pub fn display_owning_face(&self, to_screen: &geo::ToScreen, ui: &Ui, painter: &Painter, scale: f32) {
-        let font = FontId::proportional(scale * 8.0);
-        let color = Color32::from_rgb(255, 255, 255);
+        let draw = |vertices: &[Pos3], v1, v2| {
+            let edge = [
+                to_screen.apply(vertices[v1]), 
+                to_screen.apply(vertices[v2])];
+            let line = Shape::LineSegment { points: edge, stroke };
+            painter.add(line);
+        };
         let iter = itertools::izip!(
-            self.vertices.iter(), 
-            self.visible_vertices.iter(), 
-            self.owning_face.iter());
-        for (&p, &vis, &f) in iter {
-            if vis {
-                let txt = f.to_string();
-                use egui::text::*;
-                use egui::epaint::*;
-                let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * scale);
-                layout_job.halign = Align::Center;
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
-                let screen_pos = to_screen.apply(p);
-                let text = Shape::Text(TextShape::new(screen_pos, galley));
-                painter.add(text);
+            self.surface.face_normals.iter(), 
+            self.surface.face_boundary_vertices.neighbors(), 
+            self.inner_vertices.iter(),
+        );
+        let mut first_inner_dividing_edge_points = Vec::new();
+        for (&normal, corners, inner) in iter {
+            if to_screen.faces_camera(normal) {
+                //draw visible edges of self.surface
+                first_inner_dividing_edge_points.clear();
+                for (v1, v2) in corners.circular_tuple_windows() {
+                    draw(&self.vertices, v1, v2);                    
+                    let index = self.surface.vertex_neighbors.edge_direction_index(v1, v2);
+                    let edge = self.edge_dividing_vertices[index].clone();
+                    if !edge.is_empty() {
+                        first_inner_dividing_edge_points.push(edge.start);
+                        first_inner_dividing_edge_points.push(edge.end - 1);
+                    }
+                }
+                for &v1 in &first_inner_dividing_edge_points {
+                    for v2 in self.edges.neighbors_of(v1) {
+                        if first_inner_dividing_edge_points.contains(&v2) {
+                            draw(&self.vertices, v1, v2);
+                        }
+                    }
+                }
+                //draw edges of inner vertices
+                for v1 in inner.clone() {
+                    for v2 in self.edges.neighbors_of(v1) {
+                        //this inequality is important, as we know the vertices on the edges of the original surface
+                        //to have smaller index, than the inner vertices (and we know v1 is an inner vertex)
+                        //we thus only skip drawing those edges to other inner vertices, which we are guaranteed to
+                        //draw later.
+                        if v1 > v2 {
+                            draw(&self.vertices, v1, v2);
+                        }
+                    }
+                }
             }
         }
     }
