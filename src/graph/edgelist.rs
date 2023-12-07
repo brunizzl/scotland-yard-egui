@@ -73,6 +73,11 @@ impl EdgeList {
         self.length
     }
 
+    /// upper bound for edge indices
+    pub fn used_space(&self) -> usize {
+        self.entries.len()
+    }
+
     #[allow(dead_code)]
     pub fn max_neighbors(&self) -> usize {
         self.max_neighbors
@@ -220,11 +225,12 @@ impl EdgeList {
     }
 
     /// depends on self.max_neighbors
-    pub fn edge_direction_index(&self, v1: usize, v2: usize) -> Option<usize> {
+    pub fn edge_direction_index(&self, v1: usize, v2: usize) -> usize {
         self.neighbors_of(v1).position(|v| v == v2).map(|v2_pos| {
             let v1_neighs_range_start = v1 * self.max_neighbors;
             v1_neighs_range_start + v2_pos
         })
+        .unwrap()
     }
 
     #[allow(dead_code)]

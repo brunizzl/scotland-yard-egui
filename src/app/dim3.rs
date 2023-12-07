@@ -5,13 +5,13 @@ use crate::{ graph::ConvexPolyhedron, app::*, geo::{Vec3, self} };
 
 
 #[derive(Clone, Copy, PartialEq)]
-enum Platonic { Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron }
+enum MapShape { Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron, DividedIcosahedron }
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
 pub struct State {
     map: ConvexPolyhedron,
-    map_shape: Platonic,
+    map_shape: MapShape,
     map_axes: [Vec3; 3], //rotated by dragging picture
 
     camera_2d: Camera2D,
@@ -22,7 +22,7 @@ impl State {
         let scale = 1.0;
         Self { 
             map: ConvexPolyhedron::new_cube(scale), 
-            map_shape: Platonic::Cube, 
+            map_shape: MapShape::Cube, 
             map_axes: DEFAULT_AXES, 
 
             camera_2d: Camera2D::new(),
@@ -51,11 +51,12 @@ impl State {
     pub fn recompute_graph(&mut self) {
         let scale = 1.0;
         self.map = match self.map_shape {
-            Platonic::Cube => ConvexPolyhedron::new_cube(scale),
-            Platonic::Dodecahedron => ConvexPolyhedron::new_dodecahedron(scale),
-            Platonic::Icosahedron => ConvexPolyhedron::new_icosahedron(scale),
-            Platonic::Octahedron => ConvexPolyhedron::new_octahedron(scale),
-            Platonic::Tetrahedron => ConvexPolyhedron::new_tetrahedron(scale),
+            MapShape::Cube => ConvexPolyhedron::new_cube(scale),
+            MapShape::Dodecahedron => ConvexPolyhedron::new_dodecahedron(scale),
+            MapShape::Icosahedron => ConvexPolyhedron::new_icosahedron(scale),
+            MapShape::Octahedron => ConvexPolyhedron::new_octahedron(scale),
+            MapShape::Tetrahedron => ConvexPolyhedron::new_tetrahedron(scale),
+            MapShape::DividedIcosahedron => ConvexPolyhedron::new_subdivided_icosahedron(scale, 5),
         };
     }
 
@@ -66,11 +67,12 @@ impl State {
         }
         ui.collapsing("Form", |ui| {
             let old_shape = self.map_shape;
-            ui.radio_value(&mut self.map_shape, Platonic::Tetrahedron, "Tetraeder");
-            ui.radio_value(&mut self.map_shape, Platonic::Octahedron, "Oktaeder");
-            ui.radio_value(&mut self.map_shape, Platonic::Cube, "Würfel");
-            ui.radio_value(&mut self.map_shape, Platonic::Icosahedron, "Ikosaeder");
-            ui.radio_value(&mut self.map_shape, Platonic::Dodecahedron, "Dodekaeder");
+            ui.radio_value(&mut self.map_shape, MapShape::Tetrahedron, "Tetraeder");
+            ui.radio_value(&mut self.map_shape, MapShape::Octahedron, "Oktaeder");
+            ui.radio_value(&mut self.map_shape, MapShape::Cube, "Würfel");
+            ui.radio_value(&mut self.map_shape, MapShape::Icosahedron, "Ikosaeder");
+            ui.radio_value(&mut self.map_shape, MapShape::DividedIcosahedron, "geteilter Ikosaeder");
+            ui.radio_value(&mut self.map_shape, MapShape::Dodecahedron, "Dodekaeder");
             if self.map_shape != old_shape {
                 self.recompute_graph();
             }
@@ -112,6 +114,8 @@ impl State {
         let to_screen = self.build_to_screen(&response);
 
         let grey_stroke = Stroke::new(1.0, GREY);
+        let black_stroke = Stroke::new(1.0, BLACK);
+        let strokes = [grey_stroke, black_stroke];
         self.map.draw_visible_faces(&to_screen, &painter, grey_stroke);
     }
 
