@@ -5,7 +5,8 @@ use crate::{ graph::ConvexPolyhedron, app::*, geo::{Vec3, self} };
 
 
 #[derive(Clone, Copy, PartialEq)]
-enum MapShape { Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron, DividedIcosahedron }
+enum MapShape { Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron, 
+    DividedIcosahedron, DividedOctahedron, DividedTetrahedron }
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
@@ -57,6 +58,8 @@ impl State {
             MapShape::Octahedron => ConvexPolyhedron::new_octahedron(scale),
             MapShape::Tetrahedron => ConvexPolyhedron::new_tetrahedron(scale),
             MapShape::DividedIcosahedron => ConvexPolyhedron::new_subdivided_icosahedron(scale, 5),
+            MapShape::DividedOctahedron => ConvexPolyhedron::new_subdivided_octahedron(scale, 5),
+            MapShape::DividedTetrahedron => ConvexPolyhedron::new_subdivided_tetrahedron(scale, 5),
         };
     }
 
@@ -68,7 +71,9 @@ impl State {
         ui.collapsing("Form", |ui| {
             let old_shape = self.map_shape;
             ui.radio_value(&mut self.map_shape, MapShape::Tetrahedron, "Tetraeder");
+            ui.radio_value(&mut self.map_shape, MapShape::DividedTetrahedron, "geteilter Tetraeder");
             ui.radio_value(&mut self.map_shape, MapShape::Octahedron, "Oktaeder");
+            ui.radio_value(&mut self.map_shape, MapShape::DividedOctahedron, "geteilter Oktaeder");
             ui.radio_value(&mut self.map_shape, MapShape::Cube, "Würfel");
             ui.radio_value(&mut self.map_shape, MapShape::Icosahedron, "Ikosaeder");
             ui.radio_value(&mut self.map_shape, MapShape::DividedIcosahedron, "geteilter Ikosaeder");
@@ -114,8 +119,6 @@ impl State {
         let to_screen = self.build_to_screen(&response);
 
         let grey_stroke = Stroke::new(1.0, GREY);
-        let black_stroke = Stroke::new(1.0, BLACK);
-        let strokes = [grey_stroke, black_stroke];
         self.map.draw_visible_faces(&to_screen, &painter, grey_stroke);
     }
 

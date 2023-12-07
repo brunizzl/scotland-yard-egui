@@ -307,19 +307,40 @@ impl ConvexPolyhedron {
     }
 
     pub fn new_subdivided_icosahedron(scale: f32, divisions: usize) -> Self {
-        let ico = Self::new_icosahedron(1.0);
+        let iso = Self::new_icosahedron(1.0);
+        Self::subdivide_platonic_with_triangles(iso, divisions)
+            .rescale_vectices(scale)
+    }
+
+    pub fn new_subdivided_octahedron(scale: f32, divisions: usize) -> Self {
+        let oct = Self::new_octahedron(1.0);
+        Self::subdivide_platonic_with_triangles(oct, divisions)
+            .rescale_vectices(scale)
+    }
+
+    pub fn new_subdivided_tetrahedron(scale: f32, divisions: usize) -> Self {
+        let tet = Self::new_tetrahedron(1.0);
+        Self::subdivide_platonic_with_triangles(tet, divisions)
+            .rescale_vectices(scale)
+    }
+
+    /// each triangle of the original icosahedron is subdivided in smaller triangles, where divisions
+    /// denotes the number of vertices added per original boundary
+    fn subdivide_platonic_with_triangles(plat: Self, divisions: usize) -> Self {
+        assert_eq!(plat.face_boundary_vertices.min_degree(), 3);
+        assert_eq!(plat.face_boundary_vertices.max_degree(), 3);
         if divisions == 0 {
-            return ico.rescale_vectices(scale);
+            return plat;
         }
-        let mut vertex_positions = ico.vertex_positions.clone();
+        let mut vertex_positions = plat.vertex_positions.clone();
         let mut vertex_neighbors = EdgeList::new(6, vertex_positions.len());
 
         let scaled_dir = |p1, p2| (p2 - p1) / ((divisions + 1) as f32);
 
         //the indices of vertices lying on edges of the original icosahedron, grouped by on which edge they lie.
         //edges are indexed by their edge index, however only the direction (v1, v2) where v1 < v2 is used.
-        let mut edge_vertices = vec![Vec::new(); ico.vertex_neighbors.used_space()];
-        for boundary in ico.face_boundary_vertices.neighbors() {
+        let mut edge_vertices = vec![Vec::new(); plat.vertex_neighbors.used_space()];
+        for boundary in plat.face_boundary_vertices.neighbors() {
             for (v1, v2) in boundary.circular_tuple_windows() {
                 if v1 > v2 {
                     continue;
@@ -337,20 +358,20 @@ impl ConvexPolyhedron {
                 }
                 edge.push(v2);
                 vertex_neighbors.add_path_edges(edge.iter());
-                let edge_index = ico.vertex_neighbors.edge_direction_index(v1, v2);
+                let edge_index = plat.vertex_neighbors.edge_direction_index(v1, v2);
                 edge_vertices[edge_index] = edge;
             }
         }
 
         let mut boundary_vec = Vec::new(); //temporary to collect the boundary vertices in
-        for boundary in ico.face_boundary_vertices.neighbors() {
+        for boundary in plat.face_boundary_vertices.neighbors() {
             boundary_vec.clear();
             boundary_vec.extend(boundary);
             boundary_vec.sort();
             if let [v1, v2, v3] = boundary_vec[..] {
-                let edge_1_2_index = ico.vertex_neighbors.edge_direction_index(v1, v2);
-                let edge_1_3_index = ico.vertex_neighbors.edge_direction_index(v1, v3);
-                let edge_2_3_index = ico.vertex_neighbors.edge_direction_index(v2, v3);
+                let edge_1_2_index = plat.vertex_neighbors.edge_direction_index(v1, v2);
+                let edge_1_3_index = plat.vertex_neighbors.edge_direction_index(v1, v3);
+                let edge_2_3_index = plat.vertex_neighbors.edge_direction_index(v2, v3);
                 let edge_1_2 = &edge_vertices[edge_1_2_index]; 
                 let edge_1_3 = &edge_vertices[edge_1_3_index];
                 let edge_2_3 = &edge_vertices[edge_2_3_index];
@@ -404,6 +425,7 @@ impl ConvexPolyhedron {
             }
         }
 
+        //bring all vertives to sphere surface
         for pos in &mut vertex_positions {
             *pos = pos.to_vec3().normalized().to_pos3();
         }
@@ -417,7 +439,7 @@ impl ConvexPolyhedron {
             vertex_neighbors, 
             face_boundary_vertices, 
             face_normals 
-        }.rescale_vectices(scale)
+        }
     }
 
     pub fn draw_visible_faces(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
@@ -440,13 +462,6 @@ impl ConvexPolyhedron {
 
     /// draws edges on camera-facing half with strokes[0], others with strokes[1]
     pub fn draw_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, strokes: [Stroke; 2]) {
-        let edge_stroke = |v1: usize, v2: usize| {
-            let seed = v1 * v2 + 100;
-            let mut gen = crate::rand::LCG::new(seed as u64);
-            gen.waste(5);
-            let mut rnd = || (64 + (gen.next() % 128)) as u8;
-            Stroke::new(strokes[0].width, Color32::from_rgb(rnd(), rnd(), rnd()))
-        };
         for (v1, neighs) in self.vertex_neighbors.neighbors().enumerate() {
             let p1 = self.vertex_positions[v1];
             for v2 in neighs {
@@ -459,7 +474,6 @@ impl ConvexPolyhedron {
                     to_screen.apply(p2)];
                 let mid = p1.lerp(p2, 0.5).to_vec3();
                 let stroke = strokes[to_screen.faces_camera(mid) as usize];
-                let stroke = edge_stroke(v1, v2);
                 let line = Shape::LineSegment { points: edge, stroke };
                 painter.add(line);
             }

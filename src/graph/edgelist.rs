@@ -87,6 +87,7 @@ impl EdgeList {
         self.neighbors().fold(0, |acc, neighs| usize::max(acc, neighs.len()))
     }
 
+    #[allow(dead_code)]
     pub fn min_degree(&self) -> usize {
         self.neighbors().fold(usize::MAX, |acc, neighs| usize::min(acc, neighs.len()))
     }
