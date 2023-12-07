@@ -11,7 +11,7 @@ enum MapShape { Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron,
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
 pub struct State {
-    map: ConvexPolyhedron,
+    map: Embedding3D,
     map_shape: MapShape,
     map_axes: [Vec3; 3], //rotated by dragging picture
 
@@ -22,7 +22,7 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let scale = 1.0;
         Self { 
-            map: ConvexPolyhedron::new_cube(scale), 
+            map: Embedding3D::new_subdivided_icosahedron(scale, 0), 
             map_shape: MapShape::Cube, 
             map_axes: DEFAULT_AXES, 
 
@@ -50,17 +50,6 @@ impl State {
     }
 
     pub fn recompute_graph(&mut self) {
-        let scale = 1.0;
-        self.map = match self.map_shape {
-            MapShape::Cube => ConvexPolyhedron::new_cube(scale),
-            MapShape::Dodecahedron => ConvexPolyhedron::new_dodecahedron(scale),
-            MapShape::Icosahedron => ConvexPolyhedron::new_icosahedron(scale),
-            MapShape::Octahedron => ConvexPolyhedron::new_octahedron(scale),
-            MapShape::Tetrahedron => ConvexPolyhedron::new_tetrahedron(scale),
-            MapShape::DividedIcosahedron => ConvexPolyhedron::new_subdivided_icosahedron(scale, 5),
-            MapShape::DividedOctahedron => ConvexPolyhedron::new_subdivided_octahedron(scale, 5),
-            MapShape::DividedTetrahedron => ConvexPolyhedron::new_subdivided_tetrahedron(scale, 5),
-        };
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) { 
@@ -117,12 +106,12 @@ impl State {
         self.camera_2d.offset = Vec2::ZERO;
 
         let to_screen = self.build_to_screen(&response);
-        //self.map.update_visibility(&to_screen);
+        self.map.update_visibility(&to_screen);
 
         let grey_stroke = Stroke::new(1.0, GREY);
-        //self.map.draw_visible_edges(&to_screen, &painter, grey_stroke);
-        //self.map.display_owning_face(&to_screen, ui, &painter, self.camera_2d.zoom);
-        self.map.draw_visible_faces(&to_screen, &painter, grey_stroke);
+        self.map.draw_visible_edges(&to_screen, &painter, grey_stroke);
+        self.map.display_owning_face(&to_screen, ui, &painter, self.camera_2d.zoom);
+        //self.map.draw_visible_faces(&to_screen, &painter, grey_stroke);
     }
 
 }
