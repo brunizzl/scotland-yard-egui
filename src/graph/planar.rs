@@ -164,7 +164,7 @@ impl GraphDrawing {
 
 } //impl Graph
 
-//centered at zero, contained in -1.0..1.0 x -1.0..1.0
+/// centered at zero, contained in -1.0..1.0 x -1.0..1.0
 pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> GraphDrawing {
     let mut graph = GraphDrawing::empty();
     graph.add_vertex(Pos2::ZERO);
@@ -189,11 +189,11 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> GraphDrawing
     for ((b1, u1), (b2, u2)) in sector_borders.iter().circular_tuple_windows() {
         let unit_diff = *u2 - *u1;
         let mut last_levels_nodes = vec![0]; //lowest level contains only origin
-        for level in 1..(levels + 1) {
+        for level in 1..=levels {
             let level_start_pos = Pos2::ZERO + (level as f32) * *u1;
             let mut this_levels_nodes = vec![b1[level]];
             let nr_inner_nodes = level - 1;
-            for node in 1..(nr_inner_nodes + 1) {
+            for node in 1..=nr_inner_nodes {
                 let node_pos = level_start_pos + (node as f32) * unit_diff;
                 let node_index = graph.add_vertex(node_pos);
                 this_levels_nodes.push(node_index);

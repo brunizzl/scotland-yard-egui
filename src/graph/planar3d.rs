@@ -88,7 +88,7 @@ impl ConvexPolyhedron {
                 if v3_candidate == v1 {
                     continue;
                 }
-                let index_2_3 = vertex_neighbors.edge_direction_index(v2, v3_candidate).unwrap();
+                let index_2_3 = vertex_neighbors.edge_direction_index(v2, v3_candidate);
                 if !unused_edges[index_2_3] {
                     continue;
                 }
@@ -104,7 +104,7 @@ impl ConvexPolyhedron {
                 }
             }
             assert_ne!(v3, usize::MAX);
-            let index_2_3 = vertex_neighbors.edge_direction_index(v2, v3).unwrap();
+            let index_2_3 = vertex_neighbors.edge_direction_index(v2, v3);
             unused_edges[index_2_3] = false;
             face_boundary_vertices.add_directed_edge(new_face, v3);
             let v3_pos = vertex_positions[v3];
@@ -120,7 +120,7 @@ impl ConvexPolyhedron {
                     if v == snd_last_v {
                         continue;
                     }
-                    let edge_i = vertex_neighbors.edge_direction_index(last_v, v).unwrap();
+                    let edge_i = vertex_neighbors.edge_direction_index(last_v, v);
                     if v == v1 {
                         assert!(unused_edges[edge_i]);
                         unused_edges[edge_i] = false;
@@ -156,14 +156,14 @@ impl ConvexPolyhedron {
         }).collect_vec()
     }
 
-    fn for_each_vertex_position(&mut self, mut f: impl FnMut(Pos3) -> Pos3) {
+    fn for_each_vertex_as_vec3(&mut self, mut f: impl FnMut(Vec3) -> Vec3) {
         for v in &mut self.vertex_positions {
-            *v = f(*v);
+            *v = f(v.to_vec3()).to_pos3();
         }
     }
 
     fn rescale_vectices(mut self, scale: f32) -> Self {
-        self.for_each_vertex_position(|v| (v.to_vec3() * scale).to_pos3());
+        self.for_each_vertex_as_vec3(|v| v * scale);
         self
     }
 
@@ -306,6 +306,120 @@ impl ConvexPolyhedron {
             .rescale_vectices(corrected_scale)
     }
 
+    pub fn new_subdivided_icosahedron(scale: f32, divisions: usize) -> Self {
+        let ico = Self::new_icosahedron(1.0);
+        if divisions == 0 {
+            return ico.rescale_vectices(scale);
+        }
+        let mut vertex_positions = ico.vertex_positions.clone();
+        let mut vertex_neighbors = EdgeList::new(6, vertex_positions.len());
+
+        let scaled_dir = |p1, p2| (p2 - p1) / ((divisions + 1) as f32);
+
+        //the indices of vertices lying on edges of the original icosahedron, grouped by on which edge they lie.
+        //edges are indexed by their edge index, however only the direction (v1, v2) where v1 < v2 is used.
+        let mut edge_vertices = vec![Vec::new(); ico.vertex_neighbors.used_space()];
+        for boundary in ico.face_boundary_vertices.neighbors() {
+            for (v1, v2) in boundary.circular_tuple_windows() {
+                if v1 > v2 {
+                    continue;
+                }
+                let p1 = vertex_positions[v1];
+                let p2 = vertex_positions[v2];
+                let dir = scaled_dir(p1, p2);
+                let mut edge = vec![v1];
+                for steps in 1..=divisions {
+                    let p = p1 + (steps as f32) * dir;
+                    let v = vertex_neighbors.push();
+                    debug_assert_eq!(v, vertex_positions.len());
+                    vertex_positions.push(p);
+                    edge.push(v);
+                }
+                edge.push(v2);
+                vertex_neighbors.add_path_edges(edge.iter());
+                let edge_index = ico.vertex_neighbors.edge_direction_index(v1, v2);
+                edge_vertices[edge_index] = edge;
+            }
+        }
+
+        let mut boundary_vec = Vec::new(); //temporary to collect the boundary vertices in
+        for boundary in ico.face_boundary_vertices.neighbors() {
+            boundary_vec.clear();
+            boundary_vec.extend(boundary);
+            boundary_vec.sort();
+            if let [v1, v2, v3] = boundary_vec[..] {
+                let edge_1_2_index = ico.vertex_neighbors.edge_direction_index(v1, v2);
+                let edge_1_3_index = ico.vertex_neighbors.edge_direction_index(v1, v3);
+                let edge_2_3_index = ico.vertex_neighbors.edge_direction_index(v2, v3);
+                let edge_1_2 = &edge_vertices[edge_1_2_index]; 
+                let edge_1_3 = &edge_vertices[edge_1_3_index];
+                let edge_2_3 = &edge_vertices[edge_2_3_index];
+                debug_assert_eq!(edge_1_2.first(), Some(&v1));
+                debug_assert_eq!(edge_1_2.last(), Some(&v2));
+                debug_assert_eq!(edge_1_3.first(), Some(&v1));
+                debug_assert_eq!(edge_1_3.last(), Some(&v3));
+                debug_assert_eq!(edge_2_3.first(), Some(&v2));
+                debug_assert_eq!(edge_2_3.last(), Some(&v3));
+
+                let mut last_levels_nodes = vec![v1];
+                let p1 = vertex_positions[v1];
+                let p2 = vertex_positions[v2];
+                let p3 = vertex_positions[v3];
+                let dir_1_2 = scaled_dir(p1, p2);
+                let dir_2_3 = scaled_dir(p2, p3);
+                //taken more or less directly from GraphDrawing::triangulated_regular_polygon
+                for level in 1..=divisions {
+                    let level_start_pos = p1 + (level as f32) * dir_1_2;
+                    let mut this_levels_nodes =vec![edge_1_2[level]];
+                    let nr_inner_nodes = level - 1;
+                    for node in 1..=nr_inner_nodes {
+                        let node_pos = level_start_pos + (node as f32) * dir_2_3;
+                        let node_index = vertex_neighbors.push();
+                        debug_assert_eq!(node_index, vertex_positions.len());
+                        vertex_positions.push(node_pos);
+                        this_levels_nodes.push(node_index);
+                    }
+                    this_levels_nodes.push(edge_1_3[level]);
+                    //connect level to itself
+                    vertex_neighbors.add_path_edges(this_levels_nodes.iter());
+                    //connect level to previous level
+                    //note: this differs from GraphDrawing::triangulated_regular_polygon, because we 
+                    //  dont know how often we see an ico-edge as one of edge_1_2 and edge_2_3. 
+                    //to not add existing connections, we connected the divided ico edges already when 
+                    //  they where constructed.
+                    //level 1: none      2: /\     3: /\/\     4: /\/\/\       ...
+                    let window = &this_levels_nodes[1..(this_levels_nodes.len() - 1)];
+                    vertex_neighbors.add_path_edges(last_levels_nodes.iter()
+                        .interleave(window.iter()));
+
+                    last_levels_nodes = this_levels_nodes;
+                }
+                //connect last inner level to upper edge, e.g. edge_2_3
+                let window = &edge_2_3[1..(edge_2_3.len() - 1)];
+                vertex_neighbors.add_path_edges(last_levels_nodes.iter()
+                        .interleave(window.iter()));
+            }
+            else {
+                panic!("an icosahedron only consists of treeangles");
+            }
+        }
+
+        for pos in &mut vertex_positions {
+            *pos = pos.to_vec3().normalized().to_pos3();
+        }
+
+        let (face_boundary_vertices, face_normals) = 
+            Self::discover_flat_faces(
+                &vertex_positions, &vertex_neighbors);
+
+        Self { 
+            vertex_positions, 
+            vertex_neighbors, 
+            face_boundary_vertices, 
+            face_normals 
+        }.rescale_vectices(scale)
+    }
+
     pub fn draw_visible_faces(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
     {
         for (&normal, boundary) in self.face_normals.iter().zip(self.face_boundary_vertices.neighbors()) {
@@ -324,8 +438,15 @@ impl ConvexPolyhedron {
         }
     }
 
-    //draws edges on camera-facing half with strokes[0], others with strokes[1]
+    /// draws edges on camera-facing half with strokes[0], others with strokes[1]
     pub fn draw_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, strokes: [Stroke; 2]) {
+        let edge_stroke = |v1: usize, v2: usize| {
+            let seed = v1 * v2 + 100;
+            let mut gen = crate::rand::LCG::new(seed as u64);
+            gen.waste(5);
+            let mut rnd = || (64 + (gen.next() % 128)) as u8;
+            Stroke::new(strokes[0].width, Color32::from_rgb(rnd(), rnd(), rnd()))
+        };
         for (v1, neighs) in self.vertex_neighbors.neighbors().enumerate() {
             let p1 = self.vertex_positions[v1];
             for v2 in neighs {
@@ -338,6 +459,7 @@ impl ConvexPolyhedron {
                     to_screen.apply(p2)];
                 let mid = p1.lerp(p2, 0.5).to_vec3();
                 let stroke = strokes[to_screen.faces_camera(mid) as usize];
+                let stroke = edge_stroke(v1, v2);
                 let line = Shape::LineSegment { points: edge, stroke };
                 painter.add(line);
             }
