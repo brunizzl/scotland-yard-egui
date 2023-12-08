@@ -20,7 +20,7 @@ pub fn left_of_line((a, dir): Line2, p: Pos2) -> bool {
     signed_dist((a, dir), p) < 0.0
 }
 
-//assumes dir to be normalized.
+/// assumes dir to be normalized.
 pub fn signed_dist((a, dir): Line2, p: Pos2) -> f32 {
     dir.x * (a.y - p.y) - dir.y * (a.x - p.x)
 }
@@ -28,6 +28,20 @@ pub fn signed_dist((a, dir): Line2, p: Pos2) -> f32 {
 pub fn project_to_line((a, dir): Line2, p: Pos2) -> Pos2 {
     //dividing by length squared normalized both occurences of dir at once.
     a + Vec2::dot(p - a, dir) / dir.length_sq() * dir
+}
+
+/// returns [`t`] in [`a + t * da = b + s * db`]
+pub fn intersection_step((a, da): Line2, (b, db): Line2) -> f32 {
+    //a, da == p, r
+    //b, db == q, s
+    let numerator = (a.y - b.y) * db.x - (a.x - b.x) * db.y;
+    let denominator = da.x * db.y - da.y * db.x;
+    numerator / denominator
+}
+
+pub fn lines_intersect(l1: Line2, l2: Line2) -> bool {
+    (0.0..=1.0).contains(&intersection_step(l1, l2)) &&
+    (0.0..=1.0).contains(&intersection_step(l2, l1))
 }
 
 /// takes Vec3 to Vec2 where the subspace is spanned by new_x_axis and new_y_axis
@@ -86,11 +100,18 @@ impl Project3To2 {
 pub struct ToScreen {
     pub to_plane: Project3To2,
     pub move_rect: RectTransform,
+
+    screen_boundaries: [Line2; 4],
 }
 
 impl ToScreen {
     pub fn new(project: Project3To2, to_screen: RectTransform) -> Self {
-        Self { to_plane: project, move_rect: to_screen }
+        let screen = to_screen.to();
+        let b1 = line_from_to(screen.left_bottom(), screen.left_top());
+        let b2 = line_from_to(screen.left_top(), screen.right_top());
+        let b3 = line_from_to(screen.right_top(), screen.right_bottom());
+        let b4 = line_from_to(screen.right_bottom(), screen.left_bottom());
+        Self { to_plane: project, move_rect: to_screen, screen_boundaries: [b1, b2, b3, b4] }
     }
 
     pub fn apply(&self, pos: Pos3) -> Pos2 {
@@ -100,6 +121,47 @@ impl ToScreen {
 
     pub fn faces_camera(&self, face_normal: Vec3) -> bool {
         self.to_plane.signed_dist(face_normal) > 0.0
+    }
+
+    fn crosses_screen_boundary(&self, line: Line2) -> bool {
+        self.screen_boundaries.iter().any(|&b| lines_intersect(b, line))
+    }
+
+    /// assumes a, b, c to be ordered counterclockwise
+    pub fn triangle_visible(&self, a: Pos3, b: Pos3, c: Pos3) -> bool {
+        
+        let u = self.apply(a);
+        let v = self.apply(b);
+        let w = self.apply(c);
+        let screen = self.move_rect.to();
+        
+        if screen.contains(u) || screen.contains(v) || screen.contains(w) {
+            //at least one corner is visible
+            return true;
+        }
+
+        let line_uv = line_from_to(u, v);
+        let line_vw = line_from_to(v, w);
+        let line_wu = line_from_to(w, u);
+        if self.crosses_screen_boundary(line_uv)
+        || self.crosses_screen_boundary(line_vw)
+        || self.crosses_screen_boundary(line_wu) {
+            //at least one edge is visible
+            return true;
+        }
+        //if we get here, we know, that no part of the triangle an the screen boundary intersect,
+        //and that no point of the triangle is contained in the screen.
+        //thus the only option left is for the screen to be completely contained in the triangle.
+        //which screen point we test to lie inside the triangle is thus irrelevant.
+        //just to be save numerically, we use the center.
+        let screen_center = screen.center();
+        if !left_of_line(line_uv, screen_center)
+        && !left_of_line(line_vw, screen_center)
+        && !left_of_line(line_wu, screen_center) {
+            return true;
+        }
+
+        false
     }
 }
 
