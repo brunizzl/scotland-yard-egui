@@ -5,8 +5,7 @@ use crate::{ graph::Embedding3D, app::*, geo::{Vec3, self} };
 
 
 #[derive(Clone, Copy, PartialEq)]
-enum MapShape { Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron, 
-    DividedIcosahedron, DividedOctahedron, DividedTetrahedron }
+enum MapShape { Tetrahedron, Octahedron, Icosahedron }
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
@@ -14,17 +13,20 @@ pub struct State {
     map: Embedding3D,
     map_shape: MapShape,
     map_axes: [Vec3; 3], //rotated by dragging picture
+    map_radius: usize,
 
     camera_2d: Camera2D,
 }
 
 impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let scale = 1.0;
+        let s = 1.0;
+        let r = 10;
         Self { 
-            map: Embedding3D::new_subdivided_icosahedron(scale, 100), 
-            map_shape: MapShape::Cube, 
+            map: Embedding3D::new_subdivided_icosahedron(s, r), 
+            map_shape: MapShape::Icosahedron, 
             map_axes: DEFAULT_AXES, 
+            map_radius: r,
 
             camera_2d: Camera2D::new(),
         }
@@ -50,6 +52,13 @@ impl State {
     }
 
     pub fn recompute_graph(&mut self) {
+        let s = 1.0;
+        let r = self.map_radius;
+        self.map = match self.map_shape {
+            MapShape::Icosahedron => Embedding3D::new_subdivided_icosahedron(s, r),
+            MapShape::Octahedron => Embedding3D::new_subdivided_octahedron(s, r),
+            MapShape::Tetrahedron => Embedding3D::new_subdivided_tetrahedron(s, r),
+        };
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) { 
@@ -60,14 +69,12 @@ impl State {
         ui.collapsing("Form", |ui| {
             let old_shape = self.map_shape;
             ui.radio_value(&mut self.map_shape, MapShape::Tetrahedron, "Tetraeder");
-            ui.radio_value(&mut self.map_shape, MapShape::DividedTetrahedron, "geteilter Tetraeder");
             ui.radio_value(&mut self.map_shape, MapShape::Octahedron, "Oktaeder");
-            ui.radio_value(&mut self.map_shape, MapShape::DividedOctahedron, "geteilter Oktaeder");
-            ui.radio_value(&mut self.map_shape, MapShape::Cube, "Würfel");
             ui.radio_value(&mut self.map_shape, MapShape::Icosahedron, "Ikosaeder");
-            ui.radio_value(&mut self.map_shape, MapShape::DividedIcosahedron, "geteilter Ikosaeder");
-            ui.radio_value(&mut self.map_shape, MapShape::Dodecahedron, "Dodekaeder");
             if self.map_shape != old_shape {
+                self.recompute_graph();
+            }
+            if add_drag_value(ui, &mut self.map_radius, "Radius: ", 0, 1000) {
                 self.recompute_graph();
             }
         });
@@ -107,7 +114,8 @@ impl State {
 
         let to_screen = self.build_to_screen(&response);
 
-        let grey_stroke = Stroke::new(1.0, GREY);
+        let scale = self.camera_2d.zoom / (self.map_radius as f32);
+        let grey_stroke = Stroke::new(scale * 10.0, GREY);
         self.map.draw_visible_edges(&to_screen, &painter, grey_stroke);
     }
 

@@ -2,7 +2,6 @@
 use std::iter;
 
 use egui::*;
-use getrandom::Error;
 use itertools::Itertools;
 
 use crate::geo::{Pos3, Vec3, pos3, self};
@@ -394,12 +393,6 @@ impl ConvexPolyhedron {
     }
 }
 
-//range fst..lst, but also if 
-struct BidirectionalRange {
-    start: usize,
-    end: usize,
-}
-
 pub struct Embedding3D {
     /// all vertices are expected to lie on this surface.
     surface: ConvexPolyhedron,
@@ -507,7 +500,7 @@ impl Embedding3D {
                 inner_vertices.push(faces_inner);
             }
             else {
-                panic!("expected input to only have treeangles as faces");
+                panic!("expected input to only have triangles as faces");
             }
         }
 
@@ -525,6 +518,16 @@ impl Embedding3D {
         Self::subdivide_platonic_with_triangles(ico, divisions)
     }
 
+    pub fn new_subdivided_tetrahedron(scale: f32, divisions: usize) -> Self {
+        let tet = ConvexPolyhedron::new_tetrahedron(scale);
+        Self::subdivide_platonic_with_triangles(tet, divisions)
+    }
+
+    pub fn new_subdivided_octahedron(scale: f32, divisions: usize) -> Self {
+        let oct = ConvexPolyhedron::new_octahedron(scale);
+        Self::subdivide_platonic_with_triangles(oct, divisions)
+    }
+
     pub fn draw_visible_edges(&mut self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) {
         let draw = |vertices: &[Pos3], v1, v2| {
             let edge = [
@@ -535,41 +538,39 @@ impl Embedding3D {
         };
         let iter = itertools::izip!(
             self.surface.face_normals.iter(), 
-            self.surface.face_boundary_vertices.neighbors(), 
-            self.inner_vertices.iter(),
+            self.surface.face_boundary_vertices.neighbors(),
         );
-        let mut first_inner_dividing_edge_points = Vec::new();
-        for (&normal, corners, inner) in iter {
+        let mut corners_vec = Vec::new();
+        for (&normal, corners) in iter {
             if to_screen.faces_camera(normal) {
                 //draw visible edges of self.surface
-                first_inner_dividing_edge_points.clear();
-                for (v1, v2) in corners.circular_tuple_windows() {
-                    draw(&self.vertices, v1, v2);                    
-                    let index = self.surface.vertex_neighbors.edge_direction_index(v1, v2);
-                    let edge = self.edge_dividing_vertices[index].clone();
-                    if !edge.is_empty() {
-                        first_inner_dividing_edge_points.push(edge.start);
-                        first_inner_dividing_edge_points.push(edge.end - 1);
+                corners_vec.clear();
+                corners_vec.extend(corners);
+                corners_vec.sort();
+                for (&v1, &v2) in corners_vec.iter().circular_tuple_windows() {
+                    draw(&self.vertices, v1, v2);
+                }
+                if let [v1, v2, v3] = corners_vec[..] {
+                    //this dosn't draw each actual tiny edge, but instead all edges lying in 
+                    //  one line at once.
+                    let edge_1_2_index = self.surface.vertex_neighbors.edge_direction_index(v1, v2);
+                    let edge_1_3_index = self.surface.vertex_neighbors.edge_direction_index(v1, v3);
+                    let edge_2_3_index = self.surface.vertex_neighbors.edge_direction_index(v2, v3);
+                    let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index].clone(); 
+                    let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index].clone();
+                    let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index].clone();
+                    for (v1, v2) in edge_1_2.clone().zip(edge_1_3.clone()) {
+                        draw(&self.vertices, v1, v2);
+                    }
+                    for (v1, v2) in edge_2_3.clone().zip(edge_1_3.clone()) {
+                        draw(&self.vertices, v1, v2);
+                    }
+                    for (v1, v2) in edge_1_2.clone().zip(edge_2_3.clone().rev()) {
+                        draw(&self.vertices, v1, v2);
                     }
                 }
-                for &v1 in &first_inner_dividing_edge_points {
-                    for v2 in self.edges.neighbors_of(v1) {
-                        if first_inner_dividing_edge_points.contains(&v2) {
-                            draw(&self.vertices, v1, v2);
-                        }
-                    }
-                }
-                //draw edges of inner vertices
-                for v1 in inner.clone() {
-                    for v2 in self.edges.neighbors_of(v1) {
-                        //this inequality is important, as we know the vertices on the edges of the original surface
-                        //to have smaller index, than the inner vertices (and we know v1 is an inner vertex)
-                        //we thus only skip drawing those edges to other inner vertices, which we are guaranteed to
-                        //draw later.
-                        if v1 > v2 {
-                            draw(&self.vertices, v1, v2);
-                        }
-                    }
+                else {
+                    panic!("expected triangle as face");
                 }
             }
         }
