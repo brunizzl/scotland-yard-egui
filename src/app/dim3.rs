@@ -5,7 +5,7 @@ use crate::{ graph::Embedding3D, app::*, geo::{Vec3, self} };
 
 
 #[derive(Clone, Copy, PartialEq)]
-enum MapShape { Tetrahedron, Octahedron, Icosahedron }
+enum MapShape { Tetrahedron, Octahedron, Icosahedron, DividedIcosahedron }
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
@@ -23,8 +23,8 @@ impl State {
         let s = 1.0;
         let r = 10;
         Self { 
-            map: Embedding3D::new_subdivided_icosahedron(s, r), 
-            map_shape: MapShape::Icosahedron, 
+            map: Embedding3D::new_subdivided_tetrahedron(s, r), 
+            map_shape: MapShape::Tetrahedron, 
             map_axes: DEFAULT_AXES, 
             map_radius: r,
 
@@ -58,6 +58,7 @@ impl State {
             MapShape::Icosahedron => Embedding3D::new_subdivided_icosahedron(s, r),
             MapShape::Octahedron => Embedding3D::new_subdivided_octahedron(s, r),
             MapShape::Tetrahedron => Embedding3D::new_subdivided_tetrahedron(s, r),
+            MapShape::DividedIcosahedron => Embedding3D::new_subdivided_subdivided_icosahedron(s, r, 0),
         };
     }
 
@@ -71,6 +72,7 @@ impl State {
             ui.radio_value(&mut self.map_shape, MapShape::Tetrahedron, "Tetraeder");
             ui.radio_value(&mut self.map_shape, MapShape::Octahedron, "Oktaeder");
             ui.radio_value(&mut self.map_shape, MapShape::Icosahedron, "Ikosaeder");
+            ui.radio_value(&mut self.map_shape, MapShape::DividedIcosahedron, "aufgepusteter\nIkosaeder");
             if self.map_shape != old_shape {
                 self.recompute_graph();
             }
@@ -93,7 +95,7 @@ impl State {
 
         let to_screen = emath::RectTransform::from_to(from, to);
 
-        //something something project is to camera coordinates,
+        //something something "project" projects to camera coordinates,
         //so we need to invert the axe's rotation or something
         let project = geo::Project3To2::new_transposed(&self.map_axes);
         geo::ToScreen::new(project, to_screen)
@@ -114,7 +116,7 @@ impl State {
 
         let to_screen = self.build_to_screen(&response);
 
-        let scale = self.camera_2d.zoom / (self.map_radius as f32);
+        let scale = self.camera_2d.zoom / f32::max(self.map_radius as f32, 5.0);
         let grey_stroke = Stroke::new(scale * 10.0, GREY);
         self.map.draw_visible_edges(&to_screen, &painter, grey_stroke);
     }

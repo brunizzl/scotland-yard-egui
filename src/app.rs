@@ -6,17 +6,17 @@ mod dim3;
 mod cop_robber_algos;
 
 
-const GREY: Color32 = Color32::from_rgb(130, 130, 150);
-const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
-const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
-const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
-const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
-const RED: Color32 = Color32::from_rgb(230, 50, 50);
-
-const COP_BLUE: Color32 = Color32::from_rgb(10, 50, 170);
-const ROBBER_RED: Color32 = Color32::from_rgb(170, 40, 40);
-const BLUE_GLOW: Color32 = Color32::from_rgb(60, 120, 235);
-const RED_GLOW: Color32 = Color32::from_rgb(235, 120, 120);
+pub const GREY: Color32 = Color32::from_rgb(130, 130, 150);
+pub const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
+pub const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
+pub const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
+pub const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
+pub const RED: Color32 = Color32::from_rgb(230, 50, 50);
+ 
+pub const COP_BLUE: Color32 = Color32::from_rgb(10, 50, 170);
+pub const ROBBER_RED: Color32 = Color32::from_rgb(170, 40, 40);
+pub const BLUE_GLOW: Color32 = Color32::from_rgb(60, 120, 235);
+pub const RED_GLOW: Color32 = Color32::from_rgb(235, 120, 120);
 
 /// returns if val was changed
 fn add_drag_value(ui: &mut Ui, val: &mut usize, name: &str, min: usize, max: usize) -> bool {    
