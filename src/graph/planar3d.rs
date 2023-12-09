@@ -1,5 +1,6 @@
 
 use std::iter;
+use std::collections::VecDeque;
 
 use egui::*;
 use itertools::Itertools;
@@ -33,25 +34,6 @@ macro_rules! find_related {
             .enumerate()
             .filter_map(move |(i, &y)| if $f(x, y) { Some(i) } else { None }))
     };
-}
-
-/// expect boundary to form a circle, order vertices in circle s.t. neighboring vertices follow each other
-fn order_face_boundary(boundary: &mut [Index], neighbors: &EdgeList) {
-    debug_assert!(boundary.len() > 2);
-    let last = boundary.len() - 1;
-    'outher: for i1 in 0..last {
-        let v1 = boundary[i1];
-        let i2 = i1 + 1;
-        for search_i in i2..=last {
-            let v = boundary[search_i];
-            if neighbors.has_edge_(v1, v) {
-                boundary.swap(i2, search_i);
-                continue 'outher;
-            }
-        }
-        panic!("vertex boundary is not closed");
-    }
-    debug_assert!(neighbors.has_edge_(boundary[0], boundary[last]));
 }
 
 fn is_small(x: f32) -> bool {
@@ -322,6 +304,14 @@ pub struct Embedding3D {
 }
 
 impl Embedding3D {
+    pub fn nr_vertices(&self) -> usize {
+        self.vertices.len()
+    }
+
+    pub fn vertices(&self) -> &[Pos3] {
+        &self.vertices
+    }
+
     fn subdivide_platonic_with_triangles(surface: ConvexTriangleHull, divisions: usize) -> Self {
         let mut vertices = surface.vertices.clone();
         let mut edges = EdgeList::new(6, vertices.len());
@@ -448,7 +438,6 @@ impl Embedding3D {
             self.surface.face_normals.iter(), 
             self.surface.sorted_triangles(),
         );
-        let mut i = 0;
         for (&normal, [v1, v2, v3]) in iter {
             if !to_screen.faces_camera(normal) {
                 continue;
@@ -459,7 +448,6 @@ impl Embedding3D {
             if !to_screen.triangle_visible(p1, p2, p3) {
                 continue;
             }
-            i += 1;
             //draw visible edges of self.surface
             draw_line(&self.vertices, v1, v2);
             draw_line(&self.vertices, v2, v3);
@@ -484,6 +472,30 @@ impl Embedding3D {
                 draw_line(&self.vertices, v1, v2);
             }
         }
+    }
+
+    pub fn find_local_minimum(&self, mut potential: impl FnMut(Pos3) -> f32, node_hint: usize) -> (usize, f32) {
+        let mut nearest = node_hint;
+        let mut smallest_pot = potential(self.vertices[node_hint]);
+        let mut maybe_neighbor_better = true;
+        while maybe_neighbor_better {
+            maybe_neighbor_better = false;
+            for neigh in self.edges.neighbors_of(nearest) {
+                let neigh_pos = self.vertices[neigh];
+                let neigh_pot = potential(neigh_pos);
+                if neigh_pot < smallest_pot {
+                    nearest = neigh;
+                    smallest_pot = neigh_pot;
+                    maybe_neighbor_better = true;
+                }
+            }
+        }
+        (nearest, smallest_pot)
+    }    
+
+    /// everything in queue is starting point and expected to already have the correct distance
+    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<isize>) {
+        self.edges.calc_distances_to(queue, distances)
     }
 }
 

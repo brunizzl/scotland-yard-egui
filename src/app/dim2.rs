@@ -30,53 +30,6 @@ pub enum GraphShape { RegularPolygon(usize), Random, Debug }
 #[derive(Clone, Copy, PartialEq)]
 pub enum DrawNumbers { None, Indices, RobberAdvantage, MinCopDist }
 
-//denotes eighter a cop or the robber as node on screen
-//Pos2 is in graph coordinates, not in screen coordinates
-pub struct Character {
-    is_cop: bool, //else is robber
-    on_node: bool,
-    pub nearest_node: usize,
-    pos: Pos2,
-    distances: Vec<isize>,
-}
-
-impl Character {
-    fn new(is_cop: bool, pos: Pos2) -> Self {
-        Character { is_cop, on_node: false, nearest_node: 0, pos, distances: Vec::new() }
-    }
-
-    //go through all neighbors of current nearest node, if any neigbor is closer than current nearest node, 
-    //  change to that neighbor
-    //(converges to globally nearest node only for "convex" graphs, 
-    //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
-    fn update(&mut self, tolerance: f32, map: &Embedding2D, queue: &mut VecDeque<usize>) {
-        let safe_start = if map.len() > self.nearest_node { self.nearest_node } else { 0 };
-        let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos, safe_start);
-        self.on_node = nearest_dist_sq <= tolerance * tolerance;
-
-        let need_dist_update = self.distances.len() != map.len() || 
-            (self.on_node && nearest_node != self.nearest_node);
-        if need_dist_update {
-            queue.clear();
-            queue.push_back(nearest_node);
-            self.distances.clear();
-            self.distances.resize(map.len(), isize::MAX);
-            self.distances[nearest_node] = 0;
-            map.calc_distances_to(queue, &mut self.distances);
-        }
-        self.nearest_node = nearest_node;
-    }
-    
-    //options to draw cops and robber as emojies: 
-    //👮🛂🛃👿🚴🏃
-    const COP_EMOJI: &str = "👮";
-    const ROBBER_EMOJI: &str = "🏃";
-
-    pub fn emoji(&self) -> &str {
-        if self.is_cop { Self::COP_EMOJI } else { Self::ROBBER_EMOJI }
-    }
-}
-
 pub struct State {
     map: Embedding2D,
 
@@ -100,7 +53,7 @@ pub struct State {
 
     //first is robber, rest are cops
     characters: Vec<Character>,
-    tolerance: f32, //how close must a character be to a vertex to count as beeing on thet vertex
+    tolerance: f32, //how close must a character be to a vertex to count as beeing on that vertex
 
     queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
 
@@ -142,14 +95,15 @@ impl State {
             GraphShape::Random => graph::random_triangulated(self.map_radius, 8),
             GraphShape::Debug => graph::debugging_graph(),
         };
+        self.tolerance = f32::min(0.25, 0.75 / self.map_radius as f32);
         for char in &mut self.characters {
-            char.update(self.tolerance, &self.map, &mut self.queue);
+            char.update_2d(self.tolerance, &self.map, &mut self.queue);
+            char.snap_to_node();
         }
         self.extreme_vertices = Self::compute_extreme_vertices(self.map.positions());
         self.update_min_cop_dist();
         self.update_convex_cop_hull();
         self.update_cop_advantage();
-        self.tolerance = f32::min(0.25, 0.75 / self.map_radius as f32);
     }
 
     /// Called once before the first frame.
@@ -186,13 +140,13 @@ impl State {
          res
     }
 
-    pub fn robber(&self) -> Option<&Character> {
+    fn robber(&self) -> Option<&Character> {
         self.characters.first()
     }
 
-    pub fn active_cops(&self) -> impl Iterator<Item = &Character> {
+    fn active_cops(&self) -> impl Iterator<Item = &Character> {
         let start = usize::min(1, self.characters.len());
-        self.characters[start..].iter().filter(|c| c.on_node)
+        self.characters[start..].iter().filter(|&c| c.on_node)
     }
 
     fn update_min_cop_dist(&mut self) {
@@ -366,25 +320,7 @@ impl State {
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
                 "minimaler Cop Abstand");
         });
-        //adjust nr of currently computed figures
-        ui.horizontal(|ui| {
-            let (minus_emoji, plus_emoji) = match self.characters.len() {
-                0 => ("🚫", Character::ROBBER_EMOJI),
-                1 => (Character::ROBBER_EMOJI, Character::COP_EMOJI),
-                _ => (Character::COP_EMOJI, Character::COP_EMOJI),
-            };
-            let minus_text = format!("- Figur ({minus_emoji})");
-            let plus_text = format!("+ Figur ({plus_emoji})");
-            if ui.button(minus_text).clicked() {
-                self.characters.pop();
-            }
-            if ui.button(plus_text).clicked() {
-                let is_cop = self.characters.len() > 0;
-                let mut new = Character::new(is_cop, Pos2::ZERO);
-                new.update(self.tolerance, &self.map, &mut self.queue);
-                self.characters.push(new);
-            }
-        });
+        draw_character_buttons(ui, &mut self.characters);
         ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
         ui.add(Checkbox::new(&mut self.show_cop_voronoi, "zeige Punkte mit\nmehreren nächsten Cops"));
         ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
@@ -506,45 +442,15 @@ impl State {
         }
     }
 
-    fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
-        for (i, character) in self.characters.iter_mut().enumerate() {                
-            let character_size = f32::max(8.0, scale * 8.0);
-
-            let real_screen_pos = to_screen.transform_pos(character.pos);    
+    fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, 
+        to_screen: emath::RectTransform, scale: f32) 
+    {
+        for character in self.characters.iter_mut() {
             let node_pos = self.map.positions()[character.nearest_node];
-            let node_screen_pos = to_screen.transform_pos(node_pos);
-            let draw_screen_pos = if character.on_node { node_screen_pos } else { real_screen_pos };
-
-            let rect_len = 3.0 * character_size + self.tolerance;
-            let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
-            let character_id = response.id.with(i);
-            let point_response = ui.interact(point_rect, character_id, Sense::drag());
-            if point_response.dragged_by(PointerButton::Primary) {
-                character.pos = to_screen.inverse().transform_pos(real_screen_pos + point_response.drag_delta());
-                character.update(self.tolerance, &self.map, &mut self.queue);
+            if character.dragging {
+                character.update_2d(self.tolerance, &self.map, &mut self.queue);
             }
-            if point_response.drag_released_by(PointerButton::Primary) && character.on_node {
-                character.pos = node_pos; //snap actual character postion to node where he was dragged
-            }
-
-            let fill_color = if character.is_cop { COP_BLUE } else { ROBBER_RED };
-            let character_circle = Shape::circle_filled(draw_screen_pos, character_size, fill_color);
-            painter.add(character_circle);
-            if character.on_node {
-                let stroke_color = if character.is_cop { BLUE_GLOW } else { RED_GLOW };
-                let stroke = Stroke::new(scale * 3.0, stroke_color);
-                let marker_circle = Shape::circle_stroke(node_screen_pos, character_size, stroke);
-                painter.add(marker_circle);
-            }
-            //draw emoji
-            let font = FontId::proportional(character_size * 2.0);
-            let emoji_pos = draw_screen_pos - character_size * vec2(0.0, 1.3);
-            let emoji_str = character.emoji().to_string();
-            let mut layout_job = LayoutJob::simple(emoji_str, font, WHITE, 100.0);
-            layout_job.halign = Align::Center;
-            let galley = ui.fonts(|f| f.layout_job(layout_job));
-            let emoji = Shape::Text(TextShape::new(emoji_pos, galley));
-            painter.add(emoji);
+            character.drag_and_draw(response, painter, ui, to_screen, node_pos, scale);
         }
     }
 
