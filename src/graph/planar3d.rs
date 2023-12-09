@@ -41,6 +41,10 @@ fn is_small(x: f32) -> bool {
 }
 
 impl ConvexTriangleHull {
+    pub fn nr_vertices(&self) -> usize {
+        self.vertices.len()
+    }
+
     fn discover_faces(vertices: &[Pos3], edges: &EdgeList) -> (Vec<[usize; 3]>, Vec<Vec3>) {
         //enumerates each edge twice: once in each direction
         let mut unused_edges = edges.all_valid_edge_indices();
@@ -352,6 +356,14 @@ pub struct Embedding3D {
 }
 
 impl Embedding3D {
+    pub fn edges(&self) -> &EdgeList {
+        &self.edges
+    }
+
+    pub fn surface(&self) -> &ConvexTriangleHull {
+        &self.surface
+    }
+
     pub fn nr_vertices(&self) -> usize {
         self.vertices.len()
     }
@@ -390,7 +402,7 @@ impl Embedding3D {
                 edges.add_path_edges(iter::once(v1).chain(inner).chain(iter::once(v2)));
             }
         }
-        assert_eq!(vertices.len(), edges.len());
+        assert_eq!(vertices.len(), edges.nr_vertices());
 
         for &[v1, v2, v3] in &surface.triangles {
             let fst_inner_face_vertex = vertices.len();

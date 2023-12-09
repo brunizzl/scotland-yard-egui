@@ -70,7 +70,7 @@ pub struct EdgeList {
 }
 
 impl EdgeList {
-    pub fn len(&self) -> usize {
+    pub fn nr_vertices(&self) -> usize {
         self.length
     }
 
@@ -219,13 +219,6 @@ impl EdgeList {
         res
     }
 
-    pub fn has_edge_(&self, v1: Index, v2: Index) -> bool {
-        match (v1.get(), v2.get()) {
-            (Some(u1), Some(u2)) => self.has_edge(u1, u2),
-            _ => false
-        }
-    }
-
     /// depends on self.max_neighbors
     pub fn directed_index(&self, v1: usize, v2: usize) -> usize {
         self.neighbors_of(v1).position(|v| v == v2).map(|v2_pos| {
@@ -321,7 +314,7 @@ impl EdgeList {
     pub fn recolor_region<Color: Eq + Clone>(&self, (old, new): (Color, Color), 
         colors: &mut [Color], queue: &mut VecDeque<usize>) {
         
-        debug_assert_eq!(self.len(), colors.len());
+        debug_assert_eq!(self.nr_vertices(), colors.len());
         while let Some(node) = queue.pop_front() {
             for n in self.neighbors_of(node) {
                 if colors[n] == old {
