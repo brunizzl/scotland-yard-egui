@@ -75,6 +75,32 @@ impl Character {
         self.dragging = true;
     }
 
+    pub fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, ui: &Ui, scale: f32) {
+        //draw circles
+        let character_circle = Shape::circle_filled(draw_pos, scale, self.data.color);
+        painter.add(character_circle);
+        if self.on_node {
+            let stroke = Stroke::new(scale * 0.375, self.data.glow);
+            let marker_circle = Shape::circle_stroke(draw_pos, scale, stroke);
+            painter.add(marker_circle);
+        }
+        //draw emoji
+        let font = FontId::proportional(scale * 2.0);
+        let emoji_pos = draw_pos - scale * vec2(0.0, 1.3);
+        let emoji_str = self.data.emoji.to_string();
+        let mut layout_job = text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
+        layout_job.halign = Align::Center;
+        let galley = ui.fonts(|f| f.layout_job(layout_job));
+        let emoji = Shape::Text(epaint::TextShape::new(emoji_pos, galley));
+        painter.add(emoji);
+    }
+
+    pub fn draw_small_at(&self, draw_pos: Pos2, painter: &Painter, scale: f32) {
+        let character_size = f32::max(4.0, scale * 4.0);
+        let character_circle = Shape::circle_filled(draw_pos, character_size, self.data.glow);
+        painter.add(character_circle);
+    }
+
     pub fn drag_and_draw(&mut self, response: &Response, painter: &Painter, ui: &Ui, 
         to_screen: emath::RectTransform, node_pos: Pos2, scale: f32) 
     {       
@@ -84,7 +110,7 @@ impl Character {
         let draw_at_node = self.on_node && !self.dragging;
         let draw_screen_pos = if draw_at_node { node_screen_pos } else { real_screen_pos };
 
-        let rect_len = 3.0 * character_size + 3.0;
+        let rect_len = 3.0 * character_size;
         let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
         let character_id = response.id.with(self as *const Self);
         let point_response = ui.interact(point_rect, character_id, Sense::drag());
@@ -102,23 +128,7 @@ impl Character {
         }
         self.dragging = dragging;
 
-        //draw circles
-        let character_circle = Shape::circle_filled(draw_screen_pos, character_size, self.data.color);
-        painter.add(character_circle);
-        if self.on_node {
-            let stroke = Stroke::new(character_size * 0.375, self.data.glow);
-            let marker_circle = Shape::circle_stroke(draw_screen_pos, character_size, stroke);
-            painter.add(marker_circle);
-        }
-        //draw emoji
-        let font = FontId::proportional(character_size * 2.0);
-        let emoji_pos = draw_screen_pos - character_size * vec2(0.0, 1.3);
-        let emoji_str = self.data.emoji.to_string();
-        let mut layout_job = text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
-        layout_job.halign = Align::Center;
-        let galley = ui.fonts(|f| f.layout_job(layout_job));
-        let emoji = Shape::Text(epaint::TextShape::new(emoji_pos, galley));
-        painter.add(emoji);
+        self.draw_large_at(draw_screen_pos, painter, ui, character_size);
     }
 
     //go through all neighbors of current nearest node, if any neigbor is closer than current nearest node, 
@@ -144,10 +154,16 @@ impl Character {
     }
 
     //assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
-    fn update_3d(&mut self, tolerance: f32, map: &Embedding3D, to_2d: &geo::Project3To2, queue: &mut VecDeque<usize>) {
+    fn update_3d(&mut self, tolerance: f32, map: &Embedding3D, to_2d: &geo::Project3To2, 
+        vertex_visible: &[bool], queue: &mut VecDeque<usize>) 
+    {
         if self.dragging {
             let safe_start = if map.nr_vertices() > self.nearest_node { self.nearest_node } else { 0 };
-            let potential = |vertex_pos| (to_2d.project_pos(vertex_pos) - self.pos).length_sq();
+            let potential = |v:usize, v_pos| { 
+                let dist_2d = (to_2d.project_pos(v_pos) - self.pos).length_sq();
+                let backface_penalty = 10.0 * (!vertex_visible[v]) as isize as f32;
+                dist_2d + backface_penalty
+            };
             let (nearest_node, nearest_dist_sq) = map.find_local_minimum(potential, safe_start);
             self.on_node = nearest_dist_sq <= tolerance * tolerance;
     

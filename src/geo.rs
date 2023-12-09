@@ -155,9 +155,9 @@ impl ToScreen {
         //which screen point we test to lie inside the triangle is thus irrelevant.
         //just to be save numerically, we use the center.
         let screen_center = screen.center();
-        if !left_of_line(line_uv, screen_center)
-        && !left_of_line(line_vw, screen_center)
-        && !left_of_line(line_wu, screen_center) {
+        if left_of_line(line_uv, screen_center)
+        && left_of_line(line_vw, screen_center)
+        && left_of_line(line_wu, screen_center) {
             return true;
         }
 
