@@ -1,5 +1,5 @@
 
-use egui::*;
+use egui::{*, epaint::TextShape, text::LayoutJob};
 
 use crate::{ graph::Embedding3D, app::*, geo::{Vec3, Pos3, self} };
 
@@ -105,6 +105,99 @@ impl State {
         self.info.draw_menu(ui);
     }
 
+    fn draw_convex_cop_hull(&self, painter: &Painter, to_screen: &geo::ToScreen, scale: f32) {
+        for (&in_hull, &pos) in self.info.in_convex_cop_hull.iter().zip(self.map.vertices()) {
+            if in_hull.yes()  {
+                let draw_pos = to_screen.apply(pos);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 9.0, LIGHT_BLUE);
+                painter.add(marker_circle);
+            }
+        }
+    }
+
+    fn draw_green_circles(&self, painter: &Painter, to_screen: &geo::ToScreen, scale: f32) {     
+        let draw_circle_at = |pos: Pos3|{
+            let draw_pos = to_screen.apply(pos);
+            let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
+            painter.add(marker_circle);
+        };
+        match (self.info.robber_info, self.info.robber()) {
+            (RobberInfo::NearNodes, Some(r)) => 
+                for (r_dist, c_dist, &pos) in 
+                itertools::izip!(r.distances.iter(), self.info.min_cop_dist.iter(), self.map.vertices()) {
+                    if r_dist < c_dist {
+                        draw_circle_at(pos);
+                    }
+                },
+            (RobberInfo::EscapableNodes, _) => 
+                for (&adv, &pos) in self.info.cop_advantage.iter().zip(self.map.vertices()) {
+                    if adv < -1 {
+                        draw_circle_at(pos);
+                    }
+                },
+            (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
+                let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
+                for (&dist, &pos) in r.distances.iter().zip(self.map.vertices()) {
+                    if (dist as usize) <= bnd {
+                        draw_circle_at(pos);
+                    }
+                }
+            },
+            _ => {},
+        }
+    }
+
+    fn draw_robber_info(&self, painter: &Painter, to_screen: &geo::ToScreen, scale: f32) {
+        if let (RobberInfo::NearNodes, Some(r)) = (self.info.robber_info, self.info.robber()) { 
+            let dist_vs = r.distances.iter().zip(self.info.min_cop_dist.iter());
+            for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.vertices()) {
+                if r_dist < c_dist  {
+                    let draw_pos = to_screen.apply(pos);
+                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
+                    painter.add(marker_circle);
+                }
+            }
+        }
+        if self.info.robber_info == RobberInfo::EscapableNodes {
+            for (&adv, &pos) in self.info.cop_advantage.iter().zip(self.map.vertices()) {
+                if adv < -1  {
+                    let draw_pos = to_screen.apply(pos);
+                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
+                    painter.add(marker_circle);
+                }
+            }
+        }
+    }
+
+    fn draw_numbers(&self, ui: &mut Ui, painter: &Painter, to_screen: &geo::ToScreen, scale: f32) {
+        let font = FontId::proportional(scale * 8.0);
+        let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
+        for (i, &pos) in self.map.vertices().iter().enumerate() {
+            let txt = match self.info.vertex_info {
+                DrawNumbers::Indices => { i.to_string() }
+                DrawNumbers::MinCopDist => { self.info.min_cop_dist[i].to_string() }
+                DrawNumbers::None => { panic!() }
+                DrawNumbers::RobberAdvantage => { (-1 -self.info.cop_advantage[i]).to_string() }
+            };
+            let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * scale);
+            layout_job.halign = Align::Center;
+            let galley = ui.fonts(|f| f.layout_job(layout_job));
+            let screen_pos = to_screen.apply(pos);
+            let text = Shape::Text(TextShape::new(screen_pos, galley));
+            painter.add(text);
+        }
+    }
+
+    fn draw_cop_voronoi(&self, painter: &Painter, to_screen: &geo::ToScreen, scale: f32) {
+        for (&multiple, &pos) in self.info.muliple_min_dist_cops.iter().zip(self.map.vertices()) {
+            if multiple  {
+                let draw_pos = to_screen.apply(pos);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, RED);
+                painter.add(marker_circle);
+            }
+        }
+    }
+
     fn build_to_screen(&self, response: &Response) -> geo::ToScreen {
         let to = response.rect;
         let aspect_ratio = to.width() / to.height();
@@ -146,6 +239,19 @@ impl State {
         let scale = self.camera_2d.zoom / f32::max(self.map_radius as f32, 5.0);
         let grey_stroke = Stroke::new(scale * 10.0, GREY);
         self.map.draw_visible_edges(&to_screen, &painter, grey_stroke, &mut self.visible_vertices);
+
+        if self.info.show_convex_hull {
+            self.draw_convex_cop_hull(&painter, &to_screen, scale);
+        }
+        self.draw_green_circles(&painter, &to_screen, scale);
+        self.draw_robber_info(&painter, &to_screen, scale);
+
+        if self.map_radius < 20 && self.info.vertex_info != DrawNumbers::None {
+            self.draw_numbers(ui, &painter, &to_screen, scale);
+        }
+        if self.info.show_cop_voronoi {
+            self.draw_cop_voronoi(&painter, &to_screen, scale);
+        }
 
         for ch in &mut self.info.characters {
             ch.update_3d(self.tolerance, &self.map, &to_screen.to_plane, &self.visible_vertices, &mut self.info.queue);
