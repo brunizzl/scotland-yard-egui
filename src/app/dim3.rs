@@ -236,8 +236,8 @@ impl State {
 
         self.info.maybe_update(self.map.edges(), 0..self.map.surface().nr_vertices());
 
-        let scale = self.camera_2d.zoom / f32::max(self.map_radius as f32, 5.0);
-        let grey_stroke = Stroke::new(scale * 10.0, GREY);
+        let scale = f32::min(10.0 * self.camera_2d.zoom / self.map_radius as f32, 5.0);
+        let grey_stroke = Stroke::new(scale, GREY);
         self.map.draw_visible_edges(&to_screen, &painter, grey_stroke, &mut self.visible_vertices);
 
         if self.info.show_convex_hull {
@@ -257,11 +257,11 @@ impl State {
             ch.update_3d(self.tolerance, &self.map, &to_screen.to_plane, &self.visible_vertices, &mut self.info.queue);
             let node_pos = to_screen.to_plane.project_pos(self.map.vertices()[ch.nearest_node]);
             if ch.on_node && self.visible_vertices[ch.nearest_node] || !ch.on_node {
-                ch.drag_and_draw(&response, &painter, ui, to_screen.move_rect, node_pos, scale * 10.0);
+                ch.drag_and_draw(&response, &painter, ui, to_screen.move_rect, node_pos, scale);
             }
             else {
                 let drawn_node_pos = to_screen.move_rect.transform_pos(node_pos);
-                ch.draw_small_at(drawn_node_pos, &painter, scale * 10.0);
+                ch.draw_small_at(drawn_node_pos, &painter, scale);
             }
         }
     }
