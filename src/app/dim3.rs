@@ -13,6 +13,7 @@ const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
 pub struct State {
     map: Embedding3D,
+    visible_vertices: Vec<bool>,
     map_shape: MapShape,
     map_axes: [Vec3; 3], //rotated by dragging picture
     map_radius: usize,
@@ -32,6 +33,7 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = Self { 
             map: Embedding3D::new_subdivided_tetrahedron(1.0, 1), 
+            visible_vertices: Vec::new(),
             map_shape: MapShape::Tetrahedron, 
             map_axes: DEFAULT_AXES, 
             map_radius: 6,
@@ -80,12 +82,13 @@ impl State {
         };
         self.tolerance = f32::min(0.25, 0.75 / self.map_radius as f32);
         let to_2d = geo::Project3To2::inverse_of(&self.map_axes);
-        let potential = |v_pos: Pos3| -to_2d.signed_dist(v_pos.to_vec3()); 
+        self.map.update_vertex_visibility(&to_2d, &mut self.visible_vertices);
+        let potential = |_, v_pos: Pos3| -to_2d.signed_dist(v_pos.to_vec3()); 
         let (node_closest_to_cam, _) = self.map.find_local_minimum(potential, 0);
         for char in &mut self.characters {
             char.snap_to_node();
             char.nearest_node = node_closest_to_cam;
-            char.update_3d(self.tolerance, &self.map, &to_2d, &mut self.queue);
+            char.update_3d(self.tolerance, &self.map, &to_2d, &self.visible_vertices, &mut self.queue);
         }
     }
 
@@ -140,7 +143,7 @@ impl State {
         let rot = -self.camera_2d.offset / to_screen.move_rect.scale();
         self.rotate_axes_x(rot.y);
         self.rotate_axes_y(rot.x);
-        self.rotate_axes_z(-self.camera_2d.rotation);
+        self.rotate_axes_z(self.camera_2d.rotation);
         geo::gram_schmidt_3d(&mut self.map_axes);
         //use offset tu update rotation -> state is remembered by self.map_axes
         // -> offset can then be set back to 0.
@@ -149,12 +152,18 @@ impl State {
 
         let scale = self.camera_2d.zoom / f32::max(self.map_radius as f32, 5.0);
         let grey_stroke = Stroke::new(scale * 10.0, GREY);
-        self.map.draw_visible_edges(&to_screen, &painter, grey_stroke);
+        self.map.draw_visible_edges(&to_screen, &painter, grey_stroke, &mut self.visible_vertices);
 
         for ch in &mut self.characters {
-            ch.update_3d(self.tolerance, &self.map, &to_screen.to_plane, &mut self.queue);
+            ch.update_3d(self.tolerance, &self.map, &to_screen.to_plane, &self.visible_vertices, &mut self.queue);
             let node_pos = to_screen.to_plane.project_pos(self.map.vertices()[ch.nearest_node]);
-            ch.drag_and_draw(&response, &painter, ui, to_screen.move_rect, node_pos, scale * 10.0);
+            if ch.on_node && self.visible_vertices[ch.nearest_node] || !ch.on_node {
+                ch.drag_and_draw(&response, &painter, ui, to_screen.move_rect, node_pos, scale * 10.0);
+            }
+            else {
+                let drawn_node_pos = to_screen.move_rect.transform_pos(node_pos);
+                ch.draw_small_at(drawn_node_pos, &painter, scale * 10.0);
+            }
         }
     }
 

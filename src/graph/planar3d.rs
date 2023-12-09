@@ -287,13 +287,61 @@ impl ConvexTriangleHull {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct BidirectionalRange {
+    start: usize, //first element included
+    end: usize, //first element not included
+    step: isize,
+}
+
+impl BidirectionalRange {
+    pub fn empty() -> Self {
+        Self { start: 0, end: 0, step: 0 }        
+    }
+
+    fn add(a: usize, b: isize) -> usize {
+        ((a as isize) + b) as usize
+    }
+
+    pub fn new_forward(start: usize, end: usize) -> Self {
+        let end = if end < start { start } else { end };
+        Self { start, end, step: 1 }
+    }
+
+    pub fn new_backward(start: usize, end: usize) -> Self {
+        let end = if end > start { start } else { end };
+        Self { start, end, step: -1 }
+    }
+
+    pub fn reversed(&self) -> Self {
+        let step = -1 * self.step;
+        let start = Self::add(self.end, step);
+        let end = Self::add(self.start, step);
+        Self { start, end, step }
+    }
+}
+
+impl Iterator for BidirectionalRange {
+    type Item = usize;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start == self.end {
+            None
+        }
+        else {
+            let res = self.start;
+            self.start = Self::add(self.start, self.step);
+            Some(res)
+        }
+    }
+}
+
 pub struct Embedding3D {
     /// all vertices are expected to lie on this surface.
     surface: ConvexTriangleHull,
     /// maps edges of surface to the sequence of vertex indices of self.vertices dividing that edge
     /// (beginning and end vertices have the same index in self.vertices and self.surface.vertex_positions)
     /// Vec is indexed by surface.vertex_neighbors.edge_direction_index
-    edge_dividing_vertices: Vec<std::ops::Range<usize>>,
+    edge_dividing_vertices: Vec<BidirectionalRange>,
     /// indexed by surface's face index
     inner_vertices: Vec<std::ops::Range<usize>>,
 
@@ -315,7 +363,7 @@ impl Embedding3D {
     fn subdivide_platonic_with_triangles(surface: ConvexTriangleHull, divisions: usize) -> Self {
         let mut vertices = surface.vertices.clone();
         let mut edges = EdgeList::new(6, vertices.len());
-        let mut edge_dividing_vertices = vec![0..0; surface.edges.used_space()];
+        let mut edge_dividing_vertices = vec![BidirectionalRange::empty(); surface.edges.used_space()];
         let mut inner_vertices = Vec::new();
 
         let scaled_dir = |p1, p2| (p2 - p1) / ((divisions + 1) as f32);
@@ -334,26 +382,24 @@ impl Embedding3D {
                     debug_assert_eq!(v, vertices.len());
                     vertices.push(p);
                 }
-                //this relies on the triangles boundaries beeing in the same order as 
-                //when created, else this range may be empty.
-                let inner = fst_inner_edge_vertex..(vertices.len());
+                let inner = BidirectionalRange::new_forward(fst_inner_edge_vertex, vertices.len());
                 let fw_edge = surface.edges.directed_index(v1, v2);
                 let bw_edge = surface.edges.directed_index(v2, v1);
-                edge_dividing_vertices[fw_edge] = inner.clone();
-                edge_dividing_vertices[bw_edge] = inner.clone();
+                edge_dividing_vertices[fw_edge] = inner;
+                edge_dividing_vertices[bw_edge] = inner.reversed();
                 edges.add_path_edges(iter::once(v1).chain(inner).chain(iter::once(v2)));
             }
         }
         assert_eq!(vertices.len(), edges.len());
 
-        for [v1, v2, v3] in surface.sorted_triangles() {
+        for &[v1, v2, v3] in &surface.triangles {
             let fst_inner_face_vertex = vertices.len();
             let edge_1_2_index = surface.edges.directed_index(v1, v2);
             let edge_1_3_index = surface.edges.directed_index(v1, v3);
             let edge_2_3_index = surface.edges.directed_index(v2, v3);
-            let edge_1_2 = edge_dividing_vertices[edge_1_2_index].clone(); 
-            let edge_1_3 = edge_dividing_vertices[edge_1_3_index].clone();
-            let edge_2_3 = edge_dividing_vertices[edge_2_3_index].clone();
+            let edge_1_2 = edge_dividing_vertices[edge_1_2_index]; 
+            let edge_1_3 = edge_dividing_vertices[edge_1_3_index];
+            let edge_2_3 = edge_dividing_vertices[edge_2_3_index];
 
             let mut last_levels_nodes = vec![v1];
             let p1 = vertices[v1];
@@ -426,7 +472,13 @@ impl Embedding3D {
         Self::subdivide_platonic_with_triangles(oct, divisions)
     }
 
-    pub fn draw_visible_edges(&mut self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) {
+    pub fn draw_visible_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, 
+        stroke: Stroke, incorrect_vertex_visibility: &mut Vec<bool>) 
+    {
+        let mut visible = std::mem::take(incorrect_vertex_visibility);
+        visible.clear();
+        visible.resize(self.nr_vertices(), false);
+
         let draw_line = |vertices: &[Pos3], v1, v2| {
             let edge = [
                 to_screen.apply(vertices[v1]), 
@@ -436,9 +488,10 @@ impl Embedding3D {
         };
         let iter = itertools::izip!(
             self.surface.face_normals.iter(), 
-            self.surface.sorted_triangles(),
+            self.surface.triangles.iter(),
+            self.inner_vertices.iter()
         );
-        for (&normal, [v1, v2, v3]) in iter {
+        for (&normal, &[v1, v2, v3], inner) in iter {
             if !to_screen.faces_camera(normal) {
                 continue;
             }
@@ -448,6 +501,7 @@ impl Embedding3D {
             if !to_screen.triangle_visible(p1, p2, p3) {
                 continue;
             }
+
             //draw visible edges of self.surface
             draw_line(&self.vertices, v1, v2);
             draw_line(&self.vertices, v2, v3);
@@ -459,30 +513,73 @@ impl Embedding3D {
             let edge_1_2_index = self.surface.edges.directed_index(v1, v2);
             let edge_1_3_index = self.surface.edges.directed_index(v1, v3);
             let edge_2_3_index = self.surface.edges.directed_index(v2, v3);
-            let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index].clone(); 
-            let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index].clone();
-            let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index].clone();
-            for (v1, v2) in edge_1_2.clone().zip(edge_1_3.clone()) {
+            let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index]; 
+            let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index];
+            let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index];
+            for (v1, v2) in edge_1_2.zip(edge_1_3) {
                 draw_line(&self.vertices, v1, v2);
             }
-            for (v1, v2) in edge_2_3.clone().zip(edge_1_3.clone()) {
+            for (v1, v2) in edge_2_3.zip(edge_1_3) {
                 draw_line(&self.vertices, v1, v2);
             }
-            for (v1, v2) in edge_1_2.clone().zip(edge_2_3.clone().rev()) {
+            for (v1, v2) in edge_1_2.zip(edge_2_3.reversed()) {
                 draw_line(&self.vertices, v1, v2);
             }
+
+            //update vertex visibility
+            visible[v1] = true;
+            visible[v2] = true;
+            visible[v3] = true;
+            inner.clone().fold((), |(), v| visible[v] = true);
+            edge_1_2.fold((), |(), v| visible[v] = true);
+            edge_1_3.fold((), |(), v| visible[v] = true);
+            edge_2_3.fold((), |(), v| visible[v] = true);
         }
+
+        *incorrect_vertex_visibility = visible;
     }
 
-    pub fn find_local_minimum(&self, mut potential: impl FnMut(Pos3) -> f32, node_hint: usize) -> (usize, f32) {
+    pub fn update_vertex_visibility(&self, to_2d: &geo::Project3To2, vertex_visibility: &mut Vec<bool>) {
+        let mut visible = std::mem::take(vertex_visibility);
+        visible.clear();
+        visible.resize(self.nr_vertices(), false);
+        let iter = itertools::izip!(
+            self.surface.face_normals.iter(), 
+            self.surface.triangles.iter(),
+            self.inner_vertices.iter()
+        );
+        for (&normal, &[v1, v2, v3], inner) in iter {
+            if to_2d.signed_dist(normal) < 0.0 {
+                continue;
+            }
+            let edge_1_2_index = self.surface.edges.directed_index(v1, v2);
+            let edge_1_3_index = self.surface.edges.directed_index(v1, v3);
+            let edge_2_3_index = self.surface.edges.directed_index(v2, v3);
+            let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index]; 
+            let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index];
+            let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index];
+
+            visible[v1] = true;
+            visible[v2] = true;
+            visible[v3] = true;
+            inner.clone().fold((), |(), v| visible[v] = true);
+            edge_1_2.fold((), |(), v| visible[v] = true);
+            edge_1_3.fold((), |(), v| visible[v] = true);
+            edge_2_3.fold((), |(), v| visible[v] = true);
+        }
+
+        *vertex_visibility = visible;
+    }
+
+    pub fn find_local_minimum(&self, mut potential: impl FnMut(usize, Pos3) -> f32, node_hint: usize) -> (usize, f32) {
         let mut nearest = node_hint;
-        let mut smallest_pot = potential(self.vertices[node_hint]);
+        let mut smallest_pot = potential(node_hint, self.vertices[node_hint]);
         let mut maybe_neighbor_better = true;
         while maybe_neighbor_better {
             maybe_neighbor_better = false;
             for neigh in self.edges.neighbors_of(nearest) {
                 let neigh_pos = self.vertices[neigh];
-                let neigh_pot = potential(neigh_pos);
+                let neigh_pot = potential(neigh, neigh_pos);
                 if neigh_pot < smallest_pot {
                     nearest = neigh;
                     smallest_pot = neigh_pot;
