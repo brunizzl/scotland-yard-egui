@@ -1,7 +1,5 @@
 
 use std::collections::VecDeque;
-use std::iter::Map;
-use std::slice::{Chunks, Iter};
 
 use egui::{Pos2, Vec2, pos2, vec2};
 use itertools::Itertools;
@@ -20,8 +18,12 @@ impl Default for Embedding2D {
 }
 
 impl Embedding2D {
+    pub fn edges(&self) -> &EdgeList {
+        &self.edges
+    }
+
     pub fn len(&self) -> usize {
-        debug_assert_eq!(self.positions.len(), self.edges.len());
+        debug_assert_eq!(self.positions.len(), self.edges.nr_vertices());
         self.positions.len()
     }
 
@@ -54,15 +56,6 @@ impl Embedding2D {
 
     pub fn positions(&self) -> &[Pos2] {
         &self.positions
-    }
-
-    pub fn neighbors(&self) -> 
-        Map<Chunks<'_, Index>, fn(&[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize>> {
-        self.edges.neighbors()
-    }
-
-    pub fn neighbors_of(&self, v: usize) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
-        self.edges.neighbors_of(v)
     }
 
     pub fn for_each_edge(&self, mut f: impl FnMut(usize, Pos2, usize, Pos2)) {
@@ -99,13 +92,6 @@ impl Embedding2D {
     /// everything in queue is starting point and expected to already have the correct distance
     pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<isize>) {
         self.edges.calc_distances_to(queue, distances)
-    }
-
-    /// paintbucket tool, all in queue are starting vertices
-    pub fn recolor_region<Color: Eq + Clone>(&self, (old, new): (Color, Color), 
-        colors: &mut [Color], queue: &mut VecDeque<usize>) {
-
-        self.edges.recolor_region((old, new), colors, queue)
     }
 
     /// returns node index and distance to that index squared
