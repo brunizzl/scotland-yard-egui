@@ -71,7 +71,7 @@ impl Project3To2 {
         Self { new_x: *a, new_y: *b, new_z: *c }
     }
 
-    pub fn new_transposed([a, b, c]: &[Vec3; 3]) -> Self {
+    pub fn inverse_of([a, b, c]: &[Vec3; 3]) -> Self {
         let u = vec3(a.x, b.x, c.x);
         let v = vec3(a.y, b.y, c.y);
         let w = vec3(a.z, b.z, c.z);

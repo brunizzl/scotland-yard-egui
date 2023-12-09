@@ -83,21 +83,22 @@ impl State {
     }
 
     fn build_to_screen(&self, response: &Response) -> geo::ToScreen {
-        let camera = self.camera_2d;
-        let rect_min = vec2(-1.05, -1.05) / camera.zoom;
-        let rect_max = vec2(1.05, 1.05) / camera.zoom;
-        let from = Rect::from_min_max(rect_min.to_pos2(), rect_max.to_pos2());
-
-        let rect_len = f32::min(response.rect.height(), response.rect.width());
-        let to_middle = (response.rect.width() - rect_len) / 2.0;
-        let screen_min = response.rect.min + vec2(to_middle, 0.0);
-        let to = Rect::from_min_size(screen_min, vec2(rect_len, rect_len));
+        let to = response.rect;
+        let aspect_ratio = to.width() / to.height();
+        //shapes are centered around zero, with extreme vertices having length 1.0
+        let from_size = if aspect_ratio < 1.0 {
+            vec2(2.05, 2.05 / aspect_ratio)
+        }
+        else {
+            vec2(2.05 * aspect_ratio, 2.05)
+        };
+        let from = Rect::from_center_size(Pos2::ZERO, from_size / self.camera_2d.zoom);
 
         let to_screen = emath::RectTransform::from_to(from, to);
 
         //something something "project" projects to camera coordinates,
         //so we need to invert the axe's rotation or something
-        let project = geo::Project3To2::new_transposed(&self.map_axes);
+        let project = geo::Project3To2::inverse_of(&self.map_axes);
         geo::ToScreen::new(project, to_screen)
     }
 
@@ -106,15 +107,17 @@ impl State {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover()); 
 
+        self.camera_2d.update_screen_centered(ui);
+        let to_screen = self.build_to_screen(&response);
+        let rot = -self.camera_2d.offset / to_screen.move_rect.scale();
+        self.rotate_axes_x(rot.y);
+        self.rotate_axes_y(rot.x);
+        self.rotate_axes_z(-self.camera_2d.rotation);
+        geo::gram_schmidt_3d(&mut self.map_axes);
         //use offset tu update rotation -> state is remembered by self.map_axes
         // -> offset can then be set back to 0.
-        self.camera_2d.update_screen_centered(ui); 
-        self.rotate_axes_x(self.camera_2d.offset.y * -0.002 / self.camera_2d.zoom);
-        self.rotate_axes_y(self.camera_2d.offset.x * -0.002 / self.camera_2d.zoom);
-        geo::gram_schmidt_3d(&mut self.map_axes);
         self.camera_2d.offset = Vec2::ZERO;
-
-        let to_screen = self.build_to_screen(&response);
+        self.camera_2d.rotation = 0.0;
 
         let scale = self.camera_2d.zoom / f32::max(self.map_radius as f32, 5.0);
         let grey_stroke = Stroke::new(scale * 10.0, GREY);

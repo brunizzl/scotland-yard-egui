@@ -40,6 +40,8 @@ struct Camera2D {
     /// < 1.0  -> zoomed out
     /// > 1.0  -> zoomed in
     zoom: f32, 
+    /// angle in rad 0.0 == no rotation
+    rotation: f32,
     /// offset of center independent of zoom
     offset: Vec2,
 }
@@ -48,6 +50,7 @@ impl Camera2D {
     fn new() -> Self {
         Self { 
             zoom: 1.0, 
+            rotation: 0.0,
             offset: Vec2::new(0.0, 0.0), 
         }
     }
@@ -73,6 +76,7 @@ impl Camera2D {
             }
             if let Some(drag) = info.multi_touch() {
                 self.offset += drag.translation_delta;
+                self.rotation += drag.rotation_delta;
             }
         });
     }
