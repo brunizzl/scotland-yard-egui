@@ -448,6 +448,7 @@ impl Embedding3D {
             self.surface.face_normals.iter(), 
             self.surface.sorted_triangles(),
         );
+        let mut i = 0;
         for (&normal, [v1, v2, v3]) in iter {
             if !to_screen.faces_camera(normal) {
                 continue;
@@ -458,6 +459,7 @@ impl Embedding3D {
             if !to_screen.triangle_visible(p1, p2, p3) {
                 continue;
             }
+            i += 1;
             //draw visible edges of self.surface
             draw_line(&self.vertices, v1, v2);
             draw_line(&self.vertices, v2, v3);
