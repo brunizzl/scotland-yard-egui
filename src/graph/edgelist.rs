@@ -312,17 +312,20 @@ impl EdgeList {
 
     /// paintbucket tool, all in queue are starting vertices
     pub fn recolor_region<Color: Eq + Clone>(&self, (old, new): (Color, Color), 
-        colors: &mut [Color], queue: &mut VecDeque<usize>) {
+        colors: &mut [Color], queue: &mut VecDeque<usize>) -> usize {
         
         debug_assert_eq!(self.nr_vertices(), colors.len());
+        let mut nr_colored = 0;
         while let Some(node) = queue.pop_front() {
             for n in self.neighbors_of(node) {
                 if colors[n] == old {
+                    nr_colored += 1;
                     colors[n] = new.clone();
                     queue.push_back(n);
                 }
             }
         }
+        nr_colored
     }    
 } //impl EdgeList
 
