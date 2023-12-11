@@ -67,6 +67,12 @@ impl State {
         self.update_axes(|v| v.rotate_z(angle))
     }
 
+    fn camera_projection(&self) -> geo::Project3To2 {
+        //something something "project" projects to camera coordinates,
+        //so we need to invert the axe's rotation or something
+        geo::Project3To2::inverse_of(&self.map_axes)
+    }
+
     pub fn recompute_graph(&mut self) {
         let s = 1.0;
         let r = self.map_radius;
@@ -77,14 +83,14 @@ impl State {
             MapShape::DividedIcosahedron => Embedding3D::new_subdivided_subdivided_icosahedron(s, r, 0),
         };
         self.tolerance = f32::min(0.25, 0.75 / self.map_radius as f32);
-        let to_2d = geo::Project3To2::inverse_of(&self.map_axes);
+        let to_2d = self.camera_projection();
         self.map.update_vertex_visibility(&to_2d, &mut self.visible_vertices);
-        let potential = |_, v_pos: Pos3| -to_2d.signed_dist(v_pos.to_vec3()); 
-        let (node_closest_to_cam, _) = self.map.find_local_minimum(potential, 0);
         for char in &mut self.info.characters {
-            char.snap_to_node();
-            char.nearest_node = node_closest_to_cam;
-            char.update_3d(self.tolerance, &self.map, &to_2d, &self.visible_vertices, &mut self.info.queue);
+            let char_dir = char.pos3.to_vec3();
+            let potential = |_, v_pos: Pos3| -char_dir.dot(v_pos.to_vec3().normalized());
+            let (best_new_vertex, _) = self.map.find_local_minimum(potential, 0);
+            char.nearest_node = best_new_vertex;
+            char.update_distances(self.map.edges(), &mut self.info.queue);
         }
     }
 
@@ -225,10 +231,7 @@ impl State {
 
         let to_screen = emath::RectTransform::from_to(from, to);
 
-        //something something "project" projects to camera coordinates,
-        //so we need to invert the axe's rotation or something
-        let project = geo::Project3To2::inverse_of(&self.map_axes);
-        geo::ToScreen::new(project, to_screen)
+        geo::ToScreen::new(self.camera_projection(), to_screen)
     }
 
     pub fn draw_graph(&mut self, ui: &mut Ui) {
@@ -249,7 +252,7 @@ impl State {
 
         self.info.maybe_update(self.map.edges(), self.vertex_furthest_from_cops());
 
-        let scale = f32::min(10.0 * self.camera_2d.zoom / self.map_radius as f32, 5.0);
+        let scale = self.camera_2d.zoom * f32::min(12.0 / self.map_radius as f32, 4.0);
         let grey_stroke = Stroke::new(scale, GREY);
         self.map.draw_visible_edges(&to_screen, &painter, grey_stroke, &mut self.visible_vertices);
 

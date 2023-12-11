@@ -89,11 +89,6 @@ impl Embedding2D {
         self.edges.neighbors_of(node).map(move |i| (i, &self.positions[i]))
     }
 
-    /// everything in queue is starting point and expected to already have the correct distance
-    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<isize>) {
-        self.edges.calc_distances_to(queue, distances)
-    }
-
     /// returns node index and distance to that index squared
     pub fn find_nearest_node(&self, pos: Pos2, node_hint: usize) -> (usize, f32) {
         let mut nearest = node_hint;
