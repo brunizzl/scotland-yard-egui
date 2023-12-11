@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use egui::*;
 
-use crate::{graph::{Embedding2D, Embedding3D, InSet, EdgeList}, geo};
+use crate::{graph::{Embedding2D, Embedding3D, InSet, EdgeList}, geo::{self, Pos3}};
 
 mod dim2;
 mod dim3;
@@ -57,22 +57,17 @@ pub struct Character {
     data: &'static CharData,
     nearest_node: usize,
     distances: Vec<isize>,
-    pos: Pos2,
+    pos2: Pos2, //used in both 3d and 3d map (as cursor can't drag in 3d...)
+    pos3: Pos3, //only used in 3d map
     on_node: bool,
     dragging: bool, //currently beeing dragged by mouse cursor
 }
 
 impl Character {
-    fn new(is_cop: bool, pos: Pos2) -> Self {
+    fn new(is_cop: bool, pos2: Pos2) -> Self {
         let data = if is_cop { &COP } else { &ROBBER };
         //dragging set to true snaps to node next update
-        Character { data, nearest_node: 0, distances: Vec::new(), pos, on_node: false, dragging: true }
-    }
-
-    fn snap_to_node(&mut self) {
-        //if not currently held by mouse, this will generate a falling edge and a falling edge snaps to node
-        //in self.drag_and_draw
-        self.dragging = true;
+        Character { data, nearest_node: 0, distances: Vec::new(), pos2, pos3: Pos3::ZERO, on_node: false, dragging: true }
     }
 
     pub fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, ui: &Ui, scale: f32) {
@@ -105,7 +100,7 @@ impl Character {
         to_screen: emath::RectTransform, node_pos: Pos2, scale: f32) 
     {       
         let character_size = f32::max(8.0, scale * 8.0);
-        let real_screen_pos = to_screen.transform_pos(self.pos);
+        let real_screen_pos = to_screen.transform_pos(self.pos2);
         let node_screen_pos = to_screen.transform_pos(node_pos);
         let draw_at_node = self.on_node && !self.dragging;
         let draw_screen_pos = if draw_at_node { node_screen_pos } else { real_screen_pos };
@@ -119,16 +114,25 @@ impl Character {
         if dragging {
             let from_screen = to_screen.inverse();
             let new_screen_pos = draw_screen_pos + point_response.drag_delta();
-            self.pos = from_screen.transform_pos(new_screen_pos);
+            self.pos2 = from_screen.transform_pos(new_screen_pos);
         }
         //test if character was just released. doing this ourselfs allows to simulate release whenever we like
         //(e.g. just set dragging to true and we snap to position)
         if !dragging && self.dragging && self.on_node {
-            self.pos = node_pos; //snap actual character postion to node where he was dragged
+            self.pos2 = node_pos; //snap actual character postion to node where he was dragged
         }
         self.dragging = dragging;
 
         self.draw_large_at(draw_screen_pos, painter, ui, character_size);
+    }
+
+    fn update_distances(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        queue.clear();
+        queue.push_back(self.nearest_node);
+        self.distances.clear();
+        self.distances.resize(edges.nr_vertices(), isize::MAX);
+        self.distances[self.nearest_node] = 0;
+        edges.calc_distances_to(queue, &mut self.distances);
     }
 
     //go through all neighbors of current nearest node, if any neigbor is closer than current nearest node, 
@@ -137,30 +141,25 @@ impl Character {
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
     fn update_2d(&mut self, tolerance: f32, map: &Embedding2D, queue: &mut VecDeque<usize>) {
         let safe_start = if map.len() > self.nearest_node { self.nearest_node } else { 0 };
-        let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos, safe_start);
+        let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos2, safe_start);
         self.on_node = nearest_dist_sq <= tolerance * tolerance;
 
         let need_dist_update = self.distances.len() != map.len() || 
             (self.on_node && nearest_node != self.nearest_node);
-        if need_dist_update {
-            queue.clear();
-            queue.push_back(nearest_node);
-            self.distances.clear();
-            self.distances.resize(map.len(), isize::MAX);
-            self.distances[nearest_node] = 0;
-            map.calc_distances_to(queue, &mut self.distances);
-        }
         self.nearest_node = nearest_node;
+        if need_dist_update {
+            self.update_distances(map.edges(), queue);
+        }
     }
 
-    //assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
+    /// assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
     fn update_3d(&mut self, tolerance: f32, map: &Embedding3D, to_2d: &geo::Project3To2, 
         vertex_visible: &[bool], queue: &mut VecDeque<usize>) 
     {
         if self.dragging {
             let safe_start = if map.nr_vertices() > self.nearest_node { self.nearest_node } else { 0 };
             let potential = |v:usize, v_pos| { 
-                let dist_2d = (to_2d.project_pos(v_pos) - self.pos).length_sq();
+                let dist_2d = (to_2d.project_pos(v_pos) - self.pos2).length_sq();
                 let backface_penalty = 10.0 * (!vertex_visible[v]) as isize as f32;
                 dist_2d + backface_penalty
             };
@@ -169,15 +168,11 @@ impl Character {
     
             let need_dist_update = self.distances.len() != map.nr_vertices() || 
                 (self.on_node && nearest_node != self.nearest_node);
-            if need_dist_update {
-                queue.clear();
-                queue.push_back(nearest_node);
-                self.distances.clear();
-                self.distances.resize(map.nr_vertices(), isize::MAX);
-                self.distances[nearest_node] = 0;
-                map.calc_distances_to(queue, &mut self.distances);
-            }
             self.nearest_node = nearest_node;
+            if need_dist_update {
+                self.update_distances(map.edges(), queue);
+                self.pos3 = map.vertices()[self.nearest_node];
+            }
         }
     }
 }

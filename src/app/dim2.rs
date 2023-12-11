@@ -60,7 +60,6 @@ impl State {
         self.tolerance = f32::min(0.25, 0.75 / self.map_radius as f32);
         for char in &mut self.info.characters {
             char.update_2d(self.tolerance, &self.map, &mut self.info.queue);
-            char.snap_to_node();
         }
         self.extreme_vertices = Self::compute_extreme_vertices(self.map.positions());
         let edges = self.map.edges();
