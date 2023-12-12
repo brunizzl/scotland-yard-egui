@@ -185,8 +185,8 @@ impl State {
         let positions = self.map.positions();
         self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_divisions);
-        self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
         self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
+        self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
 
         self.draw_characters(ui, &response, &painter, &transform, scale);
     }

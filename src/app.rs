@@ -305,7 +305,7 @@ impl InfoState {
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
                 "minimaler Cop Abstand");
         });
-        ui.collapsing("Strategie", |ui|{
+        ui.collapsing("Strategie Räuber", |ui|{
             ui.radio_value(&mut self.robber_strat, RobberStrat::None, 
                 "Keine");
             ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHull, 
@@ -510,10 +510,21 @@ impl InfoState {
         }
         let potential = |v| match self.robber_strat {
             RobberStrat::None => panic!(),
-            //iff two neighbors have same cop advantage, we want to choose a vertex with bigger min_cop_dist.
-            //because all neighbors are neighbors of same vertex, their min_cop_dist will differ by at most 2.
-            //thus dividing the distance by 10 will make it only then the deciding factor, when the best advantage is non-unique.
-            RobberStrat::EscapeHull => self.cop_advantage[v] as f32 - self.min_cop_dist[v] as f32 / 10.0,
+            RobberStrat::EscapeHull => {
+                //the robber will always try to increase the robber advantage, except for when that would lead to beeing
+                //catched in the next move
+                let min_cop_dist = self.min_cop_dist[v];
+                if min_cop_dist < 2 {
+                    10000.0
+                }
+                else {
+                    //if multiple vertices have the same robber advantage, we use the min_cop_dist as tiebreaker.
+                    //(because all vertices v tested are neighbors of the current robber position, their cop advantage
+                    //  and min_cop_dist can vary between all of them by at most 2. thus 0.1 is sufficiently small
+                    //  as factor to only let the min_cop_dist work as tiebreaker)
+                    self.cop_advantage[v] as f32 - 0.1 * min_cop_dist as f32
+                }
+            }
         };
         if let Some(r) = self.robber() {
             let mut best = Vec::with_capacity(10);   
