@@ -4,14 +4,14 @@ use egui::*;
 use crate::{ graph::{self, Embedding2D}, app::* };
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum GraphShape { RegularPolygon(usize), Random, Debug }
+pub enum GraphShape { RegularPolygon(isize), Random, Debug }
 
 pub struct State {
     map: Embedding2D,
 
     //overall map shape: == 2 is line, == 3 triangle, == 4 square, == 5 pentagon etc.
     map_shape: GraphShape,
-    map_radius: usize, //(approx.) shortest path length from origin to rim
+    map_radius: isize, //(approx.) shortest path length from origin to rim
 
     extreme_vertices: [usize; 4], //indices of vertices with extreme coodinates
 
@@ -50,11 +50,10 @@ impl State {
     }
 
     fn recompute_graph(&mut self) {
+        let r = self.map_radius as usize;
         self.map = match self.map_shape {
-            GraphShape::RegularPolygon(n) => graph::triangulated_regular_polygon(
-                n, 
-                self.map_radius),
-            GraphShape::Random => graph::random_triangulated(self.map_radius, 8),
+            GraphShape::RegularPolygon(n) => graph::triangulated_regular_polygon(n as usize, r),
+            GraphShape::Random => graph::random_triangulated(r, 8),
             GraphShape::Debug => graph::debugging_graph(),
         };
         self.tolerance = f32::min(0.25, 0.75 / self.map_radius as f32);
@@ -64,7 +63,7 @@ impl State {
         self.extreme_vertices = Self::compute_extreme_vertices(self.map.positions());
         let edges = self.map.edges();
         self.info.update_convex_cop_hull(edges, self.extreme_vertices.iter().map(|&v| v));
-        self.info.update_min_cop_dist(edges);
+        self.info.update_min_cop_dist();
         self.info.update_cop_advantage(edges);
     }
 
@@ -122,7 +121,7 @@ impl State {
             let mut min_dist = f32::MAX;
             let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
             for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
-                if (dist as usize) == bnd {
+                if dist == bnd {
                     let new_dist = (r_pos - pos).length();
                     max_dist = f32::max(max_dist, new_dist);
                     min_dist = f32::min(min_dist, new_dist);
@@ -210,7 +209,7 @@ impl State {
         }
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_radius);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
-        self.info.draw_cop_voronoi(positions, &painter, to_screen, scale);
+        self.info.draw_cop_dist(positions, &painter, to_screen, scale);
         self.draw_characters(ui, &response, &painter, transform, scale);
     }
 }
