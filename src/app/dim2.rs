@@ -1,5 +1,5 @@
 
-use egui::{*, epaint::TextShape, text::LayoutJob};
+use egui::*;
 
 use crate::{ graph::{self, Embedding2D}, app::* };
 
@@ -133,6 +133,15 @@ impl State {
         }
     }
 
+    fn update_visible_vertices(&mut self, to_screen: &emath::RectTransform) {
+        let mut visible = std::mem::take(&mut self.info.visible);
+        visible.clear();
+        for &pos in self.map.positions() {
+            visible.push(to_screen.from().contains(pos));
+        }
+        self.info.visible = visible;
+    }
+
     fn draw_edges(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
 
         let grey_stroke = Stroke::new(scale, GREY);
@@ -156,99 +165,6 @@ impl State {
         });
     }
 
-    fn draw_convex_cop_hull(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
-        for (&in_hull, &pos) in self.info.in_convex_cop_hull.iter().zip(self.map.positions()) {
-            if in_hull.yes()  {
-                let draw_pos = to_screen.transform_pos(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, scale * 9.0, LIGHT_BLUE);
-                painter.add(marker_circle);
-            }
-        }
-    }
-
-    fn draw_green_circles(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {     
-        let draw_circle_at = |pos: Pos2|{
-            let draw_pos = to_screen.transform_pos(pos);
-            let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-            painter.add(marker_circle);
-        };
-        match (self.info.robber_info, self.info.robber()) {
-            (RobberInfo::NearNodes, Some(r)) => 
-                for (r_dist, c_dist, &pos) in 
-                itertools::izip!(r.distances.iter(), self.info.min_cop_dist.iter(), self.map.positions()) {
-                    if r_dist < c_dist {
-                        draw_circle_at(pos);
-                    }
-                },
-            (RobberInfo::EscapableNodes, _) => 
-                for (&adv, &pos) in self.info.cop_advantage.iter().zip(self.map.positions()) {
-                    if adv < -1 {
-                        draw_circle_at(pos);
-                    }
-                },
-            (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
-                let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
-                for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
-                    if (dist as usize) <= bnd {
-                        draw_circle_at(pos);
-                    }
-                }
-            },
-            _ => {},
-        }
-    }
-
-    fn draw_robber_info(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
-        if let (RobberInfo::NearNodes, Some(r)) = (self.info.robber_info, self.info.robber()) { 
-            let dist_vs = r.distances.iter().zip(self.info.min_cop_dist.iter());
-            for ((r_dist, c_dist), &pos) in dist_vs.zip(self.map.positions()) {
-                if r_dist < c_dist  {
-                    let draw_pos = to_screen.transform_pos(pos);
-                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-                    painter.add(marker_circle);
-                }
-            }
-        }
-        if self.info.robber_info == RobberInfo::EscapableNodes {
-            for (&adv, &pos) in self.info.cop_advantage.iter().zip(self.map.positions()) {
-                if adv < -1  {
-                    let draw_pos = to_screen.transform_pos(pos);
-                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-                    painter.add(marker_circle);
-                }
-            }
-        }
-    }
-
-    fn draw_numbers(&self, ui: &mut Ui, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
-        let font = FontId::proportional(scale * 8.0);
-        let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
-        for (i, &pos) in self.map.positions().iter().enumerate() {
-            let txt = match self.info.vertex_info {
-                DrawNumbers::Indices => { i.to_string() }
-                DrawNumbers::MinCopDist => { self.info.min_cop_dist[i].to_string() }
-                DrawNumbers::None => { panic!() }
-                DrawNumbers::RobberAdvantage => { (-1 -self.info.cop_advantage[i]).to_string() }
-            };
-            let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * scale);
-            layout_job.halign = Align::Center;
-            let galley = ui.fonts(|f| f.layout_job(layout_job));
-            let screen_pos = to_screen.transform_pos(pos);
-            let text = Shape::Text(TextShape::new(screen_pos, galley));
-            painter.add(text);
-        }
-    }
-
-    fn draw_cop_voronoi(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
-        for (&multiple, &pos) in self.info.muliple_min_dist_cops.iter().zip(self.map.positions()) {
-            if multiple  {
-                let draw_pos = to_screen.transform_pos(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, RED);
-                painter.add(marker_circle);
-            }
-        }
-    }
-
     fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, 
         to_screen: emath::RectTransform, scale: f32) 
     {
@@ -261,23 +177,6 @@ impl State {
         }
     }
 
-    /// fst maps graph coordinates to screen, snd defines scale to draw edges etc. at
-    fn build_to_screen(&self, response: &Response) -> (emath::RectTransform, f32) {
-        let camera = self.camera;
-        let rect_min = vec2(-1.0, -1.0) / camera.zoom;
-        let rect_max = vec2(1.0, 1.0) / camera.zoom;
-        let from = Rect::from_min_max(rect_min.to_pos2(), rect_max.to_pos2());
-
-        let rect_len = f32::min(response.rect.height(), response.rect.width());
-        let to_middle = (response.rect.width() - rect_len) / 2.0;
-        let screen_min = response.rect.min + vec2(to_middle, 0.0) + camera.offset;
-        let to = Rect::from_min_size(screen_min, vec2(rect_len, rect_len));
-
-        let to_screen = emath::RectTransform::from_to(from, to);
-        let scale = f32::min(rect_len / self.map_radius as f32 * 0.015, 4.0);
-        (to_screen, scale * camera.zoom)
-    }
-
     pub fn draw_graph(&mut self, ui: &mut Ui) {
         self.info.maybe_update(self.map.edges(), self.extreme_vertices.iter().map(|&v| v));
 
@@ -285,21 +184,33 @@ impl State {
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());   
         self.camera.update_cursor_centered(ui, &response); 
 
-        let (to_screen, scale) = self.build_to_screen(&response);
+        let transform = {
+            //our goal is to find out, by what we need to shift the center of our internal coordinates,
+            //due to the user moving around the graph on screen.
+            //however to compute that shift, we need to already know the transformation, thus
+            //the two step process shown below
+            let min_size = Vec2::splat(2.05 / self.camera.zoom);
+            let contained_centered = Rect::from_center_size(Pos2::ZERO, min_size);
+            let screen = response.rect;
+            let inverse_centered = build_to_screen_2d(contained_centered, screen).inverse();
+            let shift = inverse_centered.transform_pos(screen.center() - self.camera.offset) - Pos2::ZERO;
+            let graph_rect = inverse_centered.to().translate(shift);
+            emath::RectTransform::from_to(graph_rect, screen)
+        };
+        let scale = self.camera.zoom * f32::min(12.0 / self.map_radius as f32, 4.0);
 
-        self.draw_edges(&painter, to_screen, scale);
+        self.update_visible_vertices(&transform);
+
+        let to_screen = |p: Pos2| transform.transform_pos(p);
+
+        self.draw_edges(&painter, transform, scale);
+        let positions = self.map.positions();
         if self.info.show_convex_hull {
-            self.draw_convex_cop_hull(&painter, to_screen, scale);
+            self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         }
-        self.draw_green_circles(&painter, to_screen, scale);
-        self.draw_robber_info(&painter, to_screen, scale);
-
-        if self.map_radius < 20 && self.info.vertex_info != DrawNumbers::None {
-            self.draw_numbers(ui, &painter, to_screen, scale);
-        }
-        if self.info.show_cop_voronoi {
-            self.draw_cop_voronoi(&painter, to_screen, scale);
-        }
-        self.draw_characters(ui, &response, &painter, to_screen, scale);
+        self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_radius);
+        self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
+        self.info.draw_cop_voronoi(positions, &painter, to_screen, scale);
+        self.draw_characters(ui, &response, &painter, transform, scale);
     }
 }
