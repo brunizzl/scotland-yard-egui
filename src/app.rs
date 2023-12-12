@@ -312,7 +312,6 @@ impl InfoState {
                 "Entkomme Hülle");
         });
         draw_character_buttons(ui, &mut self.characters);     
-        add_drag_value(ui, &mut self.marked_cop_dist, "Cop Abstand: ", 0, 1000);
         ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));   
         ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
     }
