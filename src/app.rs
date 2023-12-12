@@ -567,16 +567,16 @@ impl Camera2D {
 
     /// zoom changes happen with the cursor position as fixed point, thus 
     /// with zooming we also change the offset
-    fn update_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
+    pub fn update_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
         self.update(ui, Some(response.rect));
     }
 
     /// zoom changes don't change the offset at all
-    fn update_screen_centered(&mut self, ui: &mut Ui) {
+    pub fn update_screen_centered(&mut self, ui: &mut Ui) {
         self.update(ui, None);
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         *self = Self::new();
     }
 }
