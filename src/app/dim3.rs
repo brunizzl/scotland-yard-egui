@@ -15,7 +15,7 @@ pub struct State {
     map: Embedding3D,
     map_shape: MapShape,
     map_axes: [Vec3; 3], //rotated by dragging picture
-    map_divisions: usize,
+    map_divisions: isize,
 
     camera_2d: Camera2D,
 
@@ -71,7 +71,7 @@ impl State {
 
     pub fn recompute_graph(&mut self) {
         let s = 1.0;
-        let r = self.map_divisions;
+        let r = self.map_divisions as usize;
         self.map = match self.map_shape {
             MapShape::Icosahedron => Embedding3D::new_subdivided_icosahedron(s, r),
             MapShape::Octahedron => Embedding3D::new_subdivided_octahedron(s, r),
@@ -171,7 +171,7 @@ impl State {
         self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_divisions);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
-        self.info.draw_cop_voronoi(positions, &painter, to_screen, scale);
+        self.info.draw_cop_dist(positions, &painter, to_screen, scale);
 
         self.draw_characters(ui, &response, &painter, &transform, scale);
     }

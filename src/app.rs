@@ -17,10 +17,10 @@ pub const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
 pub const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
 pub const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
 pub const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
-pub const RED: Color32 = Color32::from_rgb(230, 50, 50);
+pub const YELLOW: Color32 = Color32::from_rgb(200, 200, 0);
 
 /// returns if val was changed
-fn add_drag_value(ui: &mut Ui, val: &mut usize, name: &str, min: usize, max: usize) -> bool {    
+fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isize) -> bool {    
     ui.horizontal(|ui| { 
         let prev = *val;  
         ui.label(name);                     
@@ -199,10 +199,10 @@ fn draw_character_buttons(ui: &mut Ui, characters: &mut Vec<Character>) {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist(usize) }
+pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist(isize) }
 
 impl RobberInfo {
-    fn scale_small_dist_with_radius(dist: usize, radius: usize) -> usize {
+    fn scale_small_dist_with_radius(dist: isize, radius: isize) -> isize {
         (dist * radius) / 100
     }
 }
@@ -214,20 +214,18 @@ pub struct InfoState {
     //state kept for each node in map
     pub in_convex_cop_hull: Vec<InSet>, 
     pub min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
-    pub muliple_min_dist_cops: Vec<bool>,
     pub cop_advantage: Vec<isize>,
+    pub visible: Vec<bool>,
+    
+    pub characters: Vec<Character>,
 
+    queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
+
+    pub marked_cop_dist: isize, //mark all points with specified value in min_cop_dist (if value > 0)
     pub robber_info: RobberInfo,
     pub vertex_info: DrawNumbers,
     pub show_convex_hull: bool,
-    pub show_cop_voronoi: bool, //mark positions where (at least) two cops have minimum distance
     pub debug_info: bool,
-    
-    pub characters: Vec<Character>,
-    /// which vertices of map are currently on screen
-    pub visible: Vec<bool>,
-
-    queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
 }
 
 impl InfoState {
@@ -236,22 +234,20 @@ impl InfoState {
         Self { 
             in_convex_cop_hull: Vec::new(),
             min_cop_dist: Vec::new(),
-            muliple_min_dist_cops: Vec::new(),
             cop_advantage: Vec::new(),
-
-            robber_info: RobberInfo::None,
-            vertex_info: DrawNumbers::None,
-            show_convex_hull: false,
-            show_cop_voronoi: false,
-            debug_info: false,
+            visible: Vec::new(),
             
             characters: vec![
                 Character::new(false, Pos2::ZERO),
                 Character::new(true, pos2(0.25, 0.0)),
-                //Character::new(true, pos2(-0.25, 0.0))
                 ],
-            visible: Vec::new(),
             queue: VecDeque::new(),
+
+            marked_cop_dist: 0,
+            robber_info: RobberInfo::None,
+            vertex_info: DrawNumbers::None,
+            show_convex_hull: false,
+            debug_info: false,
         }
     }
 
@@ -293,39 +289,29 @@ impl InfoState {
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
                 "minimaler Cop Abstand");
         });
-        draw_character_buttons(ui, &mut self.characters);
-        ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));
-        ui.add(Checkbox::new(&mut self.show_cop_voronoi, "zeige Punkte mit\nmehreren nächsten Cops"));
+        draw_character_buttons(ui, &mut self.characters);     
+        add_drag_value(ui, &mut self.marked_cop_dist, "Cop Abstand: ", 0, 1000);
+        ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));   
         ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
     }
 
-    fn update_min_cop_dist(&mut self, edges: &EdgeList) {
+    fn update_min_cop_dist(&mut self) {
         let mut min_cop_dist = std::mem::take(&mut self.min_cop_dist);
-        let mut multiple = std::mem::take(&mut self.muliple_min_dist_cops);
         min_cop_dist.clear();
-        multiple.clear();
         {
-            multiple.resize(edges.nr_vertices(), false);
             let mut active_cops = self.active_cops();
             if let Some(cop) = active_cops.next() {
                 min_cop_dist.clone_from(&cop.distances);
             }
             for cop in active_cops {
-                let tripels = itertools::izip!(
-                    cop.distances.iter(), min_cop_dist.iter_mut(), multiple.iter_mut());
-                for (this, curr_min, shared) in tripels {
+                for (this, curr_min) in izip!(&cop.distances, &mut min_cop_dist) {
                     if this < curr_min {
                         *curr_min = *this;
-                        *shared = false;
-                    }
-                    else if this == curr_min {
-                        *shared = true;
                     }
                 }
             }
         }
         self.min_cop_dist = min_cop_dist;
-        self.muliple_min_dist_cops = multiple;
     }
 
     fn update_cop_advantage(&mut self, edges: &EdgeList) {
@@ -401,12 +387,12 @@ impl InfoState {
 
     fn maybe_update(&mut self, edges: &EdgeList, extreme_vertices: impl Iterator<Item = usize>) {
         let require_update = self.show_convex_hull 
-            || self.show_cop_voronoi
+            || self.marked_cop_dist > 0
             || self.robber_info != RobberInfo::None 
             || self.vertex_info != DrawNumbers::None;
         if require_update {
             self.update_convex_cop_hull(edges, extreme_vertices);
-            self.update_min_cop_dist(edges);
+            self.update_min_cop_dist();
             self.update_cop_advantage(edges);
         }
     }
@@ -428,7 +414,7 @@ impl InfoState {
     }
     
 
-    fn draw_green_circles<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32, radius: usize) 
+    fn draw_green_circles<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32, radius: isize) 
     where T: Copy, F: FnMut(T) -> Pos2
     {
         let mut draw_circle_at = |pos: T|{
@@ -453,7 +439,7 @@ impl InfoState {
             (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
                 let bnd = RobberInfo::scale_small_dist_with_radius(bnd, radius);
                 for (&dist, &pos, &vis) in izip!(&r.distances, positions, &self.visible) {
-                    if vis && (dist as usize) <= bnd {
+                    if vis && dist <= bnd {
                         draw_circle_at(pos);
                     }
                 }
@@ -488,16 +474,16 @@ impl InfoState {
         }
     }
 
-    fn draw_cop_voronoi<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32) 
+    fn draw_cop_dist<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32) 
     where T: Copy, F: FnMut(T) -> Pos2
     {
-        if !self.show_cop_voronoi {
+        if self.marked_cop_dist == 0 {
             return;
         }
-        for (&multiple, &pos, &vis) in izip!(&self.muliple_min_dist_cops, positions, &self.visible) {
-            if vis && multiple  {
+        for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, positions, &self.visible) {
+            if vis && dist == self.marked_cop_dist {
                 let draw_pos = to_screen(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, RED);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, YELLOW);
                 painter.add(marker_circle);
             }
         }
