@@ -368,7 +368,7 @@ impl Embedding3D {
         self.vertices.len()
     }
 
-    pub fn vertices(&self) -> &[Pos3] {
+    pub fn positions(&self) -> &[Pos3] {
         &self.vertices
     }
 

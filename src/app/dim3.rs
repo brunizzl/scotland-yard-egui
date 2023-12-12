@@ -1,9 +1,7 @@
 
 use std::iter;
 
-use itertools::izip;
-
-use egui::{*, epaint::TextShape, text::LayoutJob};
+use egui::*;
 
 use crate::{ graph::Embedding3D, app::*, geo::{Vec3, Pos3, self} };
 
@@ -15,10 +13,9 @@ const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
 pub struct State {
     map: Embedding3D,
-    visible_vertices: Vec<bool>,
     map_shape: MapShape,
     map_axes: [Vec3; 3], //rotated by dragging picture
-    map_radius: usize,
+    map_divisions: usize,
 
     camera_2d: Camera2D,
 
@@ -34,10 +31,9 @@ impl State {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut res = Self { 
             map: Embedding3D::new_subdivided_tetrahedron(1.0, 1), 
-            visible_vertices: Vec::new(),
             map_shape: MapShape::Tetrahedron, 
             map_axes: DEFAULT_AXES, 
-            map_radius: 6,
+            map_divisions: 6,
 
             camera_2d: Camera2D::new(),
 
@@ -75,16 +71,16 @@ impl State {
 
     pub fn recompute_graph(&mut self) {
         let s = 1.0;
-        let r = self.map_radius;
+        let r = self.map_divisions;
         self.map = match self.map_shape {
             MapShape::Icosahedron => Embedding3D::new_subdivided_icosahedron(s, r),
             MapShape::Octahedron => Embedding3D::new_subdivided_octahedron(s, r),
             MapShape::Tetrahedron => Embedding3D::new_subdivided_tetrahedron(s, r),
             MapShape::DividedIcosahedron => Embedding3D::new_subdivided_subdivided_icosahedron(s, r, 0),
         };
-        self.tolerance = f32::min(0.25, 0.75 / self.map_radius as f32);
+        self.tolerance = f32::min(0.25, 0.75 / self.map_divisions as f32);
         let to_2d = self.camera_projection();
-        self.map.update_vertex_visibility(&to_2d, &mut self.visible_vertices);
+        self.map.update_vertex_visibility(&to_2d, &mut self.info.visible);
         for char in &mut self.info.characters {
             let char_dir = char.pos3.to_vec3();
             let potential = |_, v_pos: Pos3| -char_dir.dot(v_pos.to_vec3().normalized());
@@ -108,130 +104,37 @@ impl State {
             if self.map_shape != old_shape {
                 self.recompute_graph();
             }
-            if add_drag_value(ui, &mut self.map_radius, "Radius: ", 0, 1000) {
+            if add_drag_value(ui, &mut self.map_divisions, "Auflösung: ", 0, 200) {
                 self.recompute_graph();
             }
         });
         self.info.draw_menu(ui);
     }
 
+    /// to be reliable, this one must search exhaustive, as min_cop_dist is not monotone,
+    /// thus a local minimum may not be the global one
     fn vertex_furthest_from_cops(&self) -> iter::Once<usize> {
         let (furthest_vertex, _) = self.info.min_cop_dist.iter().enumerate()
-            .fold((0, 0), |(v_best, best), (v, &dist)| if dist > best { (v, dist) } else { (v_best, best) });
+            .fold((0, 0), |best, (v, &dist)| if dist > best.1 { (v, dist) } else { best });
         iter::once(furthest_vertex)
     }
 
-    fn draw_convex_cop_hull(&self, painter: &Painter, to_screen: &geo::ToScreen, visible: &[bool], scale: f32) {
-        let iter = izip!(self.info.in_convex_cop_hull.iter(), self.map.vertices(), visible);
-        for (&in_hull, &pos, &vis) in iter {
-            if vis && in_hull.yes()  {
-                let draw_pos = to_screen.apply(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, scale * 9.0, LIGHT_BLUE);
-                painter.add(marker_circle);
+    fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, 
+        transform: &geo::ToScreen, scale: f32) 
+    {
+        for ch in &mut self.info.characters {
+            ch.update_3d(self.tolerance, &self.map, &transform.to_plane, 
+                &self.info.visible, &mut self.info.queue);
+
+            let node_pos = transform.to_plane.project_pos(self.map.positions()[ch.nearest_node]);
+            if ch.on_node && self.info.visible[ch.nearest_node] || !ch.on_node {
+                ch.drag_and_draw(&response, &painter, ui, transform.move_rect, node_pos, scale);
+            }
+            else {
+                let drawn_node_pos = transform.move_rect.transform_pos(node_pos);
+                ch.draw_small_at(drawn_node_pos, &painter, scale);
             }
         }
-    }
-
-    fn draw_green_circles(&self, painter: &Painter, to_screen: &geo::ToScreen, visible: &[bool], scale: f32) {     
-        let draw_circle_at = |pos: Pos3|{
-            let draw_pos = to_screen.apply(pos);
-            let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-            painter.add(marker_circle);
-        };
-        match (self.info.robber_info, self.info.robber()) {
-            (RobberInfo::NearNodes, Some(r)) => 
-                for (r_dist, c_dist, &pos, &vis) in 
-                izip!(r.distances.iter(), self.info.min_cop_dist.iter(), self.map.vertices(), visible) {
-                    if vis && r_dist < c_dist {
-                        draw_circle_at(pos);
-                    }
-                },
-            (RobberInfo::EscapableNodes, _) => 
-                for (&adv, &pos, &vis) in izip!(self.info.cop_advantage.iter(), self.map.vertices(), visible) {
-                    if vis && adv < -1 {
-                        draw_circle_at(pos);
-                    }
-                },
-            (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
-                let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
-                for (&dist, &pos, &vis) in izip!(r.distances.iter(), self.map.vertices(), visible) {
-                    if vis && (dist as usize) <= bnd {
-                        draw_circle_at(pos);
-                    }
-                }
-            },
-            _ => {},
-        }
-    }
-
-    fn draw_robber_info(&self, painter: &Painter, to_screen: &geo::ToScreen, visible: &[bool], scale: f32) {
-        if let (RobberInfo::NearNodes, Some(r)) = (self.info.robber_info, self.info.robber()) { 
-            let iter = izip!(r.distances.iter(), self.info.min_cop_dist.iter(), self.map.vertices(), visible);
-            for (r_dist, c_dist, &pos, &vis) in iter {
-                if vis && r_dist < c_dist  {
-                    let draw_pos = to_screen.apply(pos);
-                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-                    painter.add(marker_circle);
-                }
-            }
-        }
-        if self.info.robber_info == RobberInfo::EscapableNodes {
-            for (&adv, &pos, &vis) in izip!(self.info.cop_advantage.iter(), self.map.vertices(), visible) {
-                if vis && adv < -1  {
-                    let draw_pos = to_screen.apply(pos);
-                    let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
-                    painter.add(marker_circle);
-                }
-            }
-        }
-    }
-
-    fn draw_numbers(&self, ui: &mut Ui, painter: &Painter, to_screen: &geo::ToScreen, visible: &[bool], scale: f32) {
-        let font = FontId::proportional(scale * 8.0);
-        let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
-        for (i, &pos, &vis) in izip!(0.., self.map.vertices(), visible) {
-            if vis {
-                let txt = match self.info.vertex_info {
-                    DrawNumbers::Indices => { i.to_string() }
-                    DrawNumbers::MinCopDist => { self.info.min_cop_dist[i].to_string() }
-                    DrawNumbers::None => { panic!() }
-                    DrawNumbers::RobberAdvantage => { (-1 -self.info.cop_advantage[i]).to_string() }
-                };
-                let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * scale);
-                layout_job.halign = Align::Center;
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
-                let screen_pos = to_screen.apply(pos);
-                let text = Shape::Text(TextShape::new(screen_pos, galley));
-                painter.add(text);
-            }
-        }
-    }
-
-    fn draw_cop_voronoi(&self, painter: &Painter, to_screen: &geo::ToScreen, visible: &[bool], scale: f32) {
-        for (&multiple, &pos, &vis) in izip!(self.info.muliple_min_dist_cops.iter(), self.map.vertices(), visible) {
-            if vis && multiple  {
-                let draw_pos = to_screen.apply(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, RED);
-                painter.add(marker_circle);
-            }
-        }
-    }
-
-    fn build_to_screen(&self, response: &Response) -> geo::ToScreen {
-        let to = response.rect;
-        let aspect_ratio = to.width() / to.height();
-        //shapes are centered around zero, with extreme vertices having length 1.0
-        let from_size = if aspect_ratio < 1.0 {
-            vec2(2.05, 2.05 / aspect_ratio)
-        }
-        else {
-            vec2(2.05 * aspect_ratio, 2.05)
-        };
-        let from = Rect::from_center_size(Pos2::ZERO, from_size / self.camera_2d.zoom);
-
-        let to_screen = emath::RectTransform::from_to(from, to);
-
-        geo::ToScreen::new(self.camera_projection(), to_screen)
     }
 
     pub fn draw_graph(&mut self, ui: &mut Ui) {
@@ -239,8 +142,13 @@ impl State {
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover()); 
 
         self.camera_2d.update_screen_centered(ui);
-        let to_screen = self.build_to_screen(&response);
-        let rot = -self.camera_2d.offset / to_screen.move_rect.scale();
+        let transform = {
+            let min_size = Vec2::splat(2.05 / self.camera_2d.zoom);
+            let contained = Rect::from_center_size(Pos2::ZERO, min_size);
+            let shift_rects = build_to_screen_2d(contained, response.rect);
+            geo::ToScreen::new(self.camera_projection(), shift_rects)
+        };
+        let rot = -self.camera_2d.offset / transform.move_rect.scale();
         self.rotate_axes_x(rot.y);
         self.rotate_axes_y(rot.x);
         self.rotate_axes_z(self.camera_2d.rotation);
@@ -250,37 +158,22 @@ impl State {
         self.camera_2d.offset = Vec2::ZERO;
         self.camera_2d.rotation = 0.0;
 
+        let to_screen = |p: Pos3| transform.apply(p);
+
         self.info.maybe_update(self.map.edges(), self.vertex_furthest_from_cops());
 
-        let scale = self.camera_2d.zoom * f32::min(12.0 / self.map_radius as f32, 4.0);
+        let scale = self.camera_2d.zoom * f32::min(12.0 / self.map_divisions as f32, 4.0);
         let grey_stroke = Stroke::new(scale, GREY);
-        self.map.draw_visible_edges(&to_screen, &painter, grey_stroke, &mut self.visible_vertices);
+        self.map.draw_visible_edges(&transform, &painter, grey_stroke, 
+            &mut self.info.visible);
 
-        let visible = &self.visible_vertices[..];
-        if self.info.show_convex_hull {
-            self.draw_convex_cop_hull(&painter, &to_screen, visible, scale);
-        }
-        self.draw_green_circles(&painter, &to_screen, visible, scale);
-        self.draw_robber_info(&painter, &to_screen, visible, scale);
+        let positions = self.map.positions();
+        self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
+        self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_divisions);
+        self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
+        self.info.draw_cop_voronoi(positions, &painter, to_screen, scale);
 
-        if self.map_radius < 20 && self.info.vertex_info != DrawNumbers::None {
-            self.draw_numbers(ui, &painter, &to_screen, visible, scale);
-        }
-        if self.info.show_cop_voronoi {
-            self.draw_cop_voronoi(&painter, &to_screen, visible, scale);
-        }
-
-        for ch in &mut self.info.characters {
-            ch.update_3d(self.tolerance, &self.map, &to_screen.to_plane, &self.visible_vertices, &mut self.info.queue);
-            let node_pos = to_screen.to_plane.project_pos(self.map.vertices()[ch.nearest_node]);
-            if ch.on_node && self.visible_vertices[ch.nearest_node] || !ch.on_node {
-                ch.drag_and_draw(&response, &painter, ui, to_screen.move_rect, node_pos, scale);
-            }
-            else {
-                let drawn_node_pos = to_screen.move_rect.transform_pos(node_pos);
-                ch.draw_small_at(drawn_node_pos, &painter, scale);
-            }
-        }
+        self.draw_characters(ui, &response, &painter, &transform, scale);
     }
 
 }

@@ -1,7 +1,9 @@
 
 use std::collections::VecDeque;
 
-use egui::*;
+use itertools::izip;
+
+use egui::{*, epaint::TextShape, text::LayoutJob};
 
 use crate::{graph::{Embedding2D, Embedding3D, InSet, EdgeList}, geo::{self, Pos3}};
 
@@ -171,7 +173,7 @@ impl Character {
             self.nearest_node = nearest_node;
             if need_dist_update {
                 self.update_distances(map.edges(), queue);
-                self.pos3 = map.vertices()[self.nearest_node];
+                self.pos3 = map.positions()[self.nearest_node];
             }
         }
     }
@@ -222,6 +224,8 @@ pub struct InfoState {
     pub debug_info: bool,
     
     pub characters: Vec<Character>,
+    /// which vertices of map are currently on screen
+    pub visible: Vec<bool>,
 
     queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
 }
@@ -246,6 +250,7 @@ impl InfoState {
                 Character::new(true, pos2(0.25, 0.0)),
                 //Character::new(true, pos2(-0.25, 0.0))
                 ],
+            visible: Vec::new(),
             queue: VecDeque::new(),
         }
     }
@@ -278,7 +283,7 @@ impl InfoState {
                 add_drag_value(ui, bnd, "% Radius: ", 1, 100);
             }
         });
-        ui.collapsing("Zahlen (Radius < 20)", |ui|{
+        ui.collapsing("Zahlen", |ui|{
             ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
                 "Keine");
             ui.radio_value(&mut self.vertex_info, DrawNumbers::Indices, 
@@ -405,6 +410,112 @@ impl InfoState {
             self.update_cop_advantage(edges);
         }
     }
+
+    pub fn draw_convex_cop_hull<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32) 
+    where T: Copy, F: FnMut(T) -> Pos2
+    {
+        if !self.show_convex_hull {
+            return;
+        }
+        let iter = izip!(&self.in_convex_cop_hull, positions, &self.visible);
+        for (&in_hull, &pos, &vis) in iter {
+            if vis && in_hull.yes()  {
+                let draw_pos = to_screen(pos);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 9.0, LIGHT_BLUE);
+                painter.add(marker_circle);
+            }
+        }
+    }
+    
+
+    fn draw_green_circles<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32, radius: usize) 
+    where T: Copy, F: FnMut(T) -> Pos2
+    {
+        let mut draw_circle_at = |pos: T|{
+            let draw_pos = to_screen(pos);
+            let marker_circle = Shape::circle_filled(draw_pos, scale * 6.0, GREEN);
+            painter.add(marker_circle);
+        };
+        match (self.robber_info, self.robber()) {
+            (RobberInfo::NearNodes, Some(r)) => 
+                for (r_dist, c_dist, &pos, &vis) in 
+                izip!(&r.distances, &self.min_cop_dist, positions, &self.visible) {
+                    if vis && r_dist < c_dist {
+                        draw_circle_at(pos);
+                    }
+                },
+            (RobberInfo::EscapableNodes, _) => 
+                for (&adv, &pos, &vis) in izip!(&self.cop_advantage, positions, &self.visible) {
+                    if vis && adv < -1 {
+                        draw_circle_at(pos);
+                    }
+                },
+            (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
+                let bnd = RobberInfo::scale_small_dist_with_radius(bnd, radius);
+                for (&dist, &pos, &vis) in izip!(&r.distances, positions, &self.visible) {
+                    if vis && (dist as usize) <= bnd {
+                        draw_circle_at(pos);
+                    }
+                }
+            },
+            _ => {},
+        }
+    }    
+
+    fn draw_numbers<T, F>(&self, positions: &[T], ui: &Ui, painter: &Painter, mut to_screen: F, scale: f32) 
+    where T: Copy, F: FnMut(T) -> Pos2
+    {
+        if self.vertex_info == DrawNumbers::None {
+            return;
+        }
+        let font = FontId::proportional(scale * 8.0);
+        let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
+        for (i, &pos, &vis) in izip!(0.., positions, &self.visible) {
+            if vis {
+                let txt = match self.vertex_info {
+                    DrawNumbers::Indices => { i.to_string() }
+                    DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
+                    DrawNumbers::None => { panic!() }
+                    DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
+                };
+                let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * scale);
+                layout_job.halign = Align::Center;
+                let galley = ui.fonts(|f| f.layout_job(layout_job));
+                let screen_pos = to_screen(pos);
+                let text = Shape::Text(TextShape::new(screen_pos, galley));
+                painter.add(text);
+            }
+        }
+    }
+
+    fn draw_cop_voronoi<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32) 
+    where T: Copy, F: FnMut(T) -> Pos2
+    {
+        if !self.show_cop_voronoi {
+            return;
+        }
+        for (&multiple, &pos, &vis) in izip!(&self.muliple_min_dist_cops, positions, &self.visible) {
+            if vis && multiple  {
+                let draw_pos = to_screen(pos);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, RED);
+                painter.add(marker_circle);
+            }
+        }
+    }
+}   
+
+pub fn build_to_screen_2d(contained: Rect, to: Rect) -> emath::RectTransform {
+    let ratio = to.aspect_ratio();
+    //shapes are centered around zero, with extreme vertices having length 1.0
+    let mut from_size = contained.size();
+    if ratio < 1.0 {
+        from_size.y /= ratio;    
+    }
+    else {
+        from_size.x *= ratio;   
+    };
+    let from = Rect::from_center_size(contained.center(), from_size);
+    emath::RectTransform::from_to(from, to)
 }
 
 
@@ -429,7 +540,7 @@ impl Camera2D {
         }
     }
 
-    fn update(&mut self, ui: &mut Ui, response: Option<&Response>) {        
+    fn update(&mut self, ui: &mut Ui, screen: Option<Rect>) {        
         ui.input(|info| {
             if info.pointer.button_down(PointerButton::Secondary) {
                 self.offset += info.pointer.delta();
@@ -439,10 +550,9 @@ impl Camera2D {
             let zoom_delta = info.zoom_delta();
             self.zoom *= zoom_delta;
             if zoom_delta != 1.0 {
-                if let (Some(ptr_pos), Some(resp)) = (info.pointer.latest_pos(), response) {
+                if let (Some(ptr_pos), Some(screen)) = (info.pointer.latest_pos(), screen) {
                     //keep fixed point of zoom at mouse pointer
-                    let draw_mid = resp.rect.center();
-                    let mid_to_ptr = ptr_pos - draw_mid;
+                    let mid_to_ptr = ptr_pos - screen.center();
                     let mut zoom_center = self.offset - mid_to_ptr;
                     zoom_center *= zoom_delta;
                     self.offset = zoom_center + mid_to_ptr;
@@ -458,7 +568,7 @@ impl Camera2D {
     /// zoom changes happen with the cursor position as fixed point, thus 
     /// with zooming we also change the offset
     fn update_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
-        self.update(ui, Some(response));
+        self.update(ui, Some(response.rect));
     }
 
     /// zoom changes don't change the offset at all
