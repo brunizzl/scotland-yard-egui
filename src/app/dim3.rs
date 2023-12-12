@@ -109,6 +109,21 @@ impl State {
             }
         });
         self.info.draw_menu(ui);
+        if let (RobberInfo::SmallRobberDist, Some(r)) = (self.info.robber_info, self.info.robber()) {
+            let r_pos = self.map.positions()[r.nearest_node];
+            let mut max_dist = f32::MIN;
+            let mut min_dist = f32::MAX;
+            let bnd = RobberInfo::scale_small_dist_with_radius(self.info.small_robber_dist, self.map_divisions);
+            for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
+                if dist == bnd {
+                    let new_dist = (r_pos - pos).length();
+                    max_dist = f32::max(max_dist, new_dist);
+                    min_dist = f32::min(min_dist, new_dist);
+                }
+            }
+            ui.label(format!("min dist:   {}\nmax dist:   {}\nmin / max: {}", 
+                min_dist, max_dist, min_dist / max_dist));
+        }
     }
 
     /// to be reliable, this one must search exhaustive, as min_cop_dist is not monotone,
@@ -171,7 +186,7 @@ impl State {
         self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_divisions);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
-        self.info.draw_cop_dist(positions, &painter, to_screen, scale);
+        self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
 
         self.draw_characters(ui, &response, &painter, &transform, scale);
     }

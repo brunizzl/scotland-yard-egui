@@ -17,7 +17,7 @@ pub const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
 pub const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
 pub const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
 pub const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
-pub const YELLOW: Color32 = Color32::from_rgb(200, 200, 0);
+pub const RED: Color32 = Color32::from_rgb(230, 50, 50);
 
 /// returns if val was changed
 fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isize) -> bool {    
@@ -199,7 +199,7 @@ fn draw_character_buttons(ui: &mut Ui, characters: &mut Vec<Character>) {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist(isize) }
+pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist, CopDist }
 
 impl RobberInfo {
     fn scale_small_dist_with_radius(dist: isize, radius: isize) -> isize {
@@ -209,6 +209,10 @@ impl RobberInfo {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum DrawNumbers { None, Indices, RobberAdvantage, MinCopDist }
+
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum RobberStrat { None, EscapeHull }
 
 pub struct InfoState {
     //state kept for each node in map
@@ -221,8 +225,12 @@ pub struct InfoState {
 
     queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
 
-    pub marked_cop_dist: isize, //mark all points with specified value in min_cop_dist (if value > 0)
     pub robber_info: RobberInfo,
+    //both are only used, when the respective RobberInfo is active
+    pub marked_cop_dist: isize, //determines cop dist marked in RobberInfo::CopDist
+    pub small_robber_dist: isize, //determines max dist marked in RobberInfo::SmallRobberDist
+
+    pub robber_strat: RobberStrat,
     pub vertex_info: DrawNumbers,
     pub show_convex_hull: bool,
     pub debug_info: bool,
@@ -243,8 +251,11 @@ impl InfoState {
                 ],
             queue: VecDeque::new(),
 
-            marked_cop_dist: 0,
             robber_info: RobberInfo::None,
+            small_robber_dist: 10,
+            marked_cop_dist: 0,
+
+            robber_strat: RobberStrat::None,
             vertex_info: DrawNumbers::None,
             show_convex_hull: false,
             debug_info: false,
@@ -265,18 +276,23 @@ impl InfoState {
             //settings to draw extra information
             ui.radio_value(&mut self.robber_info, RobberInfo::None, 
                 "keine Marker");
+
             ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
                 "markiere für Räuber\nnähere Knoten");
+
             ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
                 "markiere Punkte mit\ndirekter Fluchtoption");
-            let robber_dist_button = egui::RadioButton::new(
-                matches!(self.robber_info, RobberInfo::SmallRobberDist(_)), 
+
+            ui.radio_value(&mut self.robber_info, RobberInfo::SmallRobberDist, 
                 "markiere Punkte nah\nan Räuber");
-            if ui.add(robber_dist_button).clicked() {
-                self.robber_info = RobberInfo::SmallRobberDist(50);
+            if self.robber_info == RobberInfo::SmallRobberDist {
+                add_drag_value(ui, &mut self.small_robber_dist, "% Radius: ", 1, 100);
             }
-            if let RobberInfo::SmallRobberDist(bnd) = &mut self.robber_info {
-                add_drag_value(ui, bnd, "% Radius: ", 1, 100);
+
+            ui.radio_value(&mut self.robber_info, RobberInfo::CopDist, 
+                "markiere Punkte mit\nAbstand zu Cops");
+            if self.robber_info == RobberInfo::CopDist {
+                add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
         });
         ui.collapsing("Zahlen", |ui|{
@@ -288,6 +304,12 @@ impl InfoState {
                 "Räubervorteil");
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
                 "minimaler Cop Abstand");
+        });
+        ui.collapsing("Strategie", |ui|{
+            ui.radio_value(&mut self.robber_strat, RobberStrat::None, 
+                "Keine");
+            ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHull, 
+                "Entkomme Hülle");
         });
         draw_character_buttons(ui, &mut self.characters);     
         add_drag_value(ui, &mut self.marked_cop_dist, "Cop Abstand: ", 0, 1000);
@@ -387,7 +409,7 @@ impl InfoState {
 
     fn maybe_update(&mut self, edges: &EdgeList, extreme_vertices: impl Iterator<Item = usize>) {
         let require_update = self.show_convex_hull 
-            || self.marked_cop_dist > 0
+            || self.robber_strat != RobberStrat::None
             || self.robber_info != RobberInfo::None 
             || self.vertex_info != DrawNumbers::None;
         if require_update {
@@ -436,14 +458,20 @@ impl InfoState {
                         draw_circle_at(pos);
                     }
                 },
-            (RobberInfo::SmallRobberDist(bnd), Some(r)) => {
-                let bnd = RobberInfo::scale_small_dist_with_radius(bnd, radius);
+            (RobberInfo::SmallRobberDist, Some(r)) => {
+                let bnd = RobberInfo::scale_small_dist_with_radius(self.small_robber_dist, radius);
                 for (&dist, &pos, &vis) in izip!(&r.distances, positions, &self.visible) {
                     if vis && dist <= bnd {
                         draw_circle_at(pos);
                     }
                 }
             },
+            (RobberInfo::CopDist, _) => 
+            for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, positions, &self.visible) {
+                if vis && dist == self.marked_cop_dist {
+                    draw_circle_at(pos);
+                }
+            }
             _ => {},
         }
     }    
@@ -474,16 +502,37 @@ impl InfoState {
         }
     }
 
-    fn draw_cop_dist<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32) 
+    fn draw_robber_strat<T, F>(&self, edges: &EdgeList, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32) 
     where T: Copy, F: FnMut(T) -> Pos2
     {
-        if self.marked_cop_dist == 0 {
+        if self.robber_strat == RobberStrat::None {
             return;
         }
-        for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, positions, &self.visible) {
-            if vis && dist == self.marked_cop_dist {
-                let draw_pos = to_screen(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, scale * 5.0, YELLOW);
+        let potential = |v| match self.robber_strat {
+            RobberStrat::None => panic!(),
+            //iff two neighbors have same cop advantage, we want to choose a vertex with bigger min_cop_dist.
+            //because all neighbors are neighbors of same vertex, their min_cop_dist will differ by at most 2.
+            //thus dividing the distance by 10 will make it only then the deciding factor, when the best advantage is non-unique.
+            RobberStrat::EscapeHull => self.cop_advantage[v] as f32 - self.min_cop_dist[v] as f32 / 10.0,
+        };
+        if let Some(r) = self.robber() {
+            let mut best = Vec::with_capacity(10);   
+            best.push(r.nearest_node);
+            let mut smallest_pot = potential(r.nearest_node);
+            for neigh in edges.neighbors_of(r.nearest_node) {
+                let neigh_pot = potential(neigh);
+                if neigh_pot < smallest_pot {
+                    best.clear();
+                    best.push(neigh);
+                    smallest_pot = neigh_pot;
+                }
+                else if neigh_pot == smallest_pot {
+                    best.push(neigh);
+                }
+            }
+            for v in best {
+                let draw_pos = to_screen(positions[v]);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, RED);
                 painter.add(marker_circle);
             }
         }
@@ -594,7 +643,6 @@ impl eframe::App for State {
 
         SidePanel::left("left_panel").show(ctx, |ui| {
             ui.vertical(|ui| {
-                ui.heading("Optionen");
                 widgets::global_dark_light_mode_buttons(ui);
                 let button_switch_text = if self.show_2d { "Zeige 3D" } else { "Zeige 2D" };
                 if ui.button(button_switch_text).clicked() {
