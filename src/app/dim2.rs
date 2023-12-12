@@ -115,11 +115,11 @@ impl State {
             }
         });
         self.info.draw_menu(ui);
-        if let (RobberInfo::SmallRobberDist(bnd), Some(r)) = (self.info.robber_info, self.info.robber()) {
+        if let (RobberInfo::SmallRobberDist, Some(r)) = (self.info.robber_info, self.info.robber()) {
             let r_pos = self.map.positions()[r.nearest_node];
             let mut max_dist = f32::MIN;
             let mut min_dist = f32::MAX;
-            let bnd = RobberInfo::scale_small_dist_with_radius(bnd, self.map_radius);
+            let bnd = RobberInfo::scale_small_dist_with_radius(self.info.small_robber_dist, self.map_radius);
             for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
                 if dist == bnd {
                     let new_dist = (r_pos - pos).length();
@@ -204,12 +204,11 @@ impl State {
 
         self.draw_edges(&painter, transform, scale);
         let positions = self.map.positions();
-        if self.info.show_convex_hull {
-            self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
-        }
+        self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_radius);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
-        self.info.draw_cop_dist(positions, &painter, to_screen, scale);
+        self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
+
         self.draw_characters(ui, &response, &painter, transform, scale);
     }
 }

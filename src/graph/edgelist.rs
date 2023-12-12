@@ -326,7 +326,7 @@ impl EdgeList {
             }
         }
         nr_colored
-    }    
+    }
 } //impl EdgeList
 
 
