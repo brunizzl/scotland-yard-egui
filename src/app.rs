@@ -39,6 +39,7 @@ pub struct CharData {
     color: Color32,
     glow: Color32,
     emoji: &'static str,
+    job: &'static str,
 }
 //options to draw cops and robber as emojies: 
 //👮🛂🛃👿🚴🏃
@@ -46,11 +47,13 @@ pub const COP: CharData = CharData {
     color: Color32::from_rgb(10, 50, 170),
     glow: Color32::from_rgb(60, 120, 235),
     emoji: "👮",
+    job: "Cop",
 };
 pub const ROBBER: CharData = CharData {
     color: Color32::from_rgb(170, 40, 40),
     glow: Color32::from_rgb(235, 120, 120),
     emoji: "🏃",
+    job: "Räuber",
 };
 
 //denotes eighter a cop or the robber as node on screen
@@ -222,6 +225,7 @@ pub struct InfoState {
     pub visible: Vec<bool>,
     
     pub characters: Vec<Character>,
+    last_moved: Option<&'static CharData>,
 
     queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
 
@@ -249,6 +253,8 @@ impl InfoState {
                 Character::new(false, Pos2::ZERO),
                 Character::new(true, pos2(0.25, 0.0)),
                 ],
+            last_moved: None,
+
             queue: VecDeque::new(),
 
             robber_info: RobberInfo::None,
@@ -311,7 +317,13 @@ impl InfoState {
             ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHull, 
                 "Entkomme Hülle");
         });
-        draw_character_buttons(ui, &mut self.characters);     
+        draw_character_buttons(ui, &mut self.characters);
+        if let Some(c) = self.characters.iter().find(|c| c.dragging) {
+            self.last_moved = Some(c.data);
+        }
+        if let Some(char_data) = self.last_moved {
+            ui.label(format!("letzte bewegte Figur: {}", char_data.job));
+        }
         ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));   
         ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
     }
