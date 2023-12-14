@@ -139,14 +139,14 @@ impl State {
         transform: &geo::ToScreen, scale: f32) 
     {
         for ch in &mut self.info.characters {
-            let moved = ch.update_3d(self.tolerance, &self.map, &transform.to_plane, 
+            ch.update_3d(self.tolerance, &self.map, &transform.to_plane, 
                 &self.info.visible, &mut self.info.queue);
-            if moved {
-                self.info.last_moved = Some(&ch.data);
-            }
             let node_pos = transform.to_plane.project_pos(self.map.positions()[ch.nearest_node]);
             if ch.on_node && self.info.visible[ch.nearest_node] || !ch.on_node {
-                ch.drag_and_draw(&response, &painter, ui, transform.move_rect, node_pos, scale);
+                let moved = ch.drag_and_draw(&response, &painter, ui, transform.move_rect, node_pos, scale);
+                if moved {
+                    self.info.last_moved = Some(&ch.data);
+                }
             }
             else {
                 let drawn_node_pos = transform.move_rect.transform_pos(node_pos);

@@ -171,12 +171,12 @@ impl State {
         for ch in &mut self.info.characters {
             let node_pos = self.map.positions()[ch.nearest_node];
             if ch.dragging {
-                let moved = ch.update_2d(self.tolerance, &self.map, &mut self.info.queue);
-                if moved {
-                    self.info.last_moved = Some(&ch.data);
-                }
+                ch.update_2d(self.tolerance, &self.map, &mut self.info.queue);
             }
-            ch.drag_and_draw(response, painter, ui, to_screen, node_pos, scale);
+            let moved = ch.drag_and_draw(response, painter, ui, to_screen, node_pos, scale);
+            if moved {
+                self.info.last_moved = Some(&ch.data);
+            }
         }
     }
 

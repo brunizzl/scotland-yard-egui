@@ -1,7 +1,7 @@
 
 use std::collections::VecDeque;
 
-use itertools::izip;
+use itertools::{izip, Itertools};
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
@@ -112,7 +112,7 @@ impl Character {
     }
 
     pub fn drag_and_draw(&mut self, response: &Response, painter: &Painter, ui: &Ui, 
-        to_screen: emath::RectTransform, node_pos: Pos2, scale: f32) 
+        to_screen: emath::RectTransform, node_pos: Pos2, scale: f32) -> bool
     {       
         let character_size = f32::max(8.0, scale * 8.0);
         let real_screen_pos = to_screen.transform_pos(self.pos2);
@@ -131,18 +131,24 @@ impl Character {
             let new_screen_pos = draw_screen_pos + point_response.drag_delta();
             self.pos2 = from_screen.transform_pos(new_screen_pos);
         }
+        if self.last_positions.is_empty() && self.on_node {
+            self.last_positions.push(self.nearest_node);
+        }
         //test if character was just released. doing this ourselfs allows to simulate release whenever we like
         //(e.g. just set dragging to true and we snap to position)
+        let mut made_step = false;
         if !dragging && self.dragging && self.on_node {
             self.pos2 = node_pos; //snap actual character postion to node where he was dragged
             if Some(&self.nearest_node) != self.last_positions.first() {
                 //position changed and drag released -> new step
                 self.last_positions.push(self.nearest_node);
+                made_step = true;
             }
         }
         self.dragging = dragging;
-
         self.draw_large_at(draw_screen_pos, painter, ui, character_size);
+
+        made_step
     }
 
     fn update_distances(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
@@ -158,7 +164,7 @@ impl Character {
     //  change to that neighbor
     //(converges to globally nearest node only for "convex" graphs, 
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
-    fn update_2d(&mut self, tolerance: f32, map: &Embedding2D, queue: &mut VecDeque<usize>) -> bool {
+    fn update_2d(&mut self, tolerance: f32, map: &Embedding2D, queue: &mut VecDeque<usize>) {
         let safe_start = if map.len() > self.nearest_node { self.nearest_node } else { 0 };
         let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos2, safe_start);
         self.on_node = nearest_dist_sq <= tolerance * tolerance;
@@ -169,15 +175,14 @@ impl Character {
         if need_dist_update {
             self.update_distances(map.edges(), queue);
         }
-        need_dist_update
     }
 
     /// assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
     fn update_3d(&mut self, tolerance: f32, map: &Embedding3D, to_2d: &geo::Project3To2, 
-        vertex_visible: &[bool], queue: &mut VecDeque<usize>) -> bool
+        vertex_visible: &[bool], queue: &mut VecDeque<usize>)
     {
         if !self.dragging {
-            return false;
+            return;
         }        
         let potential = |v:usize, v_pos| {
             let dist_2d = (to_2d.project_pos(v_pos) - self.pos2).length_sq();
@@ -196,7 +201,6 @@ impl Character {
             self.update_distances(map.edges(), queue);
             self.pos3 = map.positions()[self.nearest_node];
         }
-        need_dist_update
     }
 }
 
@@ -598,15 +602,21 @@ impl InfoState {
         }
         for ch in &self.characters {
             let f_len = ch.last_positions.len() as f32;
-            for (i, &v) in ch.last_positions.iter().enumerate() {    
-                if !self.visible[v] {
+            for (i, (&v1, &v2)) in ch.last_positions.iter().tuple_windows().enumerate() { 
+                if !self.visible[v1] {
+                    continue;
+                }      
+                let draw_pos_1 = to_screen(positions[v1]);
+                let size = scale * 2.5 * (i as f32 + 0.8 * f_len) / f_len;
+                let marker_circle = Shape::circle_filled(draw_pos_1, size, ch.data.glow);
+                painter.add(marker_circle);
+                if !self.visible[v2] {
                     continue;
                 } 
-                let real_pos = positions[v];       
-                let draw_pos = to_screen(real_pos);
-                let size = scale * 2.5 * (i as f32 + 0.8 * f_len) / f_len;
-                let marker_circle = Shape::circle_filled(draw_pos, size, ch.data.glow);
-                painter.add(marker_circle);
+                let points = [draw_pos_1, to_screen(positions[v2])];
+                let stroke = Stroke::new(size * 0.5, ch.data.glow);
+                let line = Shape::LineSegment { points, stroke };
+                painter.add(line);
             }
         }
     }
