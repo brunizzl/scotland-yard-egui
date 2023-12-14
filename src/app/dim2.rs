@@ -65,6 +65,7 @@ impl State {
         self.info.update_convex_cop_hull(edges, self.extreme_vertices.iter().map(|&v| v));
         self.info.update_min_cop_dist();
         self.info.update_cop_advantage(edges);
+        self.info.forget_move_history();
     }
 
     /// Called once before the first frame.
@@ -167,12 +168,15 @@ impl State {
     fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, 
         to_screen: emath::RectTransform, scale: f32) 
     {
-        for character in self.info.characters.iter_mut() {
-            let node_pos = self.map.positions()[character.nearest_node];
-            if character.dragging {
-                character.update_2d(self.tolerance, &self.map, &mut self.info.queue);
+        for ch in &mut self.info.characters {
+            let node_pos = self.map.positions()[ch.nearest_node];
+            if ch.dragging {
+                let moved = ch.update_2d(self.tolerance, &self.map, &mut self.info.queue);
+                if moved {
+                    self.info.last_moved = Some(&ch.data);
+                }
             }
-            character.drag_and_draw(response, painter, ui, to_screen, node_pos, scale);
+            ch.drag_and_draw(response, painter, ui, to_screen, node_pos, scale);
         }
     }
 
@@ -206,6 +210,7 @@ impl State {
         let positions = self.map.positions();
         self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_radius);
+        self.info.draw_character_tails(positions, &painter, to_screen, scale);
         self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
 
