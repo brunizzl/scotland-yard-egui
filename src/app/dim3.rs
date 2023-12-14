@@ -88,6 +88,7 @@ impl State {
             char.nearest_node = best_new_vertex;
             char.update_distances(self.map.edges(), &mut self.info.queue);
         }
+        self.info.forget_move_history();
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) { 
@@ -138,9 +139,11 @@ impl State {
         transform: &geo::ToScreen, scale: f32) 
     {
         for ch in &mut self.info.characters {
-            ch.update_3d(self.tolerance, &self.map, &transform.to_plane, 
+            let moved = ch.update_3d(self.tolerance, &self.map, &transform.to_plane, 
                 &self.info.visible, &mut self.info.queue);
-
+            if moved {
+                self.info.last_moved = Some(&ch.data);
+            }
             let node_pos = transform.to_plane.project_pos(self.map.positions()[ch.nearest_node]);
             if ch.on_node && self.info.visible[ch.nearest_node] || !ch.on_node {
                 ch.drag_and_draw(&response, &painter, ui, transform.move_rect, node_pos, scale);
@@ -185,6 +188,7 @@ impl State {
         let positions = self.map.positions();
         self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_divisions);
+        self.info.draw_character_tails(positions, &painter, to_screen, scale);
         self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
 

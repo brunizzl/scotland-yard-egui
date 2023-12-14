@@ -61,6 +61,7 @@ pub const ROBBER: CharData = CharData {
 pub struct Character {
     data: &'static CharData,
     nearest_node: usize,
+    last_positions: Vec<usize>,
     distances: Vec<isize>,
     pos2: Pos2, //used in both 3d and 3d map (as cursor can't drag in 3d...)
     pos3: Pos3, //only used in 3d map
@@ -72,7 +73,16 @@ impl Character {
     fn new(is_cop: bool, pos2: Pos2) -> Self {
         let data = if is_cop { &COP } else { &ROBBER };
         //dragging set to true snaps to node next update
-        Character { data, nearest_node: 0, distances: Vec::new(), pos2, pos3: Pos3::ZERO, on_node: false, dragging: true }
+        Character { 
+            data, 
+            nearest_node: 0, 
+            last_positions: Vec::new(), 
+            distances: Vec::new(), 
+            pos2, 
+            pos3: Pos3::ZERO, 
+            on_node: false, 
+            dragging: true //causes snap to node next update (as dragging will change to false)
+        }
     }
 
     pub fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, ui: &Ui, scale: f32) {
@@ -125,6 +135,10 @@ impl Character {
         //(e.g. just set dragging to true and we snap to position)
         if !dragging && self.dragging && self.on_node {
             self.pos2 = node_pos; //snap actual character postion to node where he was dragged
+            if Some(&self.nearest_node) != self.last_positions.first() {
+                //position changed and drag released -> new step
+                self.last_positions.push(self.nearest_node);
+            }
         }
         self.dragging = dragging;
 
@@ -144,7 +158,7 @@ impl Character {
     //  change to that neighbor
     //(converges to globally nearest node only for "convex" graphs, 
     //  e.g. planar graphs, where each inside face is convex and the complement of the outside face is convex)
-    fn update_2d(&mut self, tolerance: f32, map: &Embedding2D, queue: &mut VecDeque<usize>) {
+    fn update_2d(&mut self, tolerance: f32, map: &Embedding2D, queue: &mut VecDeque<usize>) -> bool {
         let safe_start = if map.len() > self.nearest_node { self.nearest_node } else { 0 };
         let (nearest_node, nearest_dist_sq) = map.find_nearest_node(self.pos2, safe_start);
         self.on_node = nearest_dist_sq <= tolerance * tolerance;
@@ -155,30 +169,34 @@ impl Character {
         if need_dist_update {
             self.update_distances(map.edges(), queue);
         }
+        need_dist_update
     }
 
     /// assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
     fn update_3d(&mut self, tolerance: f32, map: &Embedding3D, to_2d: &geo::Project3To2, 
-        vertex_visible: &[bool], queue: &mut VecDeque<usize>) 
+        vertex_visible: &[bool], queue: &mut VecDeque<usize>) -> bool
     {
-        if self.dragging {
-            let safe_start = if map.nr_vertices() > self.nearest_node { self.nearest_node } else { 0 };
-            let potential = |v:usize, v_pos| { 
-                let dist_2d = (to_2d.project_pos(v_pos) - self.pos2).length_sq();
-                let backface_penalty = 10.0 * (!vertex_visible[v]) as isize as f32;
-                dist_2d + backface_penalty
-            };
-            let (nearest_node, nearest_dist_sq) = map.find_local_minimum(potential, safe_start);
-            self.on_node = nearest_dist_sq <= tolerance * tolerance;
-    
-            let need_dist_update = self.distances.len() != map.nr_vertices() || 
-                (self.on_node && nearest_node != self.nearest_node);
-            self.nearest_node = nearest_node;
-            if need_dist_update {
-                self.update_distances(map.edges(), queue);
-                self.pos3 = map.positions()[self.nearest_node];
-            }
+        if !self.dragging {
+            return false;
+        }        
+        let potential = |v:usize, v_pos| {
+            let dist_2d = (to_2d.project_pos(v_pos) - self.pos2).length_sq();
+            let backface_penalty = 10.0 * (!vertex_visible[v]) as isize as f32;
+            dist_2d + backface_penalty
+        };
+        //this potential might fail if the map has been swapped -> we assume here the map stayed the same
+        assert!(map.nr_vertices() > self.nearest_node);
+        let (nearest_node, nearest_dist_sq) = map.find_local_minimum(potential, self.nearest_node);
+        self.on_node = nearest_dist_sq <= tolerance * tolerance;
+
+        let need_dist_update = self.distances.len() != map.nr_vertices() || 
+            (self.on_node && nearest_node != self.nearest_node);
+        self.nearest_node = nearest_node;
+        if need_dist_update {
+            self.update_distances(map.edges(), queue);
+            self.pos3 = map.positions()[self.nearest_node];
         }
+        need_dist_update
     }
 }
 
@@ -237,6 +255,7 @@ pub struct InfoState {
     pub robber_strat: RobberStrat,
     pub vertex_info: DrawNumbers,
     pub show_convex_hull: bool,
+    pub show_steps: bool,
     pub debug_info: bool,
 }
 
@@ -264,6 +283,7 @@ impl InfoState {
             robber_strat: RobberStrat::None,
             vertex_info: DrawNumbers::None,
             show_convex_hull: false,
+            show_steps: false,
             debug_info: false,
         }
     }
@@ -275,6 +295,12 @@ impl InfoState {
     fn active_cops(&self) -> impl Iterator<Item = &Character> {
         let start = usize::min(1, self.characters.len());
         self.characters[start..].iter().filter(|&c| c.on_node)
+    }
+
+    pub fn forget_move_history(&mut self) {
+        for ch in &mut self.characters {
+            ch.last_positions.clear();
+        }
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) {
@@ -318,11 +344,14 @@ impl InfoState {
                 "Entkomme Hülle");
         });
         draw_character_buttons(ui, &mut self.characters);
-        if let Some(c) = self.characters.iter().find(|c| c.dragging) {
-            self.last_moved = Some(c.data);
-        }
+        ui.horizontal(|ui| {
+            ui.add(Checkbox::new(&mut self.show_steps, "zeige Schritte"));
+            if ui.button("Reset").clicked() {
+                self.forget_move_history();
+            }
+        });
         if let Some(char_data) = self.last_moved {
-            ui.label(format!("letzte bewegte Figur: {}", char_data.job));
+            ui.label(format!("letzter Schritt von {}", char_data.job));
         }
         ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));   
         ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
@@ -513,7 +542,8 @@ impl InfoState {
         }
     }
 
-    fn draw_robber_strat<T, F>(&self, edges: &EdgeList, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32) 
+    fn draw_robber_strat<T, F>(&self, edges: &EdgeList, positions: &[T], painter: &Painter, 
+        mut to_screen: F, scale: f32) 
     where T: Copy, F: FnMut(T) -> Pos2
     {
         if self.robber_strat == RobberStrat::None {
@@ -555,6 +585,27 @@ impl InfoState {
             for v in best {
                 let draw_pos = to_screen(positions[v]);
                 let marker_circle = Shape::circle_filled(draw_pos, scale * 4.0, RED);
+                painter.add(marker_circle);
+            }
+        }
+    }
+
+    pub fn draw_character_tails<T, F>(&self, positions: &[T], painter: &Painter, mut to_screen: F, scale: f32)
+    where T: Copy, F: FnMut(T) -> Pos2 
+    {
+        if !self.show_steps {
+            return;
+        }
+        for ch in &self.characters {
+            let f_len = ch.last_positions.len() as f32;
+            for (i, &v) in ch.last_positions.iter().enumerate() {    
+                if !self.visible[v] {
+                    continue;
+                } 
+                let real_pos = positions[v];       
+                let draw_pos = to_screen(real_pos);
+                let size = scale * 2.5 * (i as f32 + 0.8 * f_len) / f_len;
+                let marker_circle = Shape::circle_filled(draw_pos, size, ch.data.glow);
                 painter.add(marker_circle);
             }
         }
