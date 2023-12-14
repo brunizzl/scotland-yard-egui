@@ -131,15 +131,17 @@ impl Character {
             let new_screen_pos = draw_screen_pos + point_response.drag_delta();
             self.pos2 = from_screen.transform_pos(new_screen_pos);
         }
+
+        let mut made_step = false;
         if self.last_positions.is_empty() && self.on_node {
             self.last_positions.push(self.nearest_node);
+            made_step = true;
         }
         //test if character was just released. doing this ourselfs allows to simulate release whenever we like
         //(e.g. just set dragging to true and we snap to position)
-        let mut made_step = false;
         if !dragging && self.dragging && self.on_node {
             self.pos2 = node_pos; //snap actual character postion to node where he was dragged
-            if Some(&self.nearest_node) != self.last_positions.first() {
+            if Some(&self.nearest_node) != self.last_positions.last() {
                 //position changed and drag released -> new step
                 self.last_positions.push(self.nearest_node);
                 made_step = true;
