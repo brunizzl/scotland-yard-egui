@@ -135,7 +135,6 @@ impl Character {
         let mut made_step = false;
         if self.last_positions.is_empty() && self.on_node {
             self.last_positions.push(self.nearest_node);
-            made_step = true;
         }
         //test if character was just released. doing this ourselfs allows to simulate release whenever we like
         //(e.g. just set dragging to true and we snap to position)
@@ -398,10 +397,10 @@ impl InfoState {
             }
         });
         if let Some(ch) = self.last_moved() {
-            ui.label(format!("letzter Schritt von {}", ch.data.job));
+            ui.label(format!("letzter Schritt: {}", ch.data.job));
         }
         if let Some(ch) = self.next_moved() {
-            ui.label(format!("nächster Schritt von {}", ch.data.job));
+            ui.label(format!("nächster Schritt: {}", ch.data.job));
         }
     }
 
