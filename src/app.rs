@@ -324,7 +324,7 @@ impl InfoState {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) {
-        ui.collapsing("Grün", |ui|{                    
+        ui.collapsing("Knoteninfo", |ui|{                    
             //settings to draw extra information
             ui.radio_value(&mut self.robber_info, RobberInfo::None, 
                 "keine Marker");
@@ -346,6 +346,9 @@ impl InfoState {
             if self.robber_info == RobberInfo::CopDist {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
+
+            ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));   
+            ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
         });
         ui.collapsing("Zahlen", |ui|{
             ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
@@ -387,10 +390,10 @@ impl InfoState {
             }
         });        
         ui.horizontal(|ui| {
-            if ui.button(" <- ").clicked() {
+            if ui.button(" ⟲ ").clicked() {
                 self.reverse_move();
             }
-            if ui.button(" -> ").clicked() {
+            if ui.button(" ⟳ ").clicked() {
                 self.redo_move();
             }
         });
@@ -400,8 +403,6 @@ impl InfoState {
         if let Some(ch) = self.next_moved() {
             ui.label(format!("nächster Schritt von {}", ch.data.job));
         }
-        ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));   
-        ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
     }
 
     fn update_min_cop_dist(&mut self) {
