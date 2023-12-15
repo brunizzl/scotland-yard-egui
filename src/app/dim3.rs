@@ -17,8 +17,6 @@ pub struct State {
     map_axes: [Vec3; 3], //rotated by dragging picture
     map_divisions: isize,
 
-    camera_2d: Camera2D,
-
     info: InfoState,
 
     /// lives in weird hybrid of 2D and 3D space.
@@ -34,8 +32,6 @@ impl State {
             map_shape: MapShape::Tetrahedron, 
             map_axes: DEFAULT_AXES, 
             map_divisions: 6,
-
-            camera_2d: Camera2D::new(),
 
             info: InfoState::new(),
             tolerance: 0.25,
@@ -93,7 +89,7 @@ impl State {
 
     pub fn draw_menu(&mut self, ui: &mut Ui) { 
         if ui.button("🏠 Position").clicked() {
-            self.camera_2d.reset();
+            self.info.camera.reset();
             self.map_axes = DEFAULT_AXES;
         }
         ui.collapsing("Form", |ui| {
@@ -160,28 +156,28 @@ impl State {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover()); 
 
-        self.camera_2d.update_screen_centered(ui);
+        self.info.process_input_screen_centered(ui);
         let transform = {
-            let min_size = Vec2::splat(2.05 / self.camera_2d.zoom);
+            let min_size = Vec2::splat(2.05 / self.info.camera.zoom);
             let contained = Rect::from_center_size(Pos2::ZERO, min_size);
             let shift_rects = build_to_screen_2d(contained, response.rect);
             geo::ToScreen::new(self.camera_projection(), shift_rects)
         };
-        let rot = -self.camera_2d.offset / transform.move_rect.scale();
+        let rot = -self.info.camera.offset / transform.move_rect.scale();
         self.rotate_axes_x(rot.y);
         self.rotate_axes_y(rot.x);
-        self.rotate_axes_z(self.camera_2d.rotation);
+        self.rotate_axes_z(self.info.camera.rotation);
         geo::gram_schmidt_3d(&mut self.map_axes);
         //use offset tu update rotation -> state is remembered by self.map_axes
         // -> offset can then be set back to 0.
-        self.camera_2d.offset = Vec2::ZERO;
-        self.camera_2d.rotation = 0.0;
+        self.info.camera.offset = Vec2::ZERO;
+        self.info.camera.rotation = 0.0;
 
         let to_screen = |p: Pos3| transform.apply(p);
 
         self.info.maybe_update(self.map.edges(), self.vertex_furthest_from_cops());
 
-        let scale = self.camera_2d.zoom * f32::min(12.0 / self.map_divisions as f32, 4.0);
+        let scale = self.info.camera.zoom * f32::min(12.0 / self.map_divisions as f32, 4.0);
         let grey_stroke = Stroke::new(scale, GREY);
         self.map.draw_visible_edges(&transform, &painter, grey_stroke, 
             &mut self.info.visible);

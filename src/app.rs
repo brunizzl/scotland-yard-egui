@@ -227,12 +227,14 @@ pub struct InfoState {
     pub min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
     pub cop_advantage: Vec<isize>,
     pub visible: Vec<bool>,
+
+    queue: VecDeque<usize>, //kept permanentely to reduce allocations when an update of some info per vertex is computed.
     
     pub characters: Vec<Character>,
     past_moves: Vec<usize>, //present is at end (same below)
     future_moves: Vec<(usize, usize)>, //fst is character index, snd is vertex index
 
-    queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
+    camera: Camera2D,
 
     pub robber_info: RobberInfo,
     //both are only used, when the respective RobberInfo is active
@@ -283,6 +285,8 @@ impl InfoState {
             min_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
             visible: Vec::new(),
+
+            queue: VecDeque::new(),
             
             characters: vec![
                 Character::new(false, Pos2::ZERO),
@@ -291,7 +295,7 @@ impl InfoState {
             past_moves: Vec::new(),
             future_moves: Vec::new(),
 
-            queue: VecDeque::new(),
+            camera: Camera2D::new(),
 
             robber_info: RobberInfo::None,
             small_robber_dist: 10,
@@ -663,6 +667,29 @@ impl InfoState {
             }
         }
     }
+
+    fn process_input(&mut self, ui: &mut Ui, screen: Option<Rect>) {
+        ui.input(|info| {
+            if info.modifiers.ctrl && info.key_pressed(Key::Z) {
+                self.reverse_move();
+            }
+            if info.modifiers.ctrl && info.key_pressed(Key::Y) {
+                self.redo_move();
+            }
+        });
+        self.camera.update(ui, screen);
+    }
+
+    /// zoom changes happen with the cursor position as fixed point, thus 
+    /// with zooming we also change the offset
+    pub fn process_input_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
+        self.process_input(ui, Some(response.rect));
+    }
+
+    /// zoom changes don't change the offset at all
+    pub fn process_input_screen_centered(&mut self, ui: &mut Ui) {
+        self.process_input(ui, None);
+    }
 }   
 
 pub fn build_to_screen_2d(contained: Rect, to: Rect) -> emath::RectTransform {
@@ -724,17 +751,6 @@ impl Camera2D {
                 self.rotation += drag.rotation_delta;
             }
         });
-    }
-
-    /// zoom changes happen with the cursor position as fixed point, thus 
-    /// with zooming we also change the offset
-    pub fn update_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
-        self.update(ui, Some(response.rect));
-    }
-
-    /// zoom changes don't change the offset at all
-    pub fn update_screen_centered(&mut self, ui: &mut Ui) {
-        self.update(ui, None);
     }
 
     pub fn reset(&mut self) {
