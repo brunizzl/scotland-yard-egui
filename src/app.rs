@@ -3,9 +3,9 @@ use std::collections::VecDeque;
 
 use itertools::{izip, Itertools};
 
-use egui::{*, epaint::TextShape, text::LayoutJob};
+use egui::{*, epaint::TextShape, text::LayoutJob, emath::RectTransform};
 
-use crate::{graph::{Embedding2D, Embedding3D, InSet, EdgeList, edgelist}, geo::{self, Pos3}};
+use crate::{graph::{Embedding2D, Embedding3D, InSet, EdgeList}, geo::{self, Pos3, Vec3, Project3To2, ToScreen}};
 
 mod dim2;
 mod dim3;
@@ -112,7 +112,7 @@ impl Character {
     }
 
     pub fn drag_and_draw(&mut self, response: &Response, painter: &Painter, ui: &Ui, 
-        to_screen: emath::RectTransform, node_pos: Pos2, scale: f32) -> bool
+        to_screen: RectTransform, node_pos: Pos2, scale: f32) -> bool
     {       
         let character_size = f32::max(8.0, scale * 8.0);
         let real_screen_pos = to_screen.transform_pos(self.pos2);
@@ -234,7 +234,7 @@ pub struct InfoState {
     past_moves: Vec<usize>, //present is at end (same below)
     future_moves: Vec<(usize, usize)>, //fst is character index, snd is vertex index
 
-    camera: Camera2D,
+    camera: Camera3D,
 
     pub robber_info: RobberInfo,
     //both are only used, when the respective RobberInfo is active
@@ -295,7 +295,7 @@ impl InfoState {
             past_moves: Vec::new(),
             future_moves: Vec::new(),
 
-            camera: Camera2D::new(),
+            camera: Camera3D::new(),
 
             robber_info: RobberInfo::None,
             small_robber_dist: 10,
@@ -327,6 +327,9 @@ impl InfoState {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) {
+        if ui.button("🏠 Position").clicked() {
+            self.camera.reset();
+        }
         ui.collapsing("Knoteninfo", |ui|{                    
             //settings to draw extra information
             ui.radio_value(&mut self.robber_info, RobberInfo::None, 
@@ -702,7 +705,7 @@ impl InfoState {
         }
     }
 
-    fn process_input(&mut self, ui: &mut Ui, screen: Option<Rect>) {
+    fn process_general_input(&mut self, ui: &mut Ui) {
         ui.input(|info| {
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
                 self.reverse_move();
@@ -711,84 +714,152 @@ impl InfoState {
                 self.redo_move();
             }
         });
-        self.camera.update(ui, screen);
     }
 
     /// zoom changes happen with the cursor position as fixed point, thus 
     /// with zooming we also change the offset
-    pub fn process_input_cursor_centered(&mut self, ui: &mut Ui, response: &Response) {
-        self.process_input(ui, Some(response.rect));
+    pub fn process_input_2d(&mut self, ui: &mut Ui, response: &Response) {
+        self.process_general_input(ui);
+        self.camera.update_2d(ui, response.rect);
     }
 
     /// zoom changes don't change the offset at all
-    pub fn process_input_screen_centered(&mut self, ui: &mut Ui) {
-        self.process_input(ui, None);
+    pub fn process_input_3d(&mut self, ui: &mut Ui, response: &Response) {
+        self.process_general_input(ui);
+        self.camera.update_3d(ui, response.rect);
     }
-}   
-
-pub fn build_to_screen_2d(contained: Rect, to: Rect) -> emath::RectTransform {
-    let ratio = to.aspect_ratio();
-    //shapes are centered around zero, with extreme vertices having length 1.0
-    let mut from_size = contained.size();
-    if ratio < 1.0 {
-        from_size.y /= ratio;    
-    }
-    else {
-        from_size.x *= ratio;   
-    };
-    let from = Rect::from_center_size(contained.center(), from_size);
-    emath::RectTransform::from_to(from, to)
-}
+}  
 
 
-#[derive(Clone, Copy)]
-struct Camera2D {
+const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
+
+struct Camera3D {
     /// == 1.0 -> no change
     /// < 1.0  -> zoomed out
     /// > 1.0  -> zoomed in
     zoom: f32, 
-    /// angle in rad 0.0 == no rotation
-    rotation: f32,
-    /// offset of center independent of zoom
-    offset: Vec2,
+    direction: [Vec3; 3],
+    /// offset of center independent of zoom + direction (e.g. in draw plane)
+    position: Pos2,
+
+    to_screen: geo::ToScreen,
 }
 
-impl Camera2D {
+impl Camera3D {
     fn new() -> Self {
+        let default_rect = Rect::from_center_size(Pos2::ZERO, Vec2::splat(1.0));
         Self { 
             zoom: 1.0, 
-            rotation: 0.0,
-            offset: Vec2::new(0.0, 0.0), 
+            direction: DEFAULT_AXES,
+            position: Pos2::new(0.0, 0.0), 
+            to_screen: geo::ToScreen::new(Project3To2::new(&DEFAULT_AXES), RectTransform::identity(default_rect))
         }
     }
 
-    fn update(&mut self, ui: &mut Ui, screen: Option<Rect>) {        
+    fn update_to_screen(&mut self, screen: Rect) {
+        let min_size = Vec2::splat(2.05 / self.zoom);
+        let center = self.position.to_vec2() / self.to_screen.move_rect.scale();
+        let contained = Rect::from_center_size(center.to_pos2(), min_size);
+        let move_rect = {
+            let ratio = screen.aspect_ratio();
+            //shapes are centered around zero, with extreme vertices having length 1.0
+            let mut from_size = contained.size();
+            if ratio < 1.0 {
+                from_size.y /= ratio;    
+            }
+            else {
+                from_size.x *= ratio;   
+            };
+            let from = Rect::from_center_size(contained.center(), from_size);
+            emath::RectTransform::from_to(from, screen)
+        };
+        
+        //something something "project" projects to camera coordinates,
+        //so we need to invert the axe's rotation or something
+        let project = geo::Project3To2::inverse_of(&self.direction);
+        self.to_screen = ToScreen::new(project, move_rect);
+    }
+
+    fn update_direction(&mut self, mut f: impl FnMut(Vec3) -> Vec3) {
+        for axis in &mut self.direction {
+            *axis = f(*axis);
+        }
+    }
+
+    fn rotate_x(&mut self, angle: f32) {
+        self.update_direction(|v| v.rotate_x(angle))
+    }
+
+    fn rotate_y(&mut self, angle: f32) {
+        self.update_direction(|v| v.rotate_y(angle))
+    }
+
+    #[allow(dead_code)]
+    fn rotate_z(&mut self, angle: f32) {
+        self.update_direction(|v| v.rotate_z(angle))
+    }
+
+    /// only z-rotation, zoom is centered around mouse pointer
+    fn update_2d(&mut self, ui: &mut Ui, screen: Rect) {        
         ui.input(|info| {
             if info.pointer.button_down(PointerButton::Secondary) {
-                self.offset += info.pointer.delta();
+                self.position -= info.pointer.delta();
             }
-            self.offset += info.scroll_delta;
+            self.position -= info.scroll_delta;
 
             let zoom_delta = info.zoom_delta();
             self.zoom *= zoom_delta;
             if zoom_delta != 1.0 {
-                if let (Some(ptr_pos), Some(screen)) = (info.pointer.latest_pos(), screen) {
+                if let Some(ptr_pos) = info.pointer.latest_pos() {
                     //keep fixed point of zoom at mouse pointer
                     let mid_to_ptr = ptr_pos - screen.center();
-                    let mut zoom_center = self.offset - mid_to_ptr;
+                    let mut zoom_center = self.position.to_vec2() - mid_to_ptr;
                     zoom_center *= zoom_delta;
-                    self.offset = zoom_center + mid_to_ptr;
+                    self.position = zoom_center.to_pos2() + mid_to_ptr;
                 }
             }
             if let Some(drag) = info.multi_touch() {
-                self.offset += drag.translation_delta;
-                self.rotation += drag.rotation_delta;
+                self.position -= drag.translation_delta;
+                self.rotate_z(drag.rotation_delta);
             }
         });
+        self.update_to_screen(screen);
+    }
+
+    /// no translation, zoom is centered around screen middle    
+    fn update_3d(&mut self, ui: &mut Ui, screen: Rect) {        
+        ui.input(|info| {
+            let mut drag_dist = Vec2::ZERO;
+            if info.pointer.button_down(PointerButton::Secondary) {
+                drag_dist -= info.pointer.delta();
+            }
+            drag_dist -= info.scroll_delta;
+            if let Some(drag) = info.multi_touch() {
+                drag_dist -= drag.translation_delta;
+                self.rotate_z(drag.rotation_delta);
+            }
+            let drag_rot = drag_dist / self.to_screen.move_rect.scale();
+            self.rotate_x(drag_rot.y);
+            self.rotate_y(drag_rot.x);
+            geo::gram_schmidt_3d(&mut self.direction);
+
+            let zoom_delta = info.zoom_delta();
+            self.zoom *= zoom_delta;
+        });
+        self.update_to_screen(screen);
     }
 
     pub fn reset(&mut self) {
         *self = Self::new();
+    }
+
+    pub fn to_screen_3d(&self, p: Pos3) -> Pos2 {
+        self.to_screen.apply(p)
+    }
+
+    pub fn to_screen_2d(&self, p: Pos2) -> Pos2 {
+        //TODO: dont ignore rotation
+        self.to_screen.move_rect.transform_pos(p)
     }
 }
 

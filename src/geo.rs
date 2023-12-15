@@ -105,13 +105,13 @@ pub struct ToScreen {
 }
 
 impl ToScreen {
-    pub fn new(project: Project3To2, to_screen: RectTransform) -> Self {
-        let screen = to_screen.to();
+    pub fn new(project: Project3To2, move_rect: RectTransform) -> Self {
+        let screen = move_rect.to();
         let b1 = line_from_to(screen.left_bottom(), screen.left_top());
         let b2 = line_from_to(screen.left_top(), screen.right_top());
         let b3 = line_from_to(screen.right_top(), screen.right_bottom());
         let b4 = line_from_to(screen.right_bottom(), screen.left_bottom());
-        Self { to_plane: project, move_rect: to_screen, screen_boundaries: [b1, b2, b3, b4] }
+        Self { to_plane: project, move_rect, screen_boundaries: [b1, b2, b3, b4] }
     }
 
     pub fn apply(&self, pos: Pos3) -> Pos2 {

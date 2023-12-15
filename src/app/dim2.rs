@@ -84,9 +84,6 @@ impl State {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) {
-        if ui.button("🏠 Position").clicked() {
-            self.info.camera.reset();
-        }
         //adjust underlying graph
         ui.collapsing("Form", |ui| {
             let prev_shape = self.map_shape;
@@ -129,17 +126,18 @@ impl State {
         }
     }
 
-    fn update_visible_vertices(&mut self, to_screen: &emath::RectTransform) {
+    fn update_visible_vertices(&mut self) {
+        let to_screen = self.info.camera.to_screen.move_rect;
         let mut visible = std::mem::take(&mut self.info.visible);
         visible.clear();
         for &pos in self.map.positions() {
-            visible.push(to_screen.from().contains(pos));
+            let screen_pos = self.info.camera.to_screen_2d(pos);
+            visible.push(to_screen.to().contains(screen_pos));
         }
         self.info.visible = visible;
     }
 
-    fn draw_edges(&self, painter: &Painter, to_screen: emath::RectTransform, scale: f32) {
-
+    fn draw_edges(&self, painter: &Painter, scale: f32) {
         let grey_stroke = Stroke::new(scale, GREY);
         let edge_stroke = |v1: usize, v2: usize| if self.info.debug_info {
             let seed = v1 * v2 + 100;
@@ -154,16 +152,16 @@ impl State {
 
         self.map.for_each_edge(|v1, p1, v2, p2| { 
             let edge = [
-                to_screen.transform_pos(p1), 
-                to_screen.transform_pos(p2)];
+                self.info.camera.to_screen_2d(p1), 
+                self.info.camera.to_screen_2d(p2)];
             let line = Shape::LineSegment { points: edge, stroke: edge_stroke(v1, v2) };
             painter.add(line);
         });
     }
 
-    fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, 
-        to_screen: emath::RectTransform, scale: f32) 
+    fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, scale: f32) 
     {
+        let to_screen = self.info.camera.to_screen.move_rect;
         for (i, ch) in self.info.characters.iter_mut().enumerate() {
             let node_pos = self.map.positions()[ch.nearest_node];
             if ch.dragging {
@@ -182,28 +180,14 @@ impl State {
 
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());   
-        self.info.process_input_cursor_centered(ui, &response); 
-
-        let transform = {
-            //our goal is to find out, by what we need to shift the center of our internal coordinates,
-            //due to the user moving around the graph on screen.
-            //however to compute that shift, we need to already know the transformation, thus
-            //the two step process shown below
-            let min_size = Vec2::splat(2.05 / self.info.camera.zoom);
-            let contained_centered = Rect::from_center_size(Pos2::ZERO, min_size);
-            let screen = response.rect;
-            let inverse_centered = build_to_screen_2d(contained_centered, screen).inverse();
-            let shift = inverse_centered.transform_pos(screen.center() - self.info.camera.offset) - Pos2::ZERO;
-            let graph_rect = inverse_centered.to().translate(shift);
-            emath::RectTransform::from_to(graph_rect, screen)
-        };
+        self.info.process_input_2d(ui, &response); 
         let scale = self.info.camera.zoom * f32::min(12.0 / self.map_radius as f32, 4.0);
 
-        self.update_visible_vertices(&transform);
+        self.update_visible_vertices();
 
-        let to_screen = |p: Pos2| transform.transform_pos(p);
+        let to_screen = |p: Pos2| self.info.camera.to_screen_2d(p);
 
-        self.draw_edges(&painter, transform, scale);
+        self.draw_edges(&painter, scale);
         let positions = self.map.positions();
         self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_radius);
@@ -211,6 +195,6 @@ impl State {
         self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
 
-        self.draw_characters(ui, &response, &painter, transform, scale);
+        self.draw_characters(ui, &response, &painter, scale);
     }
 }

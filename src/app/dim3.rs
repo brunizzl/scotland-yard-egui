@@ -3,18 +3,16 @@ use std::iter;
 
 use egui::*;
 
-use crate::{ graph::Embedding3D, app::*, geo::{Vec3, Pos3, self} };
+use crate::{ graph::Embedding3D, app::*, geo::{Pos3, self} };
 
 
 #[derive(Clone, Copy, PartialEq)]
 enum MapShape { Tetrahedron, Octahedron, Icosahedron, DividedIcosahedron }
 
-const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
 pub struct State {
     map: Embedding3D,
     map_shape: MapShape,
-    map_axes: [Vec3; 3], //rotated by dragging picture
     map_divisions: isize,
 
     info: InfoState,
@@ -30,7 +28,6 @@ impl State {
         let mut res = Self { 
             map: Embedding3D::new_subdivided_tetrahedron(1.0, 1), 
             map_shape: MapShape::Tetrahedron, 
-            map_axes: DEFAULT_AXES, 
             map_divisions: 6,
 
             info: InfoState::new(),
@@ -40,29 +37,10 @@ impl State {
         res
     }
 
-    fn update_axes(&mut self, mut f: impl FnMut(Vec3) -> Vec3) {
-        for axis in &mut self.map_axes {
-            *axis = f(*axis);
-        }
-    }
-
-    fn rotate_axes_x(&mut self, angle: f32) {
-        self.update_axes(|v| v.rotate_x(angle))
-    }
-
-    fn rotate_axes_y(&mut self, angle: f32) {
-        self.update_axes(|v| v.rotate_y(angle))
-    }
-
-    #[allow(dead_code)]
-    fn rotate_axes_z(&mut self, angle: f32) {
-        self.update_axes(|v| v.rotate_z(angle))
-    }
-
     fn camera_projection(&self) -> geo::Project3To2 {
         //something something "project" projects to camera coordinates,
         //so we need to invert the axe's rotation or something
-        geo::Project3To2::inverse_of(&self.map_axes)
+        geo::Project3To2::inverse_of(&self.info.camera.direction)
     }
 
     pub fn recompute_graph(&mut self) {
@@ -88,10 +66,6 @@ impl State {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) { 
-        if ui.button("🏠 Position").clicked() {
-            self.info.camera.reset();
-            self.map_axes = DEFAULT_AXES;
-        }
         ui.collapsing("Form", |ui| {
             let old_shape = self.map_shape;
             ui.radio_value(&mut self.map_shape, MapShape::Tetrahedron, "Tetraeder");
@@ -131,9 +105,9 @@ impl State {
         iter::once(furthest_vertex)
     }
 
-    fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, 
-        transform: &geo::ToScreen, scale: f32) 
+    fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, scale: f32) 
     {
+        let transform = &self.info.camera.to_screen;
         for (i, ch) in self.info.characters.iter_mut().enumerate() {
             ch.update_3d(self.tolerance, &self.map, &transform.to_plane, 
                 &self.info.visible, &mut self.info.queue);
@@ -156,30 +130,14 @@ impl State {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover()); 
 
-        self.info.process_input_screen_centered(ui);
-        let transform = {
-            let min_size = Vec2::splat(2.05 / self.info.camera.zoom);
-            let contained = Rect::from_center_size(Pos2::ZERO, min_size);
-            let shift_rects = build_to_screen_2d(contained, response.rect);
-            geo::ToScreen::new(self.camera_projection(), shift_rects)
-        };
-        let rot = -self.info.camera.offset / transform.move_rect.scale();
-        self.rotate_axes_x(rot.y);
-        self.rotate_axes_y(rot.x);
-        self.rotate_axes_z(self.info.camera.rotation);
-        geo::gram_schmidt_3d(&mut self.map_axes);
-        //use offset tu update rotation -> state is remembered by self.map_axes
-        // -> offset can then be set back to 0.
-        self.info.camera.offset = Vec2::ZERO;
-        self.info.camera.rotation = 0.0;
-
-        let to_screen = |p: Pos3| transform.apply(p);
-
+        self.info.process_input_3d(ui, &response);
         self.info.maybe_update(self.map.edges(), self.vertex_furthest_from_cops());
+
+        let to_screen = |p: Pos3| self.info.camera.to_screen_3d(p);
 
         let scale = self.info.camera.zoom * f32::min(12.0 / self.map_divisions as f32, 4.0);
         let grey_stroke = Stroke::new(scale, GREY);
-        self.map.draw_visible_edges(&transform, &painter, grey_stroke, 
+        self.map.draw_visible_edges(&self.info.camera.to_screen, &painter, grey_stroke, 
             &mut self.info.visible);
 
         let positions = self.map.positions();
@@ -189,7 +147,7 @@ impl State {
         self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
 
-        self.draw_characters(ui, &response, &painter, &transform, scale);
+        self.draw_characters(ui, &response, &painter, scale);
     }
 
 }
