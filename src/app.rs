@@ -206,25 +206,6 @@ impl Character {
     }
 }
 
-fn draw_character_buttons(ui: &mut Ui, characters: &mut Vec<Character>) {
-    ui.horizontal(|ui| {
-        let (minus_emoji, plus_emoji) = match characters.len() {
-            0 => ("🚫", ROBBER.emoji),
-            1 => (ROBBER.emoji, COP.emoji),
-            _ => (COP.emoji, COP.emoji),
-        };
-        let minus_text = format!("- Figur ({minus_emoji})");
-        let plus_text = format!("+ Figur ({plus_emoji})");
-        if ui.button(minus_text).clicked() {
-            characters.pop();
-        }
-        if ui.button(plus_text).clicked() {
-            let is_cop = characters.len() > 0;
-            characters.push(Character::new(is_cop, Pos2::ZERO));
-        }
-    });
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist, CopDist }
 
@@ -249,7 +230,8 @@ pub struct InfoState {
     pub visible: Vec<bool>,
     
     pub characters: Vec<Character>,
-    last_moved: Option<&'static CharData>,
+    past_moves: Vec<usize>, //present is at end (same below)
+    future_moves: Vec<(usize, usize)>, //fst is character index, snd is vertex index
 
     queue: VecDeque<usize>, //kept permanentely to reduce allocations when a character update is computed.
 
@@ -267,6 +249,35 @@ pub struct InfoState {
 
 impl InfoState {
 
+    fn last_moved(&self) -> Option<&Character> {
+        self.past_moves.last().map(|&c| &self.characters[c])
+    }
+
+    fn next_moved(&self) -> Option<&Character> {
+        self.future_moves.last().map(|(c, _)| &self.characters[*c])
+    }
+
+    fn reverse_move(&mut self) {
+        if let Some(i) = self.past_moves.pop() {
+            let ch = &mut self.characters[i];
+            if let Some(v_curr) = ch.last_positions.pop() {
+                self.future_moves.push((i, v_curr));
+                if let Some(&v_last) = ch.last_positions.last() {
+                    ch.nearest_node = v_last;
+                }
+            }
+        }
+    }
+
+    fn redo_move(&mut self) {
+        if let Some((i, v)) = self.future_moves.pop() {
+            self.past_moves.push(i);
+            let ch = &mut self.characters[i];
+            ch.last_positions.push(v);
+            ch.nearest_node = v;
+        }
+    }
+
     fn new() -> Self {
         Self { 
             in_convex_cop_hull: Vec::new(),
@@ -278,7 +289,8 @@ impl InfoState {
                 Character::new(false, Pos2::ZERO),
                 Character::new(true, pos2(0.25, 0.0)),
                 ],
-            last_moved: None,
+            past_moves: Vec::new(),
+            future_moves: Vec::new(),
 
             queue: VecDeque::new(),
 
@@ -304,6 +316,8 @@ impl InfoState {
     }
 
     pub fn forget_move_history(&mut self) {
+        self.past_moves.clear();
+        self.future_moves.clear();
         for ch in &mut self.characters {
             ch.last_positions.clear();
         }
@@ -349,15 +363,42 @@ impl InfoState {
             ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHull, 
                 "Entkomme Hülle");
         });
-        draw_character_buttons(ui, &mut self.characters);
+        ui.horizontal(|ui| {
+            let (minus_emoji, plus_emoji) = match self.characters.len() {
+                0 => ("🚫", ROBBER.emoji),
+                1 => (ROBBER.emoji, COP.emoji),
+                _ => (COP.emoji, COP.emoji),
+            };
+            let minus_text = format!("- Figur ({minus_emoji})");
+            let plus_text = format!("+ Figur ({plus_emoji})");
+            if ui.button(minus_text).clicked() {
+                self.characters.pop();
+                self.forget_move_history();
+            }
+            if ui.button(plus_text).clicked() {
+                let is_cop = self.characters.len() > 0;
+                self.characters.push(Character::new(is_cop, Pos2::ZERO));
+            }
+        });
         ui.horizontal(|ui| {
             ui.add(Checkbox::new(&mut self.show_steps, "zeige Schritte"));
             if ui.button("Reset").clicked() {
                 self.forget_move_history();
             }
+        });        
+        ui.horizontal(|ui| {
+            if ui.button(" <- ").clicked() {
+                self.reverse_move();
+            }
+            if ui.button(" -> ").clicked() {
+                self.redo_move();
+            }
         });
-        if let Some(char_data) = self.last_moved {
-            ui.label(format!("letzter Schritt von {}", char_data.job));
+        if let Some(ch) = self.last_moved() {
+            ui.label(format!("letzter Schritt von {}", ch.data.job));
+        }
+        if let Some(ch) = self.next_moved() {
+            ui.label(format!("nächster Schritt von {}", ch.data.job));
         }
         ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));   
         ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));

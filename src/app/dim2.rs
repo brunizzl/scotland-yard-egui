@@ -168,14 +168,15 @@ impl State {
     fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, 
         to_screen: emath::RectTransform, scale: f32) 
     {
-        for ch in &mut self.info.characters {
+        for (i, ch) in self.info.characters.iter_mut().enumerate() {
             let node_pos = self.map.positions()[ch.nearest_node];
             if ch.dragging {
                 ch.update_2d(self.tolerance, &self.map, &mut self.info.queue);
             }
             let moved = ch.drag_and_draw(response, painter, ui, to_screen, node_pos, scale);
             if moved {
-                self.info.last_moved = Some(&ch.data);
+                self.info.past_moves.push(i);
+                self.info.future_moves.clear();
             }
         }
     }
