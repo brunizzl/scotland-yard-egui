@@ -18,8 +18,6 @@ pub struct State {
     info: InfoState,
     
     tolerance: f32, //how close must a character be to a vertex to count as beeing on that vertex
-
-    camera: Camera2D,
 }
 
 impl State {
@@ -80,8 +78,6 @@ impl State {
             info: InfoState::new(),
 
             tolerance: 0.25,
-
-            camera: Camera2D::new(),
          };
          res.recompute_graph();
          res
@@ -89,7 +85,7 @@ impl State {
 
     pub fn draw_menu(&mut self, ui: &mut Ui) {
         if ui.button("🏠 Position").clicked() {
-            self.camera.reset();
+            self.info.camera.reset();
         }
         //adjust underlying graph
         ui.collapsing("Form", |ui| {
@@ -186,22 +182,22 @@ impl State {
 
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());   
-        self.camera.update_cursor_centered(ui, &response); 
+        self.info.process_input_cursor_centered(ui, &response); 
 
         let transform = {
             //our goal is to find out, by what we need to shift the center of our internal coordinates,
             //due to the user moving around the graph on screen.
             //however to compute that shift, we need to already know the transformation, thus
             //the two step process shown below
-            let min_size = Vec2::splat(2.05 / self.camera.zoom);
+            let min_size = Vec2::splat(2.05 / self.info.camera.zoom);
             let contained_centered = Rect::from_center_size(Pos2::ZERO, min_size);
             let screen = response.rect;
             let inverse_centered = build_to_screen_2d(contained_centered, screen).inverse();
-            let shift = inverse_centered.transform_pos(screen.center() - self.camera.offset) - Pos2::ZERO;
+            let shift = inverse_centered.transform_pos(screen.center() - self.info.camera.offset) - Pos2::ZERO;
             let graph_rect = inverse_centered.to().translate(shift);
             emath::RectTransform::from_to(graph_rect, screen)
         };
-        let scale = self.camera.zoom * f32::min(12.0 / self.map_radius as f32, 4.0);
+        let scale = self.info.camera.zoom * f32::min(12.0 / self.map_radius as f32, 4.0);
 
         self.update_visible_vertices(&transform);
 
