@@ -138,14 +138,15 @@ impl State {
     fn draw_characters(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, 
         transform: &geo::ToScreen, scale: f32) 
     {
-        for ch in &mut self.info.characters {
+        for (i, ch) in self.info.characters.iter_mut().enumerate() {
             ch.update_3d(self.tolerance, &self.map, &transform.to_plane, 
                 &self.info.visible, &mut self.info.queue);
             let node_pos = transform.to_plane.project_pos(self.map.positions()[ch.nearest_node]);
             if ch.on_node && self.info.visible[ch.nearest_node] || !ch.on_node {
                 let moved = ch.drag_and_draw(&response, &painter, ui, transform.move_rect, node_pos, scale);
                 if moved {
-                    self.info.last_moved = Some(&ch.data);
+                    self.info.past_moves.push(i);
+                    self.info.future_moves.clear();
                 }
             }
             else {
