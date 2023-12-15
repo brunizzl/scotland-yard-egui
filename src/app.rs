@@ -5,7 +5,7 @@ use itertools::{izip, Itertools};
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
-use crate::{graph::{Embedding2D, Embedding3D, InSet, EdgeList}, geo::{self, Pos3}};
+use crate::{graph::{Embedding2D, Embedding3D, InSet, EdgeList, edgelist}, geo::{self, Pos3}};
 
 mod dim2;
 mod dim3;
@@ -448,6 +448,40 @@ impl InfoState {
         edges.calc_distances_to(&mut queue, &mut advantage);
         self.cop_advantage = advantage;
         self.queue = queue;
+    }
+
+    fn hull_bondary(&self, edges: &EdgeList) -> Vec<usize> {
+        let mut start_vertex = usize::MAX;
+        'search_start: for cop in self.active_cops() {
+            for n in edges.neighbors_of(cop.nearest_node) {
+                if !self.in_convex_cop_hull[n].yes() {
+                    start_vertex = n;
+                    break 'search_start;
+                }
+            }
+        }
+        if start_vertex == usize::MAX {
+            return Vec::new();
+        }
+        let mut res = Vec::new();
+        let mut last = usize::MAX;
+        let mut curr = start_vertex;
+        loop {
+            for n in edges.neighbors_of(curr) {
+                let is_new = n != last;
+                let not_in_hull = !self.in_convex_cop_hull[n].yes();
+                let neighbors_hull = edges.neighbors_of(n).any(|nn| self.in_convex_cop_hull[nn].yes());
+                if is_new && not_in_hull && neighbors_hull {
+                    last = curr;
+                    curr = n;
+                    res.push(curr);
+                    break;
+                }
+            }
+            if curr == start_vertex {
+                return res;
+            }
+        }
     }
 
     fn update_convex_cop_hull(&mut self, edges: &EdgeList, extreme_vertices: impl Iterator<Item = usize>) {
