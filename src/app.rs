@@ -228,6 +228,9 @@ pub struct InfoState {
     pub cop_advantage: Vec<isize>,
     pub visible: Vec<bool>,
 
+    //indices of vertices just inside hull, ordered s.t. two following vertices are neighbors
+    pub convex_hull_boundary: Vec<usize>,
+
     queue: VecDeque<usize>, //kept permanentely to reduce allocations when an update of some info per vertex is computed.
     
     pub characters: Vec<Character>,
@@ -285,6 +288,8 @@ impl InfoState {
             min_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
             visible: Vec::new(),
+
+            convex_hull_boundary: Vec::new(),
 
             queue: VecDeque::new(),
             
@@ -453,36 +458,38 @@ impl InfoState {
         self.queue = queue;
     }
 
-    fn hull_bondary(&self, edges: &EdgeList) -> Vec<usize> {
+    fn update_convex_hull_bondary(&mut self, edges: &EdgeList) {
         let mut start_vertex = usize::MAX;
         'search_start: for cop in self.active_cops() {
             for n in edges.neighbors_of(cop.nearest_node) {
                 if !self.in_convex_cop_hull[n].yes() {
-                    start_vertex = n;
+                    start_vertex = cop.nearest_node;
                     break 'search_start;
                 }
             }
         }
+        self.convex_hull_boundary.clear();
         if start_vertex == usize::MAX {
-            return Vec::new();
+            return;
         }
-        let mut res = Vec::new();
         let mut last = usize::MAX;
         let mut curr = start_vertex;
         loop {
+            let mut change = false;
             for n in edges.neighbors_of(curr) {
                 let is_new = n != last;
-                let not_in_hull = !self.in_convex_cop_hull[n].yes();
-                let neighbors_hull = edges.neighbors_of(n).any(|nn| self.in_convex_cop_hull[nn].yes());
-                if is_new && not_in_hull && neighbors_hull {
+                let in_hull = self.in_convex_cop_hull[n].yes();
+                let at_border = edges.neighbors_of(n).any(|nn| !self.in_convex_cop_hull[nn].yes());
+                if is_new && in_hull && at_border {
                     last = curr;
                     curr = n;
-                    res.push(curr);
+                    self.convex_hull_boundary.push(curr);
+                    change = true;
                     break;
                 }
             }
-            if curr == start_vertex {
-                return res;
+            if curr == start_vertex || !change {
+                return;
             }
         }
     }
@@ -533,6 +540,7 @@ impl InfoState {
                 *x = InSet::Yes;
             }
         }
+        self.update_convex_hull_bondary(edges);
     }
 
     fn maybe_update(&mut self, edges: &EdgeList, extreme_vertices: impl Iterator<Item = usize>) {
@@ -558,6 +566,13 @@ impl InfoState {
             if vis && in_hull.yes()  {
                 let draw_pos = to_screen(pos);
                 let marker_circle = Shape::circle_filled(draw_pos, scale * 9.0, LIGHT_BLUE);
+                painter.add(marker_circle);
+            }
+        }
+        for &v in &self.convex_hull_boundary {
+            if self.visible[v] {
+                let draw_pos = to_screen(positions[v]);
+                let marker_circle = Shape::circle_filled(draw_pos, scale * 3.0, WHITE);
                 painter.add(marker_circle);
             }
         }
@@ -858,7 +873,7 @@ impl Camera3D {
     }
 
     pub fn to_screen_2d(&self, p: Pos2) -> Pos2 {
-        //TODO: dont ignore rotation
+        //TODO: dont ignore rotation (works everywhere, except for character movement)
         self.to_screen.move_rect.transform_pos(p)
     }
 }
