@@ -35,23 +35,23 @@ fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isi
     }).inner
 }
 
-pub struct CharData {
+pub struct CharacterData {
     color: Color32,
     glow: Color32,
     emoji: &'static str,
     job: &'static str,
 }
-//options to draw cops and robber as emojies: 
-//👮🛂🛃👿🚴🏃
-pub const COP: CharData = CharData {
+pub const COP: CharacterData = CharacterData {
     color: Color32::from_rgb(10, 50, 170),
     glow: Color32::from_rgb(60, 120, 235),
+    //alternatives: 👮🛂🛃🐈🔫🚔🐂🍩
     emoji: "👮",
     job: "Cop",
 };
-pub const ROBBER: CharData = CharData {
+pub const ROBBER: CharacterData = CharacterData {
     color: Color32::from_rgb(170, 40, 40),
     glow: Color32::from_rgb(235, 120, 120),
+    //alternatives: 👿🚴🏃🚶🐀🐢🕵💰
     emoji: "🏃",
     job: "Räuber",
 };
@@ -59,7 +59,7 @@ pub const ROBBER: CharData = CharData {
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates
 pub struct Character {
-    data: &'static CharData,
+    data: &'static CharacterData,
     nearest_node: usize,
     last_positions: Vec<usize>,
     distances: Vec<isize>,
@@ -261,24 +261,26 @@ impl InfoState {
         self.future_moves.last().map(|(c, _)| &self.characters[*c])
     }
 
-    fn reverse_move(&mut self) {
+    fn reverse_move(&mut self, edges: &EdgeList) {
         if let Some(i) = self.past_moves.pop() {
             let ch = &mut self.characters[i];
             if let Some(v_curr) = ch.last_positions.pop() {
                 self.future_moves.push((i, v_curr));
                 if let Some(&v_last) = ch.last_positions.last() {
                     ch.nearest_node = v_last;
+                    ch.update_distances(edges, &mut self.queue);
                 }
             }
         }
     }
 
-    fn redo_move(&mut self) {
+    fn redo_move(&mut self, edges: &EdgeList) {
         if let Some((i, v)) = self.future_moves.pop() {
             self.past_moves.push(i);
             let ch = &mut self.characters[i];
             ch.last_positions.push(v);
             ch.nearest_node = v;
+            ch.update_distances(edges, &mut self.queue);
         }
     }
 
@@ -331,7 +333,7 @@ impl InfoState {
         }
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui) {
+    pub fn draw_menu(&mut self, ui: &mut Ui, edges: &EdgeList) {
         if ui.button("🏠 Position").clicked() {
             self.camera.reset();
         }
@@ -402,10 +404,10 @@ impl InfoState {
         });        
         ui.horizontal(|ui| {
             if ui.button(" ⟲ ").clicked() {
-                self.reverse_move();
+                self.reverse_move(edges);
             }
             if ui.button(" ⟳ ").clicked() {
-                self.redo_move();
+                self.redo_move(edges);
             }
         });
         if let Some(ch) = self.last_moved() {
@@ -458,40 +460,53 @@ impl InfoState {
         self.queue = queue;
     }
 
-    fn update_convex_hull_bondary(&mut self, edges: &EdgeList) {
-        let mut start_vertex = usize::MAX;
-        'search_start: for cop in self.active_cops() {
-            for n in edges.neighbors_of(cop.nearest_node) {
-                if !self.in_convex_cop_hull[n].yes() {
-                    start_vertex = cop.nearest_node;
-                    break 'search_start;
+    fn update_convex_hull_boundary(&mut self, edges: &EdgeList) {
+        //idea: walk outside hull and look inside, but actually store the inside nodes
+        //this approach will fail, if one cop stands at the border of the map, but this is something
+        //2d no happening in the intresting real 3d case anyway.
+        let mut boundary = std::mem::take(&mut self.convex_hull_boundary);
+        boundary.clear();
+        let fst_outside = 'search_start_vertex: loop {
+            for cop in self.active_cops() {
+                for n in edges.neighbors_of(cop.nearest_node) {
+                    if !self.in_convex_cop_hull[n].yes() {
+                        boundary.push(cop.nearest_node);
+                        break 'search_start_vertex n;
+                    }
                 }
             }
-        }
-        self.convex_hull_boundary.clear();
-        if start_vertex == usize::MAX {
             return;
-        }
-        let mut last = usize::MAX;
-        let mut curr = start_vertex;
+        };
+        let mut last_outside = usize::MAX;
+        let mut curr_outside = fst_outside;
         loop {
             let mut change = false;
-            for n in edges.neighbors_of(curr) {
-                let is_new = n != last;
-                let in_hull = self.in_convex_cop_hull[n].yes();
-                let at_border = edges.neighbors_of(n).any(|nn| !self.in_convex_cop_hull[nn].yes());
-                if is_new && in_hull && at_border {
-                    last = curr;
-                    curr = n;
-                    self.convex_hull_boundary.push(curr);
-                    change = true;
-                    break;
+            for n in edges.neighbors_of(curr_outside) {
+                //find vertices on hull boundary
+                if self.in_convex_cop_hull[n].yes() {
+                    let len = boundary.len();
+                    let range_min = if len < 5 { 0 } else { len - 5 };
+                    if !boundary[range_min..].contains(&n) {
+                        boundary.push(n);
+                    }
+                }
+                else { //find next vertex just outside hull
+                    let still_searching = !change;
+                    let is_new = n != last_outside; //can only be trusted if still_searching
+                    let borders_hull = edges.neighbors_of(n).any(|nn| self.in_convex_cop_hull[nn].yes());
+                    if still_searching && is_new && borders_hull {
+                        last_outside = curr_outside;
+                        curr_outside = n;
+                        self.convex_hull_boundary.push(curr_outside);
+                        change = true;
+                    }
                 }
             }
-            if curr == start_vertex || !change {
-                return;
+            if curr_outside == fst_outside || !change {
+                break;
             }
         }
+        self.convex_hull_boundary = boundary;
     }
 
     fn update_convex_cop_hull(&mut self, edges: &EdgeList, extreme_vertices: impl Iterator<Item = usize>) {
@@ -540,7 +555,7 @@ impl InfoState {
                 *x = InSet::Yes;
             }
         }
-        self.update_convex_hull_bondary(edges);
+        self.update_convex_hull_boundary(edges);
     }
 
     fn maybe_update(&mut self, edges: &EdgeList, extreme_vertices: impl Iterator<Item = usize>) {
@@ -720,27 +735,27 @@ impl InfoState {
         }
     }
 
-    fn process_general_input(&mut self, ui: &mut Ui) {
+    fn process_general_input(&mut self, ui: &mut Ui, edges: &EdgeList) {
         ui.input(|info| {
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
-                self.reverse_move();
+                self.reverse_move(edges);
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
-                self.redo_move();
+                self.redo_move(edges);
             }
         });
     }
 
     /// zoom changes happen with the cursor position as fixed point, thus 
     /// with zooming we also change the offset
-    pub fn process_input_2d(&mut self, ui: &mut Ui, response: &Response) {
-        self.process_general_input(ui);
+    pub fn process_input_2d(&mut self, ui: &mut Ui, response: &Response, edges: &EdgeList) {
+        self.process_general_input(ui, edges);
         self.camera.update_2d(ui, response.rect);
     }
 
     /// zoom changes don't change the offset at all
-    pub fn process_input_3d(&mut self, ui: &mut Ui, response: &Response) {
-        self.process_general_input(ui);
+    pub fn process_input_3d(&mut self, ui: &mut Ui, response: &Response, edges: &EdgeList) {
+        self.process_general_input(ui, edges);
         self.camera.update_3d(ui, response.rect);
     }
 }  
@@ -772,22 +787,24 @@ impl Camera3D {
     }
 
     fn update_to_screen(&mut self, screen: Rect) {
-        let min_size = Vec2::splat(2.05 / self.zoom);
-        let center = self.position.to_vec2() / self.to_screen.move_rect.scale();
-        let contained = Rect::from_center_size(center.to_pos2(), min_size);
-        let move_rect = {
+        //it is important to use the current zoom to compute the influence of self.position,
+        //not the zoom of the last frame. thus we never read the last self.to_streen.
+        let scale_rect = {
             let ratio = screen.aspect_ratio();
             //shapes are centered around zero, with extreme vertices having length 1.0
-            let mut from_size = contained.size();
+            let mut from_size = Vec2::splat(2.05 / self.zoom);
             if ratio < 1.0 {
                 from_size.y /= ratio;    
             }
             else {
                 from_size.x *= ratio;   
             };
-            let from = Rect::from_center_size(contained.center(), from_size);
+            let from = Rect::from_center_size(Pos2::ZERO, from_size);
             emath::RectTransform::from_to(from, screen)
         };
+        let center = self.position.to_vec2() / scale_rect.scale();
+        let from = scale_rect.from().translate(-center);
+        let move_rect = emath::RectTransform::from_to(from, screen);
         
         //something something "project" projects to camera coordinates,
         //so we need to invert the axe's rotation or something
@@ -821,6 +838,10 @@ impl Camera3D {
                 self.position -= info.pointer.delta();
             }
             self.position -= info.scroll_delta;
+            if let Some(drag) = info.multi_touch() {
+                self.position -= drag.translation_delta;
+                self.rotate_z(drag.rotation_delta);
+            }
 
             let zoom_delta = info.zoom_delta();
             self.zoom *= zoom_delta;
@@ -832,10 +853,6 @@ impl Camera3D {
                     zoom_center *= zoom_delta;
                     self.position = zoom_center.to_pos2() + mid_to_ptr;
                 }
-            }
-            if let Some(drag) = info.multi_touch() {
-                self.position -= drag.translation_delta;
-                self.rotate_z(drag.rotation_delta);
             }
         });
         self.update_to_screen(screen);
