@@ -391,10 +391,10 @@ impl InfoState {
         });
         ui.horizontal(|ui| {
             let nr_characters = self.characters.len();
-            let (minus_emoji, plus_emoji) = match nr_characters {
-                0 => ("🚫", ROBBER.emoji),
-                1 => (ROBBER.emoji, COPS[(nr_characters - 1) % 7].emoji),
-                _ => (COPS[(nr_characters - 2) % 7].emoji, COPS[(nr_characters - 1) % 7].emoji),
+            let next_cop = || (nr_characters - 1) % 7; //only evaluate when makes sense to avoid underflow
+            let minus_emoji = self.characters.last().map_or("🚫", |c| c.data.emoji);
+            let plus_emoji = if nr_characters == 0 { ROBBER.emoji } else {
+                COPS[next_cop()].emoji
             };
             let minus_text = format!("- Figur ({minus_emoji})");
             let plus_text = format!("+ Figur ({plus_emoji})");
@@ -403,7 +403,7 @@ impl InfoState {
                 self.forget_move_history();
             }
             if ui.button(plus_text).clicked() {
-                let data = &COPS[(nr_characters - 1) % 7];
+                let data = &COPS[next_cop()];
                 self.characters.push(Character::new(data, Pos2::ZERO));
             }
         });
