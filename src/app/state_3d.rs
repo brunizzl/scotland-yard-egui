@@ -133,7 +133,9 @@ impl State {
             m.update_3d(self.tolerance, &self.map, &transform.to_plane, 
                 &self.info.visible);
             let node_pos = transform.to_plane.project_pos(self.map.positions()[m.nearest_node]);
-
+            if m.on_node && !m.dragging {
+                m.pos2 = node_pos;
+            }
             if m.on_node && self.info.visible[m.nearest_node] || !m.on_node {
                 m.drag_and_draw(response, painter, ui, transform.move_rect, node_pos, scale * 0.7, None);
             }

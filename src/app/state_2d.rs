@@ -183,6 +183,9 @@ impl State {
                 m.update_2d(self.tolerance, &self.map);
             }
             let node_pos = self.map.positions()[m.nearest_node];
+            if m.on_node && !m.dragging {
+                m.pos2 = node_pos;
+            }
             m.drag_and_draw(response, painter, ui, to_screen, node_pos, scale * 0.7, None);
         }
     }

@@ -25,17 +25,6 @@ pub struct ConvexTriangleHull {
     triangles: Vec<[usize; 3]>, 
 }
 
-macro_rules! find_related {
-    ($xs:expr, $ys:expr, $f:expr) => {
-        $xs
-        .iter()
-        .map(|&x| $ys
-            .iter()
-            .enumerate()
-            .filter_map(move |(i, &y)| if $f(x, y) { Some(i) } else { None }))
-    };
-}
-
 fn is_small(x: f32) -> bool {
     x.abs() < 1e-4
 }
@@ -143,10 +132,12 @@ impl ConvexTriangleHull {
             vertex_positions[1..].iter().fold(f32::MAX, 
                 |acc, &v| f32::min((v - v1).length(), acc))
         };
-
-        let mut vertex_neighbors = EdgeList::from_iter(
-            find_related!(vertex_positions, vertex_positions, 
-                |p1: Pos3, p2: Pos3| is_small((p1 - p2).length() - neighbor_vertex_dist)), 6);
+        let related = vertex_positions.iter().map(|&p1| 
+            vertex_positions.iter().enumerate().filter_map(
+                move |(i, &p2)| (is_small((p1-p2).length()-neighbor_vertex_dist).then_some(i)
+            )
+        ));
+        let mut vertex_neighbors = EdgeList::from_iter(related, 6);
         vertex_neighbors.maybe_shrink_capacity(0);
 
         let (triangles, face_normals) = 
