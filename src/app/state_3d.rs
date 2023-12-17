@@ -56,10 +56,10 @@ impl State {
         let to_2d = self.camera_projection();
         self.map.update_vertex_visibility(&to_2d, &mut self.info.visible);
         for char in &mut self.info.characters {
-            let char_dir = char.pos3.to_vec3();
+            let char_dir = char.marker.pos3.to_vec3();
             let potential = |_, v_pos: Pos3| -char_dir.dot(v_pos.to_vec3().normalized());
             let (best_new_vertex, _) = self.map.find_local_minimum(potential, 0);
-            char.nearest_node = best_new_vertex;
+            char.marker.nearest_node = best_new_vertex;
             char.update_distances(self.map.edges(), &mut self.info.queue);
         }
         self.info.forget_move_history();
@@ -81,7 +81,7 @@ impl State {
         });
         self.info.draw_menu(ui, self.map.edges());
         if let (RobberInfo::SmallRobberDist, Some(r)) = (self.info.robber_info, self.info.robber()) {
-            let r_pos = self.map.positions()[r.nearest_node];
+            let r_pos = self.map.positions()[r.marker.nearest_node];
             let mut max_dist = f32::MIN;
             let mut min_dist = f32::MAX;
             let bnd = RobberInfo::scale_small_dist_with_radius(self.info.small_robber_dist, self.map_divisions);
@@ -111,8 +111,8 @@ impl State {
         for (i, ch) in self.info.characters.iter_mut().enumerate() {
             ch.update_3d(self.tolerance, &self.map, &transform.to_plane, 
                 &self.info.visible, &mut self.info.queue);
-            let node_pos = transform.to_plane.project_pos(self.map.positions()[ch.nearest_node]);
-            if ch.on_node && self.info.visible[ch.nearest_node] || !ch.on_node {
+            let node_pos = transform.to_plane.project_pos(self.map.positions()[ch.marker.nearest_node]);
+            if ch.marker.on_node && self.info.visible[ch.marker.nearest_node] || !ch.marker.on_node {
                 let moved = ch.drag_and_draw(&response, &painter, ui, transform.move_rect, node_pos, scale);
                 if moved {
                     self.info.past_moves.push(i);
@@ -121,7 +121,21 @@ impl State {
             }
             else {
                 let drawn_node_pos = transform.move_rect.transform_pos(node_pos);
-                ch.draw_small_at(drawn_node_pos, &painter, scale);
+                ch.marker.draw_small_at(drawn_node_pos, &painter, scale);
+            }
+        }
+    }
+
+    fn draw_markers(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, scale: f32) 
+    {
+        let transform = &self.info.camera.to_screen;
+        for m in self.info.markers.iter_mut() {
+            m.update_3d(self.tolerance, &self.map, &transform.to_plane, 
+                &self.info.visible);
+            let node_pos = transform.to_plane.project_pos(self.map.positions()[m.nearest_node]);
+
+            if m.on_node && self.info.visible[m.nearest_node] || !m.on_node {
+                m.drag_and_draw(response, painter, ui, transform.move_rect, node_pos, scale * 0.7, None);
             }
         }
     }
@@ -147,6 +161,7 @@ impl State {
         self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
 
+        self.draw_markers(ui, &response, &painter, scale);
         self.draw_characters(ui, &response, &painter, scale);
     }
 
