@@ -108,7 +108,7 @@ impl State {
                 self.recompute_graph();
             }
         });
-        self.info.draw_menu(ui);
+        self.info.draw_menu(ui, self.map.edges());
         if let (RobberInfo::SmallRobberDist, Some(r)) = (self.info.robber_info, self.info.robber()) {
             let r_pos = self.map.positions()[r.nearest_node];
             let mut max_dist = f32::MIN;
@@ -180,7 +180,7 @@ impl State {
 
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());   
-        self.info.process_input_2d(ui, &response); 
+        self.info.process_input_2d(ui, &response, self.map.edges()); 
         let scale = self.info.camera.zoom * f32::min(12.0 / self.map_radius as f32, 4.0);
 
         self.update_visible_vertices();
