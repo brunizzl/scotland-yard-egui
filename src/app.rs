@@ -846,11 +846,11 @@ impl Camera3D {
     fn update_2d(&mut self, ui: &mut Ui, screen: Rect) {        
         ui.input(|info| {
             if info.pointer.button_down(PointerButton::Secondary) {
-                self.position -= info.pointer.delta();
+                self.position += info.pointer.delta();
             }
-            self.position -= info.scroll_delta;
+            self.position += info.scroll_delta;
             if let Some(drag) = info.multi_touch() {
-                self.position -= drag.translation_delta;
+                self.position += drag.translation_delta;
                 self.rotate_z(drag.rotation_delta);
             }
 
