@@ -41,13 +41,24 @@ pub struct CharacterData {
     emoji: &'static str,
     job: &'static str,
 }
-pub const COP: CharacterData = CharacterData {
-    color: Color32::from_rgb(10, 50, 170),
-    glow: Color32::from_rgb(60, 120, 235),
-    //alternatives: 👮🛂🛃🐈🔫🚔🐂🍩
-    emoji: "👮",
-    job: "Cop",
-};
+const fn new_cop(emoji: &'static str) -> CharacterData { 
+    CharacterData {
+        color: Color32::from_rgb(10, 50, 170),
+        glow: Color32::from_rgb(60, 120, 235),
+        //alternatives: 👮🛂🛃🐈🔫🚔🐂🍩
+        emoji,
+        job: "Cop",
+    } 
+}
+pub const COPS: [CharacterData; 7] = [
+    new_cop("👮"), 
+    new_cop("🍩"), 
+    new_cop("🐂"), 
+    new_cop("🔫"), 
+    new_cop("🚔"), 
+    new_cop("🛂"), 
+    new_cop("🛃")
+];
 pub const ROBBER: CharacterData = CharacterData {
     color: Color32::from_rgb(170, 40, 40),
     glow: Color32::from_rgb(235, 120, 120),
@@ -70,8 +81,7 @@ pub struct Character {
 }
 
 impl Character {
-    fn new(is_cop: bool, pos2: Pos2) -> Self {
-        let data = if is_cop { &COP } else { &ROBBER };
+    fn new(data: &'static CharacterData, pos2: Pos2) -> Self {
         //dragging set to true snaps to node next update
         Character { 
             data, 
@@ -296,8 +306,8 @@ impl InfoState {
             queue: VecDeque::new(),
             
             characters: vec![
-                Character::new(false, Pos2::ZERO),
-                Character::new(true, pos2(0.25, 0.0)),
+                Character::new(&ROBBER, Pos2::ZERO),
+                Character::new(&COPS[0], pos2(0.25, 0.0)),
                 ],
             past_moves: Vec::new(),
             future_moves: Vec::new(),
@@ -380,10 +390,11 @@ impl InfoState {
                 "Entkomme Hülle");
         });
         ui.horizontal(|ui| {
-            let (minus_emoji, plus_emoji) = match self.characters.len() {
+            let nr_characters = self.characters.len();
+            let (minus_emoji, plus_emoji) = match nr_characters {
                 0 => ("🚫", ROBBER.emoji),
-                1 => (ROBBER.emoji, COP.emoji),
-                _ => (COP.emoji, COP.emoji),
+                1 => (ROBBER.emoji, COPS[(nr_characters - 1) % 7].emoji),
+                _ => (COPS[(nr_characters - 2) % 7].emoji, COPS[(nr_characters - 1) % 7].emoji),
             };
             let minus_text = format!("- Figur ({minus_emoji})");
             let plus_text = format!("+ Figur ({plus_emoji})");
@@ -392,8 +403,8 @@ impl InfoState {
                 self.forget_move_history();
             }
             if ui.button(plus_text).clicked() {
-                let is_cop = self.characters.len() > 0;
-                self.characters.push(Character::new(is_cop, Pos2::ZERO));
+                let data = &COPS[(nr_characters - 1) % 7];
+                self.characters.push(Character::new(data, Pos2::ZERO));
             }
         });
         ui.horizontal(|ui| {
