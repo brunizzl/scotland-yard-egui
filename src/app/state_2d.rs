@@ -110,7 +110,7 @@ impl State {
         });
         self.info.draw_menu(ui, self.map.edges());
         if let (RobberInfo::SmallRobberDist, Some(r)) = (self.info.robber_info, self.info.robber()) {
-            let r_pos = self.map.positions()[r.nearest_node];
+            let r_pos = self.map.positions()[r.marker.nearest_node];
             let mut max_dist = f32::MIN;
             let mut min_dist = f32::MAX;
             let bnd = RobberInfo::scale_small_dist_with_radius(self.info.small_robber_dist, self.map_radius);
@@ -163,15 +163,27 @@ impl State {
     {
         let to_screen = self.info.camera.to_screen.move_rect;
         for (i, ch) in self.info.characters.iter_mut().enumerate() {
-            let node_pos = self.map.positions()[ch.nearest_node];
-            if ch.dragging {
+            if ch.marker.dragging {
                 ch.update_2d(self.tolerance, &self.map, &mut self.info.queue);
             }
+            let node_pos = self.map.positions()[ch.marker.nearest_node];
             let moved = ch.drag_and_draw(response, painter, ui, to_screen, node_pos, scale);
             if moved {
                 self.info.past_moves.push(i);
                 self.info.future_moves.clear();
             }
+        }
+    }
+
+    fn draw_markers(&mut self, ui: &mut Ui, response: &Response, painter: &Painter, scale: f32)
+    {
+        let to_screen = self.info.camera.to_screen.move_rect;
+        for m in self.info.markers.iter_mut() {
+            if m.dragging {
+                m.update_2d(self.tolerance, &self.map);
+            }
+            let node_pos = self.map.positions()[m.nearest_node];
+            m.drag_and_draw(response, painter, ui, to_screen, node_pos, scale * 0.7, None);
         }
     }
 
@@ -195,6 +207,7 @@ impl State {
         self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
 
+        self.draw_markers(ui, &response, &painter, scale);
         self.draw_characters(ui, &response, &painter, scale);
     }
 }
