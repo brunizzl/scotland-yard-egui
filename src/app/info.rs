@@ -214,10 +214,10 @@ impl InfoState {
             }
         });        
         ui.horizontal(|ui| {
-            if ui.button(" ⟲ ").clicked() {
+            if ui.button(" ⟲ ").on_hover_text("strg + z").clicked() {
                 self.reverse_move(edges);
             }
-            if ui.button(" ⟳ ").clicked() {
+            if ui.button(" ⟳ ").on_hover_text("strg + y").clicked() {
                 self.redo_move(edges);
             }
         });
@@ -228,10 +228,10 @@ impl InfoState {
             ui.label(format!("nächster Schritt: {} ({})", ch.marker.data.job, ch.marker.data.emoji));
         }
         ui.horizontal(|ui| {
-            if ui.button("- Marker").clicked() {
+            if ui.button("- Marker").on_hover_text("n an 🖱").clicked() {
                 self.markers.pop();
             }
-            if ui.button("+ Marker").clicked() {
+            if ui.button("+ Marker").on_hover_text("m an 🖱").clicked() {
                 self.markers.push(Marker::new(&MARKER, Pos2::ZERO));
             }
         });
@@ -555,6 +555,30 @@ impl InfoState {
         }
     }
 
+    fn add_marker_at(&mut self, screen_pos: Pos2) {
+        let pos = self.camera.to_screen.move_rect.inverse().transform_pos(screen_pos);
+        self.markers.push(Marker::new(&MARKER, pos));
+    }
+
+    fn remove_marker_at(&mut self, screen_pos: Pos2) {
+        let pos = self.camera.to_screen.move_rect.inverse().transform_pos(screen_pos);
+        let mut best_i = usize::MAX;
+        let mut best_dist = f32::MAX;
+        for (i, m) in self.markers.iter().enumerate() {
+            if m.on_node && !self.visible[m.nearest_node] {
+                continue;
+            }
+            let m_dist = (pos - m.pos2).length();
+            if m_dist < best_dist {
+                best_i = i;
+                best_dist = m_dist;
+            }
+        }
+        if best_i != usize::MAX {
+            self.markers.remove(best_i);
+        }
+    }
+
     pub fn process_general_input(&mut self, ui: &mut Ui, edges: &EdgeList) {
         ui.input(|info| {
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
@@ -562,7 +586,17 @@ impl InfoState {
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
                 self.redo_move(edges);
-            }
+            }  
+            if info.key_pressed(Key::M) {
+                if let Some(pointer_pos) = info.pointer.latest_pos() {
+                    self.add_marker_at(pointer_pos);
+                }
+            }  
+            if info.key_pressed(Key::N) {
+                if let Some(pointer_pos) = info.pointer.latest_pos() {
+                    self.remove_marker_at(pointer_pos);
+                }
+            }        
         });
     }
 

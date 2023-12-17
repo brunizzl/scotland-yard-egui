@@ -53,7 +53,7 @@ pub const MARKER: MarkerData = MarkerData {
 pub struct Marker {
     pub data: &'static MarkerData,
     pub nearest_node: usize,
-    pos2: Pos2, //used in both 3d and 3d map (as cursor can't drag in 3d...)
+    pub pos2: Pos2, //used in both 3d and 3d map (as cursor can't drag in 3d...)
     pub pos3: Pos3, //only used in 3d map
     pub on_node: bool,
     pub dragging: bool, //currently beeing dragged by mouse cursor
