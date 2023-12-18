@@ -1,7 +1,7 @@
 
 use egui::{*, emath::RectTransform};
 
-use crate::geo::{self, Pos3, Vec3, Project3To2, ToScreen};
+use crate::geo::{self, Vec3, Project3To2, ToScreen};
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
@@ -125,10 +125,6 @@ impl Camera3D {
 
     pub fn reset(&mut self) {
         *self = Self::new();
-    }
-
-    pub fn to_screen_3d(&self, p: Pos3) -> Pos2 {
-        self.to_screen.apply(p)
     }
 
     pub fn to_screen_2d(&self, p: Pos2) -> Pos2 {

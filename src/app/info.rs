@@ -24,7 +24,7 @@ pub enum DrawNumbers { None, Indices, RobberAdvantage, MinCopDist }
 
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum RobberStrat { None, EscapeHull }
+pub enum RobberStrat { None, EscapeHullNonLazy }
 
 pub struct InfoState {
     //state kept for each node in map
@@ -33,10 +33,13 @@ pub struct InfoState {
     pub cop_advantage: Vec<isize>,
     pub visible: Vec<bool>,
 
-    //indices of vertices just inside hull, ordered s.t. two following vertices are neighbors
+    /// indices of vertices just inside hull, ordered s.t. two following vertices are neighbors
+    /// only guaranteed to be correct if no cop ist positioned at boundary of triangulation. (e.g. this always works in 3d case)
     pub convex_hull_boundary: Vec<usize>,
 
-    pub queue: VecDeque<usize>, //kept permanentely to reduce allocations when an update of some info per vertex is computed.
+    //these two are only used as intermediary variables during computations. 
+    //to not reallocate between frames/ algorithms, these are kept and passed to the algorithms needing them as arguments.
+    pub queue: VecDeque<usize>,
     
     pub characters: Vec<Character>,
     pub past_moves: Vec<usize>, //present is at end (same below)
@@ -185,7 +188,7 @@ impl InfoState {
         ui.collapsing("Strategie Räuber", |ui|{
             ui.radio_value(&mut self.robber_strat, RobberStrat::None, 
                 "Keine");
-            ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHull, 
+            ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHullNonLazy, 
                 "Entkomme Hülle");
         });
         ui.horizontal(|ui| {
@@ -194,7 +197,8 @@ impl InfoState {
             let next_data = if nr_characters == 0 { 
                 &ROBBER 
             } else {
-                let next_cop = (nr_characters - 1) % 7;
+                let nr_cops = nr_characters - 1;
+                let next_cop = nr_cops % COPS.len();
                 &COPS[next_cop]
             };
             let minus_text = format!("- Figur ({})", minus_emoji);
@@ -489,7 +493,7 @@ impl InfoState {
         }
         let potential = |v| match self.robber_strat {
             RobberStrat::None => panic!(),
-            RobberStrat::EscapeHull => {
+            RobberStrat::EscapeHullNonLazy => {
                 //the robber will always try to increase the robber advantage, except for when that would lead to beeing
                 //catched in the next move
                 let min_cop_dist = self.min_cop_dist[v];

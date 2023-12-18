@@ -149,7 +149,8 @@ impl State {
         self.info.process_input_3d(ui, &response, self.map.edges());
         self.info.maybe_update(self.map.edges(), self.vertex_furthest_from_cops());
 
-        let to_screen = |p: Pos3| self.info.camera.to_screen_3d(p);
+        let transform = self.info.camera.to_screen;
+        let to_screen = |p: Pos3| transform.apply(p);
 
         let scale = self.info.camera.zoom * f32::min(12.0 / self.map_divisions as f32, 4.0);
         let grey_stroke = Stroke::new(scale, GREY);
@@ -159,11 +160,12 @@ impl State {
         let positions = self.map.positions();
         self.info.draw_convex_cop_hull(positions, &painter, to_screen, scale);
         self.info.draw_green_circles(positions, &painter, to_screen, scale, self.map_divisions);
+        self.draw_markers(ui, &response, &painter, scale);
+        let positions = self.map.positions();
         self.info.draw_character_tails(positions, &painter, to_screen, scale);
         self.info.draw_robber_strat(self.map.edges(), positions, &painter, to_screen, scale);
         self.info.draw_numbers(positions, ui, &painter, to_screen, scale);
 
-        self.draw_markers(ui, &response, &painter, scale);
         self.draw_characters(ui, &response, &painter, scale);
     }
 
