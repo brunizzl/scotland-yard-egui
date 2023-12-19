@@ -18,6 +18,10 @@ impl Default for Embedding2D {
 }
 
 impl Embedding2D {
+    pub fn to_parts(self) -> (Vec<Pos2>, EdgeList) {
+        (self.positions, self.edges)
+    }
+
     pub fn edges(&self) -> &EdgeList {
         &self.edges
     }

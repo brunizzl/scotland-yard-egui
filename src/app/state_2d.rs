@@ -113,7 +113,7 @@ impl State {
             let r_pos = self.map.positions()[r.marker.nearest_node];
             let mut max_dist = f32::MIN;
             let mut min_dist = f32::MAX;
-            let bnd = RobberInfo::scale_small_dist_with_radius(self.info.small_robber_dist, self.map_radius);
+            let bnd = RobberInfo::scale_small_dist_with_resolution(self.info.small_robber_dist, self.map_radius);
             for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
                 if dist == bnd {
                     let new_dist = (r_pos - pos).length();
@@ -171,7 +171,7 @@ impl State {
             if moved {
                 self.info.past_moves.push(i);
                 self.info.future_moves.clear();
-            }
+            }src/app/state_2d.rs
         }
     }
 

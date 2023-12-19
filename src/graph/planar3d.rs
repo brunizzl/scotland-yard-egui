@@ -33,6 +33,15 @@ impl ConvexTriangleHull {
         self.vertices.len()
     }
 
+    pub fn empty() -> Self {
+        Self {
+            vertices: Vec::new(),
+            face_normals: Vec::new(),
+            edges: EdgeList::empty(),
+            triangles: Vec::new(),
+        }
+    }
+
     fn discover_faces(vertices: &[Pos3], edges: &EdgeList) -> (Vec<[usize; 3]>, Vec<Vec3>) {
         //enumerates each edge twice: once in each direction
         let mut unused_edges = edges.all_valid_edge_indices();
@@ -326,6 +335,11 @@ pub struct Embedding3D {
 }
 
 impl Embedding3D {
+
+    pub fn is_3d(&self) -> bool {
+        self.surface.vertices.len() > 0
+    }
+
     pub fn edges(&self) -> &EdgeList {
         &self.edges
     }
@@ -454,12 +468,13 @@ impl Embedding3D {
         Self::subdivide_platonic_with_triangles(oct, divisions)
     }
 
-    pub fn draw_visible_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, 
-        stroke: Stroke, incorrect_vertex_visibility: &mut Vec<bool>) 
+    /// draws all visible edges, updates visible while doing it
+    pub fn draw_visible_edges_3d(&self, to_screen: &geo::ToScreen, painter: &Painter, 
+        stroke: Stroke, visible: &mut [bool]) 
     {
-        let mut visible = std::mem::take(incorrect_vertex_visibility);
-        visible.clear();
-        visible.resize(self.nr_vertices(), false);
+        debug_assert!(self.is_3d());
+        debug_assert_eq!(visible.len(), self.nr_vertices());
+        visible.iter_mut().for_each(|v| *v = false);
 
         let draw_line = |vertices: &[Pos3], v1, v2| {
             let edge = [
@@ -517,46 +532,45 @@ impl Embedding3D {
             edge_1_3.fold((), |(), v| visible[v] = true);
             edge_2_3.fold((), |(), v| visible[v] = true);
         }
-
-        *incorrect_vertex_visibility = visible;
     }
 
-    pub fn update_vertex_visibility(&self, to_2d: &geo::Project3To2, vertex_visibility: &mut Vec<bool>) {
-        let mut visible = std::mem::take(vertex_visibility);
-        visible.clear();
-        visible.resize(self.nr_vertices(), false);
-        let iter = itertools::izip!(
-            self.surface.face_normals.iter(), 
-            self.surface.triangles.iter(),
-            self.inner_vertices.iter()
-        );
-        for (&normal, &[v1, v2, v3], inner) in iter {
-            if to_2d.signed_dist(normal) < 0.0 {
-                continue;
-            }
-            let edge_1_2_index = self.surface.edges.directed_index(v1, v2);
-            let edge_1_3_index = self.surface.edges.directed_index(v1, v3);
-            let edge_2_3_index = self.surface.edges.directed_index(v2, v3);
-            let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index]; 
-            let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index];
-            let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index];
-
-            visible[v1] = true;
-            visible[v2] = true;
-            visible[v3] = true;
-            inner.clone().fold((), |(), v| visible[v] = true);
-            edge_1_2.fold((), |(), v| visible[v] = true);
-            edge_1_3.fold((), |(), v| visible[v] = true);
-            edge_2_3.fold((), |(), v| visible[v] = true);
-        }
-
-        *vertex_visibility = visible;
+    pub fn draw_all_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) {
+        self.edges.for_each_edge(|v1, v2| {
+            let edge = [
+                to_screen.apply(self.vertices[v1]), 
+                to_screen.apply(self.vertices[v2])];
+            let line = Shape::LineSegment { points: edge, stroke };
+            painter.add(line);
+        });
     }
 
     pub fn find_local_minimum(&self, mut potential: impl FnMut(usize, Pos3) -> f32, node_hint: usize) -> (usize, f32) {
         let pot = |v| potential(v, self.vertices[v]);
         self.edges.find_local_minimum(pot, node_hint)
     } 
+
+    pub fn empty() -> Self {
+        Self { 
+            surface: ConvexTriangleHull::empty(), 
+            edge_dividing_vertices: Vec::new(), 
+            inner_vertices: Vec::new(), 
+            vertices: Vec::new(), 
+            edges: EdgeList::empty(),
+        }
+    }
+
+    pub fn from_2d(planar: Embedding2D) -> Self {
+        let z = 1.2;
+        let (positions_2d, edges) = planar.to_parts();
+        let vertices = positions_2d.iter().map(|p| pos3(p.x, p.y, z)).collect_vec();
+        Self { 
+            surface: ConvexTriangleHull::empty(), 
+            edge_dividing_vertices: Vec::new(), 
+            inner_vertices: Vec::new(), 
+            vertices, 
+            edges,
+        }
+    }
 }
 
 

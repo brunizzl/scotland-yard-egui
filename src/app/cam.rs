@@ -1,7 +1,7 @@
 
 use egui::{*, emath::RectTransform};
 
-use crate::geo::{self, Vec3, Project3To2, ToScreen};
+use crate::geo::{self, Pos3, Vec3, Project3To2, ToScreen};
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
@@ -9,15 +9,19 @@ pub struct Camera3D {
     /// == 1.0 -> no change
     /// < 1.0  -> zoomed out
     /// > 1.0  -> zoomed in
-    pub zoom: f32, 
-    pub direction: [Vec3; 3],
+    zoom: f32, 
+    direction: [Vec3; 3],
     /// offset of center independent of zoom + direction (e.g. in draw plane)
-    pub position: Pos2,
+    position: Pos2,
 
-    pub to_screen: ToScreen,
+    to_screen: ToScreen,
 }
 
 impl Camera3D {
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
     pub fn new() -> Self {
         let default_rect = Rect::from_center_size(Pos2::ZERO, Vec2::splat(1.0));
         Self { 
@@ -123,12 +127,23 @@ impl Camera3D {
         self.update_to_screen(screen);
     }
 
+    pub fn reset_position(&mut self) {
+        self.position = Pos2::ZERO;
+    }
+
+    pub fn reset_direction(&mut self) {
+        self.direction = DEFAULT_AXES;
+    }
+
     pub fn reset(&mut self) {
         *self = Self::new();
     }
+    
+    pub fn transform(&self, real_pos: Pos3) -> Pos2 {
+        self.to_screen.apply(real_pos)
+    }
 
-    pub fn to_screen_2d(&self, p: Pos2) -> Pos2 {
-        //TODO: dont ignore rotation (works everywhere, except for character movement)
-        self.to_screen.move_rect.transform_pos(p)
+    pub fn to_screen(&self) -> &ToScreen {
+        &self.to_screen
     }
 }

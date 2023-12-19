@@ -285,6 +285,8 @@ impl EdgeList {
         }
     }
 
+    /// assumes undirected edges, iterates over every edge only in one direction,
+    /// e.g. one can assume f is called with ordered parameters (fst <= snd)
     pub fn for_each_edge(&self, mut f: impl FnMut(usize, usize)) {
         for (v1, neighs) in self.potential_neighbors().enumerate() {
             for &n in neighs {
