@@ -72,7 +72,6 @@ impl Camera3D {
         self.update_direction(|v| v.rotate_y(angle))
     }
 
-    #[allow(dead_code)]
     pub fn rotate_z(&mut self, angle: f32) {
         self.update_direction(|v| v.rotate_z(angle))
     }

@@ -2,11 +2,12 @@
 
 use std::collections::VecDeque;
 
-use itertools::izip;
+use itertools::{ izip, Itertools };
 
 use egui::*;
 
 use crate::graph::{EdgeList, ConvexHull, self};
+use crate::app::character::CharacterState;
 
 use super::*;
 
@@ -26,15 +27,15 @@ pub enum DrawNumbers { None, Indices, RobberAdvantage, MinCopDist }
 #[derive(Clone, Copy, PartialEq)]
 pub enum RobberStrat { None, EscapeHullNonLazy }
 
-pub struct InfoState {
+pub struct Info {
     //state kept for each node in map
     cop_hull: ConvexHull,
     min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
     cop_advantage: Vec<isize>,
     pub marked_manually: Vec<bool>,
 
-    //this is only used as intermediary variable during computations. 
-    //to not reallocate between frames/ algorithms, the storafge is kept and passed to the respective algorithms.
+    /// this is only used as intermediary variable during computations. 
+    /// to not reallocate between frames/ algorithms, the storage is kept and passed to where needed.
     pub queue: VecDeque<usize>,
     
     pub characters: CharacterState,
@@ -47,10 +48,9 @@ pub struct InfoState {
     robber_strat: RobberStrat,
     vertex_info: DrawNumbers,
     show_convex_hull: bool,
-    debug_info: bool,
 }
 
-impl InfoState {
+impl Info {
 
     pub fn new() -> Self {
         Self { 
@@ -70,7 +70,6 @@ impl InfoState {
             robber_strat: RobberStrat::None,
             vertex_info: DrawNumbers::None,
             show_convex_hull: false,
-            debug_info: false,
         }
     }
 
@@ -98,8 +97,7 @@ impl InfoState {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
 
-            ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));   
-            ui.add(Checkbox::new(&mut self.debug_info, "bunte Kanten"));
+            ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));  
         });
         ui.collapsing("Zahlen", |ui|{
             ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
@@ -168,6 +166,7 @@ impl InfoState {
             con.extreme_vertices
         }
         else {
+            debug_assert_eq!(con.positions.len(), self.min_cop_dist.len());
             let (furthest_vertex, _) = self.min_cop_dist.iter().enumerate()
                 .fold((0, 0), |best, (v, &dist)| if dist > best.1 { (v, dist) } else { best });
             temp.push(furthest_vertex);
@@ -182,11 +181,11 @@ impl InfoState {
             || self.robber_info != RobberInfo::None 
             || self.vertex_info != DrawNumbers::None;
         if require_update {
-            self.update_convex_cop_hull(con);
             self.update_min_cop_dist();
+            self.update_convex_cop_hull(con);
             self.update_cop_advantage(con.edges);
         }
-    }    
+    }
     
     fn change_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>, new_val: bool) {
         if con.positions.len() > 0 {
@@ -365,13 +364,13 @@ impl InfoState {
                 }      
                 let draw_pos_1 = con.vertex_draw_pos(v1);
                 let size = con.scale * 2.5 * (i as f32 + 0.8 * f_len) / f_len;
-                let marker_circle = Shape::circle_filled(draw_pos_1, size, ch.data.glow);
+                let marker_circle = Shape::circle_filled(draw_pos_1, size, ch.style.glow);
                 con.painter.add(marker_circle);
                 if !con.visible[v2] {
                     continue;
                 } 
                 let points = [draw_pos_1, con.vertex_draw_pos(v2)];
-                let stroke = Stroke::new(size * 0.5, ch.data.glow);
+                let stroke = Stroke::new(size * 0.5, ch.style.glow);
                 let line = Shape::LineSegment { points, stroke };
                 con.painter.add(line);
             }

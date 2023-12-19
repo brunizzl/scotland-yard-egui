@@ -10,7 +10,6 @@ pub use planar::*;
 pub mod algos;
 pub use algos::*;
 
-#[allow(dead_code)]
 pub mod planar3d;
 pub use planar3d::*;
 

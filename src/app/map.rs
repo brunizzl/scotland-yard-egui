@@ -3,6 +3,7 @@ use egui::*;
 use itertools::izip;
 
 use crate::graph::{ self, Embedding3D, EdgeList };
+use crate::app::{ cam::Camera3D, info::Info };
 use crate::geo::Pos3;
 
 use super::*;
@@ -31,7 +32,7 @@ pub struct Map {
 
 impl Map {
 
-    pub fn new(info: &mut InfoState) -> Self {
+    pub fn new(info: &mut Info) -> Self {
         let mut res = Self { 
             data: Embedding3D::empty(), 
             visible: Vec::new(),
@@ -101,7 +102,7 @@ impl Map {
         }
     }
 
-    fn recompute(&mut self, info: &mut InfoState) {
+    fn recompute(&mut self, info: &mut Info) {
         let res = self.resolution as usize;
         let snd = self.second_shape_parameter as usize;
         let s = 1.0;
@@ -148,7 +149,7 @@ impl Map {
         info.marked_manually.resize(self.data.nr_vertices(), false);
     }    
 
-    pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut InfoState) { 
+    pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) { 
         if ui.button("🏠 Position").clicked() {
             self.camera.reset();
         }
@@ -186,7 +187,14 @@ impl Map {
     }
 
     pub fn scale(&self) -> f32 {
-        self.camera.zoom() * f32::min(12.0 / self.resolution as f32, 4.0)
+        let zoom = self.camera.zoom();
+
+        let detail_factor = f32::min(12.0 / self.resolution as f32, 4.0);
+
+        let screen_size = self.camera.to_screen().move_rect.to().size();
+        let screen_res_factor = screen_size.x.min(screen_size.y) * 0.001;
+        
+        screen_res_factor * zoom * detail_factor
     }
 
     pub fn tolerance(&self) -> f32 {
