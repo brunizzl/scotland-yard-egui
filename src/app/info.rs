@@ -6,7 +6,7 @@ use itertools::{izip, Itertools};
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
-use crate::graph::{EdgeList, ConvexHull};
+use crate::graph::{EdgeList, ConvexHull, self, Embedding2D, Embedding3D};
 
 use super::*;
 
@@ -32,6 +32,7 @@ pub struct InfoState {
     pub min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
     pub cop_advantage: Vec<isize>,
     pub visible: Vec<bool>,
+    pub marked_manually: Vec<bool>,
 
     //these two are only used as intermediary variables during computations. 
     //to not reallocate between frames/ algorithms, these are kept and passed to the algorithms needing them as arguments.
@@ -41,7 +42,6 @@ pub struct InfoState {
     pub past_moves: Vec<usize>, //present is at end (same below)
     pub future_moves: Vec<(usize, usize)>, //fst is character index, snd is vertex index
 
-    pub markers: Vec<Marker>,
 
     pub camera: Camera3D,
 
@@ -96,6 +96,7 @@ impl InfoState {
             min_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
             visible: Vec::new(),
+            marked_manually: Vec::new(),
 
             queue: VecDeque::new(),
             
@@ -105,8 +106,6 @@ impl InfoState {
                 ],
             past_moves: Vec::new(),
             future_moves: Vec::new(),
-
-            markers: Vec::new(),
 
             camera: Camera3D::new(),
 
@@ -225,14 +224,6 @@ impl InfoState {
         if let Some(ch) = self.next_moved() {
             ui.label(format!("nächster Schritt: {} ({})", ch.marker.data.job, ch.marker.data.emoji));
         }
-        ui.horizontal(|ui| {
-            if ui.button("- Marker").on_hover_text("n an 🖱").clicked() {
-                self.markers.pop();
-            }
-            if ui.button("+ Marker").on_hover_text("m an 🖱").clicked() {
-                self.markers.push(Marker::new(&MARKER, Pos2::ZERO));
-            }
-        });
 
     }
 
@@ -256,7 +247,7 @@ impl InfoState {
     }
 
     pub fn update_cop_advantage(&mut self, edges: &EdgeList) {
-        let in_cop_hull = &self.cop_hull.inside;
+        let in_cop_hull = &self.cop_hull.inside();
         let mut advantage = std::mem::take(&mut self.cop_advantage);
         advantage.resize(edges.nr_vertices(), isize::MAX);        
         let mut queue = std::mem::take(&mut self.queue);
@@ -300,7 +291,7 @@ impl InfoState {
         if !self.show_convex_hull {
             return;
         }
-        let iter = izip!(&self.cop_hull.inside, positions, &self.visible);
+        let iter = izip!(self.cop_hull.inside(), positions, &self.visible);
         for (&in_hull, &pos, &vis) in iter {
             if vis && in_hull.yes()  {
                 let draw_pos = to_screen(pos);
@@ -308,7 +299,7 @@ impl InfoState {
                 painter.add(marker_circle);
             }
         }
-        for &v in &self.cop_hull.boundary {
+        for &v in self.cop_hull.boundary() {
             if self.visible[v] {
                 let draw_pos = to_screen(positions[v]);
                 let marker_circle = Shape::circle_filled(draw_pos, scale * 3.0, WHITE);
@@ -459,31 +450,31 @@ impl InfoState {
         }
     }
 
-    fn add_marker_at(&mut self, screen_pos: Pos2) {
-        let pos = self.camera.to_screen.move_rect.inverse().transform_pos(screen_pos);
-        self.markers.push(Marker::new(&MARKER, pos));
-    }
-
-    fn remove_marker_at(&mut self, screen_pos: Pos2) {
-        let pos = self.camera.to_screen.move_rect.inverse().transform_pos(screen_pos);
-        let mut best_i = usize::MAX;
-        let mut best_dist = f32::MAX;
-        for (i, m) in self.markers.iter().enumerate() {
-            if m.on_node && !self.visible[m.nearest_node] {
-                continue;
-            }
-            let m_dist = (pos - m.pos2).length();
-            if m_dist < best_dist {
-                best_i = i;
-                best_dist = m_dist;
-            }
-        }
-        if best_i != usize::MAX {
-            self.markers.remove(best_i);
+    fn change_marker_at<T, F>(&mut self, screen_pos: Pos2, positions: &[T], to_screen: F, edges: &EdgeList, new_val: bool)
+    where T: Copy, F: FnMut(T) -> Pos2 
+    {
+        if positions.len() > 0 {
+            let to_screen_pos = |v| to_screen(positions[v]);
+            let (best_vertex, _) = graph::find_nearest_node(&self.visible, edges, screen_pos, to_screen_pos, 0);
+            self.marked_manually[best_vertex] = new_val;
         }
     }
 
-    pub fn process_general_input(&mut self, ui: &mut Ui, edges: &EdgeList) {
+    fn add_marker_at<T, F>(&mut self, screen_pos: Pos2, positions: &[T], to_screen: F, edges: &EdgeList)
+    where T: Copy, F: FnMut(T) -> Pos2 
+    {
+        self.change_marker_at(screen_pos, positions, to_screen, edges, true)
+    }
+
+    fn remove_marker_at<T, F>(&mut self, screen_pos: Pos2, positions: &[T], to_screen: F, edges: &EdgeList)
+    where T: Copy, F: FnMut(T) -> Pos2 
+    {
+        self.change_marker_at(screen_pos, positions, to_screen, edges, false)
+    }
+
+    pub fn process_general_input<T, F>(&mut self, ui: &mut Ui, positions: &[T], to_screen: F, edges: &EdgeList)
+    where T: Copy, F: FnMut(T) -> Pos2 
+    {
         ui.input(|info| {
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
                 self.reverse_move(edges);
@@ -493,12 +484,12 @@ impl InfoState {
             }  
             if info.key_pressed(Key::M) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
-                    self.add_marker_at(pointer_pos);
+                    self.add_marker_at(pointer_pos, positions, to_screen, edges);
                 }
             }  
             if info.key_pressed(Key::N) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
-                    self.remove_marker_at(pointer_pos);
+                    self.remove_marker_at(pointer_pos, positions, to_screen, edges);
                 }
             }        
         });
@@ -506,14 +497,14 @@ impl InfoState {
 
     /// zoom changes happen with the cursor position as fixed point, thus 
     /// with zooming we also change the offset
-    pub fn process_input_2d(&mut self, ui: &mut Ui, response: &Response, edges: &EdgeList) {
-        self.process_general_input(ui, edges);
+    pub fn process_input_2d(&mut self, ui: &mut Ui, response: &Response, map: &Embedding2D) {
+        self.process_general_input(ui, map.positions(), _, map.edges());
         self.camera.update_2d(ui, response.rect);
     }
 
     /// zoom changes don't change the offset at all
-    pub fn process_input_3d(&mut self, ui: &mut Ui, response: &Response, edges: &EdgeList) {
-        self.process_general_input(ui, edges);
+    pub fn process_input_3d(&mut self, ui: &mut Ui, response: &Response, map: &Embedding3D) {
+        self.process_general_input(ui, map.positions(), _, map.edges());
         self.camera.update_3d(ui, response.rect);
     }
 }  

@@ -327,6 +327,24 @@ impl EdgeList {
         }
         nr_colored
     }
+
+    pub fn find_local_minimum(&self, mut potential: impl FnMut(usize) -> f32, node_hint: usize) -> (usize, f32) {
+        let mut nearest = node_hint;
+        let mut smallest_pot = potential(node_hint);
+        let mut maybe_neighbor_better = true;
+        while maybe_neighbor_better {
+            maybe_neighbor_better = false;
+            for neigh in self.neighbors_of(nearest) {
+                let neigh_pot = potential(neigh);
+                if neigh_pot < smallest_pot {
+                    nearest = neigh;
+                    smallest_pot = neigh_pot;
+                    maybe_neighbor_better = true;
+                }
+            }
+        }
+        (nearest, smallest_pot)
+    } 
 } //impl EdgeList
 
 

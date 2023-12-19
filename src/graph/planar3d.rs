@@ -554,22 +554,8 @@ impl Embedding3D {
     }
 
     pub fn find_local_minimum(&self, mut potential: impl FnMut(usize, Pos3) -> f32, node_hint: usize) -> (usize, f32) {
-        let mut nearest = node_hint;
-        let mut smallest_pot = potential(node_hint, self.vertices[node_hint]);
-        let mut maybe_neighbor_better = true;
-        while maybe_neighbor_better {
-            maybe_neighbor_better = false;
-            for neigh in self.edges.neighbors_of(nearest) {
-                let neigh_pos = self.vertices[neigh];
-                let neigh_pot = potential(neigh, neigh_pos);
-                if neigh_pot < smallest_pot {
-                    nearest = neigh;
-                    smallest_pot = neigh_pot;
-                    maybe_neighbor_better = true;
-                }
-            }
-        }
-        (nearest, smallest_pot)
+        let pot = |v| potential(v, self.vertices[v]);
+        self.edges.find_local_minimum(pot, node_hint)
     } 
 }
 
