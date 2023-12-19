@@ -1,6 +1,5 @@
 
 use std::iter;
-use std::collections::VecDeque;
 
 use egui::*;
 use itertools::Itertools;
@@ -259,26 +258,6 @@ impl ConvexTriangleHull {
                 }
             }
         }
-    }
-
-    /// draws edges on camera-facing half with strokes[0], others with strokes[1]
-    pub fn draw_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, strokes: [Stroke; 2]) {
-        for (v1, neighs) in self.edges.neighbors().enumerate() {
-            let p1 = self.vertices[v1];
-            for v2 in neighs {
-                if v2 <= v1 { //skip edges already drawn the other way around
-                    continue;
-                }
-                let p2 = self.vertices[v2];
-                let edge = [
-                    to_screen.apply(p1), 
-                    to_screen.apply(p2)];
-                let mid = p1.lerp(p2, 0.5).to_vec3();
-                let stroke = strokes[to_screen.faces_camera(mid) as usize];
-                let line = Shape::LineSegment { points: edge, stroke };
-                painter.add(line);
-            }
-        } 
     }
 }
 
@@ -591,12 +570,7 @@ impl Embedding3D {
             }
         }
         (nearest, smallest_pot)
-    }    
-
-    /// everything in queue is starting point and expected to already have the correct distance
-    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<isize>) {
-        self.edges.calc_distances_to(queue, distances)
-    }
+    } 
 }
 
 

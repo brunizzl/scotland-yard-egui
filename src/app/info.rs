@@ -6,7 +6,7 @@ use itertools::{izip, Itertools};
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
-use crate::graph::{InSet, EdgeList};
+use crate::graph::{EdgeList, ConvexHull};
 
 use super::*;
 
@@ -28,14 +28,10 @@ pub enum RobberStrat { None, EscapeHullNonLazy }
 
 pub struct InfoState {
     //state kept for each node in map
-    pub in_convex_cop_hull: Vec<InSet>, 
+    pub cop_hull: ConvexHull,
     pub min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
     pub cop_advantage: Vec<isize>,
     pub visible: Vec<bool>,
-
-    /// indices of vertices just inside hull, ordered s.t. two following vertices are neighbors
-    /// only guaranteed to be correct if no cop ist positioned at boundary of triangulation. (e.g. this always works in 3d case)
-    pub convex_hull_boundary: Vec<usize>,
 
     //these two are only used as intermediary variables during computations. 
     //to not reallocate between frames/ algorithms, these are kept and passed to the algorithms needing them as arguments.
@@ -96,12 +92,10 @@ impl InfoState {
 
     pub fn new() -> Self {
         Self { 
-            in_convex_cop_hull: Vec::new(),
+            cop_hull: ConvexHull::new(),
             min_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
             visible: Vec::new(),
-
-            convex_hull_boundary: Vec::new(),
 
             queue: VecDeque::new(),
             
@@ -262,7 +256,7 @@ impl InfoState {
     }
 
     pub fn update_cop_advantage(&mut self, edges: &EdgeList) {
-        let in_cop_hull = &self.in_convex_cop_hull;
+        let in_cop_hull = &self.cop_hull.inside;
         let mut advantage = std::mem::take(&mut self.cop_advantage);
         advantage.resize(edges.nr_vertices(), isize::MAX);        
         let mut queue = std::mem::take(&mut self.queue);
@@ -284,102 +278,8 @@ impl InfoState {
         self.queue = queue;
     }
 
-    pub fn update_convex_hull_boundary(&mut self, edges: &EdgeList) {
-        //idea: walk outside hull and look inside, but actually store the inside nodes
-        //this approach will fail, if one cop stands at the border of the map, but this is something
-        //2d no happening in the intresting real 3d case anyway.
-        let mut boundary = std::mem::take(&mut self.convex_hull_boundary);
-        boundary.clear();
-        let fst_outside = 'search_start_vertex: loop {
-            for cop in self.active_cops() {
-                for n in edges.neighbors_of(cop.marker.nearest_node) {
-                    if !self.in_convex_cop_hull[n].yes() {
-                        boundary.push(cop.marker.nearest_node);
-                        break 'search_start_vertex n;
-                    }
-                }
-            }
-            return;
-        };
-        let mut last_outside = usize::MAX;
-        let mut curr_outside = fst_outside;
-        loop {
-            let mut change = false;
-            for n in edges.neighbors_of(curr_outside) {
-                //find vertices on hull boundary
-                if self.in_convex_cop_hull[n].yes() {
-                    let len = boundary.len();
-                    let range_min = if len < 5 { 0 } else { len - 5 };
-                    if !boundary[range_min..].contains(&n) {
-                        boundary.push(n);
-                    }
-                }
-                else { //find next vertex just outside hull
-                    let still_searching = !change;
-                    let is_new = n != last_outside; //can only be trusted if still_searching
-                    let borders_hull = edges.neighbors_of(n).any(|nn| self.in_convex_cop_hull[nn].yes());
-                    if still_searching && is_new && borders_hull {
-                        last_outside = curr_outside;
-                        curr_outside = n;
-                        self.convex_hull_boundary.push(curr_outside);
-                        change = true;
-                    }
-                }
-            }
-            if curr_outside == fst_outside || !change {
-                break;
-            }
-        }
-        self.convex_hull_boundary = boundary;
-    }
-
     pub fn update_convex_cop_hull(&mut self, edges: &EdgeList, extreme_vertices: impl Iterator<Item = usize>) {
-        self.queue.clear();
-
-        let in_hull = &mut self.in_convex_cop_hull;
-        in_hull.clear();
-        in_hull.resize(edges.nr_vertices(), InSet::Perhaps);
-        for i in 1..self.characters.len() {
-            let cop_i = &self.characters[i];
-            if !cop_i.marker.on_node {
-                continue;
-            }
-            for cop_j in self.characters[(i + 1)..].iter().filter(|c| c.marker.on_node) {                
-                //walk from cop i to cop j on all shortest paths
-                in_hull[cop_i.marker.nearest_node] = InSet::NewlyAdded;
-                self.queue.push_back(cop_i.marker.nearest_node);
-                while let Some(node) = self.queue.pop_front() {
-                    let curr_dist_to_j = cop_j.distances[node];
-                    for neigh in edges.neighbors_of(node) {
-                        if cop_j.distances[neigh] < curr_dist_to_j && in_hull[neigh] != InSet::NewlyAdded {
-                            in_hull[neigh] = InSet::NewlyAdded;
-                            self.queue.push_back(neigh);
-                        }
-                    }
-                }
-                //change these paths from InSet::NewlyAdded to InSet::Yes
-                //(to allow new paths to go through the current one)
-                self.queue.push_back(cop_i.marker.nearest_node);
-                in_hull[cop_i.marker.nearest_node] = InSet::Yes;
-                edges.recolor_region((InSet::NewlyAdded, InSet::Yes), in_hull, &mut self.queue);
-            }
-        }
-        //color outside as InSet::No (note: this might miss some edge cases; best to not place cops at rim)
-        for p in extreme_vertices {
-            if in_hull[p] == InSet::Perhaps {
-                in_hull[p] = InSet::No;
-                self.queue.push_back(p);
-            }
-        }
-        edges.recolor_region((InSet::Perhaps, InSet::No), in_hull, &mut self.queue);
-
-        //color remaining InSet::Perhaps as InSet::Yes
-        for x in in_hull {
-            if *x == InSet::Perhaps {
-                *x = InSet::Yes;
-            }
-        }
-        self.update_convex_hull_boundary(edges);
+        self.cop_hull.update(&self.characters[1..], edges, &mut self.queue, extreme_vertices)
     }
 
     pub fn maybe_update(&mut self, edges: &EdgeList, extreme_vertices: impl Iterator<Item = usize>) {
@@ -400,7 +300,7 @@ impl InfoState {
         if !self.show_convex_hull {
             return;
         }
-        let iter = izip!(&self.in_convex_cop_hull, positions, &self.visible);
+        let iter = izip!(&self.cop_hull.inside, positions, &self.visible);
         for (&in_hull, &pos, &vis) in iter {
             if vis && in_hull.yes()  {
                 let draw_pos = to_screen(pos);
@@ -408,7 +308,7 @@ impl InfoState {
                 painter.add(marker_circle);
             }
         }
-        for &v in &self.convex_hull_boundary {
+        for &v in &self.cop_hull.boundary {
             if self.visible[v] {
                 let draw_pos = to_screen(positions[v]);
                 let marker_circle = Shape::circle_filled(draw_pos, scale * 3.0, WHITE);

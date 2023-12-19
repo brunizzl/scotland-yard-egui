@@ -6,7 +6,7 @@ use egui::*;
 mod state_2d;
 mod state_3d;
 mod cam;
-mod character;
+pub mod character;
 mod info;
 
 use cam::*;
