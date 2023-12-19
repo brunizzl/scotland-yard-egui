@@ -1,12 +1,28 @@
 
 use std::collections::VecDeque;
+
+use egui::*;
+
 use crate::app::character::Character;
 use super::*;
 
+pub fn find_nearest_node<F>(visible: &[bool], edges: &EdgeList, pos: Pos2, 
+    mut vertex_to_screen: F, start: usize) -> (usize, f32) 
+where F: FnMut(usize) -> Pos2
+{       
+    let potential = |v:usize| {
+        let v_screen_pos = vertex_to_screen(v);
+        let dist_2d = (v_screen_pos - pos).length_sq();
+        let backface_penalty = 10.0 * (!visible[v]) as isize as f32;
+        dist_2d + backface_penalty
+    };
+    edges.find_local_minimum(potential, start)
+}
+
 /// geodesic convex hull over some vertices with respect to some graph
 pub struct ConvexHull {
-    pub inside: Vec<InSet>,
-    pub boundary: Vec<usize>,
+    inside: Vec<InSet>,
+    boundary: Vec<usize>,
 }
 
 impl ConvexHull {
@@ -15,6 +31,14 @@ impl ConvexHull {
             inside: Vec::new(),
             boundary: Vec::new(),
         }
+    }
+
+    pub fn inside(&self) -> &[InSet] {
+        &self.inside
+    }
+
+    pub fn boundary(&self) -> &[usize] {
+        &self.boundary
     }
 
     fn update_inside(&mut self, cops: &[Character], edges: &EdgeList, queue: &mut VecDeque<usize>, 
