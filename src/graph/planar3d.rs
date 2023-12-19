@@ -29,6 +29,7 @@ fn is_small(x: f32) -> bool {
 }
 
 impl ConvexTriangleHull {
+    #[allow(dead_code)]
     pub fn nr_vertices(&self) -> usize {
         self.vertices.len()
     }
@@ -119,15 +120,6 @@ impl ConvexTriangleHull {
         self
     }
 
-    pub fn sorted_triangles(&self) -> impl Iterator<Item = [usize; 3]> + '_ {
-        self.triangles.iter().map(|corners| {
-            let mut corners = *corners;
-            corners.sort();
-            corners
-        })
-    }
-
-
     /// connects the closest vertices to have edges,
     /// positions are assumed to lie centered around the origin
     /// assumes all edges to have same length.
@@ -216,12 +208,14 @@ impl ConvexTriangleHull {
             .rescale_vectices(scale)
     }
 
+    #[allow(dead_code)]
     pub fn new_subdivided_octahedron(scale: f32, divisions: usize) -> Self {
         let oct = Self::new_octahedron(1.0);
         Self::subdivide_hull(oct, divisions)
             .rescale_vectices(scale)
     }
 
+    #[allow(dead_code)]
     pub fn new_subdivided_tetrahedron(scale: f32, divisions: usize) -> Self {
         let tet = Self::new_tetrahedron(1.0);
         Self::subdivide_hull(tet, divisions)
@@ -251,6 +245,7 @@ impl ConvexTriangleHull {
         }.rescale_vectices(scale)
     }
 
+    #[allow(dead_code)]
     pub fn draw_visible_faces(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
     {
         for (&normal, boundary) in self.face_normals.iter().zip(self.triangles.iter()) {
@@ -291,6 +286,7 @@ impl BidirectionalRange {
         Self { start, end, step: 1 }
     }
 
+    #[allow(dead_code)]
     pub fn new_backward(start: usize, end: usize) -> Self {
         let end = if end > start { start } else { end };
         Self { start, end, step: -1 }
@@ -342,10 +338,6 @@ impl Embedding3D {
 
     pub fn edges(&self) -> &EdgeList {
         &self.edges
-    }
-
-    pub fn surface(&self) -> &ConvexTriangleHull {
-        &self.surface
     }
 
     pub fn nr_vertices(&self) -> usize {

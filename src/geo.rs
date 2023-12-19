@@ -1,5 +1,5 @@
 
-use egui::{Pos2, Vec2, pos2, vec2, emath::RectTransform};
+use egui::{Pos2, Vec2, pos2, emath::RectTransform};
 
 pub mod vec3;
 pub use vec3::*;
@@ -25,6 +25,7 @@ pub fn signed_dist((a, dir): Line2, p: Pos2) -> f32 {
     dir.x * (a.y - p.y) - dir.y * (a.x - p.x)
 }
 
+#[allow(dead_code)]
 pub fn project_to_line((a, dir): Line2, p: Pos2) -> Pos2 {
     //dividing by length squared normalized both occurences of dir at once.
     a + Vec2::dot(p - a, dir) / dir.length_sq() * dir
@@ -82,12 +83,6 @@ impl Project3To2 {
     /// positive if vec is in front of plane, negative if behind, zero if on subspace
     pub fn signed_dist(&self, vec: Vec3) -> f32 {
         self.new_z.dot(vec)
-    }
-
-    pub fn project_vec(&self, vec: Vec3) -> Vec2 {
-        let x = self.new_x.dot(vec);
-        let y = self.new_y.dot(vec);
-        vec2(x, y)
     }
 
     pub fn project_pos(&self, pos: Pos3) -> Pos2 {

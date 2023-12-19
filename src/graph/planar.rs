@@ -22,6 +22,7 @@ impl Embedding2D {
         (self.positions, self.edges)
     }
 
+    #[allow(dead_code)]
     pub fn edges(&self) -> &EdgeList {
         &self.edges
     }
@@ -60,14 +61,6 @@ impl Embedding2D {
 
     pub fn positions(&self) -> &[Pos2] {
         &self.positions
-    }
-
-    pub fn for_each_edge(&self, mut f: impl FnMut(usize, Pos2, usize, Pos2)) {
-        self.edges.for_each_edge(|v1, v2| {
-            let p1 = self.positions[v1];
-            let p2 = self.positions[v2];
-            f(v1, p1, v2, p2)
-        });
     }
 
     pub fn sort_neigbors(&mut self) {

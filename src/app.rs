@@ -1,21 +1,13 @@
 
-use itertools::Itertools;
-
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
 use crate::graph::EdgeList;
 use crate::geo::Pos3;
 
-//mod state_2d;
-//mod state_3d;
 mod cam;
 pub mod character;
 mod info;
 mod map;
-
-use cam::*;
-use character::*;
-use info::*;
 
 
 const GREY: Color32 = Color32::from_rgb(130, 130, 150);
@@ -31,7 +23,7 @@ pub struct DrawContext<'a> {
     pub edges: &'a EdgeList,
     pub visible: &'a [bool],
     pub positions: &'a [Pos3],
-    pub cam: &'a Camera3D,
+    pub cam: &'a cam::Camera3D,
     pub tolerance: f32,
     pub scale: f32,
     pub resolution: isize,
@@ -63,20 +55,37 @@ fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isi
 
 pub struct State {
     map: map::Map,
-    info: InfoState,
+    info: info::Info,
 }
 
 impl State {
     /// Called once before the first frame.
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let mut info = InfoState::new();
+        let mut info = info::Info::new();
         let map = map::Map::new(&mut info);
         Self { 
             map,
             info,
         }
-    }    
+    }
 
+}
+
+fn draw_usage_info(ui: &mut Ui) {
+    ui.collapsing("Bedienung", |ui| {
+        ui.label("Spielfeld rotieren / verschieben: 
+ziehen mit rechter Maustaste
+
+verschieben einer Figur:
+ziehen mit linker Maustaste
+
+manuell Marker an Mausposition:
+setzen: m-Taste
+entfernen: n-Taste
+
+Zug rückgängig: strg + z
+Zug wiederholen: strg + y");
+    });
 }
 
 impl eframe::App for State {
@@ -88,6 +97,7 @@ impl eframe::App for State {
         SidePanel::left("left_panel").show(ctx, |ui| {
             ui.vertical(|ui| {
                 widgets::global_dark_light_mode_buttons(ui);
+                draw_usage_info(ui);
                 self.map.draw_menu(ui, &mut self.info);
                 self.info.draw_menu(ui, self.map.edges());
             });

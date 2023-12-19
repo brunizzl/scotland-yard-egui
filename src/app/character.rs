@@ -7,15 +7,15 @@ use crate::{graph::EdgeList, geo::Pos3};
 
 use super::*;
 
-pub struct MarkerData {
+pub struct Style {
     pub color: Color32,
     pub glow: Color32,
     pub emoji: &'static str,
     pub job: &'static str,
 }
 
-const fn new_cop(emoji: &'static str) -> MarkerData { 
-    MarkerData {
+const fn new_cop(emoji: &'static str) -> Style { 
+    Style {
         color: Color32::from_rgb(10, 50, 170),
         glow: Color32::from_rgb(60, 120, 235),
         //alternatives: 👮🛂🛃🐈🔫🚔🐂🍩
@@ -23,7 +23,7 @@ const fn new_cop(emoji: &'static str) -> MarkerData {
         job: "Cop",
     } 
 }
-pub const COPS: [MarkerData; 7] = [
+pub const COPS: [Style; 7] = [
     new_cop("👮"), 
     new_cop("🍩"), 
     new_cop("🐂"), 
@@ -33,7 +33,7 @@ pub const COPS: [MarkerData; 7] = [
     new_cop("🛃")
 ];
 
-pub const ROBBER: MarkerData = MarkerData {
+pub const ROBBER: Style = Style {
     color: Color32::from_rgb(170, 40, 40),
     glow: Color32::from_rgb(235, 120, 120),
     //alternatives: 👿🚴🏃🚶🐀🐢🕵💰
@@ -47,7 +47,7 @@ pub struct Character {
     pub last_positions: Vec<usize>,
     pub distances: Vec<isize>,
 
-    pub data: &'static MarkerData,
+    pub style: &'static Style,
     pub nearest_node: usize,
     pub pos2: Pos2, //used in both 3d and 3d map (as cursor can't drag in 3d...)
     pub pos3: Pos3, //only used in 3d map
@@ -56,13 +56,13 @@ pub struct Character {
 }
 
 impl Character {
-    pub fn new(data: &'static MarkerData, pos2: Pos2) -> Self {
+    pub fn new(data: &'static Style, pos2: Pos2) -> Self {
         //dragging set to true snaps to node next update
         Character { 
             last_positions: Vec::new(),
             distances: Vec::new(),
 
-            data, 
+            style: data, 
             nearest_node: 0, 
             pos2, 
             pos3: Pos3::ZERO, 
@@ -71,19 +71,19 @@ impl Character {
         }
     }
 
-    pub fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, ui: &Ui, scale: f32) {
+    fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, ui: &Ui, scale: f32) {
         //draw circles
-        let character_circle = Shape::circle_filled(draw_pos, scale, self.data.color);
+        let character_circle = Shape::circle_filled(draw_pos, scale, self.style.color);
         painter.add(character_circle);
         if self.on_node {
-            let stroke = Stroke::new(scale * 0.375, self.data.glow);
+            let stroke = Stroke::new(scale * 0.375, self.style.glow);
             let marker_circle = Shape::circle_stroke(draw_pos, scale, stroke);
             painter.add(marker_circle);
         }
         //draw emoji
         let font = FontId::proportional(scale * 2.0);
-        let emoji_pos = draw_pos - scale * vec2(0.0, 1.3);
-        let emoji_str = self.data.emoji.to_string();
+        let emoji_pos = draw_pos - scale * vec2(0.0, 1.35);
+        let emoji_str = self.style.emoji.to_string();
         let mut layout_job = text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
         layout_job.halign = Align::Center;
         let galley = ui.fonts(|f| f.layout_job(layout_job));
@@ -91,10 +91,10 @@ impl Character {
         painter.add(emoji);
     }
 
-    pub fn draw_small(&self, con: &DrawContext<'_>) {
+    fn draw_small_at_node(&self, con: &DrawContext<'_>) {
         let character_size = f32::max(4.0, con.scale * 4.0);
         let draw_pos = con.vertex_draw_pos(self.nearest_node);
-        let character_circle = Shape::circle_filled(draw_pos, character_size, self.data.glow);
+        let character_circle = Shape::circle_filled(draw_pos, character_size, self.style.glow);
         con.painter.add(character_circle);
     }
 
@@ -111,7 +111,7 @@ impl Character {
             move_rect.transform_pos(self.pos2) 
         };
 
-        let character_size = f32::max(8.0, con.scale * 8.0);
+        let character_size = f32::max(6.0, con.scale * 8.0);
         let rect_len = 3.0 * character_size;
         let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
         let character_id = con.response.id.with(self as *const Self);
@@ -267,7 +267,7 @@ impl CharacterState {
     pub fn draw_menu(&mut self, ui: &mut Ui, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         ui.horizontal(|ui| {
             let nr_characters = self.characters.len();
-            let minus_emoji = self.characters.last().map_or("🚫", |c| c.data.emoji);
+            let minus_emoji = self.characters.last().map_or("🚫", |c| c.style.emoji);
             let next_data = if nr_characters == 0 { 
                 &ROBBER 
             } else {
@@ -300,10 +300,10 @@ impl CharacterState {
             }
         });
         if let Some(ch) = self.last_moved() {
-            ui.label(format!("letzter Schritt: {} ({})", ch.data.job, ch.data.emoji));
+            ui.label(format!("letzter Schritt: {} ({})", ch.style.job, ch.style.emoji));
         }
         if let Some(ch) = self.next_moved() {
-            ui.label(format!("nächster Schritt: {} ({})", ch.data.job, ch.data.emoji));
+            ui.label(format!("nächster Schritt: {} ({})", ch.style.job, ch.style.emoji));
         }
     }
 
@@ -318,7 +318,7 @@ impl CharacterState {
                 }
             }
             else {
-                ch.draw_small(con);
+                ch.draw_small_at_node(con);
             }
         }
     }
