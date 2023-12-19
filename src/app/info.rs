@@ -11,7 +11,7 @@ use crate::app::character::CharacterState;
 
 use super::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist, CopDist }
 
 impl RobberInfo {
@@ -20,11 +20,11 @@ impl RobberInfo {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum DrawNumbers { None, Indices, RobberAdvantage, MinCopDist }
 
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum RobberStrat { None, EscapeHullNonLazy }
 
 pub struct Info {
@@ -50,18 +50,44 @@ pub struct Info {
     show_convex_hull: bool,
 }
 
-impl Info {
+mod storage_keys {
+    pub const CHARACTERS: &'static str = "info::characters";
+    pub const MARKED_MANUALLY: &'static str = "info::manually_marked";
+}
 
-    pub fn new() -> Self {
+impl Info {
+    pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        for ch in self.characters.all_mut() {
+            ch.distances = Vec::new();
+        }
+        use storage_keys::*;
+        eframe::set_value(storage, CHARACTERS, &self.characters);
+        if self.marked_manually.iter().any(|&x| x) {
+            eframe::set_value(storage, MARKED_MANUALLY, &self.marked_manually);
+        }
+    }
+
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let (characters, marked_manually) = if let Some(storage) = cc.storage {
+            use storage_keys::*;
+            (
+                eframe::get_value(storage, CHARACTERS).unwrap_or(CharacterState::new()),
+                eframe::get_value(storage, MARKED_MANUALLY).unwrap_or(Vec::new()),
+            )            
+        }
+        else {
+            (CharacterState::new(), Vec::new())
+        };
+
         Self { 
             cop_hull: ConvexHull::new(),
             min_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
-            marked_manually: Vec::new(),
+            marked_manually,
 
             queue: VecDeque::new(),
             
-            characters: CharacterState::new(),
+            characters,
 
             robber_info: RobberInfo::None,
             small_robber_dist: 10,
@@ -364,13 +390,13 @@ impl Info {
                 }      
                 let draw_pos_1 = con.vertex_draw_pos(v1);
                 let size = con.scale * 2.5 * (i as f32 + 0.8 * f_len) / f_len;
-                let marker_circle = Shape::circle_filled(draw_pos_1, size, ch.style.glow);
+                let marker_circle = Shape::circle_filled(draw_pos_1, size, ch.style().glow);
                 con.painter.add(marker_circle);
                 if !con.visible[v2] {
                     continue;
                 } 
                 let points = [draw_pos_1, con.vertex_draw_pos(v2)];
-                let stroke = Stroke::new(size * 0.5, ch.style.glow);
+                let stroke = Stroke::new(size * 0.5, ch.style().glow);
                 let line = Shape::LineSegment { points, stroke };
                 con.painter.add(line);
             }

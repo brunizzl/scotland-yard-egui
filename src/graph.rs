@@ -16,6 +16,7 @@ pub use planar3d::*;
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub enum InSet { No, Perhaps, Yes, NewlyAdded }
 impl InSet {
     pub fn yes(self) -> bool { 

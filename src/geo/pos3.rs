@@ -5,8 +5,7 @@ use super::vec3::*;
 /// copy of egui's Pos2, but with one extra dimension
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "bytemuck", derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct Pos3 {
     pub x: f32,
     pub y: f32,

@@ -8,7 +8,7 @@ use crate::geo::Pos3;
 
 use super::*;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum Shape { 
     Tetrahedron, 
     Octahedron, 
@@ -30,21 +30,55 @@ pub struct Map {
     camera: Camera3D,
 }
 
+mod storage_keys {
+    pub const SHAPE: &'static str = "map::shape";
+    pub const RESOLUTION: &'static str = "map::resolution";
+    pub const SND_PARAM: &'static str = "map::second_shape_param";
+    pub const CAMERA: &'static str = "map::camera";
+}
+
 impl Map {
 
-    pub fn new(info: &mut Info) -> Self {
-        let mut res = Self { 
+    pub fn new(info: &mut Info, cc: &eframe::CreationContext<'_>) -> Self {
+        let (shape, resolution, second_shape_parameter, camera) = if let Some(storage) = cc.storage {
+            use storage_keys::*;
+            (
+                eframe::get_value(storage, SHAPE).unwrap_or(Shape::Icosahedron),
+                eframe::get_value(storage, RESOLUTION).unwrap_or(12),
+                eframe::get_value(storage, SND_PARAM).unwrap_or(3),
+                eframe::get_value(storage, CAMERA).unwrap_or(Camera3D::new())
+            )
+        }
+        else {
+            (Shape::Icosahedron, 12, 3, Camera3D::new())
+        };
+
+        let mut result = Self { 
             data: Embedding3D::empty(), 
             visible: Vec::new(),
             extreme_vertices: Vec::new(),
 
-            shape: Shape::Icosahedron, 
-            resolution: 10, 
-            second_shape_parameter: 6,
-            camera: Camera3D::new(),
+            shape, 
+            resolution, 
+            second_shape_parameter,
+            camera,
         };
-        res.recompute(info);
-        res
+        result.recompute();
+
+        let nr_vertices = result.data.nr_vertices();
+        if info.marked_manually.len() != nr_vertices {
+            info.marked_manually.clear();
+            info.marked_manually.resize(nr_vertices, false);
+        }
+
+        result
+    }
+
+    pub fn save(&self, storage: &mut dyn eframe::Storage) {
+        use storage_keys::*;
+        eframe::set_value(storage, SHAPE, &self.shape);
+        eframe::set_value(storage, RESOLUTION, &self.resolution);
+        eframe::set_value(storage, SND_PARAM, &self.second_shape_parameter)
     }
 
     /// really shitty approximation of convex hull for 2D graphs
@@ -102,7 +136,7 @@ impl Map {
         }
     }
 
-    fn recompute(&mut self, info: &mut Info) {
+    fn recompute(&mut self) {
         let res = self.resolution as usize;
         let snd = self.second_shape_parameter as usize;
         let s = 1.0;
@@ -136,7 +170,9 @@ impl Map {
         }
         self.visible.resize(self.data.nr_vertices(), false);
         self.update_vertex_visibility();
+    }
 
+    fn adjust_info(&self, info: &mut Info) {
         for ch in info.characters.all_mut() {
             let char_dir = ch.pos3.to_vec3();
             let potential = |_, v_pos: Pos3| -char_dir.dot(v_pos.to_vec3().normalized());
@@ -147,7 +183,12 @@ impl Map {
         info.characters.forget_move_history();
         info.marked_manually.clear();
         info.marked_manually.resize(self.data.nr_vertices(), false);
-    }    
+    }
+
+    fn recompute_and_adjust(&mut self, info: &mut Info) {
+        self.recompute();
+        self.adjust_info(info);
+    }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) { 
         if ui.button("🏠 Position").clicked() {
@@ -161,27 +202,27 @@ impl Map {
             ui.radio_value(&mut self.shape, Shape::DividedIcosahedron, "aufgepusteter\nIkosaeder");
             if self.shape == Shape::DividedIcosahedron {
                 if add_drag_value(ui, &mut self.second_shape_parameter, "Druck: ", 1, self.resolution) {
-                    self.recompute(info);
+                    self.recompute_and_adjust(info);
                 }
             }
             ui.radio_value(&mut self.shape, Shape::RegularPolygon2D, "2D Polygon\ntrianguliert");
             if self.shape == Shape::RegularPolygon2D {
                 if add_drag_value(ui, &mut self.second_shape_parameter, "Seiten: ", 3, 10) {
-                    self.recompute(info);
+                    self.recompute_and_adjust(info);
                 }
             }
             ui.radio_value(&mut self.shape, Shape::Random2D, "2D Kreisscheibe\ntrianguliert");
             if self.shape == Shape::Random2D {
                 if ui.button("neu berechnen").clicked() {
-                    self.recompute(info);
+                    self.recompute_and_adjust(info);
                 }
             }
             ui.radio_value(&mut self.shape, Shape::Debug2D, "2D Debugging");
             if self.shape != old_shape {
-                self.recompute(info);
+                self.recompute_and_adjust(info);
             }
             if add_drag_value(ui, &mut self.resolution, "Auflösung: ", 0, 200) {
-                self.recompute(info);
+                self.recompute_and_adjust(info);
             }
         });
     }

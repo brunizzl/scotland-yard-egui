@@ -5,6 +5,7 @@ use crate::geo::{self, Pos3, Vec3, Project3To2, ToScreen};
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct Camera3D {
     /// == 1.0 -> no change
     /// < 1.0  -> zoomed out
