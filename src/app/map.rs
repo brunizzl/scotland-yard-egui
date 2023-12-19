@@ -78,7 +78,8 @@ impl Map {
         use storage_keys::*;
         eframe::set_value(storage, SHAPE, &self.shape);
         eframe::set_value(storage, RESOLUTION, &self.resolution);
-        eframe::set_value(storage, SND_PARAM, &self.second_shape_parameter)
+        eframe::set_value(storage, SND_PARAM, &self.second_shape_parameter);
+        eframe::set_value(storage, CAMERA, &self.camera);
     }
 
     /// really shitty approximation of convex hull for 2D graphs
