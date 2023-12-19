@@ -42,7 +42,7 @@ impl ConvexHull {
     }
 
     fn update_inside(&mut self, cops: &[Character], edges: &EdgeList, queue: &mut VecDeque<usize>, 
-        extreme_vertices: impl Iterator<Item = usize>) 
+        vertices_outside_hull: &[usize]) 
     {
         queue.clear();
 
@@ -51,13 +51,13 @@ impl ConvexHull {
         let in_hull = &mut self.inside[..];
         for i in 0..cops.len() {
             let cop_i = &cops[i];
-            if !cop_i.marker.on_node {
+            if !cop_i.on_node {
                 continue;
             }
-            for cop_j in cops[(i + 1)..].iter().filter(|c| c.marker.on_node) {                
+            for cop_j in cops[(i + 1)..].iter().filter(|c| c.on_node) {                
                 //walk from cop i to cop j on all shortest paths
-                in_hull[cop_i.marker.nearest_node] = InSet::NewlyAdded;
-                queue.push_back(cop_i.marker.nearest_node);
+                in_hull[cop_i.nearest_node] = InSet::NewlyAdded;
+                queue.push_back(cop_i.nearest_node);
                 while let Some(node) = queue.pop_front() {
                     let curr_dist_to_j = cop_j.distances[node];
                     for neigh in edges.neighbors_of(node) {
@@ -69,13 +69,13 @@ impl ConvexHull {
                 }
                 //change these paths from InSet::NewlyAdded to InSet::Yes
                 //(to allow new paths to go through the current one)
-                queue.push_back(cop_i.marker.nearest_node);
-                in_hull[cop_i.marker.nearest_node] = InSet::Yes;
+                queue.push_back(cop_i.nearest_node);
+                in_hull[cop_i.nearest_node] = InSet::Yes;
                 edges.recolor_region((InSet::NewlyAdded, InSet::Yes), in_hull, queue);
             }
         }
         //color outside as InSet::No (note: this might miss some edge cases; best to not place cops at rim)
-        for p in extreme_vertices {
+        for &p in vertices_outside_hull {
             if in_hull[p] == InSet::Perhaps {
                 in_hull[p] = InSet::No;
                 queue.push_back(p);
@@ -98,10 +98,10 @@ impl ConvexHull {
         let mut boundary = std::mem::take(&mut self.boundary);
         boundary.clear();
         let fst_outside = 'search_start_vertex: loop {
-            for cop in cops.iter().filter(|c| c.marker.on_node) {
-                for n in edges.neighbors_of(cop.marker.nearest_node) {
+            for cop in cops.iter().filter(|c| c.on_node) {
+                for n in edges.neighbors_of(cop.nearest_node) {
                     if !self.inside[n].yes() {
-                        boundary.push(cop.marker.nearest_node);
+                        boundary.push(cop.nearest_node);
                         break 'search_start_vertex n;
                     }
                 }
@@ -140,9 +140,9 @@ impl ConvexHull {
     }
 
     pub fn update(&mut self, cops: &[Character], edges: &EdgeList, queue: &mut VecDeque<usize>, 
-        extreme_vertices: impl Iterator<Item = usize>) 
+        vertices_outside_hull: &[usize]) 
     {
-        self.update_inside(cops, edges, queue, extreme_vertices);
+        self.update_inside(cops, edges, queue, vertices_outside_hull);
         self.update_boundary(cops, edges);
     }
 }

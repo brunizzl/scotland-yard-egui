@@ -54,7 +54,7 @@ impl State {
         };
         self.tolerance = f32::min(0.25, 0.75 / self.map_divisions as f32);
         let to_2d = self.camera_projection();
-        self.map.update_vertex_visibility(&to_2d, &mut self.info.visible);
+        self.map.update_vertex_visibility_3d(&to_2d, &mut self.info.visible);
         for char in &mut self.info.characters {
             let char_dir = char.marker.pos3.to_vec3();
             let potential = |_, v_pos: Pos3| -char_dir.dot(v_pos.to_vec3().normalized());
@@ -84,7 +84,7 @@ impl State {
             let r_pos = self.map.positions()[r.marker.nearest_node];
             let mut max_dist = f32::MIN;
             let mut min_dist = f32::MAX;
-            let bnd = RobberInfo::scale_small_dist_with_radius(self.info.small_robber_dist, self.map_divisions);
+            let bnd = RobberInfo::scale_small_dist_with_resolution(self.info.small_robber_dist, self.map_divisions);
             for (&dist, &pos) in r.distances.iter().zip(self.map.positions()) {
                 if dist == bnd {
                     let new_dist = (r_pos - pos).length();
@@ -154,7 +154,7 @@ impl State {
 
         let scale = self.info.camera.zoom * f32::min(12.0 / self.map_divisions as f32, 4.0);
         let grey_stroke = Stroke::new(scale, GREY);
-        self.map.draw_visible_edges(&self.info.camera.to_screen, &painter, grey_stroke, 
+        self.map.draw_visible_edges_3d(&self.info.camera.to_screen, &painter, grey_stroke, 
             &mut self.info.visible);
 
         let positions = self.map.positions();

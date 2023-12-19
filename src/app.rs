@@ -1,13 +1,17 @@
 
+use itertools::Itertools;
 
-use egui::*;
+use egui::{*, epaint::TextShape, text::LayoutJob};
 
+use crate::graph::EdgeList;
+use crate::geo::Pos3;
 
-mod state_2d;
-mod state_3d;
+//mod state_2d;
+//mod state_3d;
 mod cam;
 pub mod character;
 mod info;
+mod map;
 
 use cam::*;
 use character::*;
@@ -20,6 +24,26 @@ const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
 const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
 const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
 const RED: Color32 = Color32::from_rgb(230, 50, 50);
+const YELLOW: Color32 = Color32::from_rgb(240, 240, 50);
+
+pub struct DrawContext<'a> {
+    pub extreme_vertices: &'a [usize],
+    pub edges: &'a EdgeList,
+    pub visible: &'a [bool],
+    pub positions: &'a [Pos3],
+    pub cam: &'a Camera3D,
+    pub tolerance: f32,
+    pub scale: f32,
+    pub resolution: isize,
+    pub painter: Painter,
+    pub response: Response,
+}
+
+impl<'a> DrawContext<'a> {
+    pub fn vertex_draw_pos(&self, v: usize) -> Pos2 {
+        self.cam.transform(self.positions[v]) 
+    }
+}
 
 /// returns if val was changed
 fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isize) -> bool {    
@@ -38,20 +62,21 @@ fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isi
 }
 
 pub struct State {
-    state_2d: state_2d::State,
-    state_3d: state_3d::State,
-    show_2d: bool, //else show 3d
+    map: map::Map,
+    info: InfoState,
 }
 
 impl State {
     /// Called once before the first frame.
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let mut info = InfoState::new();
+        let map = map::Map::new(&mut info);
         Self { 
-            state_2d: state_2d::State::new(cc), 
-            state_3d: state_3d::State::new(cc), 
-            show_2d: true,
+            map,
+            info,
         }
-    }
+    }    
+
 }
 
 impl eframe::App for State {
@@ -60,32 +85,17 @@ impl eframe::App for State {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-
-
         SidePanel::left("left_panel").show(ctx, |ui| {
             ui.vertical(|ui| {
                 widgets::global_dark_light_mode_buttons(ui);
-                let button_switch_text = if self.show_2d { "Zeige 3D" } else { "Zeige 2D" };
-                if ui.button(button_switch_text).clicked() {
-                    self.show_2d = !self.show_2d;
-                }
-
-                if self.show_2d {
-                    self.state_2d.draw_menu(ui);
-                }
-                else {
-                    self.state_3d.draw_menu(ui);
-                }
+                self.map.draw_menu(ui, &mut self.info);
+                self.info.draw_menu(ui, self.map.edges());
             });
         });
 
         CentralPanel::default().show(ctx, |ui| {
-            if self.show_2d {
-                self.state_2d.draw_graph(ui);
-            }
-            else {
-                self.state_3d.draw_graph(ui);
-            }
+            let con = self.map.update_and_draw(ui);
+            self.info.update_and_draw(ui, &con);
         });
     }
 }

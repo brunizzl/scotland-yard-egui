@@ -165,6 +165,11 @@ impl ToScreen {
 
         false
     }
+
+    pub fn pos_visible(&self, pos: Pos3) -> bool {
+        let mapped = self.apply(pos);
+        self.move_rect.to().contains(mapped)
+    }
 }
 
 pub fn gram_schmidt_3d([v1, v2, v3]: &mut [Vec3; 3]) {
