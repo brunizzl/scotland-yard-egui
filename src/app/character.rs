@@ -7,6 +7,7 @@ use crate::{graph::EdgeList, geo::Pos3};
 
 use super::*;
 
+#[derive(Clone, Copy)]
 pub struct Style {
     pub color: Color32,
     pub glow: Color32,
@@ -23,32 +24,37 @@ const fn new_cop(emoji: &'static str) -> Style {
         job: "Cop",
     } 
 }
-pub const COPS: [Style; 7] = [
+
+pub const NR_COP_STYLES: usize = 7;
+
+/// fst is robber, rest are cops
+pub const CHARACTERS: [Style; 1 + NR_COP_STYLES] = [
+    Style {
+        color: Color32::from_rgb(170, 40, 40),
+        glow: Color32::from_rgb(235, 120, 120),
+        //alternatives: 👿🚴🏃🚶🐀🐢🕵💰
+        emoji: "🏃",
+        job: "Räuber",
+    },
     new_cop("👮"), 
     new_cop("🍩"), 
     new_cop("🐂"), 
     new_cop("🔫"), 
     new_cop("🚔"), 
     new_cop("🛂"), 
-    new_cop("🛃")
+    new_cop("🛃"),
 ];
-
-pub const ROBBER: Style = Style {
-    color: Color32::from_rgb(170, 40, 40),
-    glow: Color32::from_rgb(235, 120, 120),
-    //alternatives: 👿🚴🏃🚶🐀🐢🕵💰
-    emoji: "🏃",
-    job: "Räuber",
-};
 
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct Character {
+    style_index: usize,
+
     pub last_positions: Vec<usize>,
     pub distances: Vec<isize>,
-
-    pub style: &'static Style,
     pub nearest_node: usize,
+
     pub pos2: Pos2, //used in both 3d and 3d map (as cursor can't drag in 3d...)
     pub pos3: Pos3, //only used in 3d map
     pub on_node: bool,
@@ -56,14 +62,19 @@ pub struct Character {
 }
 
 impl Character {
-    pub fn new(data: &'static Style, pos2: Pos2) -> Self {
+    pub fn style(&self) -> &'static Style {
+        &CHARACTERS[self.style_index]
+    }
+
+    pub fn new(style_index: usize, pos2: Pos2) -> Self {
         //dragging set to true snaps to node next update
         Character { 
+            style_index, 
+
             last_positions: Vec::new(),
             distances: Vec::new(),
-
-            style: data, 
             nearest_node: 0, 
+            
             pos2, 
             pos3: Pos3::ZERO, 
             on_node: false, 
@@ -73,17 +84,17 @@ impl Character {
 
     fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, ui: &Ui, scale: f32) {
         //draw circles
-        let character_circle = Shape::circle_filled(draw_pos, scale, self.style.color);
+        let character_circle = Shape::circle_filled(draw_pos, scale, self.style().color);
         painter.add(character_circle);
         if self.on_node {
-            let stroke = Stroke::new(scale * 0.375, self.style.glow);
+            let stroke = Stroke::new(scale * 0.375, self.style().glow);
             let marker_circle = Shape::circle_stroke(draw_pos, scale, stroke);
             painter.add(marker_circle);
         }
         //draw emoji
         let font = FontId::proportional(scale * 2.0);
         let emoji_pos = draw_pos - scale * vec2(0.0, 1.35);
-        let emoji_str = self.style.emoji.to_string();
+        let emoji_str = self.style().emoji.to_string();
         let mut layout_job = text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
         layout_job.halign = Align::Center;
         let galley = ui.fonts(|f| f.layout_job(layout_job));
@@ -94,7 +105,7 @@ impl Character {
     fn draw_small_at_node(&self, con: &DrawContext<'_>) {
         let character_size = f32::max(4.0, con.scale * 4.0);
         let draw_pos = con.vertex_draw_pos(self.nearest_node);
-        let character_circle = Shape::circle_filled(draw_pos, character_size, self.style.glow);
+        let character_circle = Shape::circle_filled(draw_pos, character_size, self.style().glow);
         con.painter.add(character_circle);
     }
 
@@ -178,6 +189,7 @@ impl Character {
     }
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct CharacterState {    
     characters: Vec<Character>,
     past_moves: Vec<usize>, //present is at end (same below)
@@ -194,8 +206,8 @@ impl CharacterState {
     pub fn new() -> Self {
         Self {            
             characters: vec![
-                Character::new(&ROBBER, Pos2::ZERO),
-                Character::new(&COPS[0], pos2(0.25, 0.0)),
+                Character::new(0, Pos2::ZERO),
+                Character::new(1, pos2(0.25, 0.0)),
                 ],
             past_moves: Vec::new(),
             future_moves: Vec::new(),
@@ -267,22 +279,22 @@ impl CharacterState {
     pub fn draw_menu(&mut self, ui: &mut Ui, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         ui.horizontal(|ui| {
             let nr_characters = self.characters.len();
-            let minus_emoji = self.characters.last().map_or("🚫", |c| c.style.emoji);
-            let next_data = if nr_characters == 0 { 
-                &ROBBER 
+            let minus_emoji = self.characters.last().map_or("🚫", |c| c.style().emoji);
+            let next_index = if nr_characters == 0 { 
+                0 //indexes to ROBBER
             } else {
                 let nr_cops = nr_characters - 1;
-                let next_cop = nr_cops % COPS.len();
-                &COPS[next_cop]
+                let next_cop = nr_cops % NR_COP_STYLES;
+                next_cop + 1 //+ 1 as robber is at beginning
             };
             let minus_text = format!("- Figur ({})", minus_emoji);
-            let plus_text = format!("+ Figur ({})", next_data.emoji);
+            let plus_text = format!("+ Figur ({})", CHARACTERS[next_index].emoji);
             if ui.button(minus_text).clicked() {
                 self.characters.pop();
                 self.forget_move_history();
             }
             if ui.button(plus_text).clicked() {
-                self.characters.push(Character::new(next_data, Pos2::ZERO));
+                self.characters.push(Character::new(next_index, Pos2::ZERO));
             }
         });
         ui.horizontal(|ui| {
@@ -300,10 +312,10 @@ impl CharacterState {
             }
         });
         if let Some(ch) = self.last_moved() {
-            ui.label(format!("letzter Schritt: {} ({})", ch.style.job, ch.style.emoji));
+            ui.label(format!("letzter Schritt: {} ({})", ch.style().job, ch.style().emoji));
         }
         if let Some(ch) = self.next_moved() {
-            ui.label(format!("nächster Schritt: {} ({})", ch.style.job, ch.style.emoji));
+            ui.label(format!("nächster Schritt: {} ({})", ch.style().job, ch.style().emoji));
         }
     }
 

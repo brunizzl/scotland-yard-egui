@@ -60,9 +60,9 @@ pub struct State {
 
 impl State {
     /// Called once before the first frame.
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let mut info = info::Info::new();
-        let map = map::Map::new(&mut info);
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut info = info::Info::new(cc);
+        let map = map::Map::new(&mut info, cc);
         Self { 
             map,
             info,
@@ -90,7 +90,9 @@ Zug wiederholen: strg + y");
 
 impl eframe::App for State {
     /// Called by the frame work to save state before shutdown.
-    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.map.save(storage);
+        self.info.save(storage);
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {

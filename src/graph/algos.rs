@@ -20,6 +20,8 @@ where F: FnMut(usize) -> Pos2
 }
 
 /// geodesic convex hull over some vertices with respect to some graph
+
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct ConvexHull {
     inside: Vec<InSet>,
     boundary: Vec<usize>,

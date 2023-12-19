@@ -47,6 +47,7 @@ pub fn lines_intersect(l1: Line2, l2: Line2) -> bool {
 
 /// takes Vec3 to Vec2 where the subspace is spanned by new_x_axis and new_y_axis
 #[derive(Clone, Copy)]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct Project3To2 {
     /// eigenvector with eigenvalue 1, portion in that direction will be returned as first Vec2 entry
     /// vector is expected to be normalized.
@@ -94,6 +95,7 @@ impl Project3To2 {
 }
 
 #[derive(Clone, Copy)]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct ToScreen {
     pub to_plane: Project3To2,
     pub move_rect: RectTransform,
