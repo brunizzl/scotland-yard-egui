@@ -1,5 +1,8 @@
 
 use std::collections::VecDeque;
+use std::ops::Range;
+
+use itertools::izip;
 
 use egui::*;
 
@@ -23,8 +26,13 @@ where F: FnMut(usize) -> Pos2
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct ConvexHull {
-    inside: Vec<InSet>,
-    boundary: Vec<usize>,
+    /// one entry per vertex in graph
+    inside: Vec<InSet>, 
+    /// enumerates vertices which are on boundary
+    boundary: Vec<usize>, 
+    /// indexes in self.boundary, each segment is delimited by two cops on boundary.
+    /// the cops' vertices and the vertices neighboring these cops are excluded
+    segment_interiors: Vec<Range<usize>>, 
 }
 
 impl ConvexHull {
@@ -32,6 +40,7 @@ impl ConvexHull {
         Self {
             inside: Vec::new(),
             boundary: Vec::new(),
+            segment_interiors: Vec::new(),
         }
     }
 
@@ -39,8 +48,8 @@ impl ConvexHull {
         &self.inside
     }
 
-    pub fn boundary(&self) -> &[usize] {
-        &self.boundary
+    pub fn boundary_segments<'a>(&'a self) -> impl Iterator<Item = &'a [usize]> + 'a {
+        self.segment_interiors.iter().map(|seg| &self.boundary[seg.clone()])
     }
 
     fn update_inside(&mut self, cops: &[Character], edges: &EdgeList, queue: &mut VecDeque<usize>, 
@@ -141,13 +150,153 @@ impl ConvexHull {
         self.boundary = boundary;
     }
 
-    pub fn update(&mut self, cops: &[Character], edges: &EdgeList, queue: &mut VecDeque<usize>, 
+    fn update_segments(&mut self, min_cop_dist: &[isize]) {
+        self.segment_interiors.clear();
+        debug_assert_eq!(self.inside.len(), min_cop_dist.len());
+        if self.boundary.len() < 5 {
+            return;
+        }
+        debug_assert_eq!(0, min_cop_dist[self.boundary[0]]);
+        let mut start = 1;
+        loop {
+            while min_cop_dist[self.boundary[start]] <= 1 {
+                start += 1;
+                if start == self.boundary.len() {
+                    return;
+                }
+            }
+            let mut stop = start;
+            while min_cop_dist[self.boundary[stop]] > 1 {
+                stop += 1;
+                if stop == self.boundary.len() {
+                    return;
+                }
+            }
+            self.segment_interiors.push(start..stop);
+            start = stop;
+        }
+    }
+
+    pub fn update(&mut self, cops: &[Character], edges: &EdgeList, min_cop_dist: &[isize], queue: &mut VecDeque<usize>, 
         vertices_outside_hull: &[usize]) 
     {
         self.update_inside(cops, edges, queue, vertices_outside_hull);
         self.update_boundary(cops, edges);
+        self.update_segments(min_cop_dist);
     }
 }
 
+/// divides vertices in convex hull into subsets where a robber escape through some boundary segment
+/// is possible
+/// (each segment lies between two cops on boundary, cops in interior are not considered in computation)
+pub struct EscapeableNodes {
+    /// intermediary value, kept to reserve allocations etc.
+    /// has one entry per vertex, stores distance of that vertex to some (unspecified) node on hull boundary.
+    /// which node the distance is in respect to is remembered in `self.last_write_by`
+    some_boundary_dist: Vec<isize>, //one entry per vertex
 
+
+    /// intermediary value, kept to save on allocations and for convinience
+    /// one entry per vertex, each boundary node has an index in `ConvexHull::boundary`.
+    /// if `last_write_by[vertex_i] == j` then vertex_i was visited last, when distances to boundary vertex
+    /// of (boundary) index j where computed.
+    last_write_by: Vec<usize>, 
+
+    /// thing we are actually interested in. 
+    /// has one entry per vertex. interesting are only vertices in convex hull.
+    /// if vertex `v` is escapable via segment `i`, the `(i % 16)`'th bit is set in `escapable[v]`
+    escapable: Vec<u16>,
+}
+
+impl EscapeableNodes {
+    pub fn escapable(&self) -> &[u16] {
+        &self.escapable
+    }
+
+    pub fn new() -> Self {
+        Self { 
+            some_boundary_dist: Vec::new(), 
+            last_write_by: Vec::new(),
+            escapable: Vec::new(),
+        }
+    }
+
+    /// weird hybrid of region coloring and distance calculation:
+    /// update distances of self.some_boundary_dist in neighborhood of queue entries,
+    /// recolor region in self.last_write_by to be owner
+    fn calc_small_dists(&mut self, hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>, 
+        max_dist: isize, segment: Range<usize>, owner: usize) 
+    {
+        let fst_in_segment = owner == segment.start;
+        while let Some(v) = queue.pop_front() {
+            let dist = self.some_boundary_dist[v];
+            if dist >= max_dist {
+                continue;
+            }
+            for n in edges.neighbors_of(v) {
+                if !hull.inside[n].yes() {
+                    continue;
+                }
+                //the fist boundary vertex in a segment is allowed to mark all vertices in its reach.
+                //all further vertices of that same segment can only mark hull vertices which have been reached by
+                //that first one.
+                //the vertices counted at the end are only those reached by all boundary vertices.
+                if !fst_in_segment && !segment.contains(&self.last_write_by[n]) {
+                    continue;
+                }
+                //adapted from Edgelist::calc_distances_to
+                if self.last_write_by[n] != owner {
+                    self.some_boundary_dist[n] = dist + 1;
+                    queue.push_back(n);
+                    self.last_write_by[n] = owner;
+                }
+            }
+        }
+    }
+
+    /// assumes segment has form `some_start..=owner`
+    /// also assumes queue to only contain vertices of the region to add
+    fn add_region_to_escapable(&mut self, owner: usize, marker: u16, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        debug_assert!(queue.iter().all(|&v| self.last_write_by[v] == owner));
+        while let Some(v) = queue.pop_front() {
+            debug_assert!(self.escapable[v] | marker != 0);
+            debug_assert!(owner != 0);
+            self.last_write_by[v] = 0;
+            for n in edges.neighbors_of(v) {
+                if self.last_write_by[n] == owner {
+                    self.escapable[n] |= marker;
+                    queue.push_back(n);
+                }
+            }
+        }
+    }
+
+    pub fn update(&mut self, hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        let nr_vertices = edges.nr_vertices();
+        self.some_boundary_dist.clear();
+        self.last_write_by.clear();
+        self.escapable.clear();
+        self.some_boundary_dist.resize(nr_vertices, isize::MAX);
+        self.last_write_by.resize(nr_vertices, 0); //no owner is 0 (as a cop stands at pos 0 of hull boundary)
+        self.escapable.resize(nr_vertices, 0);
+        queue.clear();
+
+        for (indices, vertices, seq_nr) in izip!(&hull.segment_interiors, hull.boundary_segments(), 0..) {
+            let max_dist = indices.len() as isize - 1;
+            debug_assert_eq!(indices.len(), vertices.len());
+            for (i, &v) in izip!(indices.clone(), vertices) {
+                debug_assert!(i != 0);
+                queue.push_back(v);
+                self.some_boundary_dist[v] = 0;
+                self.last_write_by[v] = i;
+                self.calc_small_dists(hull, edges, queue, max_dist, indices.clone(), i);
+            }
+            let owner = indices.end - 1; //last i of loop above
+            queue.push_back(vertices[0]);
+            let marker = 1u16 << (seq_nr % 16);
+            self.escapable[vertices[0]] |= marker;
+            self.add_region_to_escapable(owner, marker, edges, queue);
+        }
+    }
+}
 
