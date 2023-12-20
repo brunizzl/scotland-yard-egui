@@ -31,10 +31,10 @@ pub struct Map {
 }
 
 mod storage_keys {
-    pub const SHAPE: &'static str = "map::shape";
-    pub const RESOLUTION: &'static str = "map::resolution";
-    pub const SND_PARAM: &'static str = "map::second_shape_param";
-    pub const CAMERA: &'static str = "map::camera";
+    pub const SHAPE: &'static str = "app::map::shape";
+    pub const RESOLUTION: &'static str = "app::map::resolution";
+    pub const SND_PARAM: &'static str = "app::map::second_shape_param";
+    pub const CAMERA: &'static str = "app::map::camera";
 }
 
 impl Map {
@@ -64,12 +64,7 @@ impl Map {
             camera,
         };
         result.recompute();
-
-        let nr_vertices = result.data.nr_vertices();
-        if info.marked_manually.len() != nr_vertices {
-            info.marked_manually.clear();
-            info.marked_manually.resize(nr_vertices, false);
-        }
+        result.adjust_info(info);
 
         result
     }
@@ -181,14 +176,18 @@ impl Map {
             ch.nearest_node = best_new_vertex;
             ch.update_distances(self.data.edges(), &mut info.queue);
         }
-        info.characters.forget_move_history();
-        info.marked_manually.clear();
-        info.marked_manually.resize(self.data.nr_vertices(), false);
+
+        let nr_vertices = self.data.nr_vertices();
+        if info.marked_manually.len() != nr_vertices {
+            info.marked_manually.clear();
+            info.marked_manually.resize(nr_vertices, false);
+        }
     }
 
     fn recompute_and_adjust(&mut self, info: &mut Info) {
         self.recompute();
         self.adjust_info(info);
+        info.characters.forget_move_history();
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) { 

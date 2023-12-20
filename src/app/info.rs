@@ -51,8 +51,12 @@ pub struct Info {
 }
 
 mod storage_keys {
-    pub const CHARACTERS: &'static str = "info::characters";
-    pub const MARKED_MANUALLY: &'static str = "info::manually_marked";
+    pub const CHARACTERS: &'static str = "app::info::characters";
+    pub const MARKED_MANUALLY: &'static str = "app::info::manually_marked";
+    pub const ROBBER_INFO: &'static str = "app::info::robber_info";
+    pub const ROBBER_STRAT: &'static str = "app::info::robber_strat";
+    pub const VERTEX_INFO: &'static str = "app::info::vertex_info";
+    pub const SHOW_HULL: &'static str = "app::info::show_convex_hull";
 }
 
 impl Info {
@@ -65,18 +69,40 @@ impl Info {
         if self.marked_manually.iter().any(|&x| x) {
             eframe::set_value(storage, MARKED_MANUALLY, &self.marked_manually);
         }
+        eframe::set_value(storage, ROBBER_INFO, &self.robber_info);
+        eframe::set_value(storage, ROBBER_STRAT, &self.robber_strat);
+        eframe::set_value(storage, VERTEX_INFO, &self.vertex_info);
+        eframe::set_value(storage, SHOW_HULL, &self.show_convex_hull);
     }
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let (characters, marked_manually) = if let Some(storage) = cc.storage {
+        let (
+            characters, 
+            marked_manually, 
+            robber_info, 
+            robber_strat, 
+            vertex_info, 
+            show_convex_hull
+        ) = if let Some(storage) = cc.storage {
             use storage_keys::*;
             (
                 eframe::get_value(storage, CHARACTERS).unwrap_or(CharacterState::new()),
                 eframe::get_value(storage, MARKED_MANUALLY).unwrap_or(Vec::new()),
+                eframe::get_value(storage, ROBBER_INFO).unwrap_or(RobberInfo::None),
+                eframe::get_value(storage, ROBBER_STRAT).unwrap_or(RobberStrat::None),
+                eframe::get_value(storage, VERTEX_INFO).unwrap_or(DrawNumbers::None),                
+                eframe::get_value(storage, SHOW_HULL).unwrap_or(false),
             )            
         }
         else {
-            (CharacterState::new(), Vec::new())
+            (
+                CharacterState::new(), 
+                Vec::new(), 
+                RobberInfo::None, 
+                RobberStrat::None, 
+                DrawNumbers::None, 
+                false
+            )
         };
 
         Self { 
@@ -89,13 +115,13 @@ impl Info {
             
             characters,
 
-            robber_info: RobberInfo::None,
+            robber_info,
             small_robber_dist: 10,
             marked_cop_dist: 0,
 
-            robber_strat: RobberStrat::None,
-            vertex_info: DrawNumbers::None,
-            show_convex_hull: false,
+            robber_strat,
+            vertex_info,
+            show_convex_hull,
         }
     }
 
@@ -144,19 +170,20 @@ impl Info {
         self.characters.draw_menu(ui, edges, &mut self.queue);
     }
 
-    fn update_min_cop_dist(&mut self) {
+    fn update_min_cop_dist(&mut self, edges: &EdgeList) {
         let mut min_cop_dist = std::mem::take(&mut self.min_cop_dist);
         min_cop_dist.clear();
-        {
-            let mut active_cops = self.characters.active_cops();
-            if let Some(cop) = active_cops.next() {
-                min_cop_dist.clone_from(&cop.distances);
-            }
-            for cop in active_cops {
-                for (this, curr_min) in izip!(&cop.distances, &mut min_cop_dist) {
-                    if this < curr_min {
-                        *curr_min = *this;
-                    }
+        let mut active_cops = self.characters.active_cops();
+        if let Some(cop) = active_cops.next() {
+            min_cop_dist.clone_from(&cop.distances);
+        }
+        else {
+            min_cop_dist.resize(edges.nr_vertices(), isize::MAX);
+        }
+        for cop in active_cops {
+            for (this, curr_min) in izip!(&cop.distances, &mut min_cop_dist) {
+                if this < curr_min {
+                    *curr_min = *this;
                 }
             }
         }
@@ -207,7 +234,7 @@ impl Info {
             || self.robber_info != RobberInfo::None 
             || self.vertex_info != DrawNumbers::None;
         if require_update {
-            self.update_min_cop_dist();
+            self.update_min_cop_dist(con.edges);
             self.update_convex_cop_hull(con);
             self.update_cop_advantage(con.edges);
         }
