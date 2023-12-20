@@ -80,34 +80,13 @@ impl Info {
     }
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let (
-            characters, 
-            marked_manually, 
-            robber_info, 
-            robber_strat, 
-            vertex_info, 
-            show_convex_hull
-        ) = if let Some(storage) = cc.storage {
-            use storage_keys::*;
-            (
-                eframe::get_value(storage, CHARACTERS).unwrap_or(CharacterState::new()),
-                eframe::get_value(storage, MARKED_MANUALLY).unwrap_or(Vec::new()),
-                eframe::get_value(storage, ROBBER_INFO).unwrap_or(RobberInfo::None),
-                eframe::get_value(storage, ROBBER_STRAT).unwrap_or(RobberStrat::None),
-                eframe::get_value(storage, VERTEX_INFO).unwrap_or(DrawNumbers::None),                
-                eframe::get_value(storage, SHOW_HULL).unwrap_or(false),
-            )            
-        }
-        else {
-            (
-                CharacterState::new(), 
-                Vec::new(), 
-                RobberInfo::None, 
-                RobberStrat::None, 
-                DrawNumbers::None, 
-                false
-            )
-        };
+        use storage_keys::*;
+        let characters = load_or(cc.storage, CHARACTERS, CharacterState::new);
+        let marked_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
+        let robber_info = load_or(cc.storage, ROBBER_INFO, || RobberInfo::None);
+        let robber_strat = load_or(cc.storage, ROBBER_STRAT, || RobberStrat::None);
+        let vertex_info = load_or(cc.storage, VERTEX_INFO, || DrawNumbers::None);
+        let show_convex_hull = load_or(cc.storage, SHOW_HULL, || false);
 
         Self { 
             cop_hull: ConvexHull::new(),

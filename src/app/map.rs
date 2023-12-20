@@ -13,8 +13,8 @@ pub enum Shape {
     Tetrahedron, 
     Octahedron, 
     Icosahedron, 
-    DividedIcosahedron, 
-    RegularPolygon2D, 
+    DividedIcosahedron, //Map::nr_ico_divisions belongs to this
+    RegularPolygon2D, //Map::nr_polygon_sides belongs to this
     Random2D, 
     Debug2D 
 }
@@ -26,32 +26,28 @@ pub struct Map {
 
     shape: Shape,
     resolution: isize,
-    second_shape_parameter: isize,
+    nr_polygon_sides: isize, //not stored as part of enum to remember when switching shape back and forth
+    nr_ico_divisions: isize, //not stored as part of enum to remember when switching shape back and forth
     camera: Camera3D,
 }
 
 mod storage_keys {
     pub const SHAPE: &'static str = "app::map::shape";
     pub const RESOLUTION: &'static str = "app::map::resolution";
-    pub const SND_PARAM: &'static str = "app::map::second_shape_param";
+    pub const NR_POLY_SIDES: &'static str = "app::map::poly_sides";
+    pub const NR_ICO_DIVISIONS: &'static str = "app::map::nr_ico_divisions";
     pub const CAMERA: &'static str = "app::map::camera";
 }
 
 impl Map {
 
     pub fn new(info: &mut Info, cc: &eframe::CreationContext<'_>) -> Self {
-        let (shape, resolution, second_shape_parameter, camera) = if let Some(storage) = cc.storage {
-            use storage_keys::*;
-            (
-                eframe::get_value(storage, SHAPE).unwrap_or(Shape::Icosahedron),
-                eframe::get_value(storage, RESOLUTION).unwrap_or(12),
-                eframe::get_value(storage, SND_PARAM).unwrap_or(3),
-                eframe::get_value(storage, CAMERA).unwrap_or(Camera3D::new())
-            )
-        }
-        else {
-            (Shape::Icosahedron, 12, 3, Camera3D::new())
-        };
+        use storage_keys::*;
+        let shape = load_or(cc.storage, SHAPE, || Shape::Icosahedron);
+        let resolution = load_or(cc.storage, RESOLUTION, || 12);
+        let nr_polygon_sides = load_or(cc.storage, NR_POLY_SIDES, || 6);
+        let nr_ico_divisions = load_or(cc.storage, NR_ICO_DIVISIONS, || 3);
+        let camera = load_or(cc.storage, CAMERA, Camera3D::new);
 
         let mut result = Self { 
             data: Embedding3D::empty(), 
@@ -60,7 +56,8 @@ impl Map {
 
             shape, 
             resolution, 
-            second_shape_parameter,
+            nr_polygon_sides,
+            nr_ico_divisions,
             camera,
         };
         result.recompute();
@@ -73,7 +70,8 @@ impl Map {
         use storage_keys::*;
         eframe::set_value(storage, SHAPE, &self.shape);
         eframe::set_value(storage, RESOLUTION, &self.resolution);
-        eframe::set_value(storage, SND_PARAM, &self.second_shape_parameter);
+        eframe::set_value(storage, NR_POLY_SIDES, &self.nr_polygon_sides);
+        eframe::set_value(storage, NR_ICO_DIVISIONS, &self.nr_ico_divisions);
         eframe::set_value(storage, CAMERA, &self.camera);
     }
 
@@ -134,22 +132,22 @@ impl Map {
 
     fn recompute(&mut self) {
         let res = self.resolution as usize;
-        let snd = self.second_shape_parameter as usize;
-        let s = 1.0;
+        let radius = 1.0;
         self.data = match self.shape {
             Shape::Icosahedron => 
-                Embedding3D::new_subdivided_icosahedron(s, res),
+                Embedding3D::new_subdivided_icosahedron(radius, res),
             Shape::Octahedron => 
-                Embedding3D::new_subdivided_octahedron(s, res),
+                Embedding3D::new_subdivided_octahedron(radius, res),
             Shape::Tetrahedron => 
-                Embedding3D::new_subdivided_tetrahedron(s, res),
-            Shape::DividedIcosahedron => { 
-                let res = (res + snd - 1) / snd;
-                Embedding3D::new_subdivided_subdivided_icosahedron(s, snd, res) 
+                Embedding3D::new_subdivided_tetrahedron(radius, res),
+            Shape::DividedIcosahedron => {
+                let res1 = usize::min(res, self.nr_ico_divisions as usize);
+                let res2 = res / usize::max(res1, 1);
+                Embedding3D::new_subdivided_subdivided_icosahedron(radius, res1, res2) 
             },
             Shape::RegularPolygon2D => {
-                let snd = snd.clamp(3, 10);
-                Embedding3D::from_2d(graph::triangulated_regular_polygon(snd, res))
+                let sides = self.nr_polygon_sides as usize;
+                Embedding3D::from_2d(graph::triangulated_regular_polygon(sides, res))
             },
             Shape::Random2D => 
                 Embedding3D::from_2d(graph::random_triangulated(res, 8)),
@@ -201,13 +199,13 @@ impl Map {
             ui.radio_value(&mut self.shape, Shape::Icosahedron, "Ikosaeder");
             ui.radio_value(&mut self.shape, Shape::DividedIcosahedron, "aufgepusteter\nIkosaeder");
             if self.shape == Shape::DividedIcosahedron {
-                if add_drag_value(ui, &mut self.second_shape_parameter, "Druck: ", 1, self.resolution) {
+                if add_drag_value(ui, &mut self.nr_ico_divisions, "Druck: ", 0, self.resolution) {
                     self.recompute_and_adjust(info);
                 }
             }
             ui.radio_value(&mut self.shape, Shape::RegularPolygon2D, "2D Polygon\ntrianguliert");
             if self.shape == Shape::RegularPolygon2D {
-                if add_drag_value(ui, &mut self.second_shape_parameter, "Seiten: ", 3, 10) {
+                if add_drag_value(ui, &mut self.nr_polygon_sides, "Seiten: ", 3, 10) {
                     self.recompute_and_adjust(info);
                 }
             }
