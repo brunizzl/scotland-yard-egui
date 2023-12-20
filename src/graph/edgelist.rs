@@ -300,7 +300,8 @@ impl EdgeList {
     }
 
     /// everything in queue is starting point and expected to already have the correct distance
-    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut Vec<isize>) {
+    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut [isize]) {
+        debug_assert_eq!(distances.len(), self.nr_vertices());
         while let Some(v) = queue.pop_front() {
             let dist = distances[v];
             for n in self.neighbors_of(v) {

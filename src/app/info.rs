@@ -6,13 +6,13 @@ use itertools::{ izip, Itertools };
 
 use egui::*;
 
-use crate::graph::{EdgeList, ConvexHull, self};
+use crate::graph::{EdgeList, ConvexHull, EscapeableNodes, self};
 use crate::app::character::CharacterState;
 
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub enum RobberInfo { None, EscapableNodes, NearNodes, SmallRobberDist, CopDist }
+pub enum RobberInfo { None, RobberAdvantage, EscapeableNodes, NearNodes, SmallRobberDist, CopDist }
 
 impl RobberInfo {
     pub fn scale_small_dist_with_resolution(dist: isize, radius: isize) -> isize {
@@ -21,7 +21,7 @@ impl RobberInfo {
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum DrawNumbers { None, Indices, RobberAdvantage, MinCopDist }
+pub enum DrawNumbers { None, Indices, RobberAdvantage, EscapeableNodes, MinCopDist }
 
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -30,6 +30,7 @@ pub enum RobberStrat { None, EscapeHullNonLazy }
 pub struct Info {
     //state kept for each node in map
     cop_hull: ConvexHull,
+    escapable: EscapeableNodes,
     min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
     cop_advantage: Vec<isize>,
     pub marked_manually: Vec<bool>,
@@ -90,6 +91,7 @@ impl Info {
 
         Self { 
             cop_hull: ConvexHull::new(),
+            escapable: EscapeableNodes::new(),
             min_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
             marked_manually,
@@ -117,8 +119,11 @@ impl Info {
             ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
                 "markiere für Räuber\nnähere Knoten");
 
-            ui.radio_value(&mut self.robber_info, RobberInfo::EscapableNodes, 
-                "markiere Punkte mit\ndirekter Fluchtoption");
+            ui.radio_value(&mut self.robber_info, RobberInfo::RobberAdvantage, 
+                "markiere Punkte mit\ndirekter Fluchtoption (1)");
+
+            ui.radio_value(&mut self.robber_info, RobberInfo::EscapeableNodes, 
+                "markiere Punkte mit\ndirekter Fluchtoption (2)");
 
             ui.radio_value(&mut self.robber_info, RobberInfo::SmallRobberDist, 
                 "markiere Punkte nah\nan Räuber");
@@ -141,6 +146,8 @@ impl Info {
                 "Knotenindizes");
             ui.radio_value(&mut self.vertex_info, DrawNumbers::RobberAdvantage, 
                 "Räubervorteil");
+            ui.radio_value(&mut self.vertex_info, DrawNumbers::EscapeableNodes, 
+                "Marker Fluchtoption (2)");
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
                 "minimaler Cop Abstand");
         });
@@ -197,7 +204,7 @@ impl Info {
     }
 
     fn update_convex_cop_hull(&mut self, con: &DrawContext<'_>) {
-        let mut temp = Vec::new();
+        let mut temp = [usize::MAX];
         let vertices_outside_hull = if con.extreme_vertices.len() > 0 {
             con.extreme_vertices
         }
@@ -205,20 +212,52 @@ impl Info {
             debug_assert_eq!(con.positions.len(), self.min_cop_dist.len());
             let (furthest_vertex, _) = self.min_cop_dist.iter().enumerate()
                 .fold((0, 0), |best, (v, &dist)| if dist > best.1 { (v, dist) } else { best });
-            temp.push(furthest_vertex);
+            temp[0] = furthest_vertex;
             &temp
         };
-        self.cop_hull.update(&self.characters.cops(), con.edges, &mut self.queue, vertices_outside_hull)
+
+        self.cop_hull.update(
+            &self.characters.cops(), 
+            con.edges, 
+            &self.min_cop_dist,
+            &mut self.queue, 
+            vertices_outside_hull,
+        );
+    }
+
+    fn update_escapable(&mut self, con: &DrawContext<'_>) {
+        self.escapable.update(&self.cop_hull, con.edges, &mut self.queue)
     }
 
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
-        let require_update = self.show_convex_hull 
-            || self.robber_strat != RobberStrat::None
-            || self.robber_info != RobberInfo::None 
-            || self.vertex_info != DrawNumbers::None;
-        if require_update {
+        let update_cop_advantage = self.robber_info == RobberInfo::RobberAdvantage
+            || self.vertex_info == DrawNumbers::RobberAdvantage;
+            
+        let update_escapable = self.robber_info == RobberInfo::EscapeableNodes
+            || self.vertex_info == DrawNumbers::EscapeableNodes;
+        
+        let update_hull = update_cop_advantage 
+            || update_escapable 
+            || self.show_convex_hull;
+
+        let update_min_cop_dist = update_hull
+            || self.robber_info == RobberInfo::CopDist
+            || self.vertex_info == DrawNumbers::MinCopDist;
+
+        let robber_moved = self.characters.robber_updated();
+        let cop_moved = self.characters.active_cops_updated();
+
+        let nr_vertices = con.edges.nr_vertices();
+        if (cop_moved || self.min_cop_dist.len() != nr_vertices) && update_min_cop_dist {
             self.update_min_cop_dist(con.edges);
+        }
+        if (cop_moved || self.cop_hull.inside().len() != nr_vertices) && update_hull {
             self.update_convex_cop_hull(con);
+        }
+        if (cop_moved || self.escapable.escapable().len() != nr_vertices) && update_escapable {
+            self.update_escapable(con);
+        }
+        if (cop_moved || robber_moved || self.cop_advantage.len() != nr_vertices) && update_cop_advantage {
             self.update_cop_advantage(con.edges);
         }
     }
@@ -271,19 +310,28 @@ impl Info {
                 con.painter.add(marker_circle);
             }
         }
-        for &v in self.cop_hull.boundary() {
-            if con.visible[v] {
-                let draw_pos = con.vertex_draw_pos(v);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 2.0, WHITE);
-                con.painter.add(marker_circle);
+        for seg in self.cop_hull.boundary_segments() {
+            for &v in seg {
+                if con.visible[v] {
+                    let draw_pos = con.vertex_draw_pos(v);
+                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 2.0, WHITE);
+                    con.painter.add(marker_circle);
+                }
             }
         }
     } 
 
     fn draw_green_circles(&self, con: &DrawContext<'_>) {
-        let draw_circle_at = |pos|{
+        let random_color = |seed| {
+            let seed = seed as u64 * (100 + seed as u64);
+            let mut gen = crate::rand::LCG::new(seed);
+            gen.waste(2);
+            let mut rnd = || (64 + (gen.next() % 128)) as u8;
+            Color32::from_rgb(rnd(), rnd(), rnd())
+        };
+        let draw_circle_at = |pos, color|{
             let draw_pos = con.cam.transform(pos);
-            let marker_circle = Shape::circle_filled(draw_pos, con.scale * 6.0, GREEN);
+            let marker_circle = Shape::circle_filled(draw_pos, con.scale * 6.0, color);
             con.painter.add(marker_circle);
         };
         match (self.robber_info, self.characters.robber()) {
@@ -291,13 +339,13 @@ impl Info {
                 for (r_dist, c_dist, &pos, &vis) in 
                 izip!(&r.distances, &self.min_cop_dist, con.positions, con.visible) {
                     if vis && r_dist < c_dist {
-                        draw_circle_at(pos);
+                        draw_circle_at(pos, GREEN);
                     }
                 },
-            (RobberInfo::EscapableNodes, _) => 
+            (RobberInfo::RobberAdvantage, _) => 
                 for (&adv, &pos, &vis) in izip!(&self.cop_advantage, con.positions, con.visible) {
                     if vis && adv < -1 {
-                        draw_circle_at(pos);
+                        draw_circle_at(pos, GREEN);
                     }
                 },
             (RobberInfo::SmallRobberDist, Some(r)) => {
@@ -305,14 +353,20 @@ impl Info {
                     self.small_robber_dist, con.resolution);
                 for (&dist, &pos, &vis) in izip!(&r.distances, con.positions, con.visible) {
                     if vis && dist <= bnd {
-                        draw_circle_at(pos);
+                        draw_circle_at(pos, GREEN);
                     }
                 }
             },
             (RobberInfo::CopDist, _) => 
             for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, con.positions, con.visible) {
                 if vis && dist == self.marked_cop_dist {
-                    draw_circle_at(pos);
+                    draw_circle_at(pos, GREEN);
+                }
+            }
+            (RobberInfo::EscapeableNodes, _) => 
+            for (&esc, &pos, &vis) in izip!(self.escapable.escapable(), con.positions, con.visible) {
+                if vis && esc != 0 {
+                    draw_circle_at(pos, random_color(esc));
                 }
             }
             _ => {},
@@ -332,6 +386,10 @@ impl Info {
                     DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
                     DrawNumbers::None => { panic!() }
                     DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
+                    DrawNumbers::EscapeableNodes => { 
+                        let marker = self.escapable.escapable()[i];
+                        if marker == 0 { String::new() } else { format!("{:b}", marker) }
+                    }
                 };
                 let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
                 layout_job.halign = Align::Center;

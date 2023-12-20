@@ -59,6 +59,7 @@ pub struct Character {
     pub pos3: Pos3, //only used in 3d map
     pub on_node: bool,
     pub dragging: bool, //currently beeing dragged by mouse cursor
+    pub updated: bool, //nearest_node or distances changed this frame
 }
 
 impl Character {
@@ -78,7 +79,8 @@ impl Character {
             pos2, 
             pos3: Pos3::ZERO, 
             on_node: false, 
-            dragging: true //causes snap to node next update (as dragging will change to false)
+            dragging: true, //causes snap to node next update (as dragging will change to false)
+            updated: true,
         }
     }
 
@@ -109,8 +111,7 @@ impl Character {
         con.painter.add(character_circle);
     }
 
-    pub fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) -> bool
-    {       
+    pub fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) {       
         let to_plane = con.cam.to_screen().to_plane;
         let move_rect = con.cam.to_screen().move_rect;
 
@@ -134,7 +135,6 @@ impl Character {
             self.pos2 = move_rect.inverse().transform_pos(new_screen_pos);
         }
 
-        let mut made_step = false;
         if self.last_positions.is_empty() && self.on_node {
             self.last_positions.push(self.nearest_node);
         }
@@ -145,18 +145,16 @@ impl Character {
             if Some(&self.nearest_node) != self.last_positions.last() {
                 //position changed and drag released -> new step
                 self.last_positions.push(self.nearest_node);
-                made_step = true;
             }
         }
         self.dragging = dragging;
-        self.draw_large_at(draw_screen_pos, &con.painter, ui, character_size);
-
-        made_step
+        self.draw_large_at(draw_screen_pos, &con.painter, ui, character_size);        
     }
 
     /// assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
     pub fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>)
     {
+        self.updated = false; //will be set to true again if self.update_distances is called
         if !self.dragging {
             return;
         }   
@@ -186,6 +184,7 @@ impl Character {
         self.distances.resize(edges.nr_vertices(), isize::MAX);
         self.distances[self.nearest_node] = 0;
         edges.calc_distances_to(queue, &mut self.distances);
+        self.updated = true;
     }
 }
 
@@ -268,6 +267,14 @@ impl CharacterState {
         self.cops().iter().filter(|&c| c.on_node)
     }
 
+    pub fn robber_updated(&self) -> bool {
+        self.robber().map_or(false, |r| r.updated)
+    }
+
+    pub fn active_cops_updated(&self) -> bool {
+        self.active_cops().any(|c| c.updated)
+    }
+
     pub fn forget_move_history(&mut self) {
         self.past_moves.clear();
         self.future_moves.clear();
@@ -323,8 +330,8 @@ impl CharacterState {
         for (i, ch) in self.characters.iter_mut().enumerate() {
             ch.update(con, queue);
             if ch.on_node && con.visible[ch.nearest_node] || !ch.on_node {
-                let moved = ch.drag_and_draw(ui, con);
-                if moved {
+                ch.drag_and_draw(ui, con);
+                if ch.updated {
                     self.past_moves.push(i);
                     self.future_moves.clear();
                 }
