@@ -88,6 +88,13 @@ Zug wiederholen: strg + y");
     });
 }
 
+fn load_or<T, F>(storage: Option<&dyn eframe::Storage>, key: &str, f: F) -> T 
+where T: serde::de::DeserializeOwned, 
+      F: FnOnce() -> T
+{
+    storage.and_then(|s| eframe::get_value(s, key)).unwrap_or_else(f)
+}
+
 impl eframe::App for State {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
