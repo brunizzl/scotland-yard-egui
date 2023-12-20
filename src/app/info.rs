@@ -61,11 +61,15 @@ mod storage_keys {
 
 impl Info {
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        for ch in self.characters.all_mut() {
-            ch.distances = Vec::new();
-        }
+        //idea: only store settings, not state that is recomputable.
+        let all_dists = self.characters.all_mut().iter_mut()
+            .map(|c| std::mem::take(&mut c.distances)).collect_vec();
         use storage_keys::*;
         eframe::set_value(storage, CHARACTERS, &self.characters);
+        for (ch, dists) in izip!(self.characters.all_mut(), all_dists.into_iter()) {
+            ch.distances = dists;
+        }
+
         if self.marked_manually.iter().any(|&x| x) {
             eframe::set_value(storage, MARKED_MANUALLY, &self.marked_manually);
         }
