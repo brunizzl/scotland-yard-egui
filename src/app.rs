@@ -105,6 +105,8 @@ impl eframe::App for State {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         SidePanel::left("left_panel").show(ctx, |ui| {
             ui.vertical(|ui| {
+                let compile_datetime = compile_time::datetime_str!();
+                ui.label(format!("kompiliert am {compile_datetime}"));
                 widgets::global_dark_light_mode_buttons(ui);
                 draw_usage_info(ui);
                 self.map.draw_menu(ui, &mut self.info);
