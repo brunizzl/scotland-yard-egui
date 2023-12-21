@@ -345,8 +345,9 @@ impl Info {
                     }
                 },
             (RobberInfo::RobberAdvantage, _) => 
-                for (&adv, &pos, &vis) in izip!(&self.cop_advantage, con.positions, con.visible) {
-                    if vis && adv < -1 {
+                for (&adv, &pos, &vis, &hull) in 
+                izip!(&self.cop_advantage, con.positions, con.visible, self.cop_hull.inside()) {
+                    if vis && hull.yes() && adv < -1 {
                         draw_circle_at(pos, GREEN);
                     }
                 },
