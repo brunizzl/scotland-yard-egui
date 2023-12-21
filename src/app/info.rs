@@ -230,6 +230,8 @@ impl Info {
     }
 
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
+        self.characters.update(con, &mut self.queue);
+
         let update_cop_advantage = self.robber_info == RobberInfo::RobberAdvantage
             || self.vertex_info == DrawNumbers::RobberAdvantage;
             
@@ -490,6 +492,7 @@ impl Info {
         self.draw_character_tails(con);
         self.draw_robber_strat(con);
         self.draw_numbers(ui, con);
-        self.characters.update_and_draw(ui, con, &mut self.queue);
+        self.characters.draw(ui, con);
+        self.characters.frame_is_finished();
     }
 }  
