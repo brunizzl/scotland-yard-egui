@@ -28,7 +28,7 @@ const fn new_cop(emoji: &'static str) -> Style {
 pub const NR_COP_STYLES: usize = 7;
 
 /// fst is robber, rest are cops
-pub const CHARACTERS: [Style; 1 + NR_COP_STYLES] = [
+pub const STYLES: [Style; 1 + NR_COP_STYLES] = [
     Style {
         color: Color32::from_rgb(170, 40, 40),
         glow: Color32::from_rgb(235, 120, 120),
@@ -55,16 +55,19 @@ pub struct Character {
     pub distances: Vec<isize>,
     pub nearest_node: usize,
 
-    pub pos2: Pos2, //used in both 3d and 3d map (as cursor can't drag in 3d...)
-    pub pos3: Pos3, //only used in 3d map
+    //position to where is is currently held while dragging, 
+    //only updated while dragging (coordinates are the middle ones of ToScreen)
+    pos2: Pos2, 
+
+    pub pos3: Pos3, //position of nearest_node
     pub on_node: bool,
-    pub dragging: bool, //currently beeing dragged by mouse cursor
-    pub updated: bool, //nearest_node or distances changed this frame
+    dragging: bool, //currently beeing dragged by mouse cursor
+    updated: bool, //nearest_node or distances changed this frame
 }
 
 impl Character {
     pub fn style(&self) -> &'static Style {
-        &CHARACTERS[self.style_index]
+        &STYLES[self.style_index]
     }
 
     pub fn new(style_index: usize, pos2: Pos2) -> Self {
@@ -111,7 +114,8 @@ impl Character {
         con.painter.add(character_circle);
     }
 
-    fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) {       
+    /// returns true iff character was just released and has changed its node
+    fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) -> bool {       
         let to_plane = con.cam.to_screen().to_plane;
         let move_rect = con.cam.to_screen().move_rect;
 
@@ -140,15 +144,19 @@ impl Character {
         }
         //test if character was just released. doing this ourselfs allows to simulate release whenever we like
         //(e.g. just set dragging to true and we snap to position)
+        let mut just_released_on_new_node = false;
         if !dragging && self.dragging && self.on_node {
             self.pos2 = node_pos; //snap actual character postion to node where he was dragged
             if Some(&self.nearest_node) != self.last_positions.last() {
                 //position changed and drag released -> new step
                 self.last_positions.push(self.nearest_node);
+                just_released_on_new_node = true;
             }
         }
         self.dragging = dragging;
-        self.draw_large_at(draw_screen_pos, &con.painter, ui, character_size);        
+        self.draw_large_at(draw_screen_pos, &con.painter, ui, character_size);
+
+        just_released_on_new_node  
     }
 
     /// assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
@@ -270,7 +278,7 @@ impl CharacterState {
         self.robber().map_or(false, |r| r.updated)
     }
 
-    pub fn active_cops_updated(&self) -> bool {
+    pub fn active_cop_updated(&self) -> bool {
         self.active_cops().any(|c| c.updated)
     }
 
@@ -300,7 +308,7 @@ impl CharacterState {
                 next_cop + 1 //+ 1 as robber is at beginning
             };
             let minus_text = format!("- Figur ({})", minus_emoji);
-            let plus_text = format!("+ Figur ({})", CHARACTERS[next_index].emoji);
+            let plus_text = format!("+ Figur ({})", STYLES[next_index].emoji);
             if ui.button(minus_text).clicked() {
                 self.characters.pop();
                 self.forget_move_history();
@@ -332,19 +340,19 @@ impl CharacterState {
     }
 
     pub fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>) {
-        for (i, ch) in self.characters.iter_mut().enumerate() {
+        for ch in &mut self.characters {
             ch.update(con, queue);
-            if ch.updated {
-                self.past_moves.push(i);
-                self.future_moves.clear();
-            }
         }
     }
 
     pub fn draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
-        for ch in &mut self.characters {
+        for (i, ch) in self.characters.iter_mut().enumerate() {
             if ch.on_node && con.visible[ch.nearest_node] || !ch.on_node {
-                ch.drag_and_draw(ui, con);
+                let finished_move = ch.drag_and_draw(ui, con);                
+                if finished_move {
+                    self.past_moves.push(i);
+                    self.future_moves.clear();
+                }
             }
             else {
                 ch.draw_small_at_node(con);

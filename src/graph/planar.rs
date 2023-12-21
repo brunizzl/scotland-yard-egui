@@ -278,8 +278,8 @@ impl Triangualtion {
 
     //move every a step into the center of its neighbors positions average
     //requires neighbors to be sorted
-    fn move_vertices_apart(&self, heat: f32) -> Vec<Pos2> {
-        let mut res = self.graph.positions.clone();
+    fn move_vertices_apart(&mut self, heat: f32) {
+        let mut new_positions = self.graph.positions.clone();
         let avg_len = self.avg_edge_len();
         let one_over_avg_edge_len_sq = 1.0 / (avg_len * avg_len);
         //dont wanna move the outher points -> skip circumference
@@ -296,7 +296,7 @@ impl Triangualtion {
                         cum_pos += self.graph.positions[n].to_vec2();
                         cum_dist += 1.0;
                     }
-                    res[v] = Pos2::ZERO + cum_pos / cum_dist;
+                    new_positions[v] = Pos2::ZERO + cum_pos / cum_dist;
                     continue 'step;
                 }
                 //if all neighbors are sorted correctly, we move the vertex to the average position of 
@@ -309,10 +309,10 @@ impl Triangualtion {
                 cum_pos += p2 * length;
             }
             let push_force = heat * self.neighbor_push_force(v, one_over_avg_edge_len_sq);
-            res[v] = Pos2::ZERO + cum_pos / cum_dist + push_force;
+            new_positions[v] = Pos2::ZERO + cum_pos / cum_dist + push_force;
         }
 
-        res
+        self.graph.positions = new_positions;
     }
 
     #[inline(always)]
@@ -501,10 +501,12 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Embedding2D
         tri.graph.sort_neigbors();
         let heat = 1.0 - step as f32 * heat_step;
         debug_assert!(heat >= 0.0);
-        let new_vertices = tri.move_vertices_apart(heat);
-        let without_wheel = &new_vertices[(circumference + 1)..];
+        tri.move_vertices_apart(heat);
+        tri.graph.sort_neigbors();
+        let without_wheel = &tri.graph.positions[(circumference + 1)..];
         tri = Triangualtion::new_from_positions(without_wheel, circumference);
     }
     tri.graph.edges.maybe_shrink_capacity(0);
+    tri.graph.sort_neigbors();
     tri.graph
 }
