@@ -45,7 +45,10 @@ impl Map {
         use storage_keys::*;
         let shape = load_or(cc.storage, SHAPE, || Shape::Icosahedron);
         //to not accidentally lag on restart, we limit maximal initial resolution
-        let resolution = load_or(cc.storage, RESOLUTION, || 12).min(12); 
+        let (resolution, shrunk) = {
+            let last_res = load_or(cc.storage, RESOLUTION, || 12);
+            if last_res > 25 { (25, true) } else { (last_res, false) }
+        };
         let nr_polygon_sides = load_or(cc.storage, NR_POLY_SIDES, || 6);
         let nr_ico_divisions = load_or(cc.storage, NR_ICO_DIVISIONS, || 3);
         let camera = load_or(cc.storage, CAMERA, Camera3D::new);
@@ -63,6 +66,11 @@ impl Map {
         };
         result.recompute();
         result.adjust_info(info);
+        if shrunk {
+            //graph is not exactly the same -> vertex indices are now wothless
+            //(and in worst case larger than curr number of vertices)
+            info.characters.forget_move_history();
+        }
 
         result
     }
