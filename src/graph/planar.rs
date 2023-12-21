@@ -36,26 +36,26 @@ impl Embedding2D {
         Embedding2D { positions: Vec::new(), edges: EdgeList::empty() }
     }
 
-    pub fn add_vertex(&mut self, pos: Pos2) -> usize {
+    fn add_vertex(&mut self, pos: Pos2) -> usize {
         let new_index = self.len();
         self.positions.push(pos);
         self.edges.push();
         new_index
     }
 
-    pub fn has_edge(&self, v1: usize, v2: usize) -> bool {
+    fn has_edge(&self, v1: usize, v2: usize) -> bool {
         self.edges.has_edge(v1, v2)
     }
 
-    pub fn add_edge(&mut self, v1: usize, v2: usize) {
+    fn add_edge(&mut self, v1: usize, v2: usize) {
         self.edges.add_edge(v1, v2)
     }
 
-    pub fn remove_edge(&mut self, v1: usize, v2: usize) {
+    fn remove_edge(&mut self, v1: usize, v2: usize) {
         self.edges.remove_edge(v1, v2)
     }
 
-    pub fn add_path_edges<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
+    fn add_path_edges<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
         self.edges.add_path_edges_ref(path)
     }
 
@@ -63,7 +63,7 @@ impl Embedding2D {
         &self.positions
     }
 
-    pub fn sort_neigbors(&mut self) {
+    fn sort_neigbors(&mut self) {
         for (v1, neighs) in self.edges.potential_neighbors_mut().enumerate() {
             let p1 = self.positions[v1];
 
@@ -192,13 +192,13 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Embedding2D 
     graph
 }
 
-pub struct Triangualtion {
+struct Triangualtion {
     graph: Embedding2D,
     circumference: usize, //nr of edges on the outher rim
 }
 
 impl Triangualtion {
-    pub fn new_wheel(circumference: usize) -> Self {
+    fn new_wheel(circumference: usize) -> Self {
         let mut graph = Embedding2D::empty();
         for v in 0..circumference {
             let angle = std::f32::consts::TAU * (v as f32) / (circumference as f32);
@@ -218,7 +218,7 @@ impl Triangualtion {
         Self { graph, circumference }
     }
 
-    pub fn has_face(&self, v1: usize, v2: usize, v3: usize) -> bool {
+    fn has_face(&self, v1: usize, v2: usize, v3: usize) -> bool {
         self.graph.has_edge(v1, v2) &&
         self.graph.has_edge(v2, v3) &&
         self.graph.has_edge(v3, v1)
@@ -226,7 +226,7 @@ impl Triangualtion {
 
     //assumes edge of (v1, v2) and vertex v3 form a face, 
     //returns other face adjacent to edge
-    pub fn neighbor_face_vertex(&self, (v1, v2): (usize, usize), v3: usize) -> usize {
+    fn neighbor_face_vertex(&self, (v1, v2): (usize, usize), v3: usize) -> usize {
         debug_assert!(self.has_face(v1, v2, v3));
 
         let v1_neighs = self.graph.edges.neighbors_of(v1);
@@ -269,7 +269,7 @@ impl Triangualtion {
 
     //move every a step into the center of its neighbors positions average
     //requires neighbors to be sorted
-    pub fn move_vertices_apart(&self, heat: f32) -> Vec<Pos2> {
+    fn move_vertices_apart(&self, heat: f32) -> Vec<Pos2> {
         let mut res = self.graph.positions.clone();
         let avg_len = self.avg_edge_len();
         let one_over_avg_edge_len_sq = 1.0 / (avg_len * avg_len);
@@ -306,11 +306,11 @@ impl Triangualtion {
         res
     }
 
-    pub fn avg_edge_len(&self) -> f32 {
+    fn avg_edge_len(&self) -> f32 {
         std::f32::consts::TAU / (self.circumference as f32)
     }
 
-    pub fn divide_longest_edges(&mut self) {
+    fn divide_longest_edges(&mut self) {
         let avg_len = self.avg_edge_len();
         let mut queue = VecDeque::new();
         let mut v1_neighbors = Vec::new();
@@ -329,7 +329,7 @@ impl Triangualtion {
         }
     }
 
-    pub fn find_face_of(&self, point: Pos2) -> Option<[usize; 3]> {        
+    fn find_face_of(&self, point: Pos2) -> Option<[usize; 3]> {        
         let (start, _) = self.graph.find_nearest_node(point, self.circumference);
         let mut curr_pos = self.graph.positions[start];
         let mut curr_line = geo::line_from_to(point, curr_pos);
@@ -366,7 +366,7 @@ impl Triangualtion {
         }
     }
 
-    pub fn update_edges(&mut self, queue: &mut VecDeque<((usize, usize), usize)>) {
+    fn update_edges(&mut self, queue: &mut VecDeque<((usize, usize), usize)>) {
         while let Some(((v1, v2), v0)) = queue.pop_front() {
             if !self.has_face(v1, v2, v0) {
                 continue;
@@ -402,7 +402,7 @@ impl Triangualtion {
         }
     }
 
-    pub fn add_vertex(&mut self, new_pos: Pos2, queue: &mut VecDeque<((usize, usize), usize)>) -> usize {
+    fn add_vertex(&mut self, new_pos: Pos2, queue: &mut VecDeque<((usize, usize), usize)>) -> usize {
         if let Some(face) = self.find_face_of(new_pos) {
             let new = self.graph.add_vertex(new_pos);
             for &v in face.iter() {
@@ -430,7 +430,7 @@ impl Triangualtion {
         usize::MAX     
     }
 
-    pub fn new_from_positions(positions :&[Pos2], circumference: usize) -> Triangualtion {
+    fn new_from_positions(positions :&[Pos2], circumference: usize) -> Triangualtion {
         let mut discarded = Vec::new();
         let mut queue = VecDeque::new();
         let mut res = Self::new_wheel(circumference);
@@ -446,7 +446,7 @@ impl Triangualtion {
         res
     }
 
-    pub fn new_random(nr_nodes: usize, circumference: usize) -> Self {
+    fn new_random(nr_nodes: usize, circumference: usize) -> Self {
         //start with square with unit circle in middle
         let mut res = Self::new_wheel(circumference);
 
@@ -494,8 +494,4 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Embedding2D
     }
     tri.graph.edges.maybe_shrink_capacity(0);
     tri.graph
-}
-
-pub fn debugging_graph() -> Embedding2D {
-    Triangualtion::new_wheel(10).graph
 }

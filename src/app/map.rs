@@ -16,7 +16,6 @@ pub enum Shape {
     DividedIcosahedron, //Map::nr_ico_divisions belongs to this
     RegularPolygon2D, //Map::nr_polygon_sides belongs to this
     Random2D, 
-    Debug2D 
 }
 
 pub struct Map {
@@ -159,9 +158,7 @@ impl Map {
                 Embedding3D::from_2d(graph::triangulated_regular_polygon(sides, res))
             },
             Shape::Random2D => 
-                Embedding3D::from_2d(graph::random_triangulated(res, 8)),
-            Shape::Debug2D => 
-                Embedding3D::from_2d(graph::debugging_graph()),
+                Embedding3D::from_2d(graph::random_triangulated(res, 8))
         };
         if self.is_3d() {
             self.extreme_vertices.clear();
@@ -224,7 +221,6 @@ impl Map {
                     self.recompute_and_adjust(info);
                 }
             }
-            ui.radio_value(&mut self.shape, Shape::Debug2D, "2D Debugging");
             if self.shape != old_shape {
                 self.recompute_and_adjust(info);
             }
