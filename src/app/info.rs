@@ -111,51 +111,77 @@ impl Info {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, edges: &EdgeList) {
-        ui.collapsing("Knoteninfo", |ui|{                    
+        ui.collapsing("Knoteninfo", |ui|{
+            ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"));  
+
+            ui.add_space(5.0);
+            ui.label("Marker:");
             //settings to draw extra information
             ui.radio_value(&mut self.robber_info, RobberInfo::None, 
-                "keine Marker");
+                "Keine");
 
             ui.radio_value(&mut self.robber_info, RobberInfo::NearNodes, 
-                "markiere für Räuber\nnähere Knoten");
+                "für Räuber nähere Knoten")
+                .on_hover_text("alle Knoten näher am Räuber als am nächsten Cop");
 
             ui.radio_value(&mut self.robber_info, RobberInfo::RobberAdvantage, 
-                "markiere Punkte mit\ndirekter Fluchtoption (1)");
+                "Punkte mit direkter Fluchtoption 1")
+                .on_hover_text("alle Punkte in der Konvexen Hülle, \
+                die näher an einem Punkt ausserhalb der Hülle sind, als der nächste Cop an diesem Punkt ist");
 
             ui.radio_value(&mut self.robber_info, RobberInfo::EscapeableNodes, 
-                "markiere Punkte mit\ndirekter Fluchtoption (2)");
+                "Punkte mit direkter Fluchtoption 2")
+                .on_hover_text("Jedes Paar von benauchbarten Cops am Hüllenrand kontrolliert einen Randbereich. \
+                Will der Räuber durch diesen Bereich fliehen, dürfen die Cops in der Zeit, \
+                die der Räuber zum Rand braucht, diesen nicht auf Länge 0 kürzen können. \n\
+                Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
+                als die Cops diesen Abschnitt dicht machen können. \n\
+                Nicht berücksichtigt für die Berechnung aller Fluchtoptionen zu einem Segment zwischen zwei Cops sind alle anderen Cops. \
+                Insbesondere werden Cops im inneren der Hülle zu keinem Zeitpunkt berücksichtigt. \
+                (TODO: ändere das)");
 
             ui.radio_value(&mut self.robber_info, RobberInfo::SmallRobberDist, 
-                "markiere Punkte nah\nan Räuber");
+                "Punkte nah an Räuber")
+                .on_hover_text("Alle Punkte die Abstand <= Auflösung * (% Auflösung) / 100 zu Räuber haben");
             if self.robber_info == RobberInfo::SmallRobberDist {
-                add_drag_value(ui, &mut self.small_robber_dist, "% Radius: ", 1, 100);
+                add_drag_value(ui, &mut self.small_robber_dist, "% Auflösung: ", 1, 100);
             }
 
             ui.radio_value(&mut self.robber_info, RobberInfo::CopDist, 
-                "markiere Punkte mit\nAbstand zu Cops");
+                "Punkte mit Abstand zu Cops")
+                .on_hover_text("Abstand einstellbar bei ausgewählter Option");
             if self.robber_info == RobberInfo::CopDist {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
-
-            ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige \"Konvexe Hülle\"\n um Cops"));  
         });
         ui.collapsing("Zahlen", |ui|{
             ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
                 "Keine");
+
             ui.radio_value(&mut self.vertex_info, DrawNumbers::Indices, 
-                "Knotenindizes");
+                "Knotenindizes")
+                .on_hover_text("nur relevant für Debugging");
+
             ui.radio_value(&mut self.vertex_info, DrawNumbers::RobberAdvantage, 
-                "Räubervorteil");
+                "marker Fluchtoption 1")
+                .on_hover_text("Helfer zur Berechnung von Fluchtoption 1");
+
             ui.radio_value(&mut self.vertex_info, DrawNumbers::EscapeableNodes, 
-                "Marker Fluchtoption (2)");
+                "Marker Fluchtoption 2")
+                .on_hover_text("jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. C }. \
+                Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.");
+
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
-                "minimaler Cop Abstand");
+                "minimaler Cop Abstand")
+                .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
         });
         ui.collapsing("Strategie Räuber", |ui|{
             ui.radio_value(&mut self.robber_strat, RobberStrat::None, 
                 "Keine");
+
             ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHullNonLazy, 
-                "Entkomme Hülle");
+                "Entkomme Hülle")
+                .on_hover_text("Heuristik für Fluchtoption (1)");
         });
         self.characters.draw_menu(ui, edges, &mut self.queue);
     }
@@ -329,7 +355,7 @@ impl Info {
             gen.waste(3);
             let mut rnd = || (gen.next() % 128) as u8;
 
-            //idea: hit at least one 128 in every view of length 3
+            //idea: hit at least one 100 in every view of length 3
             const BRIGHT: [u8; 8] = [0, 100, 0, 0, 100, 100, 0, 100];
             let off = rnd() as usize % (BRIGHT.len() - 2);
             let [b0, b1, b2, ..] = BRIGHT[off..] else { panic!() };

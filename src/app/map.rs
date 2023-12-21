@@ -203,19 +203,19 @@ impl Map {
             ui.radio_value(&mut self.shape, Shape::Tetrahedron, "Tetraeder");
             ui.radio_value(&mut self.shape, Shape::Octahedron, "Oktaeder");
             ui.radio_value(&mut self.shape, Shape::Icosahedron, "Ikosaeder");
-            ui.radio_value(&mut self.shape, Shape::DividedIcosahedron, "aufgepusteter\nIkosaeder");
+            ui.radio_value(&mut self.shape, Shape::DividedIcosahedron, "aufgepusteter Ikosaeder");
             if self.shape == Shape::DividedIcosahedron {
                 if add_drag_value(ui, &mut self.nr_ico_divisions, "Druck: ", 0, self.resolution) {
                     self.recompute_and_adjust(info);
                 }
             }
-            ui.radio_value(&mut self.shape, Shape::RegularPolygon2D, "2D Polygon\ntrianguliert");
+            ui.radio_value(&mut self.shape, Shape::RegularPolygon2D, "2D Polygon trianguliert");
             if self.shape == Shape::RegularPolygon2D {
                 if add_drag_value(ui, &mut self.nr_polygon_sides, "Seiten: ", 3, 10) {
                     self.recompute_and_adjust(info);
                 }
             }
-            ui.radio_value(&mut self.shape, Shape::Random2D, "2D Kreisscheibe\ntrianguliert");
+            ui.radio_value(&mut self.shape, Shape::Random2D, "2D Kreisscheibe zufällig trianguliert");
             if self.shape == Shape::Random2D {
                 if ui.button("neu berechnen").clicked() {
                     self.recompute_and_adjust(info);
