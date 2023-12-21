@@ -257,10 +257,14 @@ impl EscapeableNodes {
     /// assumes segment has form `some_start..=owner`
     /// also assumes queue to only contain vertices of the region to add
     fn add_region_to_escapable(&mut self, owner: usize, marker: u16, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        debug_assert!(owner != 0);
         debug_assert!(queue.iter().all(|&v| self.last_write_by[v] == owner));
         while let Some(v) = queue.pop_front() {
             debug_assert!(self.escapable[v] | marker != 0);
-            debug_assert!(owner != 0);
+            if self.last_write_by[v] == 0 {
+                continue;
+            }
+            debug_assert_eq!(self.last_write_by[v], owner);
             self.last_write_by[v] = 0;
             for n in edges.neighbors_of(v) {
                 if self.last_write_by[n] == owner {

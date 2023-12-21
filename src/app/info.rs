@@ -326,7 +326,7 @@ impl Info {
             let seed = seed as u64 * (100 + seed as u64);
             let mut gen = crate::rand::LCG::new(seed);
             gen.waste(2);
-            let mut rnd = || (64 + (gen.next() % 128)) as u8;
+            let mut rnd = || (128 + (gen.next() % 128)) as u8;
             Color32::from_rgb(rnd(), rnd(), rnd())
         };
         let draw_circle_at = |pos, color|{
