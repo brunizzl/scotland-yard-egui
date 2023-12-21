@@ -328,7 +328,7 @@ impl Info {
             let seed = seed as u64 * (100 + seed as u64);
             let mut gen = crate::rand::LCG::new(seed);
             gen.waste(2);
-            let mut rnd = || (128 + (gen.next() % 128)) as u8;
+            let mut rnd = || (80 + (gen.next() % 128)) as u8;
             Color32::from_rgb(rnd(), rnd(), rnd())
         };
         let draw_circle_at = |pos, color|{
@@ -380,6 +380,12 @@ impl Info {
         if self.vertex_info == DrawNumbers::None {
             return;
         }
+        let true_bits = |x:u16| -> String {
+            const HEX_CHARS: [char; 16] = 
+                ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
+            let pow2 = (0..16).map(|i| 2u16.pow(i));
+            izip!(HEX_CHARS, pow2).filter_map(|(c, i)| (i & x != 0).then_some(c)).collect()
+        };
         let font = FontId::proportional(con.scale * 8.0);
         let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
         for (i, &pos, &vis) in izip!(0.., con.positions, con.visible) {
@@ -389,10 +395,7 @@ impl Info {
                     DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
                     DrawNumbers::None => { panic!() }
                     DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
-                    DrawNumbers::EscapeableNodes => { 
-                        let marker = self.escapable.escapable()[i];
-                        if marker == 0 { String::new() } else { format!("{:b}", marker) }
-                    }
+                    DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[i]) }
                 };
                 let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
                 layout_job.halign = Align::Center;
