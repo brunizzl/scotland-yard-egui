@@ -44,7 +44,8 @@ impl Map {
     pub fn new(info: &mut Info, cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
         let shape = load_or(cc.storage, SHAPE, || Shape::Icosahedron);
-        let resolution = load_or(cc.storage, RESOLUTION, || 12);
+        //to not accidentally lag on restart, we limit maximal initial resolution
+        let resolution = load_or(cc.storage, RESOLUTION, || 12).min(12); 
         let nr_polygon_sides = load_or(cc.storage, NR_POLY_SIDES, || 6);
         let nr_ico_divisions = load_or(cc.storage, NR_ICO_DIVISIONS, || 3);
         let camera = load_or(cc.storage, CAMERA, Camera3D::new);

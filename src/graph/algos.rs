@@ -277,7 +277,6 @@ impl EscapeableNodes {
 
     pub fn update(&mut self, hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         let nr_vertices = edges.nr_vertices();
-        self.some_boundary_dist.clear();
         self.last_write_by.clear();
         self.escapable.clear();
         self.some_boundary_dist.resize(nr_vertices, isize::MAX);
