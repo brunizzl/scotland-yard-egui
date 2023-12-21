@@ -111,7 +111,7 @@ impl Character {
         con.painter.add(character_circle);
     }
 
-    pub fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) {       
+    fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) {       
         let to_plane = con.cam.to_screen().to_plane;
         let move_rect = con.cam.to_screen().move_rect;
 
@@ -152,9 +152,8 @@ impl Character {
     }
 
     /// assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
-    pub fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>)
+    fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>)
     {
-        self.updated = false; //will be set to true again if self.update_distances is called
         if !self.dragging {
             return;
         }   
@@ -275,6 +274,12 @@ impl CharacterState {
         self.active_cops().any(|c| c.updated)
     }
 
+    pub fn frame_is_finished(&mut self) {
+        for c in &mut self.characters {
+            c.updated = false;
+        }
+    }
+
     pub fn forget_move_history(&mut self) {
         self.past_moves.clear();
         self.future_moves.clear();
@@ -326,15 +331,20 @@ impl CharacterState {
         }
     }
 
-    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, queue: &mut VecDeque<usize>) {
+    pub fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>) {
         for (i, ch) in self.characters.iter_mut().enumerate() {
             ch.update(con, queue);
+            if ch.updated {
+                self.past_moves.push(i);
+                self.future_moves.clear();
+            }
+        }
+    }
+
+    pub fn draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+        for ch in &mut self.characters {
             if ch.on_node && con.visible[ch.nearest_node] || !ch.on_node {
                 ch.drag_and_draw(ui, con);
-                if ch.updated {
-                    self.past_moves.push(i);
-                    self.future_moves.clear();
-                }
             }
             else {
                 ch.draw_small_at_node(con);
