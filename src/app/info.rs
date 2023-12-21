@@ -112,7 +112,10 @@ impl Info {
 
     pub fn draw_menu(&mut self, ui: &mut Ui, edges: &EdgeList) {
         ui.collapsing("Knoteninfo", |ui|{
-            ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"));  
+            ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"))
+                .on_hover_text("Berechnung des Randes kann im 2D Fall und insbesondere im \
+                zufällig triangulierten Fall versagen. Manche Marker brauchen diesen Rand und \
+                werden in diesen Fällen dann nicht angezeigt.");
 
             ui.add_space(5.0);
             ui.label("Marker:");
@@ -163,7 +166,7 @@ impl Info {
                 .on_hover_text("nur relevant für Debugging");
 
             ui.radio_value(&mut self.vertex_info, DrawNumbers::RobberAdvantage, 
-                "marker Fluchtoption 1")
+                "Marker Fluchtoption 1")
                 .on_hover_text("Helfer zur Berechnung von Fluchtoption 1");
 
             ui.radio_value(&mut self.vertex_info, DrawNumbers::EscapeableNodes, 
@@ -257,6 +260,8 @@ impl Info {
 
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
         self.characters.update(con, &mut self.queue);
+        let robber_moved = self.characters.robber_updated();
+        let cop_moved = self.characters.active_cop_updated();
 
         let update_cop_advantage = self.robber_info == RobberInfo::RobberAdvantage
             || self.vertex_info == DrawNumbers::RobberAdvantage;
@@ -270,10 +275,8 @@ impl Info {
 
         let update_min_cop_dist = update_hull
             || self.robber_info == RobberInfo::CopDist
+            || self.robber_info == RobberInfo::NearNodes
             || self.vertex_info == DrawNumbers::MinCopDist;
-
-        let robber_moved = self.characters.robber_updated();
-        let cop_moved = self.characters.active_cops_updated();
 
         let nr_vertices = con.edges.nr_vertices();
         if (cop_moved || self.min_cop_dist.len() != nr_vertices) && update_min_cop_dist {
@@ -307,6 +310,7 @@ impl Info {
     }
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+        
         ui.input(|info| {
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
                 self.characters.reverse_move(con.edges, &mut self.queue);

@@ -48,6 +48,11 @@ impl ConvexHull {
         &self.inside
     }
 
+    #[allow(dead_code)]
+    pub fn boundary(&self) -> &[usize] {
+        &self.boundary
+    }
+
     pub fn boundary_segments<'a>(&'a self) -> impl Iterator<Item = &'a [usize]> + 'a {
         self.segment_interiors.iter().map(|seg| &self.boundary[seg.clone()])
     }
@@ -121,30 +126,51 @@ impl ConvexHull {
         };
         let mut last_outside = usize::MAX;
         let mut curr_outside = fst_outside;
+        let mut steps_since_boundary_change = 0;
         loop {
-            let mut change = false;
+            let mut change_outside = false;
+            let mut change_boundary = false;
             for n in edges.neighbors_of(curr_outside) {
                 //find vertices on hull boundary
                 if self.inside[n].yes() {
                     let len = boundary.len();
-                    let range_min = if len < 5 { 0 } else { len - 5 };
+                    let range_min = if len < 10 { 0 } else { len - 10 };
                     if !boundary[range_min..].contains(&n) {
                         boundary.push(n);
+                        change_boundary = true;
                     }
                 }
                 else { //find next vertex just outside hull
-                    let still_searching = !change;
+                    let still_searching = !change_outside;
                     let is_new = n != last_outside; //can only be trusted if still_searching
                     let borders_hull = edges.neighbors_of(n).any(|nn| self.inside[nn].yes());
                     if still_searching && is_new && borders_hull {
                         last_outside = curr_outside;
                         curr_outside = n;
-                        change = true;
+                        change_outside = true;
                     }
                 }
             }
-            if curr_outside == fst_outside || !change {
+            if change_boundary {
+                steps_since_boundary_change = 0;
+            }
+            else {
+                steps_since_boundary_change += 1;
+            }
+            if steps_since_boundary_change > 100 || boundary.len() > edges.nr_vertices() || !change_outside {
+                //if !change_outside, we have hit a boundary of the graph itself and thus cant find any more 
+                //  vertices outside the hull.
+                //the resulting boundary part however is of such shape, that we can keep it for the later uses.
+                //should that change: add !change_outside to the failure path.
+
+                //for the other two: i have no idea.
+                //some error occured -> give up and keep boundary empty
+                //the algorithms should work on a planar triangulation, so the given graph is not planar?
+                boundary.clear();
                 break;
+            }
+            if curr_outside == fst_outside {
+                break; //happy path :)
             }
         }
         self.boundary = boundary;
@@ -295,9 +321,11 @@ impl EscapeableNodes {
                 self.calc_small_dists(hull, edges, queue, max_dist, indices.clone(), i);
             }
             let owner = indices.end - 1; //last i of loop above
-            queue.push_back(vertices[0]);
+            debug_assert!(queue.is_empty());
+            let last = *vertices.last().unwrap();
+            queue.push_back(last);
             let marker = 1u16 << (seq_nr % 16);
-            self.escapable[vertices[0]] |= marker;
+            self.escapable[last] |= marker;
             self.add_region_to_escapable(owner, marker, edges, queue);
         }
     }

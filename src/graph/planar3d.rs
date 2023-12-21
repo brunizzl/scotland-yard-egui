@@ -552,7 +552,7 @@ impl Embedding3D {
     }
 
     pub fn from_2d(planar: Embedding2D) -> Self {
-        let z = 1.2;
+        let z = 0.5;
         let (positions_2d, edges) = planar.to_parts();
         let vertices = positions_2d.iter().map(|p| pos3(p.x, p.y, z)).collect_vec();
         Self { 
