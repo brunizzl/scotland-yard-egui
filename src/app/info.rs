@@ -523,8 +523,8 @@ impl Info {
     }
 
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
-        self.maybe_update(con);
         self.process_general_input(ui, con);
+        self.maybe_update(con);
         self.draw_convex_cop_hull(con);
         self.draw_green_circles(con);
         self.draw_manual_markers(con);
