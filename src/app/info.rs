@@ -112,7 +112,7 @@ impl Info {
         }
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui, edges: &EdgeList) {
+    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
         self.menu_change = false;
         ui.collapsing("Knoteninfo", |ui|{
             self.menu_change |= 
@@ -197,7 +197,8 @@ impl Info {
                 .on_hover_text("Heuristik für Fluchtoption (1)");
             self.menu_change |= old != self.robber_strat;
         });
-        self.characters.draw_menu(ui, edges, &mut self.queue);
+        self.menu_change |= 
+            self.characters.draw_menu(ui, map, &mut self.queue);
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
@@ -334,11 +335,11 @@ impl Info {
         
         ui.input(|info| {
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
-                self.characters.reverse_move(con.edges, &mut self.queue);
+                self.characters.reverse_move(con.edges, con.positions, &mut self.queue);
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
-                self.characters.redo_move(con.edges, &mut self.queue);
-            }  
+                self.characters.redo_move(con.edges, con.positions, &mut self.queue);
+            }
             if info.key_pressed(Key::M) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.add_marker_at(pointer_pos, con);

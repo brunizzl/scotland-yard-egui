@@ -102,7 +102,7 @@ impl eframe::App for State {
                 widgets::global_dark_light_mode_buttons(ui);
                 draw_usage_info(ui);
                 self.map.draw_menu(ui, &mut self.info);
-                self.info.draw_menu(ui, self.map.edges());
+                self.info.draw_menu(ui, &self.map);
             });
         });
 
