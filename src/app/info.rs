@@ -49,6 +49,7 @@ pub struct Info {
     robber_strat: RobberStrat,
     vertex_info: DrawNumbers,
     show_convex_hull: bool,
+    menu_change: bool,
 }
 
 mod storage_keys {
@@ -107,18 +108,23 @@ impl Info {
             robber_strat,
             vertex_info,
             show_convex_hull,
+            menu_change: false,
         }
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, edges: &EdgeList) {
+        self.menu_change = false;
         ui.collapsing("Knoteninfo", |ui|{
-            ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"))
+            self.menu_change |= 
+                ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"))
                 .on_hover_text("Berechnung des Randes kann im 2D Fall und insbesondere im \
                 zufällig triangulierten Fall versagen. Manche Marker brauchen diesen Rand und \
-                werden in diesen Fällen dann nicht angezeigt.");
+                werden in diesen Fällen dann nicht angezeigt.")
+                .changed();
 
             ui.add_space(5.0);
             ui.label("Marker:");
+            let old = self.robber_info;
             //settings to draw extra information
             ui.radio_value(&mut self.robber_info, RobberInfo::None, 
                 "Keine");
@@ -156,8 +162,10 @@ impl Info {
             if self.robber_info == RobberInfo::CopDist {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
+            self.menu_change |= old != self.robber_info;
         });
         ui.collapsing("Zahlen", |ui|{
+            let old = self.vertex_info;
             ui.radio_value(&mut self.vertex_info, DrawNumbers::None, 
                 "Keine");
 
@@ -177,14 +185,17 @@ impl Info {
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
                 "minimaler Cop Abstand")
                 .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
+            self.menu_change |= old != self.vertex_info;
         });
         ui.collapsing("Strategie Räuber", |ui|{
+            let old = self.robber_strat;
             ui.radio_value(&mut self.robber_strat, RobberStrat::None, 
                 "Keine");
 
             ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHullNonLazy, 
                 "Entkomme Hülle")
                 .on_hover_text("Heuristik für Fluchtoption (1)");
+            self.menu_change |= old != self.robber_strat;
         });
         self.characters.draw_menu(ui, edges, &mut self.queue);
     }
@@ -256,6 +267,13 @@ impl Info {
 
     fn update_escapable(&mut self, con: &DrawContext<'_>) {
         self.escapable.update(&self.cop_hull, con.edges, &mut self.queue)
+    }
+
+    fn definitely_update(&mut self, con: &DrawContext<'_>) {
+        self.update_min_cop_dist(con.edges);
+        self.update_convex_cop_hull(con);
+        self.update_escapable(con);
+        self.update_cop_advantage(con.edges);
     }
 
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
@@ -524,7 +542,7 @@ impl Info {
 
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         self.process_general_input(ui, con);
-        self.maybe_update(con);
+        if self.menu_change { self.definitely_update(con); } else { self.maybe_update(con); }
         self.draw_convex_cop_hull(con);
         self.draw_green_circles(con);
         self.draw_manual_markers(con);
