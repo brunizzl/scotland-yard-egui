@@ -146,7 +146,7 @@ impl Info {
                 Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
                 als die Cops diesen Abschnitt dicht machen können. \n\
                 Nicht berücksichtigt für die Berechnung aller Fluchtoptionen zu einem Segment zwischen zwei Cops sind alle anderen Cops. \
-                Insbesondere werden Cops im inneren der Hülle zu keinem Zeitpunkt berücksichtigt. \
+                COPS IM INNEREN DER HÜLLE WERDEN AKTUELL NUR INKORREKT BERÜCKSICHTIGT. \
                 (TODO: ändere das)");
 
             ui.radio_value(&mut self.robber_info, RobberInfo::SmallRobberDist, 
