@@ -5,7 +5,7 @@ use egui::*;
 
 use crate::{graph::EdgeList, geo::Pos3};
 
-use super::*;
+use super::{*, color::*};
 
 #[derive(Clone, Copy)]
 pub struct Style {

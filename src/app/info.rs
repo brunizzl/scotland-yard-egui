@@ -9,7 +9,7 @@ use egui::*;
 use crate::graph::{EdgeList, ConvexHull, EscapeableNodes, self};
 use crate::app::character::CharacterState;
 
-use super::*;
+use super::{*, color::*};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub enum RobberInfo { None, RobberAdvantage, EscapeableNodes, NearNodes, SmallRobberDist, CopDist }
@@ -375,18 +375,6 @@ impl Info {
     } 
 
     fn draw_green_circles(&self, con: &DrawContext<'_>) {
-        let random_color = |seed| {
-            let mut gen = crate::rand::LCG::new(seed as u64);
-            gen.waste(3);
-            let mut rnd = || (gen.next() % 128) as u8;
-
-            //idea: hit at least one 100 in every view of length 3
-            const BRIGHT: [u8; 8] = [0, 100, 0, 0, 100, 100, 0, 100];
-            let off = rnd() as usize % (BRIGHT.len() - 2);
-            let [b0, b1, b2, ..] = BRIGHT[off..] else { panic!() };
-
-            Color32::from_rgb(rnd() + b0, rnd() + b1, rnd() + b2)
-        };
         let draw_circle_at = |pos, color|{
             let draw_pos = con.cam.transform(pos);
             let marker_circle = Shape::circle_filled(draw_pos, con.scale * 6.0, color);
@@ -425,7 +413,7 @@ impl Info {
             (RobberInfo::EscapeableNodes, _) => 
             for (&esc, &pos, &vis) in izip!(self.escapable.escapable(), con.positions, con.visible) {
                 if vis && esc != 0 {
-                    draw_circle_at(pos, random_color(esc));
+                    draw_circle_at(pos, super::color::u16_marker_color(esc));
                 }
             }
             _ => {},
