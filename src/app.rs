@@ -8,15 +8,7 @@ mod cam;
 pub mod character;
 mod info;
 mod map;
-
-
-const GREY: Color32 = Color32::from_rgb(130, 130, 150);
-const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
-const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
-const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
-const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
-const RED: Color32 = Color32::from_rgb(230, 50, 50);
-const YELLOW: Color32 = Color32::from_rgb(240, 240, 50);
+mod color;
 
 pub struct DrawContext<'a> {
     pub extreme_vertices: &'a [usize],

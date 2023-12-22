@@ -6,7 +6,7 @@ use crate::graph::{ self, Embedding3D, EdgeList };
 use crate::app::{ cam::Camera3D, info::Info };
 use crate::geo::Pos3;
 
-use super::*;
+use super::{*, color::*};
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum Shape { 
