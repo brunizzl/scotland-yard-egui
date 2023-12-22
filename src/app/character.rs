@@ -55,11 +55,15 @@ pub struct Character {
     pub distances: Vec<isize>,
     pub nearest_node: usize,
 
-    //position to where is is currently held while dragging, 
-    //only updated while dragging (coordinates are the middle ones of ToScreen)
+    /// position to where is is currently held while dragging, 
+    /// only updated while dragging (coordinates are the middle ones of ToScreen)
     pos2: Pos2, 
 
-    pub pos3: Pos3, //position of nearest_node
+    /// position of nearest_node. 
+    /// this is only relevant, when a new graph is computed: it places the character at the node on the new graph 
+    /// closest to where he was before.
+    pub pos3: Pos3, 
+
     pub on_node: bool,
     dragging: bool, //currently beeing dragged by mouse cursor
     updated: bool, //nearest_node or distances changed this frame
@@ -179,18 +183,20 @@ impl Character {
         let change = self.on_node && nearest_node != self.nearest_node;
         self.nearest_node = nearest_node;
         if change || self.distances.len() != con.positions.len() {
-            self.update_distances(con.edges, queue);
-            self.pos3 = con.positions[self.nearest_node];
+            self.update_distances(con.edges, con.positions, queue);
         }
     }
 
-    pub fn update_distances(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+    pub fn update_distances(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
         queue.clear();
         queue.push_back(self.nearest_node);
         self.distances.clear();
         self.distances.resize(edges.nr_vertices(), isize::MAX);
         self.distances[self.nearest_node] = 0;
         edges.calc_distances_to(queue, &mut self.distances);
+
+        self.pos3 = positions[self.nearest_node];
+
         self.updated = true;
     }
 }
@@ -230,26 +236,26 @@ impl CharacterState {
         self.future_moves.last().map(|(c, _)| &self.characters[*c])
     }
 
-    pub fn reverse_move(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+    pub fn reverse_move(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
         if let Some(i) = self.past_moves.pop() {
             let ch = &mut self.characters[i];
             if let Some(v_curr) = ch.last_positions.pop() {
                 self.future_moves.push((i, v_curr));
                 if let Some(&v_last) = ch.last_positions.last() {
                     ch.nearest_node = v_last;
-                    ch.update_distances(edges, queue);
+                    ch.update_distances(edges, positions, queue);
                 }
             }
         }
     }
 
-    pub fn redo_move(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+    pub fn redo_move(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
         if let Some((i, v)) = self.future_moves.pop() {
             self.past_moves.push(i);
             let ch = &mut self.characters[i];
             ch.last_positions.push(v);
             ch.nearest_node = v;
-            ch.update_distances(edges, queue);
+            ch.update_distances(edges, positions, queue);
         }
     }
 
@@ -296,7 +302,9 @@ impl CharacterState {
         }
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+    /// returns a menu change (e.g. a new character was added, one removed...)
+    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, queue: &mut VecDeque<usize>) -> bool {
+        let mut change = false;
         ui.horizontal(|ui| {
             let nr_characters = self.characters.len();
             let minus_emoji = self.characters.last().map_or("🚫", |c| c.style().emoji);
@@ -312,23 +320,28 @@ impl CharacterState {
             if ui.button(minus_text).clicked() {
                 self.characters.pop();
                 self.forget_move_history();
+                change = true;
             }
             if ui.button(plus_text).clicked() {
                 self.characters.push(Character::new(next_index, Pos2::ZERO));
+                change = true;
             }
         });
         ui.horizontal(|ui| {
             ui.add(Checkbox::new(&mut self.show_steps, "zeige Schritte"));
             if ui.button("Reset").clicked() {
                 self.forget_move_history();
+                change = true;
             }
         });        
         ui.horizontal(|ui| {
             if ui.button(" ⟲ ").on_hover_text("strg + z").clicked() {
-                self.reverse_move(edges, queue);
+                self.reverse_move(map.edges(), map.positions(), queue);
+                change = true;
             }
             if ui.button(" ⟳ ").on_hover_text("strg + y").clicked() {
-                self.redo_move(edges, queue);
+                self.redo_move(map.edges(), map.positions(), queue);
+                change = true;
             }
         });
         if let Some(ch) = self.last_moved() {
@@ -337,6 +350,7 @@ impl CharacterState {
         if let Some(ch) = self.next_moved() {
             ui.label(format!("nächster Schritt: {} ({})", ch.style().job, ch.style().emoji));
         }
+        change
     }
 
     pub fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>) {
