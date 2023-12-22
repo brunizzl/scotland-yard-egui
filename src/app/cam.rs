@@ -80,7 +80,7 @@ impl Camera3D {
     /// only z-rotation, zoom is centered around mouse pointer
     pub fn update_2d(&mut self, ui: &mut Ui, screen: Rect) {        
         ui.input(|info| {
-            if info.pointer.hover_pos().map_or(true, |pos| !screen.contains(pos)) {
+            if !ui.rect_contains_pointer(screen) {
                 return;
             }
             if info.pointer.button_down(PointerButton::Secondary) {
@@ -110,7 +110,7 @@ impl Camera3D {
     /// no translation, zoom is centered around screen middle    
     pub fn update_3d(&mut self, ui: &mut Ui, screen: Rect) {        
         ui.input(|info| {
-            if info.pointer.hover_pos().map_or(true, |pos| !screen.contains(pos)) {
+            if !ui.rect_contains_pointer(screen) {
                 return;
             }
             let mut drag_dist = Vec2::ZERO;
