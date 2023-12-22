@@ -269,6 +269,7 @@ impl Info {
         self.escapable.update(&self.cop_hull, con.edges, &mut self.queue)
     }
 
+    /// recomputes everything
     fn definitely_update(&mut self, con: &DrawContext<'_>) {
         self.update_min_cop_dist(con.edges);
         self.update_convex_cop_hull(con);
@@ -276,6 +277,8 @@ impl Info {
         self.update_cop_advantage(con.edges);
     }
 
+    /// recomputes only things currently shown or required by things currently shown
+    /// and only if something relevant (e.g. a cop's position) changed
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
         self.characters.update(con, &mut self.queue);
         let robber_moved = self.characters.robber_updated();
