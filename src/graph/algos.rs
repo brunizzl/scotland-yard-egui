@@ -367,12 +367,13 @@ impl EscapeableNodes {
     fn unmark_interior_near(&mut self, cop: &Character, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         let mut local_queue = std::mem::take(queue);
         let start = cop.nearest_node;
-        let marker = self.escapable[start];
+        let mut marker = self.escapable[start];
         if marker != 0 {
             self.escapable[start] = 0;
         }
         for n in edges.neighbors_of(start) {
             if self.escapable[n] != 0 {
+                marker |= self.escapable[n];
                 self.escapable[n] = 0;
                 local_queue.push_back(n);
             }
@@ -384,6 +385,8 @@ impl EscapeableNodes {
             for n in edges.neighbors_of(v) {
                 let in_cops_region = self.escapable[n] as isize - signed_marker <= 0;
                 let marked = self.escapable[n] & marker != 0;
+                //this is only correct, if the current region looks like a triangle, e.g. if the robber dosn't have
+                //to decrease his distance to the interior cop while escaping. 
                 let cop_can_intersect = self.some_boundary_dist[n] - cop.distances[n] >= cop_boundary_dist;
                 if in_cops_region && marked && cop_can_intersect {
                     self.escapable[n] = 0;
