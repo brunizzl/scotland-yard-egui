@@ -60,7 +60,7 @@ fn take_active(xs: &[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
 /// works great if most vertices have degree close to the maximum degree, as every vertex
 /// allocates the same space for potential neighbors
 /// CAUTION: if not most vertices have close to the maximum degree (e.g. with one central vertex),
-/// this structre is way worse than using a vector for each vertices' neighbors.
+/// this structure is way worse than using a vector for each vertices' neighbors.
 #[derive(Clone)]
 pub struct EdgeList {
     next_shrink_check_len: usize,
@@ -302,15 +302,17 @@ impl EdgeList {
     /// everything in queue is starting point and expected to already have the correct distance
     pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut [isize]) {
         debug_assert_eq!(distances.len(), self.nr_vertices());
-        while let Some(v) = queue.pop_front() {
+        let mut local_queue = std::mem::take(queue);
+        while let Some(v) = local_queue.pop_front() {
             let dist = distances[v];
             for n in self.neighbors_of(v) {
                 if distances[n] > dist + 1 {
                     distances[n] = dist + 1;
-                    queue.push_back(n);
+                    local_queue.push_back(n);
                 }
             }
         }
+        *queue = local_queue;
     }
 
     /// paintbucket tool, all in queue are starting vertices

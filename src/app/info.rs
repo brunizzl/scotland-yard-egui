@@ -267,7 +267,12 @@ impl Info {
     }
 
     fn update_escapable(&mut self, con: &DrawContext<'_>) {
-        self.escapable.update(&self.cop_hull, con.edges, &mut self.queue)
+        self.escapable.update(
+            self.characters.cops(), 
+            &self.cop_hull, 
+            con.edges, 
+            &mut self.queue
+        )
     }
 
     /// recomputes everything
@@ -438,6 +443,7 @@ impl Info {
                 let txt = match self.vertex_info {
                     DrawNumbers::Indices => { i.to_string() }
                     DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
+                    //DrawNumbers::MinCopDist => { self.escapable.boundary_dist()[i].to_string() }
                     DrawNumbers::None => { panic!() }
                     DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
                     DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[i]) }
@@ -503,21 +509,30 @@ impl Info {
         }
         for ch in self.characters.all() {
             let f_len = ch.last_positions.len() as f32;
+            let draw_size = |i| con.scale * 2.5 * (i + 0.8 * f_len) / f_len;
             for (i, (&v1, &v2)) in ch.last_positions.iter().tuple_windows().enumerate() { 
                 if !con.visible[v1] {
                     continue;
                 }      
                 let draw_pos_1 = con.vertex_draw_pos(v1);
-                let size = con.scale * 2.5 * (i as f32 + 0.8 * f_len) / f_len;
+                let size = draw_size(i as f32);
                 let marker_circle = Shape::circle_filled(draw_pos_1, size, ch.style().glow);
                 con.painter.add(marker_circle);
                 if !con.visible[v2] {
                     continue;
                 } 
                 let points = [draw_pos_1, con.vertex_draw_pos(v2)];
-                let stroke = Stroke::new(size * 0.5, ch.style().glow);
+                let stroke = Stroke::new(size * 0.75, ch.style().glow);
                 let line = Shape::LineSegment { points, stroke };
                 con.painter.add(line);
+            }
+            if let Some(&v) = ch.last_positions.last() {
+                if con.visible[v] {
+                    let draw_pos = con.vertex_draw_pos(v);
+                    let size = draw_size(f_len);
+                    let marker_circle = Shape::circle_filled(draw_pos, size, ch.style().glow);
+                    con.painter.add(marker_circle);
+                }
             }
         }
     }
