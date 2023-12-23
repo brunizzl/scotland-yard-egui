@@ -232,11 +232,11 @@ pub struct EscapeableNodes {
     /// thing we are actually interested in. 
     /// has one entry per vertex. interesting are only vertices in convex hull.
     /// if vertex `v` is escapable via segment `i`, the `(i % 16)`'th bit is set in `escapable[v]`
-    escapable: Vec<u16>,
+    escapable: Vec<u32>,
 }
 
 impl EscapeableNodes {
-    pub fn escapable(&self) -> &[u16] {
+    pub fn escapable(&self) -> &[u32] {
         &self.escapable
     }
 
@@ -322,7 +322,7 @@ impl EscapeableNodes {
 
     /// assumes segment has form `some_start..=owner`
     /// also assumes queue to only contain vertices of the region to add
-    fn add_region_to_escapable(&mut self, owner: usize, marker: u16, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+    fn add_region_to_escapable(&mut self, owner: usize, marker: u32, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         debug_assert!(owner != 0);
         debug_assert!(queue.iter().all(|&v| self.last_write_by[v] == owner));
         while let Some(v) = queue.pop_front() {
@@ -358,7 +358,7 @@ impl EscapeableNodes {
             debug_assert!(queue.is_empty());
             let last = *vertices.last().unwrap();
             queue.push_back(last);
-            let marker = 1u16 << (seq_nr % 16);
+            let marker = 1u32 << (seq_nr % 16);
             self.escapable[last] |= marker;
             self.add_region_to_escapable(owner, marker, edges, queue);
         }
@@ -398,6 +398,7 @@ impl EscapeableNodes {
     }
 
     /// assumes update_boundary_cops has already run
+    #[allow(dead_code)]
     fn consider_interior_cops(&mut self, cops: &[Character], hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         self.calc_boundary_dist(hull, edges, queue);
         let interior_cops = cops.iter().filter(
@@ -410,7 +411,7 @@ impl EscapeableNodes {
         }
     }
 
-    pub fn update(&mut self, cops: &[Character], hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+    pub fn update(&mut self, _cops: &[Character], hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         let nr_vertices = edges.nr_vertices();
         self.last_write_by.clear();
         self.escapable.clear();
@@ -420,7 +421,7 @@ impl EscapeableNodes {
         self.escapable.resize(nr_vertices, 0);
 
         self.consider_boundary_cops(hull, edges, queue);
-        self.consider_interior_cops(cops, hull, edges, queue);
+        //self.consider_interior_cops(cops, hull, edges, queue);
     }
 }
 
