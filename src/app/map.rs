@@ -178,7 +178,7 @@ impl Map {
             let potential = |_, v_pos: Pos3| -char_dir.dot(v_pos.to_vec3().normalized());
             let (best_new_vertex, _) = self.data.find_local_minimum(potential, 0);
             ch.nearest_node = best_new_vertex;
-            ch.update_distances(self.data.edges(), self.data.positions(), &mut info.queue);
+            ch.update_distances(self.data.edges(), &mut info.queue);
         }
 
         let nr_vertices = self.data.nr_vertices();
@@ -224,7 +224,7 @@ impl Map {
             if self.shape != old_shape {
                 self.recompute_and_adjust(info);
             }
-            if add_drag_value(ui, &mut self.resolution, "Auflösung: ", 0, 200) {
+            if add_drag_value(ui, &mut self.resolution, "Auflösung: ", 1, 200) {
                 self.recompute_and_adjust(info);
             }
         });
