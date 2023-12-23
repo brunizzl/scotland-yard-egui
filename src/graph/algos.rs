@@ -2,7 +2,7 @@
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use itertools::izip;
+use itertools::{izip, Itertools};
 
 use egui::*;
 
@@ -30,6 +30,10 @@ pub struct ConvexHull {
     inside: Vec<InSet>, 
     /// enumerates vertices which are on boundary
     boundary: Vec<usize>, 
+
+    /// nr of steps to reach outside. e.g. 0 for vertices outside hull
+    /// and 1 for vertices on boundary
+    dist_to_outside: Vec<isize>,
     /// indexes in self.boundary, each segment is delimited by two cops on boundary.
     /// the cops' vertices and the vertices neighboring these cops are excluded
     segment_interiors: Vec<Range<usize>>, 
@@ -40,6 +44,7 @@ impl ConvexHull {
         Self {
             inside: Vec::new(),
             boundary: Vec::new(),
+            dist_to_outside: Vec::new(),
             segment_interiors: Vec::new(),
         }
     }
@@ -53,8 +58,13 @@ impl ConvexHull {
         &self.boundary
     }
 
+    #[allow(dead_code)]
+    pub fn dist_to_outside(&self) -> &[isize] {
+        &self.dist_to_outside
+    }
+
     /// each segment consists of vertices on boundary, segments are divided by cops
-    pub fn boundary_segments<'a>(&'a self) -> impl Iterator<Item = &'a [usize]> + 'a {
+    pub fn boundary_segments<'a>(&'a self) -> impl ExactSizeIterator<Item = &'a [usize]> + 'a + Clone {
         self.segment_interiors.iter().map(|seg| &self.boundary[seg.clone()])
     }
 
@@ -108,73 +118,103 @@ impl ConvexHull {
         }
     }
 
-    fn update_boundary(&mut self, cops: &[Character], edges: &EdgeList) {
-        //idea: walk outside hull and look inside, but actually store the inside nodes
-        //this approach will fail, if one cop stands at the border of the map, but this is something
-        //2d no happening in the intresting real 3d case anyway.
-        let mut boundary = std::mem::take(&mut self.boundary);
-        boundary.clear();
-        let fst_outside = 'search_start_vertex: loop {
-            for cop in cops.iter().filter(|c| c.on_node) {
-                for n in edges.neighbors_of(cop.nearest_node) {
-                    if !self.inside[n].yes() {
-                        boundary.push(cop.nearest_node);
-                        break 'search_start_vertex n;
-                    }
-                }
+    /// assumes self.inside is already up to date
+    fn update_dist_to_outside(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        debug_assert_eq!(self.inside.len(), edges.nr_vertices());
+        queue.clear();
+        self.dist_to_outside.clear();
+        let mut iter = izip!(&self.inside, edges.neighbors(), 0..);
+        self.dist_to_outside.resize_with(edges.nr_vertices(), || {
+            let (&in_hull, mut neighs, v) = iter.next().unwrap();
+            if !in_hull.yes() {
+                0
+            } else if neighs.all(|n| self.inside[n].yes()) { 
+                isize::MAX 
+            } else { 
+                queue.push_back(v);
+                1 
             }
-            return;
-        };
-        let mut last_outside = usize::MAX;
-        let mut curr_outside = fst_outside;
-        let mut steps_since_boundary_change = 0;
-        loop {
-            let mut change_outside = false;
-            let mut change_boundary = false;
-            for n in edges.neighbors_of(curr_outside) {
-                //find vertices on hull boundary
-                if self.inside[n].yes() {
-                    let len = boundary.len();
-                    let range_min = if len < 10 { 0 } else { len - 10 };
-                    if !boundary[range_min..].contains(&n) {
-                        boundary.push(n);
-                        change_boundary = true;
-                    }
-                }
-                else { //find next vertex just outside hull
-                    let still_searching = !change_outside;
-                    let is_new = n != last_outside; //can only be trusted if still_searching
-                    let borders_hull = edges.neighbors_of(n).any(|nn| self.inside[nn].yes());
-                    if still_searching && is_new && borders_hull {
-                        last_outside = curr_outside;
-                        curr_outside = n;
-                        change_outside = true;
-                    }
-                }
-            }
-            if change_boundary {
-                steps_since_boundary_change = 0;
-            }
-            else {
-                steps_since_boundary_change += 1;
-            }
-            if steps_since_boundary_change > 100 || boundary.len() > edges.nr_vertices() || !change_outside {
-                //if !change_outside, we have hit a boundary of the graph itself and thus cant find any more 
-                //  vertices outside the hull.
-                //the resulting boundary part however is of such shape, that we can keep it for the later uses.
-                //should that change: add !change_outside to the failure path.
+        });
 
-                //for the other two: i have no idea.
-                //some error occured -> give up and keep boundary empty
-                //the algorithms should work on a planar triangulation, so the given graph is not planar?
-                boundary.clear();
-                break;
-            }
-            if curr_outside == fst_outside {
-                break; //happy path :)
+        edges.calc_distances_to(queue, &mut self.dist_to_outside);
+    }
+
+    fn find_fist_boundary_point(&self, cops: &[Character], edges: &EdgeList) -> Option<usize> {
+        for cop in cops.iter().filter(|c| c.on_node) {
+            let v = cop.nearest_node;
+            for n in edges.neighbors_of(v) {
+                if !self.inside[n].yes() {
+                    debug_assert_eq!(self.dist_to_outside[v], 1);
+                    return Some(v);
+                }
             }
         }
-        self.boundary = boundary;
+        None
+    }
+
+    /// assumes that self.dist_to_outside is already up to date
+    fn update_boundary(&mut self, cops: &[Character], edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        let Some(fst_inside) = self.find_fist_boundary_point(cops, edges) else { return; };
+
+        let mut potential_next = std::mem::take(queue);
+        let mut boundary = std::mem::take(&mut self.boundary);
+        boundary.clear();
+        let mut curr_inside = fst_inside;
+        loop {
+            boundary.push(curr_inside);
+            let range_min = { 
+                let len = boundary.len();
+                if len < 15 { 0 } else { len - 15 }
+            };
+
+            for n in edges.neighbors_of(curr_inside) {
+                //this will miss small overall hull sizes of width 1, but these are boring anyway.
+                if boundary[range_min..].contains(&n) {
+                    continue;
+                }
+                if self.dist_to_outside[n] != 1 {
+                    continue;
+                }
+                if n == fst_inside { //happy exit :)
+                    self.boundary = boundary;
+                    *queue = potential_next;
+                    return;
+                }
+                potential_next.push_back(n);
+            }
+            match potential_next.len() {
+                1 => curr_inside = potential_next[0], //common case
+
+                0 => for old in &boundary[range_min..] { //take the option visited the longest time ago
+                    if edges.neighbors_of(curr_inside).contains(old) {
+                        curr_inside = *old;
+                        break;
+                    }
+                },
+
+                _ => if boundary.len() == 1 && potential_next.len() == 2 {
+                    //the first boundary point decides the direction
+                    curr_inside = potential_next[0];
+                } else {
+                    //take one that shares an outside neighbor with curr_inside (only guaranteed to happen in triangulations)
+                    let curr_neighs_outside = edges.neighbors_of(curr_inside)
+                        .filter(|&n| self.dist_to_outside[n] == 0);
+                    for &pn in potential_next.iter() {
+                        if edges.neighbors_of(pn).any(|pnn| curr_neighs_outside.clone().contains(&pnn)) {
+                            curr_inside = pn;
+                            break;
+                        }
+                    }
+                },
+            }
+            potential_next.clear();
+            if *boundary.last().unwrap() == curr_inside || boundary.len() >= edges.nr_vertices() { //sad exit :(
+                boundary.clear();
+                self.boundary = boundary;
+                *queue = potential_next;
+                return;
+            }
+        }
     }
 
     fn update_segments(&mut self, min_cop_dist: &[isize]) {
@@ -208,7 +248,8 @@ impl ConvexHull {
         vertices_outside_hull: &[usize]) 
     {
         self.update_inside(cops, edges, queue, vertices_outside_hull);
-        self.update_boundary(cops, edges);
+        self.update_dist_to_outside(edges, queue);
+        self.update_boundary(cops, edges, queue);
         self.update_segments(min_cop_dist);
     }
 }
@@ -241,8 +282,13 @@ impl EscapeableNodes {
     }
 
     #[allow(dead_code)]
-    fn boundary_dist(&self) -> &[isize] {
+    pub fn boundary_dist(&self) -> &[isize] {
         &self.some_boundary_dist
+    }
+
+    #[allow(dead_code)]
+    pub fn owners(&self) -> &[usize] {
+        &self.last_write_by
     }
 
     pub fn new() -> Self {
@@ -253,42 +299,39 @@ impl EscapeableNodes {
         }
     }
 
-    /// stores dist to closest boundary vertex of same marker region in `self.some_boundary_dist`.
-    fn calc_boundary_dist(&mut self, hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>) {
-        self.some_boundary_dist.clear();
-        self.some_boundary_dist.resize(edges.nr_vertices(), isize::MAX);
-        let boundary_dist = &mut self.some_boundary_dist[..];
+    
 
-        let mut local_queue = std::mem::take(queue);
-        local_queue.clear();
-        for segment in hull.boundary_segments() {
-            for &v in segment {
-                boundary_dist[v] = 0;
-                local_queue.push_back(v);
-            }
-            let marker = self.escapable[segment[0]];
-            while let Some(v) = local_queue.pop_front() {
-                let dist = boundary_dist[v];
-                debug_assert!(dist != isize::MAX);
-                debug_assert!(self.escapable[v] & marker != 0);
-                for n in edges.neighbors_of(v) {
-                    if self.escapable[n] & marker == 0 {
-                        continue;
-                    }
-                    if boundary_dist[n] > dist + 1 {
-                        boundary_dist[n] = dist + 1;
-                        local_queue.push_back(n);
-                    }
-                }
-            }
-        }        
-        *queue = local_queue;
+    /// stores dist to closest boundary vertex of same marker region in `self.some_boundary_dist`.
+    fn calc_boundary_dist_to(&mut self, boundary: &[usize], owner: usize, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        debug_assert_eq!(self.some_boundary_dist.len(), edges.nr_vertices());
+        debug_assert!(boundary.iter().all(|&v| self.last_write_by[v] == owner));
+
+        queue.clear();
+        let v0 = boundary[0];
+        self.some_boundary_dist[v0] = isize::MAX;
+        queue.push_back(v0);
+        edges.recolor_region_with(
+            isize::MAX, 
+            &mut self.some_boundary_dist, 
+            |v, _| self.last_write_by[v] == owner, 
+            queue
+        );
+
+        for &v in boundary {
+            self.some_boundary_dist[v] = 0;
+            queue.push_back(v);
+        }
+        edges.calc_distances_to_with(
+            &mut self.some_boundary_dist, 
+            |v, _| self.last_write_by[v] == owner, 
+            queue
+        );
     }
 
     /// weird hybrid of region coloring and distance calculation:
     /// update distances of self.some_boundary_dist in neighborhood of queue entries,
     /// recolor region in self.last_write_by to be owner
-    fn calc_small_dists(&mut self, mut ignore: impl FnMut(usize) -> bool, edges: &EdgeList, 
+    fn calc_small_dists(&mut self, mut select: impl FnMut(usize) -> bool, edges: &EdgeList, 
         queue: &mut VecDeque<usize>, max_dist: isize, last_owner: Option<usize>, owner: usize) 
     {
         let fst_in_segment = last_owner == None;
@@ -300,7 +343,8 @@ impl EscapeableNodes {
                 continue;
             }
             for n in edges.neighbors_of(v) {
-                if ignore(n) {
+                //can by specified by caller what region is selected as baseline (e.g. convex hull...)
+                if !select(n) {
                     continue;
                 }
                 //the fist boundary vertex in a segment is allowed to mark all vertices in its reach.
@@ -310,12 +354,15 @@ impl EscapeableNodes {
                 if !fst_in_segment && self.last_write_by[n] != last_owner {
                     continue;
                 }
-                //adapted from Edgelist::calc_distances_to
-                if self.last_write_by[n] != owner {
-                    self.some_boundary_dist[n] = dist + 1;
-                    local_queue.push_back(n);
-                    self.last_write_by[n] = owner;
+                //we have been here before -> no need to mark again
+                if self.last_write_by[n] == owner {
+                    continue;
                 }
+                //it is key to never check the distance we overwrite. we don't want the minimum distance to all
+                //boundary nodes, we actually want the distance to the current boundary node.
+                self.some_boundary_dist[n] = dist + 1;
+                local_queue.push_back(n);
+                self.last_write_by[n] = owner;
             }
         }
         *queue = local_queue;
@@ -325,15 +372,14 @@ impl EscapeableNodes {
     /// also assumes queue to only contain vertices of the region to add
     fn add_region_to_escapable(&mut self, owner: usize, marker: u32, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         debug_assert!(owner != 0);
-        debug_assert!(queue.iter().all(|&v| self.last_write_by[v] == owner));
         while let Some(v) = queue.pop_front() {
-            debug_assert!(self.escapable[v] | marker != 0);
-            if self.last_write_by[v] == 0 {
-                continue;
-            }
+            debug_assert!(self.escapable[v] & marker != 0);
             debug_assert_eq!(self.last_write_by[v], owner);
-            self.last_write_by[v] = 0;
             for n in edges.neighbors_of(v) {
+                //already marked -> don't add to queue again
+                if self.escapable[n] & marker != 0 {
+                    continue;
+                }
                 if self.last_write_by[n] == owner {
                     self.escapable[n] |= marker;
                     queue.push_back(n);
@@ -354,91 +400,45 @@ impl EscapeableNodes {
             //future boundary vertices thus only consider inner vertices reached by both extremes,
             //which should get us some constant factor in speedup.
             let mut last_i = None;
+            let mut last_v = usize::MAX;
             let mut compute_dists_to = |i, v| {
                 debug_assert!(i != 0);
                 queue.push_back(v);
                 self.some_boundary_dist[v] = 0;
                 self.last_write_by[v] = i;
-                let not_in_hull = |x:usize| !hull.inside[x].yes();
-                self.calc_small_dists(not_in_hull, edges, queue, max_dist, last_i, i);
+                let in_hull = |x:usize| hull.inside[x].yes();
+                self.calc_small_dists(in_hull, edges, queue, max_dist, last_i, i);
                 last_i = Some(i);
+                last_v = v;
             };
             let mut iter = izip!(indices.clone(), vertices);
-            if let Some((i, &v)) = iter.next() {
+            if let Some((i, &v)) = iter.next_back() {
                 compute_dists_to(i, v);
             }
-            for (i, &v) in iter.rev() {
+            for (i, &v) in iter {
                 compute_dists_to(i, v);
             }
 
             let owner = last_i.unwrap();
             debug_assert!(queue.is_empty());
-            let last = *vertices.last().unwrap();
-            queue.push_back(last);
+            queue.push_back(last_v);
             let marker = 1u32 << (seq_nr % 32);
-            self.escapable[last] |= marker;
+            self.escapable[last_v] |= marker;
             self.add_region_to_escapable(owner, marker, edges, queue);
-        }
-    }
-
-    fn unmark_interior_near(&mut self, cop: &Character, edges: &EdgeList, queue: &mut VecDeque<usize>) {
-        let mut local_queue = std::mem::take(queue);
-        let start = cop.nearest_node;
-        let mut marker = self.escapable[start];
-        if marker != 0 {
-            self.escapable[start] = 0;
-        }
-        for n in edges.neighbors_of(start) {
-            if self.escapable[n] != 0 {
-                marker |= self.escapable[n];
-                self.escapable[n] = 0;
-                local_queue.push_back(n);
-            }
-        }
-        let cop_boundary_dist = self.some_boundary_dist[start] - 1;
-        let signed_marker = marker as isize;
-        while let Some(v) = local_queue.pop_front() {
-            debug_assert_eq!(self.escapable[v], 0);
-            for n in edges.neighbors_of(v) {
-                let in_cops_region = self.escapable[n] as isize - signed_marker <= 0;
-                let marked = self.escapable[n] & marker != 0;
-                //this is only correct, if the current region looks like a triangle, e.g. if the robber dosn't have
-                //to decrease his distance to the interior cop while escaping. 
-                let cop_can_intersect = self.some_boundary_dist[n] - cop.distances[n] >= cop_boundary_dist;
-                if in_cops_region && marked && cop_can_intersect {
-                    self.escapable[n] = 0;
-                    local_queue.push_back(n);
-                }
-            }
-        }
-        *queue = local_queue;
-    }
-
-    /// assumes update_boundary_cops has already run
-    #[allow(dead_code)]
-    fn consider_interior_cops(&mut self, cops: &[Character], hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>) {
-        self.calc_boundary_dist(hull, edges, queue);
-        let interior_cops = cops.iter().filter(
-            |c| c.on_node && edges.neighbors_of(c.nearest_node).all(
-                |n| hull.inside[n].yes()
-            )
-        );
-        for cop in interior_cops {
-            self.unmark_interior_near(cop, edges, queue);
+            self.calc_boundary_dist_to(vertices, owner, edges, queue);
         }
     }
 
     pub fn update(&mut self, _cops: &[Character], hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         let nr_vertices = edges.nr_vertices();
-        self.last_write_by.clear();
         self.escapable.clear();
+        self.last_write_by.clear();
         self.some_boundary_dist.clear();
-        self.some_boundary_dist.resize(nr_vertices, isize::MAX);
-        self.last_write_by.resize(nr_vertices, 0); //no owner is 0 (as a cop stands at pos 0 of hull boundary)
         self.escapable.resize(nr_vertices, 0);
+        self.last_write_by.resize(nr_vertices, 0); //no owner is 0 (as a cop stands at pos 0 of hull boundary)
+        self.some_boundary_dist.resize(nr_vertices, isize::MAX);
 
         self.consider_boundary_cops(hull, edges, queue);
-        //self.consider_interior_cops(cops, hull, edges, queue);
     }
 }
 

@@ -56,7 +56,7 @@ fn blend<'a>(colors: impl Iterator<Item = &'a [f32; 3]>) -> Color32 {
 
 pub fn u16_marker_color(marker: u32) -> Color32 {
     let iter = izip!(&AUTOMATIC_MARKER_COLORS, 0..).filter_map(|(col, i)|
-        (2u32.pow(i) & marker != 0).then_some(col)
+        ((1u32 << i) & marker != 0).then_some(col)
     );
     blend(iter)
 }
@@ -108,8 +108,8 @@ const fn create_distinct_colors() -> [[f32; 3]; 32] {
         let mut k = 0;
         while k < 32 {
             let ang = (tau * k) / 32 + ang_offset;
-            let sat = 900;
-            let val = 950;
+            let sat = 870;
+            let val = 850;
             res[i] = hsv_to_rgb(ang, sat, val);
             i += 1;
             k += 32 / 4;

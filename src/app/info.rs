@@ -21,7 +21,7 @@ impl RobberInfo {
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum DrawNumbers { None, Indices, RobberAdvantage, EscapeableNodes, MinCopDist }
+pub enum DrawNumbers { None, Indices, RobberAdvantage, EscapeableNodes, DistToFreedom, MinCopDist, Debugging }
 
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -117,9 +117,10 @@ impl Info {
         ui.collapsing("Knoteninfo", |ui|{
             self.menu_change |= 
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"))
-                .on_hover_text("Berechnung des Randes kann im 2D Fall und insbesondere im \
-                zufällig triangulierten Fall versagen. Manche Marker brauchen diesen Rand und \
-                werden in diesen Fällen dann nicht angezeigt.")
+                .on_hover_text("Berechnung des Randes kann aus Effizienzgründen für sehr kleine / \
+                sehr dünne Hüllen fehlerhaft sein. \n\
+                Wenn die Cops im 3D Fall den gesamten Graphen durch die Hülle abdecken, wird trotzdem ein Rand gezeigt, da\
+                der Punkt am weitesten entfernt von jedem Cop vom Algorithmus hier immer als außerhalb der Hülle angenommen wird.")
                 .changed();
 
             ui.add_space(5.0);
@@ -179,12 +180,22 @@ impl Info {
 
             ui.radio_value(&mut self.vertex_info, DrawNumbers::EscapeableNodes, 
                 "Marker Fluchtoption 2")
-                .on_hover_text("jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. C }. \
+                .on_hover_text("jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
                 Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.");
 
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
                 "minimaler Cop Abstand")
                 .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
+
+            ui.radio_value(&mut self.vertex_info, DrawNumbers::DistToFreedom, 
+                "Distanz zur Freiheit")
+                .on_hover_text("Distanz zu nähestem Punkt außerhalb der Konvexen Hülle");
+
+            ui.radio_value(&mut self.vertex_info, DrawNumbers::Debugging, 
+                "Debugging")
+                .on_hover_text("Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
+                gerade spannend zum debuggen war");
+
             self.menu_change |= old != self.vertex_info;
         });
         ui.collapsing("Strategie Räuber", |ui|{
@@ -298,7 +309,8 @@ impl Info {
         
         let update_hull = update_cop_advantage 
             || update_escapable 
-            || self.show_convex_hull;
+            || self.show_convex_hull
+            || self.vertex_info == DrawNumbers::DistToFreedom;
 
         let update_min_cop_dist = update_hull
             || self.robber_info == RobberInfo::CopDist
@@ -431,11 +443,10 @@ impl Info {
             return;
         }
         let true_bits = |x:u32| -> String {
-            const HEX_CHARS: [char; 32] = 
+            const NAMES: [char; 32] = 
                 ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 
                  'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', ];
-            let pow2 = (0..32).map(|i| 2u32.pow(i));
-            izip!(HEX_CHARS, pow2).filter_map(|(c, i)| (i & x != 0).then_some(c)).collect()
+            izip!(NAMES, 0..).filter_map(|(name, i)| ((1u32 << i) & x != 0).then_some(name)).collect()
         };
         let font = FontId::proportional(con.scale * 8.0);
         let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
@@ -444,10 +455,15 @@ impl Info {
                 let txt = match self.vertex_info {
                     DrawNumbers::Indices => { i.to_string() }
                     DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
-                    //DrawNumbers::MinCopDist => { self.escapable.boundary_dist()[i].to_string() }
+                    DrawNumbers::DistToFreedom => self.cop_hull.dist_to_outside()[i].to_string(),
                     DrawNumbers::None => { panic!() }
                     DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
                     DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[i]) }
+                    DrawNumbers::Debugging => self.escapable.owners()[i].to_string(),
+                    //DrawNumbers::Debugging => { 
+                    //    let d = self.escapable.boundary_dist()[i];
+                    //    if d == isize::MAX { String::new() } else { d.to_string() }
+                    //}
                 };
                 let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
                 layout_job.halign = Align::Center;
