@@ -1,6 +1,6 @@
 
 use std::collections::VecDeque;
-use std::iter::Map;
+use std::iter::{Map, ExactSizeIterator};
 use std::slice::{Chunks, Iter};
 
 use itertools::Itertools;
@@ -170,7 +170,7 @@ impl EdgeList {
         self.entries.chunks(self.max_neighbors)
     }
 
-    pub fn neighbors(&self) -> Map<Chunks<'_, Index>, fn(&[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize>> {
+    pub fn neighbors(&self) -> impl ExactSizeIterator<Item = impl ExactSizeIterator<Item = usize> + '_ + Clone> + '_ + Clone {
         self.potential_neighbors().map(take_active)
     }
 
@@ -300,13 +300,15 @@ impl EdgeList {
     }
 
     /// everything in queue is starting point and expected to already have the correct distance
-    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut [isize]) {
+    pub fn calc_distances_to_with<F>(&self, distances: &mut [isize], mut select: F, queue: &mut VecDeque<usize>) 
+    where F: FnMut(usize, &[isize]) -> bool
+    {
         debug_assert_eq!(distances.len(), self.nr_vertices());
         let mut local_queue = std::mem::take(queue);
         while let Some(v) = local_queue.pop_front() {
             let dist = distances[v];
             for n in self.neighbors_of(v) {
-                if distances[n] > dist + 1 {
+                if select(n, distances) && distances[n] > dist + 1 {
                     distances[n] = dist + 1;
                     local_queue.push_back(n);
                 }
@@ -315,22 +317,47 @@ impl EdgeList {
         *queue = local_queue;
     }
 
-    /// paintbucket tool, all in queue are starting vertices
-    pub fn recolor_region<Color: Eq + Clone>(&self, (old, new): (Color, Color), 
-        colors: &mut [Color], queue: &mut VecDeque<usize>) -> usize {
-        
+    /// everything in queue is starting point and expected to already have the correct distance
+    pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut [isize]) {
+        self.calc_distances_to_with(distances, |_, _| true, queue)
+    }
+
+    /// paintbucket tool, all in queue are starting vertices, is_old decides if a color is changed to new
+    /// and can therefore also access colors as snd parameter
+    pub fn recolor_region_with<Color, F>(&self, new: Color, colors: &mut [Color], 
+        mut is_old: F, queue: &mut VecDeque<usize>) -> usize 
+    where Color: Eq + Clone + std::fmt::Debug,
+          F: FnMut(usize, &[Color]) -> bool
+    {        
         debug_assert_eq!(self.nr_vertices(), colors.len());
         let mut nr_colored = 0;
-        while let Some(node) = queue.pop_front() {
-            for n in self.neighbors_of(node) {
-                if colors[n] == old {
+        let mut local_queue = std::mem::take(queue);
+        while let Some(v) = local_queue.pop_front() {
+            debug_assert_eq!(colors[v], new);
+            for n in self.neighbors_of(v) {
+                //seems redundant at first for the simple recolor_region case, 
+                //but prevents getting stuck in the case of old == new
+                if colors[n] == new { 
+                    continue;
+                }
+                if is_old(n, colors) {
                     nr_colored += 1;
                     colors[n] = new.clone();
-                    queue.push_back(n);
+                    local_queue.push_back(n);
                 }
             }
         }
+        *queue = local_queue;
         nr_colored
+    }
+
+    /// paintbucket tool, all in queue are starting vertices
+    pub fn recolor_region<Color>(&self, (old, new): (Color, Color), 
+        colors: &mut [Color], queue: &mut VecDeque<usize>) -> usize 
+    where Color: Eq + Clone + std::fmt::Debug
+    {
+        debug_assert_ne!(old, new); //technically not needed, but why would anyone want that?
+        self.recolor_region_with(new, colors, |v, cs| cs[v] == old, queue)
     }
 
     pub fn find_local_minimum(&self, mut potential: impl FnMut(usize) -> f32, node_hint: usize) -> (usize, f32) {
