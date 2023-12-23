@@ -430,10 +430,11 @@ impl Info {
         if self.vertex_info == DrawNumbers::None {
             return;
         }
-        let true_bits = |x:u16| -> String {
-            const HEX_CHARS: [char; 16] = 
-                ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
-            let pow2 = (0..16).map(|i| 2u16.pow(i));
+        let true_bits = |x:u32| -> String {
+            const HEX_CHARS: [char; 32] = 
+                ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 
+                 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', ];
+            let pow2 = (0..32).map(|i| 2u32.pow(i));
             izip!(HEX_CHARS, pow2).filter_map(|(c, i)| (i & x != 0).then_some(c)).collect()
         };
         let font = FontId::proportional(con.scale * 8.0);

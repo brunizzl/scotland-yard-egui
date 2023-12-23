@@ -11,7 +11,8 @@ pub const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
 pub const RED: Color32 = Color32::from_rgb(230, 50, 50);
 pub const YELLOW: Color32 = Color32::from_rgb(240, 240, 50);
 
-const MARKER_COLORS: [[f32; 3]; 16] = [
+#[allow(dead_code)]
+const HAND_PICKED_MARKER_COLORS: [[f32; 3]; 16] = [
     [171.0, 130.0, 255.0], //MediumPurple1
     [255.0,  64.0,  64.0], //brown1
     [255.0, 215.0,   0.0], //gold1
@@ -29,6 +30,8 @@ const MARKER_COLORS: [[f32; 3]; 16] = [
     [124.0, 252.0,   0.0], //LawnGreen
     [131.0, 111.0, 255.0], //SlateBlue1
 ];
+
+const AUTOMATIC_MARKER_COLORS: [[f32; 3]; 32] = create_distinct_colors();
 
 fn plus_eq(color1: &mut [f32; 3], color2: &[f32; 3]) {
     for (c1, c2) in color1.iter_mut().zip(color2.iter()) {
@@ -51,10 +54,83 @@ fn blend<'a>(colors: impl Iterator<Item = &'a [f32; 3]>) -> Color32 {
     floats_to_color(res, 1.0 / count)
 }
 
-pub fn u16_marker_color(marker: u16) -> Color32 {
-    let iter = izip!(&MARKER_COLORS, 0..).filter_map(|(col, i)|
-        (2u16.pow(i) & marker != 0).then_some(col)
+pub fn u16_marker_color(marker: u32) -> Color32 {
+    let iter = izip!(&AUTOMATIC_MARKER_COLORS, 0..).filter_map(|(col, i)|
+        (2u32.pow(i) & marker != 0).then_some(col)
     );
     blend(iter)
+}
+
+//assume s, v, in interval 0..1000, h in interval 0..6000000
+//we use integers, as floating point is disallowed in compile time...
+const fn hsv_to_rgb(h: usize, s: usize, v: usize) -> [f32; 3] {
+    assert!(h <= 6000000);
+    assert!(s <= 1000);
+    assert!(v <= 1000);
+
+    let h_interval = h / 1000000; //in interval 0..6
+    let f = (h / 1000) - h_interval * 1000;
+    let p = (v * (1000 - s)) / 1000;
+    let q = (v * (1000 - (s * f)  / 1000)) / 1000;
+    let t = (v * (1000 - (s * (1000 - f))  / 1000))  / 1000;
+    let (r, g, b) = match h_interval {
+        0 | 6 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        5 => (v, p, q),
+        _ => panic!(),
+    };
+    let r_f32 = ((r * 255) / 1000) as f32;
+    let g_f32 = ((g * 255) / 1000) as f32;
+    let b_f32 = ((b * 255) / 1000) as f32;
+    [r_f32, g_f32, b_f32]
+}
+
+const fn create_distinct_colors() -> [[f32; 3]; 32] {
+    let mut res = [[0.0; 3]; 32];
+    let mut i = 0;
+    let tau = 6000000; //circular constant, e.g. 2 * pi, only blown up and int, because compiletime
+    let sat = 900;
+    let val = 950;
+    {
+        let mut k = 0;
+        while k < 4 {
+            let ang = (tau * k) / 4;
+            res[i] = hsv_to_rgb(ang, sat, val);
+            i += 1;
+            k += 1;
+        }
+    } //now i == 4
+    {
+        let mut k = 2;
+        while k < 6 {
+            let ang = (tau * ((k % 4) * 2 + 1)) / 8;
+            res[i] = hsv_to_rgb(ang, sat, val);
+            i += 1;
+            k += 1;
+        }
+    } //now i == 8
+    {
+        let mut k = 0;
+        while k < 8 {
+            let ang = (tau * ((k % 8) * 2 + 1)) / 16;
+            res[i] = hsv_to_rgb(ang, sat, val);
+            i += 1;
+            k += 1;
+        }
+    } //now i == 16
+    {
+        let mut k = 8;
+        while k < 24 {
+            let ang = (tau * ((k % 16) * 2 + 1)) / 32;
+            res[i] = hsv_to_rgb(ang, sat, val);
+            i += 1;
+            k += 1;
+        }
+    } //now i == 32
+
+    res
 }
 
