@@ -231,7 +231,7 @@ pub struct EscapeableNodes {
 
     /// thing we are actually interested in. 
     /// has one entry per vertex. interesting are only vertices in convex hull.
-    /// if vertex `v` is escapable via segment `i`, the `(i % 16)`'th bit is set in `escapable[v]`
+    /// if vertex `v` is escapable via segment `i`, the `(i % 32)`'th bit is set in `escapable[v]`
     escapable: Vec<u32>,
 }
 
@@ -241,7 +241,7 @@ impl EscapeableNodes {
     }
 
     #[allow(dead_code)]
-    pub fn boundary_dist(&self) -> &[isize] {
+    fn boundary_dist(&self) -> &[isize] {
         &self.some_boundary_dist
     }
 
@@ -288,10 +288,11 @@ impl EscapeableNodes {
     /// weird hybrid of region coloring and distance calculation:
     /// update distances of self.some_boundary_dist in neighborhood of queue entries,
     /// recolor region in self.last_write_by to be owner
-    fn calc_small_dists(&mut self, hull: &ConvexHull, edges: &EdgeList, queue: &mut VecDeque<usize>, 
-        max_dist: isize, segment: Range<usize>, owner: usize) 
+    fn calc_small_dists(&mut self, mut ignore: impl FnMut(usize) -> bool, edges: &EdgeList, 
+        queue: &mut VecDeque<usize>, max_dist: isize, last_owner: Option<usize>, owner: usize) 
     {
-        let fst_in_segment = owner == segment.start;
+        let fst_in_segment = last_owner == None;
+        let last_owner = last_owner.unwrap_or(usize::MAX);
         let mut local_queue = std::mem::take(queue);
         while let Some(v) = local_queue.pop_front() {
             let dist = self.some_boundary_dist[v];
@@ -299,14 +300,14 @@ impl EscapeableNodes {
                 continue;
             }
             for n in edges.neighbors_of(v) {
-                if !hull.inside[n].yes() {
+                if ignore(n) {
                     continue;
                 }
                 //the fist boundary vertex in a segment is allowed to mark all vertices in its reach.
                 //all further vertices of that same segment can only mark hull vertices which have been reached by
-                //that first one.
+                //all previous ones.
                 //the vertices counted at the end are only those reached by all boundary vertices.
-                if !fst_in_segment && !segment.contains(&self.last_write_by[n]) {
+                if !fst_in_segment && self.last_write_by[n] != last_owner {
                     continue;
                 }
                 //adapted from Edgelist::calc_distances_to
@@ -320,7 +321,7 @@ impl EscapeableNodes {
         *queue = local_queue;
     }
 
-    /// assumes segment has form `some_start..=owner`
+    /// assumes segment was last colored by owner
     /// also assumes queue to only contain vertices of the region to add
     fn add_region_to_escapable(&mut self, owner: usize, marker: u32, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         debug_assert!(owner != 0);
@@ -347,18 +348,34 @@ impl EscapeableNodes {
         for (indices, vertices, seq_nr) in izip!(&hull.segment_interiors, hull.boundary_segments(), 0..) {
             let max_dist = indices.len() as isize - 1;
             debug_assert_eq!(indices.len(), vertices.len());
-            for (i, &v) in izip!(indices.clone(), vertices) {
+
+            //we call calc_small_dists vor every vertex in our boundary segement.
+            //to speed up computation, our first and second vertex are on opposing ends. 
+            //future boundary vertices thus only consider inner vertices reached by both extremes,
+            //which should get us some constant factor in speedup.
+            let mut last_i = None;
+            let mut compute_dists_to = |i, v| {
                 debug_assert!(i != 0);
                 queue.push_back(v);
                 self.some_boundary_dist[v] = 0;
                 self.last_write_by[v] = i;
-                self.calc_small_dists(hull, edges, queue, max_dist, indices.clone(), i);
+                let not_in_hull = |x:usize| !hull.inside[x].yes();
+                self.calc_small_dists(not_in_hull, edges, queue, max_dist, last_i, i);
+                last_i = Some(i);
+            };
+            let mut iter = izip!(indices.clone(), vertices);
+            if let Some((i, &v)) = iter.next() {
+                compute_dists_to(i, v);
             }
-            let owner = indices.end - 1; //last i of loop above
+            for (i, &v) in iter.rev() {
+                compute_dists_to(i, v);
+            }
+
+            let owner = last_i.unwrap();
             debug_assert!(queue.is_empty());
             let last = *vertices.last().unwrap();
             queue.push_back(last);
-            let marker = 1u32 << (seq_nr % 16);
+            let marker = 1u32 << (seq_nr % 32);
             self.escapable[last] |= marker;
             self.add_region_to_escapable(owner, marker, edges, queue);
         }

@@ -90,46 +90,33 @@ const fn hsv_to_rgb(h: usize, s: usize, v: usize) -> [f32; 3] {
 
 const fn create_distinct_colors() -> [[f32; 3]; 32] {
     let mut res = [[0.0; 3]; 32];
-    let mut i = 0;
     let tau = 6000000; //circular constant, e.g. 2 * pi, only blown up and int, because compiletime
-    let sat = 900;
-    let val = 950;
-    {
+    let ang_offsets = [
+        tau/32, 
+        tau/32 + tau/8, 
+        tau/32 + tau/16, 
+        tau/32 + tau/16 + tau/8, 
+        0, 
+        tau/8, 
+        tau/16, 
+        tau/16 + tau/8, 
+    ];
+    let mut i = 0;
+    let mut nr_ang_offset = 0;
+    while nr_ang_offset < ang_offsets.len() {
+        let ang_offset = ang_offsets[nr_ang_offset];
         let mut k = 0;
-        while k < 4 {
-            let ang = (tau * k) / 4;
+        while k < 32 {
+            let ang = (tau * k) / 32 + ang_offset;
+            let sat = 900;
+            let val = 950;
             res[i] = hsv_to_rgb(ang, sat, val);
             i += 1;
-            k += 1;
+            k += 32 / 4;
         }
-    } //now i == 4
-    {
-        let mut k = 2;
-        while k < 6 {
-            let ang = (tau * ((k % 4) * 2 + 1)) / 8;
-            res[i] = hsv_to_rgb(ang, sat, val);
-            i += 1;
-            k += 1;
-        }
-    } //now i == 8
-    {
-        let mut k = 0;
-        while k < 8 {
-            let ang = (tau * ((k % 8) * 2 + 1)) / 16;
-            res[i] = hsv_to_rgb(ang, sat, val);
-            i += 1;
-            k += 1;
-        }
-    } //now i == 16
-    {
-        let mut k = 8;
-        while k < 24 {
-            let ang = (tau * ((k % 16) * 2 + 1)) / 32;
-            res[i] = hsv_to_rgb(ang, sat, val);
-            i += 1;
-            k += 1;
-        }
-    } //now i == 32
+        nr_ang_offset += 1;
+    }
+    assert!(i == 32);
 
     res
 }
