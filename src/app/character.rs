@@ -154,6 +154,7 @@ impl Character {
             if Some(&self.nearest_node) != self.last_positions.last() {
                 //position changed and drag released -> new step
                 self.last_positions.push(self.nearest_node);
+                self.pos3 = con.positions[self.nearest_node];
                 just_released_on_new_node = true;
             }
         }
@@ -183,19 +184,17 @@ impl Character {
         let change = self.on_node && nearest_node != self.nearest_node;
         self.nearest_node = nearest_node;
         if change || self.distances.len() != con.positions.len() {
-            self.update_distances(con.edges, con.positions, queue);
+            self.update_distances(con.edges, queue);
         }
     }
 
-    pub fn update_distances(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
+    pub fn update_distances(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         queue.clear();
         queue.push_back(self.nearest_node);
         self.distances.clear();
         self.distances.resize(edges.nr_vertices(), isize::MAX);
         self.distances[self.nearest_node] = 0;
         edges.calc_distances_to(queue, &mut self.distances);
-
-        self.pos3 = positions[self.nearest_node];
 
         self.updated = true;
     }
@@ -243,7 +242,8 @@ impl CharacterState {
                 self.future_moves.push((i, v_curr));
                 if let Some(&v_last) = ch.last_positions.last() {
                     ch.nearest_node = v_last;
-                    ch.update_distances(edges, positions, queue);
+                    ch.update_distances(edges, queue);
+                    ch.pos3 = positions[ch.nearest_node];            
                 }
             }
         }
@@ -255,7 +255,8 @@ impl CharacterState {
             let ch = &mut self.characters[i];
             ch.last_positions.push(v);
             ch.nearest_node = v;
-            ch.update_distances(edges, positions, queue);
+            ch.update_distances(edges, queue);
+            ch.pos3 = positions[ch.nearest_node];     
         }
     }
 
