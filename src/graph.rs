@@ -15,13 +15,38 @@ pub use planar3d::*;
 
 
 
+#[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[derive(serde::Deserialize, serde::Serialize)]
-pub enum InSet { No, Perhaps, Yes, NewlyAdded }
+pub enum InSet { 
+    No = 0, 
+    Yes = 1, 
+    OnBoundary = 2, 
+    Perhaps = 4, 
+    NewlyAdded = 8, 
+}
+const _: () = assert!(std::mem::size_of::<InSet>() == 1);
+
 impl InSet {
-    pub fn yes(self) -> bool { 
-        debug_assert!(matches!(self, InSet::No | InSet::Yes));
-        self == InSet::Yes 
+    const fn finished_construction(self) -> bool {
+        matches!(self, InSet::No | InSet::Yes | InSet::OnBoundary)
+    }
+
+    #[inline(always)]
+    pub const fn inside(self) -> bool { 
+        debug_assert!(self.finished_construction());
+        !self.outside()
+    }
+
+    #[inline(always)]
+    pub const fn on_boundary(self) -> bool {
+        debug_assert!(self.finished_construction());
+        matches!(self, InSet::OnBoundary)
+    }
+
+    #[inline(always)]
+    pub const fn outside(self) -> bool {
+        debug_assert!(self.finished_construction());
+        matches!(self, InSet::No)
     }
 }
 

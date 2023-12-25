@@ -21,7 +21,7 @@ impl RobberInfo {
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum DrawNumbers { None, Indices, RobberAdvantage, EscapeableNodes, DistToFreedom, MinCopDist, Debugging }
+pub enum DrawNumbers { None, Indices, RobberAdvantage, EscapeableNodes, MinCopDist, Debugging }
 
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -187,10 +187,6 @@ impl Info {
                 "minimaler Cop Abstand")
                 .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
 
-            ui.radio_value(&mut self.vertex_info, DrawNumbers::DistToFreedom, 
-                "Distanz zur Freiheit")
-                .on_hover_text("Distanz zu nähestem Punkt außerhalb der Konvexen Hülle");
-
             ui.radio_value(&mut self.vertex_info, DrawNumbers::Debugging, 
                 "Debugging")
                 .on_hover_text("Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
@@ -233,22 +229,22 @@ impl Info {
     }
 
     fn update_cop_advantage(&mut self, edges: &EdgeList) {
-        let in_cop_hull = &self.cop_hull.inside();
+        let cop_hull = &self.cop_hull.inside();
         let mut advantage = std::mem::take(&mut self.cop_advantage);
         advantage.resize(edges.nr_vertices(), isize::MAX);        
         let mut queue = std::mem::take(&mut self.queue);
         queue.clear();
 
         let zipped = itertools::izip!(0.., 
-            in_cop_hull.iter(), 
+            cop_hull.iter(), 
             advantage.iter_mut(), 
             self.min_cop_dist.iter(), 
             edges.neighbors());
-        for (node, &in_hull, adv, &cop_dist, mut neighs) in zipped {
-            if !in_hull.yes() && neighs.any(|n| in_cop_hull[n].yes()) {
+        for (node, &hull, adv, &cop_dist, mut neighs) in zipped {
+            if !hull.inside() && neighs.any(|n| cop_hull[n].inside()) {
                 queue.push_back(node);
             }
-            *adv = if in_hull.yes() { isize::MAX } else { -cop_dist };
+            *adv = if hull.inside() { isize::MAX } else { -cop_dist };
         }
         edges.calc_distances_to(&mut queue, &mut advantage);
         self.cop_advantage = advantage;
@@ -302,15 +298,16 @@ impl Info {
         let cop_moved = self.characters.active_cop_updated();
 
         let update_cop_advantage = self.robber_info == RobberInfo::RobberAdvantage
-            || self.vertex_info == DrawNumbers::RobberAdvantage;
+            || self.vertex_info == DrawNumbers::RobberAdvantage
+            || self.vertex_info == DrawNumbers::Debugging;
             
         let update_escapable = self.robber_info == RobberInfo::EscapeableNodes
-            || self.vertex_info == DrawNumbers::EscapeableNodes;
+            || self.vertex_info == DrawNumbers::EscapeableNodes
+            || self.vertex_info == DrawNumbers::Debugging;
         
         let update_hull = update_cop_advantage 
             || update_escapable 
-            || self.show_convex_hull
-            || self.vertex_info == DrawNumbers::DistToFreedom;
+            || self.show_convex_hull;
 
         let update_min_cop_dist = update_hull
             || self.robber_info == RobberInfo::CopDist
@@ -375,7 +372,7 @@ impl Info {
             return;
         }
         for (&in_hull, &pos, &vis) in izip!(self.cop_hull.inside(), con.positions, con.visible) {
-            if vis && in_hull.yes()  {
+            if vis && in_hull.inside()  {
                 let draw_pos = con.cam.transform(pos);
                 let marker_circle = Shape::circle_filled(draw_pos, con.scale * 9.0, LIGHT_BLUE);
                 con.painter.add(marker_circle);
@@ -409,7 +406,7 @@ impl Info {
             (RobberInfo::RobberAdvantage, _) => 
                 for (&adv, &pos, &vis, &hull) in 
                 izip!(&self.cop_advantage, con.positions, con.visible, self.cop_hull.inside()) {
-                    if vis && hull.yes() && adv < -1 {
+                    if vis && hull.inside() && adv < -1 {
                         draw_circle_at(pos, GREEN);
                     }
                 },
@@ -455,7 +452,6 @@ impl Info {
                 let txt = match self.vertex_info {
                     DrawNumbers::Indices => { i.to_string() }
                     DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
-                    DrawNumbers::DistToFreedom => self.cop_hull.dist_to_outside()[i].to_string(),
                     DrawNumbers::None => { panic!() }
                     DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
                     DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[i]) }

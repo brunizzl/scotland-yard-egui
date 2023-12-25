@@ -23,16 +23,12 @@ where F: FnMut(usize) -> Pos2
 }
 
 /// geodesic convex hull over some vertices with respect to some graph
-#[derive(serde::Deserialize, serde::Serialize)]
 pub struct ConvexHull {
     /// one entry per vertex in graph
-    inside: Vec<InSet>, 
+    hull: Vec<InSet>, 
     /// enumerates vertices which are on boundary
     boundary: Vec<usize>, 
 
-    /// nr of steps to reach outside. e.g. 0 for vertices outside hull
-    /// and 1 for vertices on boundary
-    dist_to_outside: Vec<isize>,
     /// indexes in self.boundary, each segment is delimited by two cops on boundary.
     /// the cops' vertices and the vertices neighboring these cops are excluded
     segment_interiors: Vec<Range<usize>>, 
@@ -41,25 +37,19 @@ pub struct ConvexHull {
 impl ConvexHull {
     pub fn new() -> Self {
         Self {
-            inside: Vec::new(),
+            hull: Vec::new(),
             boundary: Vec::new(),
-            dist_to_outside: Vec::new(),
             segment_interiors: Vec::new(),
         }
     }
 
     pub fn inside(&self) -> &[InSet] {
-        &self.inside
+        &self.hull
     }
 
     #[allow(dead_code)]
     pub fn boundary(&self) -> &[usize] {
         &self.boundary
-    }
-
-    #[allow(dead_code)]
-    pub fn dist_to_outside(&self) -> &[isize] {
-        &self.dist_to_outside
     }
 
     /// each segment consists of vertices on boundary, segments are divided by cops
@@ -72,9 +62,9 @@ impl ConvexHull {
     {
         queue.clear();
 
-        self.inside.clear();
-        self.inside.resize(edges.nr_vertices(), InSet::Perhaps);
-        let in_hull = &mut self.inside[..];
+        self.hull.clear();
+        self.hull.resize(edges.nr_vertices(), InSet::Perhaps);
+        let hull = &mut self.hull[..];
         for i in 0..cops.len() {
             let cop_i = &cops[i];
             if !cop_i.on_node {
@@ -82,13 +72,13 @@ impl ConvexHull {
             }
             for cop_j in cops[(i + 1)..].iter().filter(|c| c.on_node) {                
                 //walk from cop i to cop j on all shortest paths
-                in_hull[cop_i.nearest_node] = InSet::NewlyAdded;
+                hull[cop_i.nearest_node] = InSet::NewlyAdded;
                 queue.push_back(cop_i.nearest_node);
                 while let Some(node) = queue.pop_front() {
                     let curr_dist_to_j = cop_j.distances[node];
                     for neigh in edges.neighbors_of(node) {
-                        if cop_j.distances[neigh] < curr_dist_to_j && in_hull[neigh] != InSet::NewlyAdded {
-                            in_hull[neigh] = InSet::NewlyAdded;
+                        if cop_j.distances[neigh] < curr_dist_to_j && hull[neigh] != InSet::NewlyAdded {
+                            hull[neigh] = InSet::NewlyAdded;
                             queue.push_back(neigh);
                         }
                     }
@@ -96,67 +86,47 @@ impl ConvexHull {
                 //change these paths from InSet::NewlyAdded to InSet::Yes
                 //(to allow new paths to go through the current one)
                 queue.push_back(cop_i.nearest_node);
-                in_hull[cop_i.nearest_node] = InSet::Yes;
-                edges.recolor_region((InSet::NewlyAdded, InSet::Yes), in_hull, queue);
+                hull[cop_i.nearest_node] = InSet::Yes;
+                edges.recolor_region((InSet::NewlyAdded, InSet::Yes), hull, queue);
             }
         }
         //color outside as InSet::No (note: this might miss some edge cases; best to not place cops at rim)
         for &p in vertices_outside_hull {
-            if in_hull[p] == InSet::Perhaps {
-                in_hull[p] = InSet::No;
+            if hull[p] == InSet::Perhaps {
+                hull[p] = InSet::No;
                 queue.push_back(p);
             }
         }
-        edges.recolor_region((InSet::Perhaps, InSet::No), in_hull, queue);
+        edges.recolor_region((InSet::Perhaps, InSet::No), hull, queue);
 
         //color remaining InSet::Perhaps as InSet::Yes
-        for x in in_hull {
+        for x in hull {
             if *x == InSet::Perhaps {
                 *x = InSet::Yes;
             }
         }
-    }
-
-    /// assumes self.inside is already up to date
-    fn update_dist_to_outside(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
-        debug_assert_eq!(self.inside.len(), edges.nr_vertices());
-        queue.clear();
-        self.dist_to_outside.clear();
-        let mut iter = izip!(&self.inside, edges.neighbors(), 0..);
-        self.dist_to_outside.resize_with(edges.nr_vertices(), || {
-            let (&in_hull, mut neighs, v) = iter.next().unwrap();
-            if !in_hull.yes() {
-                0
-            } else if neighs.all(|n| self.inside[n].yes()) { 
-                isize::MAX 
-            } else { 
-                queue.push_back(v);
-                1 
+        //mark boundary as such
+        let hull = &mut self.hull[..];
+        for (v, mut neighs) in izip!(0.., edges.neighbors()) {
+            if hull[v].inside() && neighs.any(|n| hull[n].outside()) {
+                hull[v] = InSet::OnBoundary;
             }
-        });
-
-        edges.calc_distances_to(queue, &mut self.dist_to_outside);
+        }
     }
 
-    fn find_fist_boundary_point(&self, cops: &[Character], edges: &EdgeList) -> Option<usize> {
+    fn find_fist_boundary_point(&self, cops: &[Character]) -> Option<usize> {
         for cop in cops.iter().filter(|c| c.on_node) {
             let v = cop.nearest_node;
-            if !self.inside[v].yes() { //only happens when there is only one cop
-                continue;
-            }
-            for n in edges.neighbors_of(v) {
-                if !self.inside[n].yes() {
-                    debug_assert_eq!(self.dist_to_outside[v], 1);
-                    return Some(v);
-                }
+            if self.hull[v].on_boundary() {
+                return Some(v);
             }
         }
         None
     }
 
-    /// assumes that self.dist_to_outside is already up to date
+    /// assumes that self.hull is already up to date
     fn update_boundary(&mut self, cops: &[Character], edges: &EdgeList, queue: &mut VecDeque<usize>) {
-        let Some(fst_inside) = self.find_fist_boundary_point(cops, edges) else { return; };
+        let Some(fst_inside) = self.find_fist_boundary_point(cops) else { return; };
 
         let mut potential_next = std::mem::take(queue);
         let mut boundary = std::mem::take(&mut self.boundary);
@@ -189,7 +159,7 @@ impl ConvexHull {
                 if boundary_end.contains(&n) {
                     continue;
                 }
-                if self.dist_to_outside[n] != 1 {
+                if !self.hull[n].on_boundary() {
                     continue;
                 }
                 potential_next.push_back(n);
@@ -220,7 +190,7 @@ impl ConvexHull {
                         //i dont't care though. that case is uninteresting anyway.
                         let is_neigh_of_curr_and_outside_hull = |v| edges
                             .neighbors_of(curr_inside)
-                            .filter(|&n| self.dist_to_outside[n] == 0)
+                            .filter(|&n| self.hull[n].outside())
                             .contains(&v);
                         if edges.neighbors_of(next).any(is_neigh_of_curr_and_outside_hull) {
                             break 'take_one_sharing_side next;
@@ -246,7 +216,7 @@ impl ConvexHull {
 
     fn update_segments(&mut self, min_cop_dist: &[isize]) {
         self.segment_interiors.clear();
-        debug_assert_eq!(self.inside.len(), min_cop_dist.len());
+        debug_assert_eq!(self.hull.len(), min_cop_dist.len());
         if self.boundary.len() < 5 {
             return;
         }
@@ -275,7 +245,6 @@ impl ConvexHull {
         vertices_outside_hull: &[usize]) 
     {
         self.update_inside(cops, edges, queue, vertices_outside_hull);
-        self.update_dist_to_outside(edges, queue);
         self.update_boundary(cops, edges, queue);
         self.update_segments(min_cop_dist);
     }
@@ -432,7 +401,7 @@ impl EscapeableNodes {
                 queue.push_back(v);
                 self.some_boundary_dist[v] = 0;
                 self.last_write_by[v] = i;
-                let in_hull = |x:usize| hull.inside[x].yes();
+                let in_hull = |x:usize| hull.hull[x].inside();
                 self.calc_small_dists(in_hull, edges, queue, max_dist, last_i, i);
                 last_i = Some(i);
                 last_v = v;
