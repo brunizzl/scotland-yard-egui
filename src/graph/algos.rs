@@ -551,6 +551,14 @@ impl EscapeableNodes {
                             c1, c2, &self.boundary_segment_dist, &mut path, edges);
                         for &v in &path {
                             self.keep_in_escapable[v] = KeepVertex::Yes;
+                            for n in edges.neighbors_of(v) {
+                                //build "firewall" below path, such that recoloring of keep_in_escapable inside this loop
+                                //will only go up into deeper parts and not below to the boundary.
+                                if hull_data.hull[n].inside() 
+                                && self.boundary_segment_dist[n] < self.boundary_segment_dist[v] {
+                                    self.keep_in_escapable[n] = KeepVertex::Yes;
+                                }
+                            }
                         }
                         path.retain(|&v| isize::min(c1.distances[v], c2.distances[v]) > 1);
                         if path.is_empty() {
@@ -580,26 +588,12 @@ impl EscapeableNodes {
                         let last_owner = last_owner.unwrap();
                         for &v in &path {
                             debug_assert_eq!(self.last_write_by[v], last_owner);
-                            self.keep_in_escapable[v] = KeepVertex::Yes;
-                            queue.push_back(v);  
-                        }
-                        //descent from new path to old boundary
-                        edges.recolor_region_with(KeepVertex::Yes, 
-                            &mut self.keep_in_escapable, 
-                            |v, n, _| escapable[n] & marker != 0 
-                                && self.boundary_segment_dist[v] > self.boundary_segment_dist[n], 
-                            queue
-                        );
-                        for &v in &path {
-                            debug_assert_eq!(self.last_write_by[v], last_owner);
                             debug_assert_eq!(self.keep_in_escapable[v], KeepVertex::Yes);
                             queue.push_back(v);  
                         }
-                        //ascent from path to everything above
                         edges.recolor_region_with(KeepVertex::Yes, 
                             &mut self.keep_in_escapable, 
-                            |v, n, _| self.last_write_by[n] == last_owner 
-                                && self.boundary_segment_dist[v] < self.boundary_segment_dist[n], 
+                            |_, n, _| self.last_write_by[n] == last_owner, 
                             queue
                         );
                     }
