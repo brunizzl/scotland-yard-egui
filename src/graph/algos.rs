@@ -322,6 +322,11 @@ impl EscapeableNodes {
     }
 
     #[allow(dead_code)]
+    pub fn boundary_segment_dist(&self) -> &[isize] {
+        &self.boundary_segment_dist
+    }
+
+    #[allow(dead_code)]
     pub fn inner_connecting_line(&self) -> &[usize] {
         &self.inner_connecting_line
     }
@@ -578,6 +583,19 @@ impl EscapeableNodes {
                             self.keep_in_escapable[v] = KeepVertex::Yes;
                             queue.push_back(v);  
                         }
+                        //descent from new path to old boundary
+                        edges.recolor_region_with(KeepVertex::Yes, 
+                            &mut self.keep_in_escapable, 
+                            |v, n, _| escapable[n] & marker != 0 
+                                && self.boundary_segment_dist[v] > self.boundary_segment_dist[n], 
+                            queue
+                        );
+                        for &v in &path {
+                            debug_assert_eq!(self.last_write_by[v], last_owner);
+                            debug_assert_eq!(self.keep_in_escapable[v], KeepVertex::Yes);
+                            queue.push_back(v);  
+                        }
+                        //ascent from path to everything above
                         edges.recolor_region_with(KeepVertex::Yes, 
                             &mut self.keep_in_escapable, 
                             |v, n, _| self.last_write_by[n] == last_owner 
@@ -592,8 +610,8 @@ impl EscapeableNodes {
                             self.keep_in_escapable[v] = KeepVertex::Yes;
                         }
                     }
+                    //ascent from old boundary up to path
                     edges.recolor_region_with(KeepVertex::Yes, &mut self.keep_in_escapable, |_, n, _| hull_data.hull[n].inside(), queue);
-                    debug_assert!(self.keep_in_escapable.iter().all(|k| matches!(k, KeepVertex::No | KeepVertex::Yes)));
 
                     //we now want to keep the intersection of self.keep_in_escapable and the old region marked by marker
                     //in self.escapable.

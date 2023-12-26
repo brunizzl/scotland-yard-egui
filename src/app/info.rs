@@ -468,7 +468,7 @@ impl Info {
                     DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[i]) }
                     //DrawNumbers::Debugging => self.escapable.owners()[i].to_string(),
                     DrawNumbers::Debugging => { 
-                        let d = self.escapable.boundary_dist()[i];
+                        let d = self.escapable.boundary_segment_dist()[i];
                         if d == isize::MAX { String::new() } else { d.to_string() }
                     }
                 };
