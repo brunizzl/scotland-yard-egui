@@ -327,7 +327,7 @@ impl EdgeList {
     pub fn recolor_region_with<Color, F>(&self, new: Color, colors: &mut [Color], 
         mut is_old: F, queue: &mut VecDeque<usize>) -> usize 
     where Color: Eq + Clone + std::fmt::Debug,
-          F: FnMut(usize, &[Color]) -> bool
+          F: FnMut(usize, usize, &[Color]) -> bool
     {        
         debug_assert_eq!(self.nr_vertices(), colors.len());
         let mut nr_colored = 0;
@@ -340,7 +340,7 @@ impl EdgeList {
                 if colors[n] == new { 
                     continue;
                 }
-                if is_old(n, colors) {
+                if is_old(v, n, colors) {
                     nr_colored += 1;
                     colors[n] = new.clone();
                     local_queue.push_back(n);
@@ -357,7 +357,7 @@ impl EdgeList {
     where Color: Eq + Clone + std::fmt::Debug
     {
         debug_assert_ne!(old, new); //technically not needed, but why would anyone want that?
-        self.recolor_region_with(new, colors, |v, cs| cs[v] == old, queue)
+        self.recolor_region_with(new, colors, |_, n, cs| cs[n] == old, queue)
     }
 
     pub fn find_local_minimum(&self, mut potential: impl FnMut(usize) -> f32, node_hint: usize) -> (usize, f32) {

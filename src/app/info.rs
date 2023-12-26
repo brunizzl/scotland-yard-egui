@@ -145,10 +145,7 @@ impl Info {
                 Will der Räuber durch diesen Bereich fliehen, dürfen die Cops in der Zeit, \
                 die der Räuber zum Rand braucht, diesen nicht auf Länge 0 kürzen können. \n\
                 Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
-                als die Cops diesen Abschnitt dicht machen können. \n\
-                Nicht berücksichtigt für die Berechnung aller Fluchtoptionen zu einem Segment zwischen zwei Cops sind alle anderen Cops. \
-                COPS IM INNEREN DER HÜLLE WERDEN AKTUELL NUR INKORREKT BERÜCKSICHTIGT. \
-                (TODO: ändere das)");
+                als die Cops diesen Abschnitt dicht machen können.");
 
             ui.radio_value(&mut self.robber_info, RobberInfo::SmallRobberDist, 
                 "Punkte nah an Räuber")
