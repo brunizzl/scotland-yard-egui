@@ -477,7 +477,9 @@ impl EscapeableNodes {
         self.keep_in_escapable.clear();
         self.keep_in_escapable.resize(edges.nr_vertices(), KeepVertex::No);
 
-        let mut owner = hull_data.boundary.len();
+        //owners of boundary vertices where chosen as what the vertice's index in this vector was 
+        //  -> new owners can start after all valid vector indices
+        let mut owner = hull_data.boundary.len(); 
         queue.clear();
         let iter = izip!(
             hull_data.boundary_interieur_indices(), 
@@ -496,6 +498,9 @@ impl EscapeableNodes {
                 let v = c.nearest_node;
                 let active = c.on_node;
                 let distinct = v != v_left && v != v_right;
+                //if cop is not at least next to region, then there must be some point on the region boundary
+                //that can be reached faster by a robber starting in the region than by that outside cop.
+                //this is by definition of the regions.
                 let in_region = escapable[v] & marker != 0;
                 let next_to_region = edges.neighbors_of(v).any(|n| escapable[n] & marker != 0);
                 active && distinct && (in_region || next_to_region)
@@ -513,6 +518,7 @@ impl EscapeableNodes {
                     if !endangers(&self.escapable, cop_j) {
                         continue;
                     }
+                    //compare with "<=" and ">" to not skip case where i == j
                     let i_closer_eq_to_left = left_cop.distances[cop_i.nearest_node] <= left_cop.distances[cop_j.nearest_node];
                     let i_closer_to_right = right_cop.distances[cop_i.nearest_node] < right_cop.distances[cop_j.nearest_node];
                     if i_closer_eq_to_left == i_closer_to_right {
@@ -545,18 +551,27 @@ impl EscapeableNodes {
                         if path.is_empty() {
                             continue;
                         }
+
                         let max_escapable_dist = path.len() as isize - 1;
                         let mut last_owner = None;
                         debug_assert!(queue.is_empty());
-                        for &v in &path {
+                        let mut compute_small_dists_for = |v| {
                             queue.push_back(v);
                             self.some_boundary_dist[v] = 0;
                             self.last_write_by[v] = owner;
-                            let in_hull = |x:usize| hull_data.hull[x].inside();
+                            //this is mostly a waste: somehow it is insufficient to only walk inside our marked region
+                            let in_hull = |n: usize| hull_data.hull[n].inside();
                             self.calc_small_dists(in_hull, edges, queue, max_escapable_dist, last_owner, owner);
                             last_owner = Some(owner);
                             owner += 1;
+                        };
+                        //same as in consider_boundary_cops: we start with the opposing ends to get some constant speedup
+                        //as we shrink the space of escapable vertices faster
+                        compute_small_dists_for(path[0]);
+                        for &v in path[1..].iter().rev() {
+                            compute_small_dists_for(v);
                         }
+
                         let last_owner = last_owner.unwrap();
                         for &v in &path {
                             debug_assert_eq!(self.last_write_by[v], last_owner);
@@ -615,7 +630,7 @@ impl EscapeableNodes {
             }
         }
         
-        //because of EdgeList::recolor_region_with reasons, we always included the vertices reset here as save robber
+        //because of EdgeList::recolor_region_with reasons, we always included the vertices reset here as safe robber
         //positions. this is obv. wrong
         for cop in cops.iter().filter(|c| c.on_node) {
             self.escapable[cop.nearest_node] = 0;
@@ -640,27 +655,27 @@ impl EscapeableNodes {
             //to speed up computation, our first and second vertex are on opposing ends. 
             //future boundary vertices thus only consider inner vertices reached by both extremes,
             //which should get us some constant factor in speedup.
-            let mut last_i = None;
+            let mut last_owner = None;
             let mut last_v = usize::MAX;
-            let mut compute_dists_to = |i, v| {
-                debug_assert!(i != 0);
+            let mut compute_dists_to = |owner, v| {
+                debug_assert!(owner != 0);
                 queue.push_back(v);
                 self.some_boundary_dist[v] = 0;
-                self.last_write_by[v] = i;
+                self.last_write_by[v] = owner;
                 let in_hull = |x:usize| hull_data.hull[x].inside();
-                self.calc_small_dists(in_hull, edges, queue, max_escapable_dist, last_i, i);
-                last_i = Some(i);
+                self.calc_small_dists(in_hull, edges, queue, max_escapable_dist, last_owner, owner);
+                last_owner = Some(owner);
                 last_v = v;
             };
             let mut iter = izip!(indices.clone(), vertices);
-            if let Some((i, &v)) = iter.next_back() {
-                compute_dists_to(i, v);
+            if let Some((owner, &v)) = iter.next_back() {
+                compute_dists_to(owner, v);
             }
-            for (i, &v) in iter {
-                compute_dists_to(i, v);
+            for (owner, &v) in iter {
+                compute_dists_to(owner, v);
             }
     
-            let owner = last_i.unwrap();
+            let owner = last_owner.unwrap();
             debug_assert!(queue.is_empty());
             queue.push_back(last_v);
             let marker = 1u32 << (seg_nr % 32);
