@@ -6,13 +6,13 @@ use itertools::{ izip, Itertools };
 
 use egui::*;
 
-use crate::graph::{EdgeList, ConvexHull, EscapeableNodes, self};
+use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, self};
 use crate::app::character::CharacterState;
 
 use super::{*, color::*};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub enum RobberInfo { None, RobberAdvantage, EscapeableNodes, NearNodes, SmallRobberDist, CopDist }
+pub enum RobberInfo { None, RobberAdvantage, EscapeableNodes, NearNodes, SmallRobberDist, CopDist, Debugging }
 
 impl RobberInfo {
     pub fn scale_small_dist_with_resolution(dist: isize, radius: isize) -> isize {
@@ -29,7 +29,7 @@ pub enum RobberStrat { None, EscapeHullNonLazy }
 
 pub struct Info {
     //state kept for each node in map
-    cop_hull: ConvexHull,
+    cop_hull_data: ConvexHullData,
     escapable: EscapeableNodes,
     min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
     cop_advantage: Vec<isize>,
@@ -91,7 +91,7 @@ impl Info {
         let show_convex_hull = load_or(cc.storage, SHOW_HULL, || false);
 
         Self { 
-            cop_hull: ConvexHull::new(),
+            cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
             min_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -163,6 +163,11 @@ impl Info {
             if self.robber_info == RobberInfo::CopDist {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
+
+            ui.radio_value(&mut self.robber_info, RobberInfo::Debugging, 
+                "Debugging")
+                .on_hover_text("Was auch immer gerade während des letzten mal kompilierens interessant war");
+
             self.menu_change |= old != self.robber_info;
         });
         ui.collapsing("Zahlen", |ui|{
@@ -229,7 +234,7 @@ impl Info {
     }
 
     fn update_cop_advantage(&mut self, edges: &EdgeList) {
-        let cop_hull = &self.cop_hull.inside();
+        let cop_hull = &self.cop_hull_data.hull();
         let mut advantage = std::mem::take(&mut self.cop_advantage);
         advantage.resize(edges.nr_vertices(), isize::MAX);        
         let mut queue = std::mem::take(&mut self.queue);
@@ -264,7 +269,7 @@ impl Info {
             &temp
         };
 
-        self.cop_hull.update(
+        self.cop_hull_data.update(
             &self.characters.cops(), 
             con.edges, 
             &self.min_cop_dist,
@@ -276,7 +281,7 @@ impl Info {
     fn update_escapable(&mut self, con: &DrawContext<'_>) {
         self.escapable.update(
             self.characters.cops(), 
-            &self.cop_hull, 
+            &self.cop_hull_data, 
             con.edges, 
             &mut self.queue
         )
@@ -298,10 +303,12 @@ impl Info {
         let cop_moved = self.characters.active_cop_updated();
 
         let update_cop_advantage = self.robber_info == RobberInfo::RobberAdvantage
+            || self.robber_info == RobberInfo::Debugging
             || self.vertex_info == DrawNumbers::RobberAdvantage
             || self.vertex_info == DrawNumbers::Debugging;
             
         let update_escapable = self.robber_info == RobberInfo::EscapeableNodes
+            || self.robber_info == RobberInfo::Debugging
             || self.vertex_info == DrawNumbers::EscapeableNodes
             || self.vertex_info == DrawNumbers::Debugging;
         
@@ -318,7 +325,7 @@ impl Info {
         if (cop_moved || self.min_cop_dist.len() != nr_vertices) && update_min_cop_dist {
             self.update_min_cop_dist(con.edges);
         }
-        if (cop_moved || self.cop_hull.inside().len() != nr_vertices) && update_hull {
+        if (cop_moved || self.cop_hull_data.hull().len() != nr_vertices) && update_hull {
             self.update_convex_cop_hull(con);
         }
         if (cop_moved || self.escapable.escapable().len() != nr_vertices) && update_escapable {
@@ -371,14 +378,14 @@ impl Info {
         if !self.show_convex_hull {
             return;
         }
-        for (&in_hull, &pos, &vis) in izip!(self.cop_hull.inside(), con.positions, con.visible) {
+        for (&in_hull, &pos, &vis) in izip!(self.cop_hull_data.hull(), con.positions, con.visible) {
             if vis && in_hull.inside()  {
                 let draw_pos = con.cam.transform(pos);
                 let marker_circle = Shape::circle_filled(draw_pos, con.scale * 9.0, LIGHT_BLUE);
                 con.painter.add(marker_circle);
             }
         }
-        for seg in self.cop_hull.boundary_segments() {
+        for seg in self.cop_hull_data.boundary_interieurs() {
             for &v in seg {
                 if con.visible[v] {
                     let draw_pos = con.vertex_draw_pos(v);
@@ -405,7 +412,7 @@ impl Info {
                 },
             (RobberInfo::RobberAdvantage, _) => 
                 for (&adv, &pos, &vis, &hull) in 
-                izip!(&self.cop_advantage, con.positions, con.visible, self.cop_hull.inside()) {
+                izip!(&self.cop_advantage, con.positions, con.visible, self.cop_hull_data.hull()) {
                     if vis && hull.inside() && adv < -1 {
                         draw_circle_at(pos, GREEN);
                     }
@@ -429,6 +436,13 @@ impl Info {
             for (&esc, &pos, &vis) in izip!(self.escapable.escapable(), con.positions, con.visible) {
                 if vis && esc != 0 {
                     draw_circle_at(pos, super::color::u16_marker_color(esc));
+                }
+            }
+            (RobberInfo::Debugging, _) =>             
+            for &v in self.escapable.inner_connecting_line() {
+                if con.visible[v] {
+                    let pos = con.positions[v];
+                    draw_circle_at(pos, GREEN);
                 }
             }
             _ => {},
@@ -455,11 +469,11 @@ impl Info {
                     DrawNumbers::None => { panic!() }
                     DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
                     DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[i]) }
-                    DrawNumbers::Debugging => self.escapable.owners()[i].to_string(),
-                    //DrawNumbers::Debugging => { 
-                    //    let d = self.escapable.boundary_dist()[i];
-                    //    if d == isize::MAX { String::new() } else { d.to_string() }
-                    //}
+                    //DrawNumbers::Debugging => self.escapable.owners()[i].to_string(),
+                    DrawNumbers::Debugging => { 
+                        let d = self.escapable.boundary_dist()[i];
+                        if d == isize::MAX { String::new() } else { d.to_string() }
+                    }
                 };
                 let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
                 layout_job.halign = Align::Center;
