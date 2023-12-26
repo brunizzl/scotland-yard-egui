@@ -361,7 +361,7 @@ impl EscapeableNodes {
         edges.recolor_region_with(
             isize::MAX, 
             &mut self.boundary_segment_dist, 
-            |v, _| hull[v].inside(), 
+            |_, n, _| hull[n].inside(), 
             queue
         );
 
@@ -564,7 +564,11 @@ impl EscapeableNodes {
                             queue.push_back(v);  
                         }
                         edges.recolor_region_with(KeepVertex::Yes, 
-                            &mut self.keep_in_escapable, |v, _| self.last_write_by[v] == last_owner, queue);
+                            &mut self.keep_in_escapable, 
+                            |v, n, _| self.last_write_by[n] == last_owner 
+                                && self.boundary_segment_dist[v] < self.boundary_segment_dist[n], 
+                            queue
+                        );
                     }
                     debug_assert!(queue.is_empty());
                     for &v in boundary_interior {
@@ -573,7 +577,7 @@ impl EscapeableNodes {
                             self.keep_in_escapable[v] = KeepVertex::Yes;
                         }
                     }
-                    edges.recolor_region_with(KeepVertex::Yes, &mut self.keep_in_escapable, |v, _| hull_data.hull[v].inside(), queue);
+                    edges.recolor_region_with(KeepVertex::Yes, &mut self.keep_in_escapable, |_, n, _| hull_data.hull[n].inside(), queue);
                     debug_assert!(self.keep_in_escapable.iter().all(|k| matches!(k, KeepVertex::No | KeepVertex::Yes)));
 
                     //we now want to keep the intersection of self.keep_in_escapable and the old region marked by marker
@@ -602,7 +606,7 @@ impl EscapeableNodes {
                         queue.push_back(v);
                         self.keep_in_escapable[v] = KeepVertex::No;
                     }
-                    edges.recolor_region_with(KeepVertex::No, &mut self.keep_in_escapable, |_, _| true, queue);
+                    edges.recolor_region_with(KeepVertex::No, &mut self.keep_in_escapable, |_, _, _| true, queue);
                     debug_assert!(self.keep_in_escapable.iter().all(|&k| k == KeepVertex::No));
 
                     self.escapable = escapable;
