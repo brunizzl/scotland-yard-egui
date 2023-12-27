@@ -152,4 +152,8 @@ impl Camera3D {
     pub fn to_screen(&self) -> &ToScreen {
         &self.to_screen
     }
+
+    pub fn screen_normal(&self) -> Vec3 {
+        self.to_screen.to_plane.new_z
+    }
 }

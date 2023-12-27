@@ -324,7 +324,11 @@ impl CharacterState {
                 change = true;
             }
             if ui.button(plus_text).clicked() {
-                self.characters.push(Character::new(next_index, Pos2::ZERO));
+                let mut new_ch = Character::new(next_index, Pos2::ZERO);
+                let find_screen_facing = |v: usize| -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal());
+                let (v, _) = map.edges().find_local_minimum(find_screen_facing, 0);
+                new_ch.nearest_node = v;
+                self.characters.push(new_ch);
                 change = true;
             }
         });

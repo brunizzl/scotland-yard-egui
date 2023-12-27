@@ -6,7 +6,7 @@ use itertools::{ izip, Itertools };
 
 use egui::*;
 
-use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, self};
+use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes};
 use crate::app::character::CharacterState;
 
 use super::{*, color::*};
@@ -29,6 +29,7 @@ pub enum RobberStrat { None, EscapeHullNonLazy }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
+    marker_color: Color32,
     robber_info: RobberInfo,
 
     //both are only used, when the respective RobberInfo is active
@@ -99,6 +100,14 @@ impl Options {
                 .on_hover_text("Was auch immer gerade während des letzten mal kompilierens interessant war");
 
             menu_change |= old != self.robber_info;
+
+            ui.horizontal(|ui| {
+                ui.label("Farbe manuelle Marker: ")
+                    .on_hover_text("Manuelle Marker können an dem der Mausposition nächsten Knoten \
+                    mit Taste [m] hinzugefügt und [n] entfernt werden.\n\
+                    Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.");
+                ui.color_edit_button_srgba(&mut self.marker_color);
+            });
         });
         ui.collapsing("Zahlen", |ui|{
             let old = self.vertex_info;
@@ -201,6 +210,7 @@ impl Info {
         let show_hull_boundary = load_or(cc.storage, SHOW_HULL_BND, || false);
 
         let options = load_or(cc.storage, OPTIONS, || Options {
+            marker_color: YELLOW,
             robber_info,
             marked_cop_dist: 10,
             small_robber_dist: 10,
@@ -307,6 +317,7 @@ impl Info {
 
     /// recomputes everything
     fn definitely_update(&mut self, con: &DrawContext<'_>) {
+        self.characters.update(con, &mut self.queue);
         self.update_min_cop_dist(con.edges);
         self.update_convex_cop_hull(con);
         self.update_escapable(con);
@@ -357,11 +368,10 @@ impl Info {
     
     fn change_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>, new_val: bool) {
         if con.positions.len() > 0 {
-            let to_screen_pos = |v| con.vertex_draw_pos(v);
-            let (best_vertex, _) = graph::find_nearest_node(con.visible, con.edges, screen_pos, to_screen_pos, 0);
-            self.marked_manually[best_vertex] = new_val;
+            let (vertex, _) = con.find_closest_vertex(screen_pos);
+            self.marked_manually[vertex] = new_val;
         }
-    } 
+    }
     
     fn add_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
         self.change_marker_at(screen_pos, con, true)
@@ -586,7 +596,7 @@ impl Info {
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
             if vis && marked {
                 let draw_pos = con.cam.transform(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, YELLOW);
+                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, self.options.marker_color);
                 con.painter.add(marker_circle);
             }
         }
