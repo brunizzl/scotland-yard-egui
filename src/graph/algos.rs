@@ -538,7 +538,7 @@ impl EscapeableNodes {
 
                     //idea: connect the four cops by paths. these paths will split the current region of self.escapable
                     //into two parts: one is in front of the inner cops. if the robber is in that part, he can just 
-                    //escape straight to the boundary s if the inner cops where not present at all.
+                    //escape straight to the boundary as if the inner cops where not present at all.
                     //if the robber is in the other part, he is yet to cross the just constructed line. along this line,
                     //every section is now guarded by the two cops c1 and c2 and can be crossed if the same conditions hold
                     //as for crossing the boundary between left_cop and right_cop.
@@ -560,6 +560,7 @@ impl EscapeableNodes {
                                 }
                             }
                         }
+                        //keep only escapable parts of path (e.g. not vertices directly next to the guarding cops)
                         path.retain(|&v| isize::min(c1.distances[v], c2.distances[v]) > 1);
                         if path.is_empty() {
                             continue;
