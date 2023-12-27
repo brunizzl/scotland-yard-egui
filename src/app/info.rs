@@ -394,24 +394,22 @@ impl Info {
     }
 
     fn draw_convex_cop_hull(&self, con: &DrawContext<'_>) {
-        if !self.options.show_convex_hull {
-            return;
-        }
-        for (&in_hull, &pos, &vis) in izip!(self.cop_hull_data.hull(), con.positions, con.visible) {
-            if vis && in_hull.inside()  {
-                let draw_pos = con.cam.transform(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 9.0, LIGHT_BLUE);
-                con.painter.add(marker_circle);
+        if self.options.show_convex_hull {
+            for (&in_hull, &pos, &vis) in izip!(self.cop_hull_data.hull(), con.positions, con.visible) {
+                if vis && in_hull.inside()  {
+                    let draw_pos = con.cam.transform(pos);
+                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 9.0, LIGHT_BLUE);
+                    con.painter.add(marker_circle);
+                }
             }
         }
-        if !self.options.show_hull_boundary {
-            return;
-        }
-        for &v in self.cop_hull_data.boundary() {
-            if con.visible[v] {
-                let draw_pos = con.vertex_draw_pos(v);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 2.0, WHITE);
-                con.painter.add(marker_circle);
+        if self.options.show_hull_boundary {
+            for &v in self.cop_hull_data.boundary() {
+                if con.visible[v] {
+                    let draw_pos = con.vertex_draw_pos(v);
+                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 2.0, WHITE);
+                    con.painter.add(marker_circle);
+                }
             }
         }
     } 
