@@ -224,7 +224,7 @@ impl Map {
             if self.shape != old_shape {
                 self.recompute_and_adjust(info);
             }
-            if add_drag_value(ui, &mut self.resolution, "Auflösung: ", 1, 200) {
+            if add_drag_value(ui, &mut self.resolution, "Auflösung: ", 0, 200) {
                 self.recompute_and_adjust(info);
             }
         });

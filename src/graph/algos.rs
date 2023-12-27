@@ -146,11 +146,11 @@ impl ConvexHullData {
 
     /// assumes that self.hull is already up to date
     fn update_boundary(&mut self, cops: &[Character], edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        self.boundary.clear();
         let Some(fst_inside) = self.find_fist_boundary_point(cops) else { return; };
 
         let mut potential_next = std::mem::take(queue);
         let mut boundary = std::mem::take(&mut self.boundary);
-        boundary.clear();
         boundary.push(fst_inside);
         let mut curr_inside = fst_inside;
         let mut last_inside = usize::MAX;
