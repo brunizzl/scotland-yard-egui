@@ -4,23 +4,8 @@ use std::ops::Range;
 
 use itertools::{izip, Itertools};
 
-use egui::*;
-
 use crate::app::character::Character;
 use super::*;
-
-pub fn find_nearest_node<F>(visible: &[bool], edges: &EdgeList, pos: Pos2, 
-    mut vertex_to_screen: F, start: usize) -> (usize, f32) 
-where F: FnMut(usize) -> Pos2
-{       
-    let potential = |v:usize| {
-        let v_screen_pos = vertex_to_screen(v);
-        let dist_2d = (v_screen_pos - pos).length_sq();
-        let backface_penalty = 10.0 * (!visible[v]) as isize as f32;
-        dist_2d + backface_penalty
-    };
-    edges.find_local_minimum(potential, start)
-}
 
 /// geodesic convex hull over some vertices with respect to some graph
 pub struct ConvexHullData {

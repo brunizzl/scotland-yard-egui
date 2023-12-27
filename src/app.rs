@@ -27,6 +27,18 @@ impl<'a> DrawContext<'a> {
     pub fn vertex_draw_pos(&self, v: usize) -> Pos2 {
         self.cam.transform(self.positions[v]) 
     }
+
+    pub fn find_closest_vertex(&self, screen_pos: Pos2) -> (usize, f32) {
+        debug_assert!(self.positions.len() > 0);
+        let find_screen_facing = |v: usize| -self.positions[v].to_vec3().normalized().dot(self.cam.screen_normal());
+        let (screen_facing, _) = self.edges.find_local_minimum(find_screen_facing, 0);
+        let screen_pos_diff = |v| {
+            let dist_2d = (self.vertex_draw_pos(v) - screen_pos).length();
+            let backface_penalty = 10.0 * (!self.visible[v]) as isize as f32;
+            dist_2d + backface_penalty
+        };
+        self.edges.find_local_minimum(screen_pos_diff, screen_facing)
+    }
 }
 
 /// returns if val was changed
@@ -67,6 +79,10 @@ fn draw_usage_info(ui: &mut Ui) {
     ui.collapsing("Bedienung", |ui| {
         ui.label("Spielfeld rotieren / verschieben: 
 ziehen mit rechter Maustaste
+oder vertikal strg, horizontal strg + shift
+
+zoom: 
+strg + scrollen
 
 verschieben einer Figur:
 ziehen mit linker Maustaste
