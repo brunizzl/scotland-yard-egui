@@ -38,9 +38,9 @@ pub const STYLES: [Style; 1 + NR_COP_STYLES] = [
     },
     new_cop("👮"), 
     new_cop("🍩"), 
+    new_cop("🚔"), 
     new_cop("🐂"), 
     new_cop("🔫"), 
-    new_cop("🚔"), 
     new_cop("🛂"), 
     new_cop("🛃"),
 ];
