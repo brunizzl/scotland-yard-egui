@@ -29,7 +29,8 @@ pub enum RobberStrat { None, EscapeHullNonLazy }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
-    marker_color: Color32,
+    manual_marker_color: Color32,
+    automatic_marker_color: Color32,
     robber_info: RobberInfo,
 
     //both are only used, when the respective RobberInfo is active
@@ -42,9 +43,28 @@ struct Options {
     show_hull_boundary: bool,
 }
 
+const DEFAULT_OPTIONS: Options = Options {
+    manual_marker_color: YELLOW,
+    automatic_marker_color: GREEN,
+    robber_info: RobberInfo::None,
+    marked_cop_dist: 10,
+    small_robber_dist: 10,
+    robber_strat: RobberStrat::None,
+    vertex_info: DrawNumbers::None,
+    show_convex_hull: false,
+    show_hull_boundary: false,
+};
+
 impl Options {
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut menu_change = false;
+        if ui.button("Optionen zurücksetzen")
+            .on_hover_text("Figuren und Spielfeld bleiben erhalten, \
+            nur Informationsanzeige wird deaktiviert und benutze Farben zurückgesetzt.")
+            .clicked() {
+            *self = DEFAULT_OPTIONS;
+            menu_change = true;
+        }
         ui.collapsing("Knoteninfo", |ui|{
             menu_change |= 
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"))
@@ -59,6 +79,10 @@ impl Options {
 
             ui.add_space(5.0);
             ui.label("Marker:");
+            ui.horizontal(|ui| {
+                ui.label("Farbe: ");
+                ui.color_edit_button_srgba(&mut self.automatic_marker_color);
+            });
             let old = self.robber_info;
             //settings to draw extra information
             ui.radio_value(&mut self.robber_info, RobberInfo::None, 
@@ -106,7 +130,7 @@ impl Options {
                     .on_hover_text("Manuelle Marker können an dem der Mausposition nächsten Knoten \
                     mit Taste [m] hinzugefügt und [n] entfernt werden.\n\
                     Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.");
-                ui.color_edit_button_srgba(&mut self.marker_color);
+                ui.color_edit_button_srgba(&mut self.manual_marker_color);
             });
         });
         ui.collapsing("Zahlen", |ui|{
@@ -203,17 +227,18 @@ impl Info {
         let characters = load_or(cc.storage, CHARACTERS, CharacterState::new);
         let marked_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
 
-        let robber_info = load_or(cc.storage, ROBBER_INFO, || RobberInfo::None);
-        let robber_strat = load_or(cc.storage, ROBBER_STRAT, || RobberStrat::None);
-        let vertex_info = load_or(cc.storage, VERTEX_INFO, || DrawNumbers::None);
-        let show_convex_hull = load_or(cc.storage, SHOW_HULL, || false);
-        let show_hull_boundary = load_or(cc.storage, SHOW_HULL_BND, || false);
+        let robber_info = load_or(cc.storage, ROBBER_INFO, || DEFAULT_OPTIONS.robber_info);
+        let robber_strat = load_or(cc.storage, ROBBER_STRAT, || DEFAULT_OPTIONS.robber_strat);
+        let vertex_info = load_or(cc.storage, VERTEX_INFO, || DEFAULT_OPTIONS.vertex_info);
+        let show_convex_hull = load_or(cc.storage, SHOW_HULL, || DEFAULT_OPTIONS.show_convex_hull);
+        let show_hull_boundary = load_or(cc.storage, SHOW_HULL_BND, || DEFAULT_OPTIONS.show_hull_boundary);
 
         let options = load_or(cc.storage, OPTIONS, || Options {
-            marker_color: YELLOW,
+            manual_marker_color: DEFAULT_OPTIONS.manual_marker_color,
+            automatic_marker_color: DEFAULT_OPTIONS.automatic_marker_color,
             robber_info,
-            marked_cop_dist: 10,
-            small_robber_dist: 10,
+            marked_cop_dist: DEFAULT_OPTIONS.marked_cop_dist,
+            small_robber_dist: DEFAULT_OPTIONS.small_robber_dist,
             robber_strat,
             vertex_info,
             show_convex_hull,
@@ -435,14 +460,14 @@ impl Info {
                 for (r_dist, c_dist, &pos, &vis) in 
                 izip!(&r.distances, &self.min_cop_dist, con.positions, con.visible) {
                     if vis && r_dist < c_dist {
-                        draw_circle_at(pos, GREEN);
+                        draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 },
             (RobberInfo::RobberAdvantage, _) => 
                 for (&adv, &pos, &vis, &hull) in 
                 izip!(&self.cop_advantage, con.positions, con.visible, self.cop_hull_data.hull()) {
                     if vis && hull.inside() && adv < -1 {
-                        draw_circle_at(pos, GREEN);
+                        draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 },
             (RobberInfo::SmallRobberDist, Some(r)) => {
@@ -450,14 +475,14 @@ impl Info {
                     self.options.small_robber_dist, con.resolution);
                 for (&dist, &pos, &vis) in izip!(&r.distances, con.positions, con.visible) {
                     if vis && dist <= bnd {
-                        draw_circle_at(pos, GREEN);
+                        draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 }
             },
             (RobberInfo::CopDist, _) => 
             for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, con.positions, con.visible) {
                 if vis && dist == self.options.marked_cop_dist {
-                    draw_circle_at(pos, GREEN);
+                    draw_circle_at(pos, self.options.automatic_marker_color);
                 }
             }
             (RobberInfo::EscapeableNodes, _) => 
@@ -470,7 +495,7 @@ impl Info {
             for &v in self.escapable.inner_connecting_line() {
                 if con.visible[v] {
                     let pos = con.positions[v];
-                    draw_circle_at(pos, GREEN);
+                    draw_circle_at(pos, self.options.automatic_marker_color);
                 }
             }
             _ => {},
@@ -596,7 +621,7 @@ impl Info {
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
             if vis && marked {
                 let draw_pos = con.cam.transform(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, self.options.marker_color);
+                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, self.options.manual_marker_color);
                 con.painter.add(marker_circle);
             }
         }
