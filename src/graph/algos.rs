@@ -724,8 +724,10 @@ impl CopPairHullData {
         if self.boundary.is_empty() {
             return;
         }
-
-        let cop_2_boundary_pos = self.boundary.iter().position(|&v| v == cop_2.nearest_node).unwrap();
+        let Some(cop_2_boundary_pos) = self.boundary.iter().position(|&v| v == cop_2.nearest_node) else {
+            self.boundary.clear();
+            return;
+        };
         let fst_segment = &self.boundary[..(cop_2_boundary_pos + 1)];
         let snd_segment = &self.boundary[cop_2_boundary_pos..];
         if fst_segment.len() < 5 && snd_segment.len() < 5 {
