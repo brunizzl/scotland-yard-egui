@@ -227,6 +227,7 @@ impl Map {
             if add_drag_value(ui, &mut self.resolution, "Auflösung: ", 0, 200) {
                 self.recompute_and_adjust(info);
             }
+            ui.label(format!("    ➡ {} Knoten", self.data.nr_vertices()));
         });
     }
 
