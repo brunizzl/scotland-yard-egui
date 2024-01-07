@@ -1,10 +1,12 @@
 
 use std::collections::VecDeque;
+use std::collections::BTreeSet;
 
 use egui::{Pos2, Vec2, pos2, vec2};
 use itertools::Itertools;
 
 use super::*;
+use crate::geo::{Pos3, Vec3, pos3, vec3};
 
 pub struct Embedding2D {
     positions: Vec<Pos2>,
@@ -27,7 +29,7 @@ impl Embedding2D {
         &self.edges
     }
 
-    pub fn len(&self) -> usize {
+    pub fn nr_vertices(&self) -> usize {
         debug_assert_eq!(self.positions.len(), self.edges.nr_vertices());
         self.positions.len()
     }
@@ -38,7 +40,7 @@ impl Embedding2D {
 
     #[inline(always)]
     fn add_vertex(&mut self, pos: Pos2) -> usize {
-        let new_index = self.len();
+        let new_index = self.nr_vertices();
         self.positions.push(pos);
         self.edges.push();
         new_index
@@ -146,6 +148,36 @@ impl Embedding2D {
         }
     }
 
+    /// turns each edge into a path of length `nr_subdivisions + 1`, 
+    /// e.g. `graph.subdivide_all_edges(0)` does nothing
+    pub fn subdivide_all_edges(&mut self, nr_subdivisions: usize) {
+        if nr_subdivisions == 0 {
+            return;
+        }
+        let nr_og_vertices = self.nr_vertices();
+
+        let mut v1_neighbors = Vec::new();
+        for v1 in 0..nr_og_vertices {
+            v1_neighbors.clear();
+            v1_neighbors.extend(self.edges.neighbors_of(v1));
+            for &v2 in &v1_neighbors {
+                if v2 < nr_og_vertices {
+                    let pos1 = self.positions[v1];
+                    let pos2 = self.positions[v2];
+                    let step = (pos2 - pos1) / (nr_subdivisions as f32 + 1.0);
+                    self.edges.remove_edge(v1, v2);
+                    let mut curr = v1;
+                    for i in 1..=nr_subdivisions {
+                        let next = self.add_vertex(pos1 + (i as f32) * step);
+                        self.add_edge(curr, next);
+                        curr = next;
+                    }
+                    self.add_edge(curr, v2);
+                }
+            }
+        }
+    }
+
 } //impl Graph
 
 /// centered at zero, contained in -1.0..1.0 x -1.0..1.0
@@ -159,7 +191,7 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Embedding2D 
     let edge_length = 1.0 / std::cmp::max(1, levels) as f32;
     let mut sector_borders = Vec::new();
     for border_nr in 0..sides {
-        let next_free_index = graph.len();
+        let next_free_index = graph.nr_vertices();
         let border = std::iter::once(0)
             .chain(next_free_index..(next_free_index + levels))
             .collect::<Vec<_>>();
@@ -325,7 +357,7 @@ impl Triangualtion {
         let avg_len = self.avg_edge_len();
         let mut queue = VecDeque::new();
         let mut v1_neighbors = Vec::new();
-        for v1 in 5..self.graph.len() {
+        for v1 in 5..self.graph.nr_vertices() {
             let v1_pos = self.graph.positions[v1];
             v1_neighbors.clear();
             v1_neighbors.extend(self.graph.edges.neighbors_of(v1));
@@ -476,7 +508,7 @@ impl Triangualtion {
             }
         };
         let mut queue = VecDeque::new();
-        let final_node_index = nr_nodes + res.graph.len();
+        let final_node_index = nr_nodes + res.graph.nr_vertices();
         for _ in 0..(nr_nodes * 2) {
             let pos = random_point();
             let new = res.add_vertex(pos, &mut queue);
@@ -509,4 +541,235 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Embedding2D
     tri.graph.edges.maybe_shrink_capacity(0);
     tri.graph.sort_neigbors();
     tri.graph
+}
+
+/// takes vertices and edges of a [`super::Embedding3D`] and applies a stereographic projection
+/// (see https://en.wikipedia.org/wiki/Stereographic_projection) with the `north_pole` mapped to infinity.
+fn project_stereographic_from_3d(positions_3d: &[Pos3], edges: EdgeList, north_pole: Vec3) -> Embedding2D {
+    let (unrotated_phi, unrotated_tau) = vec3(0.0, 0.0, 1.0).angle();
+    let (phi, tau) = north_pole.angle();
+    let delta_phi = unrotated_phi - phi;
+    let delta_tau = unrotated_tau - tau;
+
+    let positions = positions_3d.iter().map(|p| {
+        let p = p.to_vec3().rotate_z(delta_phi).rotate_x(delta_tau).normalized();
+        let raw = Vec2 {
+            x: p.x / (1.0 - p.z),
+            y: p.y / (1.0 - p.z),
+        };
+        let raw_len = raw.length();
+        let corrected = f32::powf(raw_len, 0.5);
+        (2.0 * raw * (corrected / raw_len)).to_pos2()
+    }).collect_vec();
+
+    Embedding2D { positions, edges }
+}
+
+use crate::graph::planar3d::edges_from_uniform_positions;
+
+pub fn projected_subdivided_cube(nr_edge_divisions: usize) -> Embedding2D {
+    let p = 1.0;
+    let n = -1.0;
+    let vs = vec![
+        pos3(p, p, p),
+        pos3(p, p, n),
+        pos3(p, n, p),
+        pos3(p, n, n),
+        pos3(n, p, p),
+        pos3(n, p, n),
+        pos3(n, n, p),
+        pos3(n, n, n),
+    ];
+    let edges = edges_from_uniform_positions(&vs);
+    let mut res = project_stereographic_from_3d(&vs, edges, vec3(0.0, 0.0, 1.0));
+    res.subdivide_all_edges(nr_edge_divisions);
+    res
+}
+
+pub fn projected_subdivided_dodecahedron(nr_edge_divisions: usize) -> Embedding2D {    
+    let a = 1.0;
+    let p = (1.0 + f32::sqrt(5.0)) / 2.0;
+    let d = 2.0 / (1.0 + f32::sqrt(5.0));
+    let vs = vec![
+        pos3(a, a, a),
+        pos3(a, a, -a),
+        pos3(a, -a, a),
+        pos3(a, -a, -a),
+        pos3(-a, a, a),
+        pos3(-a, a, -a),
+        pos3(-a, -a, a),
+        pos3(-a, -a, -a),
+        pos3(0.0, p, d),
+        pos3(0.0, p, -d),
+        pos3(0.0, -p, d),
+        pos3(0.0, -p, -d),
+        pos3(d, 0.0, p),
+        pos3(d, 0.0, -p),
+        pos3(-d, 0.0, p),
+        pos3(-d, 0.0, -p),
+        pos3(p, d, 0.0),
+        pos3(p, -d, 0.0),
+        pos3(-p, d, 0.0),
+        pos3(-p, -d, 0.0),
+    ];
+    let edges = edges_from_uniform_positions(&vs);
+    let infinite_face = find_circle(&edges, 0, 5);
+    let north_pole = Pos3::average(infinite_face.iter().map(|&v| vs[v])).to_vec3();
+    let mut res = project_stereographic_from_3d(&vs, edges, north_pole);
+    res.subdivide_all_edges(nr_edge_divisions);
+    res
+}
+
+pub fn projected_subdivided_truncated_icosahedron(nr_edge_divisions: usize) -> Embedding2D {
+    let phi = (1.0 + f32::sqrt(5.0)) / 2.0;
+    #[allow(unused_parens)]
+    let vs = vec![
+        pos3(0.0, 1.0, 3.0 * phi),
+        pos3(0.0, 1.0, -3.0 * phi),
+        pos3(0.0, -1.0, 3.0 * phi),
+        pos3(0.0, -1.0, -3.0 * phi),
+        pos3(3.0 * phi, 0.0, 1.0),
+        pos3(3.0 * phi, 0.0, -1.0),
+        pos3(-3.0 * phi, 0.0, 1.0),
+        pos3(-3.0 * phi, 0.0, -1.0),
+        pos3(1.0, 3.0 * phi, 0.0),
+        pos3(1.0, -3.0 * phi, 0.0),
+        pos3(-1.0, 3.0 * phi, 0.0),
+        pos3(-1.0, -3.0 * phi, 0.0),
+
+        pos3(1.0, (2.0 + phi), 2.0 * phi),
+        pos3(1.0, (2.0 + phi), -2.0 * phi),
+        pos3(1.0, -(2.0 + phi), 2.0 * phi),
+        pos3(1.0, -(2.0 + phi), -2.0 * phi),
+        pos3(-1.0, (2.0 + phi), 2.0 * phi),
+        pos3(-1.0, (2.0 + phi), -2.0 * phi),
+        pos3(-1.0, -(2.0 + phi), 2.0 * phi),
+        pos3(-1.0, -(2.0 + phi), -2.0 * phi),
+        pos3(2.0 * phi, 1.0, (2.0 + phi)),
+        pos3(2.0 * phi, 1.0, -(2.0 + phi)),
+        pos3(2.0 * phi, -1.0, (2.0 + phi)),
+        pos3(2.0 * phi, -1.0, -(2.0 + phi)),
+        pos3(-2.0 * phi, 1.0, (2.0 + phi)),
+        pos3(-2.0 * phi, 1.0, -(2.0 + phi)),
+        pos3(-2.0 * phi, -1.0, (2.0 + phi)),
+        pos3(-2.0 * phi, -1.0, -(2.0 + phi)),
+        pos3((2.0 + phi), 2.0 * phi, 1.0),
+        pos3((2.0 + phi), 2.0 * phi, -1.0),
+        pos3((2.0 + phi), -2.0 * phi, 1.0),
+        pos3((2.0 + phi), -2.0 * phi, -1.0),
+        pos3(-(2.0 + phi), 2.0 * phi, 1.0),
+        pos3(-(2.0 + phi), 2.0 * phi, -1.0),
+        pos3(-(2.0 + phi), -2.0 * phi, 1.0),
+        pos3(-(2.0 + phi), -2.0 * phi, -1.0),
+
+        pos3(phi, 2.0, (2.0 * phi + 1.0)),
+        pos3(phi, 2.0, -(2.0 * phi + 1.0)),
+        pos3(phi, -2.0, (2.0 * phi + 1.0)),
+        pos3(phi, -2.0, -(2.0 * phi + 1.0)),
+        pos3(-phi, 2.0, (2.0 * phi + 1.0)),
+        pos3(-phi, 2.0, -(2.0 * phi + 1.0)),
+        pos3(-phi, -2.0, (2.0 * phi + 1.0)),
+        pos3(-phi, -2.0, -(2.0 * phi + 1.0)),
+        pos3((2.0 * phi + 1.0), phi, 2.0),
+        pos3((2.0 * phi + 1.0), phi, -2.0),
+        pos3((2.0 * phi + 1.0), -phi, 2.0),
+        pos3((2.0 * phi + 1.0), -phi, -2.0),
+        pos3(-(2.0 * phi + 1.0), phi, 2.0),
+        pos3(-(2.0 * phi + 1.0), phi, -2.0),
+        pos3(-(2.0 * phi + 1.0), -phi, 2.0),
+        pos3(-(2.0 * phi + 1.0), -phi, -2.0),
+        pos3(2.0,  (2.0 * phi + 1.0), phi),
+        pos3(2.0,  (2.0 * phi + 1.0), -phi),
+        pos3(2.0,  -(2.0 * phi + 1.0), phi),
+        pos3(2.0,  -(2.0 * phi + 1.0), -phi),
+        pos3(-2.0,  (2.0 * phi + 1.0), phi),
+        pos3(-2.0,  (2.0 * phi + 1.0), -phi),
+        pos3(-2.0,  -(2.0 * phi + 1.0), phi),
+        pos3(-2.0,  -(2.0 * phi + 1.0), -phi),
+    ];
+    let edges = edges_from_uniform_positions(&vs);
+    debug_assert_eq!(vs.len(), 60);
+    debug_assert_eq!(edges.count_entries(), 180);
+    let infinite_face = find_circle(&edges, 0, 5);
+    let north_pole = Pos3::average(infinite_face.iter().map(|&v| vs[v])).to_vec3();
+    let mut res = project_stereographic_from_3d(&vs, edges, north_pole);
+    res.subdivide_all_edges(nr_edge_divisions);
+    res
+}
+
+/// custom subdivision of graph described in Fabian Hamann's masters thesis 
+pub fn subdivided_robber_win_graph(nr_edge_divisions: usize) -> Embedding2D {
+    let mut res = projected_subdivided_truncated_icosahedron(0);
+    let circles_len_6 = find_all_circles(res.edges(), 6);
+    for circle in circles_len_6 {
+        let avg_pos = pos3::average(circle.iter().map(|&v| res.positions[v]));
+        let center = res.add_vertex(avg_pos);
+        for v in circle {
+            res.add_edge(v, center);
+        }
+    }
+
+    res.subdivide_all_edges(nr_edge_divisions);
+    res
+}
+
+fn find_next_in_circle(edges: &EdgeList, path: &mut Vec<usize>, nr_left: usize) -> bool {
+    debug_assert!(path.len() > 0);
+    if nr_left == 0 {
+        let first = *path.first().unwrap();
+        let last = path.last().unwrap();
+        return edges.neighbors_of(first).contains(last);
+    }
+
+    let curr = *path.last().unwrap();
+    let last = if path.len() > 1 { path[path.len() - 2] } else { usize::MAX };
+    for n in edges.neighbors_of(curr) {
+        if n != last {
+            path.push(n);
+            if find_next_in_circle(edges, path, nr_left - 1) {
+                return true;
+            }
+            path.pop();
+        }
+    }
+    false
+}
+
+/// finds a smallest circle starting at `start`
+fn find_circle(edges: &EdgeList, start: usize, min_circumference: usize) -> Vec<usize> {
+    if min_circumference > 2 {
+        let mut path = vec![start];
+        for circumference in min_circumference..edges.nr_vertices() {
+            if find_next_in_circle(edges, &mut path, circumference - 1) {
+                return path;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn find_all_circles_at(edges: &EdgeList, start: usize, circumference: usize) -> Vec<Vec<usize>> {
+    if circumference < 3 {
+        return Vec::new();
+    }
+    let mut res = Vec::new();
+    for n in edges.neighbors_of(start) {
+        let mut path = vec![start, n];
+        if find_next_in_circle(edges, &mut path, circumference - 2) {
+            res.push(path);
+        }
+    }
+    res
+}
+
+fn find_all_circles(edges: &EdgeList, circumference: usize) -> BTreeSet<Vec<usize>> {
+    let mut res = BTreeSet::new();
+    for v in 0..edges.nr_vertices() {
+        let new_circles = find_all_circles_at(edges, v, circumference);
+        for mut circle in new_circles {
+            circle.sort();
+            res.insert(circle);
+        }
+    }
+    res
 }

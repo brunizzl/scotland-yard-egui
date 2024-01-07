@@ -28,6 +28,24 @@ fn is_small(x: f32) -> bool {
     x.abs() < 1e-4
 }
 
+/// connects the closest vertices to have edges,
+/// assumes all connected vertices to have same respective distances.
+pub fn edges_from_uniform_positions(vertex_positions: &[Pos3]) -> EdgeList {
+    debug_assert!(vertex_positions.len() >= 4); //can't make a hull of 3 points in 3d
+
+    let neighbor_vertex_dist = {
+        let v1 = vertex_positions[0];
+        vertex_positions[1..].iter().fold(f32::MAX, 
+            |acc, &v| f32::min((v - v1).length(), acc))
+    };
+    let related = vertex_positions.iter().map(|&p1| 
+        vertex_positions.iter().enumerate().filter_map(
+            move |(i, &p2)| (is_small((p1-p2).length()-neighbor_vertex_dist).then_some(i)
+        )
+    ));
+    EdgeList::from_iter(related, 6)
+}
+
 impl ConvexTriangleHull {
     #[allow(dead_code)]
     pub fn nr_vertices(&self) -> usize {
@@ -125,19 +143,7 @@ impl ConvexTriangleHull {
     /// assumes all edges to have same length.
     fn new_uniform_from_positions(vertex_positions: Vec<Pos3>) -> Self 
     {
-        debug_assert!(vertex_positions.len() >= 4); //can't make a hull of 3 points in 3d
-
-        let neighbor_vertex_dist = {
-            let v1 = vertex_positions[0];
-            vertex_positions[1..].iter().fold(f32::MAX, 
-                |acc, &v| f32::min((v - v1).length(), acc))
-        };
-        let related = vertex_positions.iter().map(|&p1| 
-            vertex_positions.iter().enumerate().filter_map(
-                move |(i, &p2)| (is_small((p1-p2).length()-neighbor_vertex_dist).then_some(i)
-            )
-        ));
-        let mut vertex_neighbors = EdgeList::from_iter(related, 6);
+        let mut vertex_neighbors = edges_from_uniform_positions(&vertex_positions);
         vertex_neighbors.maybe_shrink_capacity(0);
 
         let (triangles, face_normals) = 
@@ -243,25 +249,6 @@ impl ConvexTriangleHull {
             triangles, 
             face_normals 
         }.rescale_vectices(scale)
-    }
-
-    #[allow(dead_code)]
-    pub fn draw_visible_faces(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) 
-    {
-        for (&normal, boundary) in self.face_normals.iter().zip(self.triangles.iter()) {
-            if to_screen.faces_camera(normal) {
-                for (&v1, &v2) in boundary.iter().circular_tuple_windows() {
-                    let p1 = self.vertices[v1];
-                    let p2 = self.vertices[v2];
-
-                    let edge = [
-                        to_screen.apply(p1), 
-                        to_screen.apply(p2)];
-                    let line = Shape::LineSegment { points: edge, stroke };
-                    painter.add(line);
-                }
-            }
-        }
     }
 }
 

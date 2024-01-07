@@ -89,6 +89,25 @@ impl Pos3 {
             z: egui::lerp(self.z..=other.z, t),
         }
     }
+
+    pub fn average(positions: impl ExactSizeIterator<Item = Self>) -> Pos3 {
+        let mut acc = Vec3::ZERO;
+        let len = positions.len() as f32;
+        for x in positions {
+            acc += x.to_vec3();
+        }
+        Pos3::ZERO + acc / len
+    }
+}
+
+use egui::{Pos2, Vec2};
+pub fn average(positions: impl ExactSizeIterator<Item = Pos2>) -> Pos2 {
+    let mut acc = Vec2::ZERO;
+    let len = positions.len() as f32;
+    for x in positions {
+        acc += x.to_vec2();
+    }
+    Pos2::ZERO + acc / len
 }
 
 impl std::ops::Index<usize> for Pos3 {
