@@ -296,8 +296,8 @@ impl Info {
                     }));
             }
             else if ui.button("Starte Rechnung")
-                .on_hover_text("WARNUNG: weil WASM keine threads mag blockt \
-                die Websiteversion bei diese Reschnung die GUI").clicked() 
+                .on_hover_text("WARNUNG: weil WASM keine Threads mag, blockt \
+                die Websiteversion bei dieser Rechnung die GUI").clicked() 
             {
                 let _ = ui.ctx().animate_value_with_time(
                     Id::new(&self.bruteforce_worker as *const _), 0.0, 0.0);
