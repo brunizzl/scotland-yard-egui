@@ -42,6 +42,7 @@ struct Options {
     vertex_info: DrawNumbers,
     show_convex_hull: bool,
     show_hull_boundary: bool,
+    draw_vertices: bool,
 }
 
 const DEFAULT_OPTIONS: Options = Options {
@@ -54,6 +55,7 @@ const DEFAULT_OPTIONS: Options = Options {
     vertex_info: DrawNumbers::None,
     show_convex_hull: false,
     show_hull_boundary: false,
+    draw_vertices: false,
 };
 
 impl Options {
@@ -77,6 +79,8 @@ impl Options {
             menu_change |= ui.add(Checkbox::new(&mut self.show_hull_boundary, "zeige Grenze"))
                 .changed();
 
+            //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
+            ui.add(Checkbox::new(&mut self.draw_vertices, "Zeichne Knoten"));
 
             ui.add_space(5.0);
             ui.label("Marker:");
@@ -253,6 +257,7 @@ impl Info {
             vertex_info,
             show_convex_hull,
             show_hull_boundary,
+            draw_vertices: DEFAULT_OPTIONS.draw_vertices,
         });
 
         Self { 
@@ -273,11 +278,8 @@ impl Info {
         }
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
-        self.menu_change = false;
-        self.menu_change |= self.options.draw_menu(ui);
-        self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
-        
+    /// doesn't only draw menu but also manages computation
+    pub fn draw_bruteforce_menu(&mut self, ui: &mut Ui, map: &map::Map) {
         ui.collapsing("Bruteforce", |ui|{
             if self.bruteforce_worker.is_some() {
                 let float = ui.ctx().animate_value_with_time(
@@ -297,7 +299,9 @@ impl Info {
             }
             else if ui.button("Starte Rechnung")
                 .on_hover_text("WARNUNG: weil WASM keine Threads mag, blockt \
-                die Websiteversion bei dieser Rechnung die GUI").clicked() 
+                die Websiteversion bei dieser Rechnung die GUI.\n\
+                Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
+                Bruteforceberechnungen nicht in RAM möglich macht.").clicked() 
             {
                 let _ = ui.ctx().animate_value_with_time(
                     Id::new(&self.bruteforce_worker as *const _), 0.0, 0.0);
@@ -345,6 +349,14 @@ impl Info {
                     format!("Räuber gewinnt gegen {} auf {} Knoten", write_cops(*nr_cops), safe.nr_map_vertices()))
             }
         });
+    }
+
+    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
+        self.menu_change = false;
+        self.menu_change |= self.options.draw_menu(ui);
+        self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
+        
+        self.draw_bruteforce_menu(ui, map);
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
@@ -529,6 +541,19 @@ impl Info {
             }
         }
     } 
+
+    fn draw_vertices(&self, con: &DrawContext<'_>) {
+        if !self.options.draw_vertices {
+            return;
+        }
+        for (&vis, &pos) in izip!(con.visible, con.positions) {
+            if vis {
+                let draw_pos = con.cam.transform(pos);
+                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.0, Color32::GRAY);
+                con.painter.add(marker_circle);
+            }
+        }
+    }
 
     fn draw_green_circles(&self, con: &DrawContext<'_>) {
         let draw_circle_at = |pos, color|{
@@ -724,6 +749,7 @@ impl Info {
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         self.process_general_input(ui, con);
         if self.menu_change { self.definitely_update(con); } else { self.maybe_update(con); }
+        self.draw_vertices(con);
         self.draw_convex_cop_hull(con);
         self.draw_green_circles(con);
         self.draw_manual_markers(con);
