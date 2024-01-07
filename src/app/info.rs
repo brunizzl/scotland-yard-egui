@@ -1,18 +1,19 @@
 
 
 use std::collections::VecDeque;
+use std::thread;
 
 use itertools::{ izip, Itertools };
 
 use egui::*;
 
-use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes};
+use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult, CartesianGraphProduct};
 use crate::app::character::CharacterState;
 
 use super::{*, color::*};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub enum RobberInfo { None, RobberAdvantage, EscapeableNodes, NearNodes, SmallRobberDist, CopDist, Debugging }
+pub enum RobberInfo { None, RobberAdvantage, BruteForceRes, EscapeableNodes, NearNodes, SmallRobberDist, CopDist, Debugging }
 
 impl RobberInfo {
     pub fn scale_small_dist_with_resolution(dist: isize, radius: isize) -> isize {
@@ -105,6 +106,12 @@ impl Options {
                 Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
                 als die Cops diesen Abschnitt dicht machen können.");
 
+            ui.radio_value(&mut self.robber_info, RobberInfo::BruteForceRes, "Bruteforce Ergebnis")
+                .on_hover_text("Wenn Bruteforce Berechnung ergeben hat, \
+                dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
+                aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
+                die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.");
+
             ui.radio_value(&mut self.robber_info, RobberInfo::SmallRobberDist, 
                 "Punkte nah an Räuber")
                 .on_hover_text("Alle Punkte die Abstand <= Auflösung * (% Auflösung) / 100 zu Räuber haben");
@@ -192,6 +199,9 @@ pub struct Info {
 
     options: Options,
     menu_change: bool,
+
+    bruteforce_worker: Option<thread::JoinHandle<BruteForceResult>>,
+    bruteforce_result: BruteForceResult,
 }
 
 mod storage_keys {
@@ -257,6 +267,9 @@ impl Info {
             characters,            
             options,
             menu_change: false,
+
+            bruteforce_worker: None,
+            bruteforce_result: BruteForceResult::None,
         }
     }
 
@@ -264,6 +277,62 @@ impl Info {
         self.menu_change = false;
         self.menu_change |= self.options.draw_menu(ui);
         self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
+        
+        ui.collapsing("Bruteforce", |ui|{
+            if self.bruteforce_worker.is_some() {
+                let float = ui.ctx().animate_value_with_time(
+                    Id::new(&self.bruteforce_worker as *const _), 4e20, 1e20);
+
+                ui.label(format!("Berechne Wert {}",
+                    match (float as isize) % 8 { 
+                        0 => "", 
+                        1 => " .", 
+                        2 => " . .", 
+                        3 => " . . .", 
+                        4 => " . . . .", 
+                        5 => "   . . .", 
+                        6 => "     . .", 
+                        _ => "       ."
+                    }));
+            }
+            else if ui.button("Starte Rechnung").clicked() {
+                let _ = ui.ctx().animate_value_with_time(
+                    Id::new(&self.bruteforce_worker as *const _), 0.0, 0.0);
+
+                let edges = map.edges().clone();
+                let nr_characters = self.characters.active_cops().count();
+                self.bruteforce_worker = Some(thread::spawn(move || {
+                    compute_safe_robber_positions(nr_characters, &edges)
+                }));
+            }
+            self.bruteforce_worker = match std::mem::take(&mut self.bruteforce_worker) {
+                None => None,
+                Some(handle) => if handle.is_finished() {
+                    self.bruteforce_result = match handle.join() {
+                        Err(_) => BruteForceResult::Error("Programmabsturz".to_owned()),
+                        Ok(res) => res,
+                    };
+                    None
+                }
+                else {
+                    Some(handle)
+                }
+            };
+
+            let write_cops = |nr_cops: usize| if nr_cops == 1 { 
+                "einen Cop".to_owned() 
+            } else { 
+                nr_cops.to_string() + " Cops" 
+            };
+            match &self.bruteforce_result {
+                BruteForceResult::None => ui.label("Noch keine beendete Rechnung"),
+                BruteForceResult::Error(what) => ui.label("Fehler bei letzter Rechnung: \n".to_owned() + what),
+                BruteForceResult::CopsWin(nr_cops, nr_vertices) => ui.label(
+                    format!("Räuber verliert gegen {} auf {} Knoten", write_cops(*nr_cops), nr_vertices)),
+                BruteForceResult::RobberWins(nr_cops, safe) => ui.label(
+                    format!("Räuber gewinnt gegen {} auf {} Knoten", write_cops(*nr_cops), safe.nr_map_vertices()))
+            }
+        });
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
@@ -491,6 +560,19 @@ impl Info {
                     draw_circle_at(pos, super::color::u16_marker_color(esc));
                 }
             }
+            (RobberInfo::BruteForceRes, _) => if let BruteForceResult::RobberWins(nr_cops, safe) = &self.bruteforce_result {
+                if con.edges.nr_vertices() == safe.nr_map_vertices() && self.characters.active_cops().count() == *nr_cops {
+                    if let Some(cop_moves) = CartesianGraphProduct::new(con.edges, *nr_cops) {
+                        let cop_positions = cop_moves.pack(self.characters.active_cops().map(|c| c.nearest_node));
+                        let safe_vertices = safe.robber_safe_at(cop_positions);
+                        for (safe, &vis, &pos) in izip!(safe_vertices, con.visible, con.positions) {
+                            if safe && vis {
+                                draw_circle_at(pos, self.options.automatic_marker_color);
+                            }
+                        }
+                    }
+                }
+            },
             (RobberInfo::Debugging, _) =>             
             for &v in self.escapable.inner_connecting_line() {
                 if con.visible[v] {

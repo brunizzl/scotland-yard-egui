@@ -13,6 +13,10 @@ pub use algos::*;
 pub mod planar3d;
 pub use planar3d::*;
 
+/// bruteforce algrotithms to compute the lazy-cop number of a graph
+pub mod bruteforce;
+pub use bruteforce::*;
+
 
 
 #[repr(u8)]
