@@ -552,7 +552,7 @@ fn project_stereographic_from_3d(positions_3d: &[Pos3], edges: EdgeList, north_p
     let delta_tau = unrotated_tau - tau;
 
     let positions = positions_3d.iter().map(|p| {
-        let p = p.to_vec3().rotate_z(delta_phi).rotate_x(delta_tau).normalized();
+        let p = p.to_vec3().rotate_z(delta_phi).rotate_x(delta_tau).rotate_z(std::f32::consts::TAU / 4.0).normalized();
         let raw = Vec2 {
             x: p.x / (1.0 - p.z),
             y: p.y / (1.0 - p.z),
