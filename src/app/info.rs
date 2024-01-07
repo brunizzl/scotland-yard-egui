@@ -295,15 +295,27 @@ impl Info {
                         _ => "       ."
                     }));
             }
-            else if ui.button("Starte Rechnung").clicked() {
+            else if ui.button("Starte Rechnung")
+                .on_hover_text("WARNUNG: weil WASM keine threads mag blockt \
+                die Websiteversion bei diese Reschnung die GUI").clicked() 
+            {
                 let _ = ui.ctx().animate_value_with_time(
                     Id::new(&self.bruteforce_worker as *const _), 0.0, 0.0);
 
                 let edges = map.edges().clone();
                 let nr_characters = self.characters.active_cops().count();
-                self.bruteforce_worker = Some(thread::spawn(move || {
-                    compute_safe_robber_positions(nr_characters, &edges)
-                }));
+                //use threads natively
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.bruteforce_worker = Some(thread::spawn(move || {
+                        compute_safe_robber_positions(nr_characters, &edges)
+                    }));
+                }
+                //wasm doesn't like threads -> just block gui                 
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.bruteforce_result = compute_safe_robber_positions(nr_characters, &edges);
+                }
             }
             self.bruteforce_worker = match std::mem::take(&mut self.bruteforce_worker) {
                 None => None,
