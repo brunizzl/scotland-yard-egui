@@ -2,6 +2,7 @@
 use std::collections::VecDeque;
 
 use egui::*;
+use itertools::izip;
 
 use crate::{graph::EdgeList, geo::Pos3};
 
@@ -171,18 +172,21 @@ impl Character {
             return;
         }   
         let to_plane = con.cam.to_screen().to_plane;
-        let potential = |v:usize| {
-            let dist_2d = (to_plane.project_pos(con.positions[v]) - self.pos2).length_sq();
-            let backface_penalty = 10.0 * (!con.visible[v]) as isize as f32;
-            dist_2d + backface_penalty
-        };
-        //this potential might fail if the map has been swapped -> we assume here the map stayed the same
-        assert!(con.positions.len() > self.nearest_node);
-        let (nearest_node, nearest_dist_sq) = con.edges.find_local_minimum(potential, self.nearest_node);
-        self.on_node = nearest_dist_sq <= con.tolerance * con.tolerance;
+        let mut best_dist_sq = f32::MAX;
+        let mut best_vertex = usize::MAX;
+        for (v, &vis, &pos) in izip!(0.., con.visible, con.positions) {
+            if vis {
+                let new_dist_sq = (to_plane.project_pos(pos) - self.pos2).length_sq();
+                if new_dist_sq < best_dist_sq {
+                    best_dist_sq = new_dist_sq;
+                    best_vertex = v;
+                }
+            } 
+        }
+        self.on_node = best_dist_sq <= con.tolerance * con.tolerance;
 
-        let change = self.on_node && nearest_node != self.nearest_node;
-        self.nearest_node = nearest_node;
+        let change = self.on_node && best_vertex != self.nearest_node;
+        self.nearest_node = best_vertex;
         if change || self.distances.len() != con.positions.len() {
             self.update_distances(con.edges, queue);
         }
