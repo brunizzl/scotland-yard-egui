@@ -7,7 +7,8 @@ pub use vec3::*;
 pub mod pos3;
 pub use pos3::*;
 
-
+pub mod mat;
+pub use mat::*;
 
 
 type Line2 = (Pos2, Vec2);

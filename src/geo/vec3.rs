@@ -58,6 +58,10 @@ impl Vec3 {
         }
     }
 
+    pub fn is_normalized(self) -> bool {
+        (self.length_sq() - 1.0).abs() < 1e-4
+    }
+
     #[inline(always)]
     pub fn length(self) -> f32 {
         self.x.hypot(self.y).hypot(self.z)

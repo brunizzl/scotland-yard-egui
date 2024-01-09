@@ -3,11 +3,11 @@
 use std::collections::VecDeque;
 use std::thread;
 
-use itertools::{ izip, Itertools };
+use itertools::{ izip, Itertools, equal };
 
 use egui::*;
 
-use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult};
+use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult, SymmetricMap};
 use crate::app::character::CharacterState;
 
 use super::{*, color::*};
@@ -22,6 +22,7 @@ pub enum RobberInfo {
     SmallRobberDist, 
     CopDist, 
     VertexEquivalenceClass,
+    CopsRotatedToEquivalence,
     Debugging 
 }
 
@@ -150,9 +151,13 @@ impl Options {
 
             ui.radio_value(&mut self.robber_info, RobberInfo::VertexEquivalenceClass, 
                 "Symmetrieäquivalenzklasse")
-                .on_hover_text("Für symmetrische Graphen werden Knoten die mit einer symmetrierespektierenden \
-                Rotation + Spiegelung auf einander abgebildet werden in die selbe Klasse gesteckt. \
+                .on_hover_text("Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
+                Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
                 Das macht Bruteforce etwas weniger speicherintensiv.");
+
+            //ui.radio_value(&mut self.robber_info, RobberInfo::CopsRotatedToEquivalence, 
+            //    "Rotierte Coppositionen")
+            //    .on_hover_text("Coppositionen rotiert auf repräsentative Knoten selber Äquivalenzklasse");
 
             ui.radio_value(&mut self.robber_info, RobberInfo::Debugging, 
                 "Debugging")
@@ -191,7 +196,10 @@ impl Options {
                 .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
 
             ui.radio_value(&mut self.vertex_info, DrawNumbers::VertexEquivalenceClass, 
-                "Symmetrieäquivalenzklasse");
+                "Symmetrieäquivalenzklasse")
+                .on_hover_text("Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
+                Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
+                Das macht Bruteforce etwas weniger speicherintensiv.");
 
             ui.radio_value(&mut self.vertex_info, DrawNumbers::Debugging, 
                 "Debugging")
@@ -333,19 +341,22 @@ impl Info {
                 let _ = ui.ctx().animate_value_with_time(
                     Id::new(&self.bruteforce_worker as *const _), 0.0, 0.0);
 
-                let edges = map.edges().clone();
                 let nr_characters = self.characters.active_cops().count();
+                let symmetric_map = SymmetricMap {
+                    edges: map.edges().clone(),
+                    eqivalence: map.data().equivalence().cloned(),
+                };
                 //use threads natively
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     self.bruteforce_worker = Some(thread::spawn(move || {
-                        compute_safe_robber_positions(nr_characters, &edges)
+                        compute_safe_robber_positions(nr_characters, symmetric_map)
                     }));
                 }
                 //wasm doesn't like threads -> just block gui                 
                 #[cfg(target_arch = "wasm32")]
                 {
-                    self.bruteforce_result = compute_safe_robber_positions(nr_characters, &edges);
+                    self.bruteforce_result = compute_safe_robber_positions(nr_characters, symmetric_map);
                 }
             }
             self.bruteforce_worker = match std::mem::take(&mut self.bruteforce_worker) {
@@ -646,6 +657,25 @@ impl Info {
                     }
                 }
             },
+            (RobberInfo::CopsRotatedToEquivalence, _) => if let Some(equiv) = con.equivalence_class {
+                let active_cops = self.characters.active_cops().collect_vec();
+                if active_cops.len() > 0 {
+                    let rot = equiv.transform_to_representative(con.edges, active_cops[0].nearest_node);
+                    for cop in active_cops {
+                        let v_rot = equiv.apply_transform(con.edges, &rot, cop.nearest_node);
+                        let pos_rot = con.positions[v_rot];
+                        if con.visible[v_rot] {
+                            draw_circle_at(pos_rot, self.options.automatic_marker_color);                            
+                        }
+                        else { //only draw half size
+                            let draw_pos = con.cam.transform(pos_rot);
+                            let marker_circle = Shape::circle_filled(draw_pos, con.scale * 3.0, 
+                                self.options.automatic_marker_color);
+                            con.painter.add(marker_circle);
+                        }
+                    }
+                }
+            },
             (RobberInfo::Debugging, _) =>             
             for &v in self.escapable.inner_connecting_line() {
                 if con.visible[v] {
@@ -669,19 +699,19 @@ impl Info {
         };
         let font = FontId::proportional(con.scale * 8.0);
         let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
-        for (i, &pos, &vis) in izip!(0.., con.positions, con.visible) {
+        for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
             if vis {
                 let txt = match self.options.vertex_info {
-                    DrawNumbers::Indices => { i.to_string() }
-                    DrawNumbers::MinCopDist => { self.min_cop_dist[i].to_string() }
+                    DrawNumbers::Indices => { v.to_string() }
+                    DrawNumbers::MinCopDist => { self.min_cop_dist[v].to_string() }
                     DrawNumbers::None => { panic!() }
-                    DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
-                    DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[i]) }
+                    DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[v]).to_string() }
+                    DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[v]) }
                     DrawNumbers::VertexEquivalenceClass => 
-                        con.equivalence_class.map(|e| e.classes()[i].to_string()).unwrap_or(String::new()),
+                        con.equivalence_class.map(|e| e.classes()[v].to_string()).unwrap_or(String::new()),
                     //DrawNumbers::Debugging => self.escapable.owners()[i].to_string(),
                     DrawNumbers::Debugging => { 
-                        let d = self.escapable.boundary_segment_dist()[i];
+                        let d = self.escapable.boundary_segment_dist()[v];
                         if d == isize::MAX { String::new() } else { d.to_string() }
                     }
                 };

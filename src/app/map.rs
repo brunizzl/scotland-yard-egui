@@ -44,6 +44,10 @@ mod storage_keys {
 
 impl Map {
 
+    pub fn data(&self) -> &Embedding3D {
+        &self.data
+    }
+
     pub fn new(info: &mut Info, cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
         let shape = load_or(cc.storage, SHAPE, || Shape::Icosahedron);
