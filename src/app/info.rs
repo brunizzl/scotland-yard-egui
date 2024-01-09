@@ -13,7 +13,17 @@ use crate::app::character::CharacterState;
 use super::{*, color::*};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub enum RobberInfo { None, RobberAdvantage, BruteForceRes, EscapeableNodes, NearNodes, SmallRobberDist, CopDist, Debugging }
+pub enum RobberInfo { 
+    None, 
+    RobberAdvantage, 
+    BruteForceRes, 
+    EscapeableNodes, 
+    NearNodes, 
+    SmallRobberDist, 
+    CopDist, 
+    VertexEquivalenceClass,
+    Debugging 
+}
 
 impl RobberInfo {
     pub fn scale_small_dist_with_resolution(dist: isize, radius: isize) -> isize {
@@ -22,7 +32,15 @@ impl RobberInfo {
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum DrawNumbers { None, Indices, RobberAdvantage, EscapeableNodes, MinCopDist, Debugging }
+pub enum DrawNumbers { 
+    None, 
+    Indices, 
+    RobberAdvantage, 
+    EscapeableNodes, 
+    MinCopDist, 
+    VertexEquivalenceClass,
+    Debugging 
+}
 
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -130,6 +148,12 @@ impl Options {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
 
+            ui.radio_value(&mut self.robber_info, RobberInfo::VertexEquivalenceClass, 
+                "Symmetrieäquivalenzklasse")
+                .on_hover_text("Für symmetrische Graphen werden Knoten die mit einer symmetrierespektierenden \
+                Rotation + Spiegelung auf einander abgebildet werden in die selbe Klasse gesteckt. \
+                Das macht Bruteforce etwas weniger speicherintensiv.");
+
             ui.radio_value(&mut self.robber_info, RobberInfo::Debugging, 
                 "Debugging")
                 .on_hover_text("Was auch immer gerade während des letzten mal kompilierens interessant war");
@@ -165,6 +189,9 @@ impl Options {
             ui.radio_value(&mut self.vertex_info, DrawNumbers::MinCopDist, 
                 "minimaler Cop Abstand")
                 .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
+
+            ui.radio_value(&mut self.vertex_info, DrawNumbers::VertexEquivalenceClass, 
+                "Symmetrieäquivalenzklasse");
 
             ui.radio_value(&mut self.vertex_info, DrawNumbers::Debugging, 
                 "Debugging")
@@ -597,14 +624,25 @@ impl Info {
                     draw_circle_at(pos, super::color::u16_marker_color(esc));
                 }
             }
-            (RobberInfo::BruteForceRes, _) => if let BruteForceResult::RobberWins(nr_cops, safe, configs) = &self.bruteforce_result {
-                if con.edges.nr_vertices() == safe.nr_map_vertices() && self.characters.active_cops().count() == *nr_cops {
-                    let cop_positions = configs.pack(self.characters.active_cops().map(|c| c.nearest_node));
-                    let safe_vertices = safe.robber_safe_at(cop_positions);
-                    for (safe, &vis, &pos) in izip!(safe_vertices, con.visible, con.positions) {
-                        if safe && vis {
-                            draw_circle_at(pos, self.options.automatic_marker_color);
+            (RobberInfo::BruteForceRes, _) => 
+                if let BruteForceResult::RobberWins(nr_cops, safe, configs) = &self.bruteforce_result {
+                    let same_map = con.edges.nr_vertices() == safe.nr_map_vertices();
+                    let same_nr_cops = self.characters.active_cops().count() == *nr_cops;
+                    if same_map && same_nr_cops {
+                        let cop_positions = configs.pack(self.characters.active_cops().map(|c| c.nearest_node));
+                        let safe_vertices = safe.robber_safe_at(cop_positions);
+                        for (safe, &vis, &pos) in izip!(safe_vertices, con.visible, con.positions) {
+                            if safe && vis {
+                                draw_circle_at(pos, self.options.automatic_marker_color);
+                            }
                         }
+                    }
+                },
+            (RobberInfo::VertexEquivalenceClass, _) => if let Some(equiv) = con.equivalence_class {                
+                for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
+                    if vis {
+                        let colors = &super::color::MARKER_COLORS;
+                        draw_circle_at(pos, colors[class as usize % colors.len()]);
                     }
                 }
             },
@@ -639,6 +677,8 @@ impl Info {
                     DrawNumbers::None => { panic!() }
                     DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[i]).to_string() }
                     DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[i]) }
+                    DrawNumbers::VertexEquivalenceClass => 
+                        con.equivalence_class.map(|e| e.classes()[i].to_string()).unwrap_or(String::new()),
                     //DrawNumbers::Debugging => self.escapable.owners()[i].to_string(),
                     DrawNumbers::Debugging => { 
                         let d = self.escapable.boundary_segment_dist()[i];

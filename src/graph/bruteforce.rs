@@ -74,6 +74,7 @@ impl CopConfigurations {
                 }
             }
         }
+        
         let nr_vertices = map.nr_vertices();
         let size = {
             let mut i = 0usize;

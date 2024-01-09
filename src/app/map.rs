@@ -294,7 +294,8 @@ impl Map {
             scale, 
             resolution: self.resolution, 
             painter,
-            response
+            response,
+            equivalence_class: self.data.equivalence(),
         }
     }
 }

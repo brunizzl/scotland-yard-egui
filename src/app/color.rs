@@ -121,3 +121,14 @@ const fn create_distinct_colors() -> [[f32; 3]; 32] {
     res
 }
 
+const fn build_marker_colors() -> [Color32; 32] {
+    let mut i = 0;
+    let mut res = [Color32::BLACK; 32];
+    while i < 32 {
+        let color = AUTOMATIC_MARKER_COLORS[i];
+        res[i] = Color32::from_rgb(color[0] as u8, color[1] as u8, color[2] as u8);
+        i += 1;
+    }
+    res
+}
+pub const MARKER_COLORS: [Color32; 32] = build_marker_colors();
