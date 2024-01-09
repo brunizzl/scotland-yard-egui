@@ -7,7 +7,7 @@ use itertools::{ izip, Itertools };
 
 use egui::*;
 
-use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult, CartesianGraphProduct};
+use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult};
 use crate::app::character::CharacterState;
 
 use super::{*, color::*};
@@ -80,7 +80,7 @@ impl Options {
                 .changed();
 
             //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
-            ui.add(Checkbox::new(&mut self.draw_vertices, "Zeichne Knoten"));
+            ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
 
             ui.add_space(5.0);
             ui.label("Marker:");
@@ -345,7 +345,7 @@ impl Info {
                 BruteForceResult::Error(what) => ui.label("Fehler bei letzter Rechnung: \n".to_owned() + what),
                 BruteForceResult::CopsWin(nr_cops, nr_vertices) => ui.label(
                     format!("Räuber verliert gegen {} auf {} Knoten", write_cops(*nr_cops), nr_vertices)),
-                BruteForceResult::RobberWins(nr_cops, safe) => ui.label(
+                BruteForceResult::RobberWins(nr_cops, safe, _cofigs) => ui.label(
                     format!("Räuber gewinnt gegen {} auf {} Knoten", write_cops(*nr_cops), safe.nr_map_vertices()))
             }
         });
@@ -597,15 +597,13 @@ impl Info {
                     draw_circle_at(pos, super::color::u16_marker_color(esc));
                 }
             }
-            (RobberInfo::BruteForceRes, _) => if let BruteForceResult::RobberWins(nr_cops, safe) = &self.bruteforce_result {
+            (RobberInfo::BruteForceRes, _) => if let BruteForceResult::RobberWins(nr_cops, safe, configs) = &self.bruteforce_result {
                 if con.edges.nr_vertices() == safe.nr_map_vertices() && self.characters.active_cops().count() == *nr_cops {
-                    if let Some(cop_moves) = CartesianGraphProduct::new(con.edges, *nr_cops) {
-                        let cop_positions = cop_moves.pack(self.characters.active_cops().map(|c| c.nearest_node));
-                        let safe_vertices = safe.robber_safe_at(cop_positions);
-                        for (safe, &vis, &pos) in izip!(safe_vertices, con.visible, con.positions) {
-                            if safe && vis {
-                                draw_circle_at(pos, self.options.automatic_marker_color);
-                            }
+                    let cop_positions = configs.pack(self.characters.active_cops().map(|c| c.nearest_node));
+                    let safe_vertices = safe.robber_safe_at(cop_positions);
+                    for (safe, &vis, &pos) in izip!(safe_vertices, con.visible, con.positions) {
+                        if safe && vis {
+                            draw_circle_at(pos, self.options.automatic_marker_color);
                         }
                     }
                 }

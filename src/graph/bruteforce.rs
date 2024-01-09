@@ -10,25 +10,88 @@ use super::EdgeList;
 
 type CompactCops = usize;
 
-pub struct CartesianGraphProduct<'a> {
-    original_edges: &'a EdgeList,
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct CompactCopsIndex(usize);
+
+/// keeps track of all multisets of size `self.nr_cops` and elements in  `self.nr_original_vertices` 
+pub struct CopConfigurations {
+    nr_original_vertices: usize,
     nr_cops: usize, //stored in usize, but this can in praxis only be veeeery small
+    all_configurations: Vec<CompactCops>,
 }
 
-impl<'a> CartesianGraphProduct<'a> {
 
-    pub fn nr_product_vertices(&self) -> usize {
-        self.original_edges.nr_vertices().pow(self.nr_cops as u32)
+fn pack(nr_cops: usize, nr_original_vertices: usize, cops: impl Iterator<Item = usize>) -> CompactCops {
+    let nr_vertices = nr_original_vertices as CompactCops;
+    let mut positions: CompactCops = 0;
+    let mut i = 0;
+    for cop in cops {
+        positions *= nr_vertices;
+        debug_assert!((cop as CompactCops) < nr_vertices);
+        positions += cop as CompactCops;
+        i += 1;
+    }
+    debug_assert_eq!(i, nr_cops);
+    positions
+}
+
+impl CopConfigurations {
+
+    pub fn nr_configurations(&self) -> usize {
+        self.all_configurations.len()
     }
 
-    pub fn new(original_edges: &'a EdgeList, nr_cops: usize) -> Option<Self> {
-        //only start computation when all vertices' indices can be converted to usize
-        let _size = (original_edges.nr_vertices() as usize).checked_pow(nr_cops as u32)?;
-        Some(Self { original_edges, nr_cops })
+    pub fn new(map: &EdgeList, nr_cops: usize) -> Option<Self> {
+
+        fn for_each_configuration(nr_cops: usize, nr_vertices: usize, mut f: impl FnMut(CompactCops)) {
+            let mut curr_config = vec![0usize; nr_cops];
+            let mut sorted_curr_config = vec![0usize; nr_cops];
+            let advance = |config: &mut [_]| -> bool {
+                let mut fst_change = 0;
+                loop {
+                    if config[fst_change] + 1 < nr_vertices {
+                        config[fst_change] += 1;
+                        break;
+                    }
+                    fst_change += 1;
+                    if fst_change == nr_cops {
+                        return false;
+                    }
+                };
+                for i in 0..fst_change {
+                    config[i] = config[fst_change];
+                }
+                true
+            };
+            loop {
+                sorted_curr_config.clone_from(&curr_config);
+                sorted_curr_config.sort();
+                let packed = pack(nr_cops, nr_vertices, sorted_curr_config.iter().map(|&c| c));
+                f(packed);
+                if !advance(&mut curr_config) {
+                    return;
+                }
+            }
+        }
+        let nr_vertices = map.nr_vertices();
+        let size = {
+            let mut i = 0usize;
+            for_each_configuration(nr_cops, nr_vertices, |_| i += 1);
+            i
+        };
+        let mut all_configurations = Vec::new();        
+        if all_configurations.try_reserve_exact(size).is_err() {
+            return None;
+        }
+        for_each_configuration(nr_cops, nr_vertices, |c| all_configurations.push(c));
+
+        Some(Self { nr_original_vertices: nr_vertices, nr_cops, all_configurations })
     }
 
-    pub fn unpack(&self, mut positions: CompactCops) -> impl ExactSizeIterator<Item = usize> + Clone {
-        let nr_vertices = self.original_edges.nr_vertices() as CompactCops;
+    pub fn unpack(&self, index: CompactCopsIndex) -> impl ExactSizeIterator<Item = usize> + Clone {
+        let mut positions = self.all_configurations[index.0];
+        let nr_vertices = self.nr_original_vertices as CompactCops;
         (0..self.nr_cops).map(move |_| {
             let val = positions % nr_vertices;
             positions /= nr_vertices;
@@ -36,22 +99,31 @@ impl<'a> CartesianGraphProduct<'a> {
         })
     }
 
-    pub fn pack(&self, cops: impl Iterator<Item = usize>) -> CompactCops {
-        let nr_vertices = self.original_edges.nr_vertices() as CompactCops;
-        let mut positions: CompactCops = 0;
-        let mut i = 0;
-        for cop in cops {
-            positions *= nr_vertices;
-            debug_assert!((cop as CompactCops) < nr_vertices);
-            positions += cop as CompactCops;
-            i += 1;
+    pub fn pack(&self, cops: impl Iterator<Item = usize>) -> CompactCopsIndex {
+        assert!(self.nr_cops <= 8);
+        let mut unpacked = [0usize; 8];
+        for (i, pos) in cops.enumerate() {
+            debug_assert!((pos as CompactCops) < self.nr_original_vertices);
+            debug_assert_ne!(i, self.nr_cops);
+            unpacked[i] = pos;
         }
-        assert_eq!(i, self.nr_cops);
-        positions
+        unpacked[..self.nr_cops].sort();
+
+        let nr_vertices = self.nr_original_vertices as CompactCops;
+        let mut positions: CompactCops = 0;
+        for &pos in &unpacked[..self.nr_cops] {
+            positions *= nr_vertices;
+            positions += pos as CompactCops;
+        }
+        CompactCopsIndex(self.all_configurations.binary_search(&positions).unwrap())
     }
 
     /// returns all cop positions reachable in a single lazy-cop move from positions, except the do-nothing move
-    pub fn lazy_cop_moves_from(&self, positions: CompactCops) -> impl Iterator<Item = CompactCops> + '_ + Clone {
+    pub fn lazy_cop_moves_from<'a>(&'a self, positions: CompactCopsIndex, graph: &'a EdgeList) 
+    -> impl Iterator<Item = CompactCopsIndex> + 'a + Clone 
+    {
+        debug_assert_eq!(self.nr_original_vertices, graph.nr_vertices());
+
         assert!(self.nr_cops <= 8);
         let mut unpacked = [0usize; 8];
         for (storage, cop_pos) in izip!(&mut unpacked, self.unpack(positions)) {
@@ -60,7 +132,7 @@ impl<'a> CartesianGraphProduct<'a> {
 
         let iter = (0..self.nr_cops).flat_map(move |i| {
             let cop_i_pos = unpacked[i];
-            self.original_edges.neighbors_of(cop_i_pos).map(move |n| 
+            graph.neighbors_of(cop_i_pos).map(move |n| 
                 self.pack((0..self.nr_cops).map(|j| 
                     if i == j { n } else { unpacked[j] }
                 ))
@@ -78,8 +150,8 @@ pub struct SafeRobberPositions {
 }
 
 impl SafeRobberPositions {
-    fn new(cop_moves: &CartesianGraphProduct<'_>) -> Option<Self> {
-        let nr_entries = cop_moves.nr_product_vertices().checked_mul(cop_moves.original_edges.nr_vertices())?;
+    fn new(cop_moves: &CopConfigurations) -> Option<Self> {
+        let nr_entries = cop_moves.nr_configurations().checked_mul(cop_moves.nr_original_vertices)?;
         let vec_data_len = (nr_entries + 31) / 32;
         let mut bit_vec_data = Vec::new();
         if bit_vec_data.try_reserve(vec_data_len).is_err() {
@@ -89,7 +161,7 @@ impl SafeRobberPositions {
         let Ok(safe) = bv::BitVec::try_from_vec(bit_vec_data) else {
             return None;
         };
-        let nr_map_vertices = cop_moves.original_edges.nr_vertices();
+        let nr_map_vertices = cop_moves.nr_original_vertices;
 
         Some(Self { safe, nr_map_vertices })
     }
@@ -98,14 +170,14 @@ impl SafeRobberPositions {
         self.nr_map_vertices
     }
 
-    fn robber_indices_at(&self, positions: CompactCops) -> std::ops::Range<usize> {
-        let start = positions as usize * self.nr_map_vertices();
+    fn robber_indices_at(&self, index: CompactCopsIndex) -> std::ops::Range<usize> {
+        let start = index.0 * self.nr_map_vertices();
         let stop = start + self.nr_map_vertices();
         start..stop
     }
 
-    pub fn robber_safe_at(&self, positions: CompactCops) -> impl ExactSizeIterator<Item = bool> + '_ + Clone {
-        let range = self.robber_indices_at(positions);
+    pub fn robber_safe_at(&self, index: CompactCopsIndex) -> impl ExactSizeIterator<Item = bool> + '_ + Clone {
+        let range = self.robber_indices_at(index);
         range.map(|i| self.safe[i])
     }
 }
@@ -116,12 +188,12 @@ pub enum BruteForceResult {
     /// stores for how many cops result was computed and for a graph over how many vertices
     CopsWin(usize, usize),
     /// stores for how many cops result was computed
-    RobberWins(usize, SafeRobberPositions),
+    RobberWins(usize, SafeRobberPositions, CopConfigurations),
 }
 
 /// algorithm 2.2
 pub fn compute_safe_robber_positions<'a>(nr_cops: usize, graph: &'a EdgeList) -> BruteForceResult {
-    let Some(cop_moves) = CartesianGraphProduct::new(graph, nr_cops) else {
+    let Some(cop_moves) = CopConfigurations::new(graph, nr_cops) else {
         return BruteForceResult::Error("Zu wenig Speicherplatz (Cops passen nicht in Int)".to_owned());
     };
     let Some(mut f) = SafeRobberPositions::new(&cop_moves) else {
@@ -129,14 +201,14 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, graph: &'a EdgeList) ->
     };
 
     let mut queue = VecDeque::new();
-    if queue.try_reserve(cop_moves.nr_product_vertices()).is_err() {
+    if queue.try_reserve(cop_moves.nr_configurations()).is_err() {
         return BruteForceResult::Error("Zu wenig Speicherplatz (Queue zu lang)".to_owned());
     }
 
-    for cop_positions in 0..(cop_moves.nr_product_vertices() as CompactCops) {
+    for index in (0..cop_moves.nr_configurations()).map(|i| CompactCopsIndex(i)) {
         //line 2
-        let robber_range = f.robber_indices_at(cop_positions);
-        for cop_pos in cop_moves.unpack(cop_positions) {
+        let robber_range = f.robber_indices_at(index);
+        for cop_pos in cop_moves.unpack(index) {
             f.safe.set(robber_range.start + cop_pos, false);
             for n in graph.neighbors_of(cop_pos) {
                 f.safe.set(robber_range.start + n, false);
@@ -144,7 +216,7 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, graph: &'a EdgeList) ->
         }
         
         //line 3
-        queue.push_back(cop_positions);
+        queue.push_back(index);
     }
 
     let mut safe_robber_neighbors = vec![false; graph.nr_vertices()];
@@ -165,7 +237,7 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, graph: &'a EdgeList) ->
         }
 
         //line 7
-        for neigh_cop_positions in cop_moves.lazy_cop_moves_from(cop_positions) {
+        for neigh_cop_positions in cop_moves.lazy_cop_moves_from(cop_positions, graph) {
             //line 8
             let mut f_temp_changed = false;
             for (stored, b1, &b2) in izip!(&mut f_temp, f.robber_safe_at(neigh_cop_positions), &safe_robber_neighbors) {
@@ -195,7 +267,7 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, graph: &'a EdgeList) ->
 
     }
 
-    BruteForceResult::RobberWins(nr_cops, f)
+    BruteForceResult::RobberWins(nr_cops, f, cop_moves)
 }
 
 
