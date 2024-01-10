@@ -178,7 +178,7 @@ impl Embedding2D {
         }
     }
 
-} //impl Graph
+}
 
 /// centered at zero, contained in -1.0..1.0 x -1.0..1.0
 pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Embedding2D {

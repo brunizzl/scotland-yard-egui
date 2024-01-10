@@ -154,6 +154,8 @@ impl EdgeList {
         }
     }
 
+    /// keeps all edges the same, but adds space for edges of a new vertex
+    /// returns index of that new vertex
     pub fn push(&mut self) -> usize {
         let new_index = self.length;
         let new_len = self.length + 1;
@@ -241,7 +243,7 @@ impl EdgeList {
     }
 
     pub fn add_directed_edge(&mut self, v1: usize, v2: usize) {
-        debug_assert!(!self.has_directed_edge(v1, v2));
+        debug_assert!(!self.has_directed_edge(v1, v2), "why would u want to add an already existing edge?");
         let i2 = Index::new(v2);
         loop {
             if let Some(e1) = next_unused(self.neighbors_mut_of(v1)) {

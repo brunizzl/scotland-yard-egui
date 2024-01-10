@@ -5,7 +5,6 @@ use itertools::izip;
 use bitvec::prelude as bv;
 
 use super::{EdgeList, EquivalenceClass};
-use crate::geo::{Matrix3x3, Pos3, Vec3};
 
 
 type CompactCops = usize;
@@ -51,7 +50,7 @@ impl CopConfigurations {
         self.configurations.len()
     }
 
-    pub fn new(mut map: SymmetricMap, nr_cops: usize) -> Option<Self> {
+    pub fn new(map: SymmetricMap, nr_cops: usize) -> Option<Self> {
 
         fn for_each_configuration(nr_cops: usize, nr_vertices: usize, mut f: impl FnMut(CompactCops)) {
             let mut curr_config = vec![0usize; nr_cops];

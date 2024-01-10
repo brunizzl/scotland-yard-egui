@@ -98,9 +98,14 @@ impl Pos3 {
         }
         Pos3::ZERO + acc / len
     }
+
+    pub fn average_ref<'a>(positions: impl ExactSizeIterator<Item = &'a Self>) -> Pos3 {
+        Self::average(positions.map(|&p| p))
+    }
 }
 
 use egui::{Pos2, Vec2};
+#[allow(dead_code)]
 pub fn average(positions: impl ExactSizeIterator<Item = Pos2>) -> Pos2 {
     let mut acc = Vec2::ZERO;
     let len = positions.len() as f32;

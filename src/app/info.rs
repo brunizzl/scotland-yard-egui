@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::thread;
 
-use itertools::{ izip, Itertools, equal };
+use itertools::{ izip, Itertools };
 
 use egui::*;
 

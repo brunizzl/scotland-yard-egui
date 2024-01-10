@@ -1,5 +1,6 @@
 
 use std::iter;
+use std::collections::BTreeSet;
 
 use egui::*;
 use itertools::{izip, Itertools};
@@ -404,10 +405,6 @@ impl EquivalenceClass {
         &self.class
     } 
 
-    pub fn representatives(&self) -> &[usize] {
-        &self.representative
-    }
-
     /// if vertex is representative of it's class returns None, else
     /// the rotation (+ perhaps reflection) mapping vertex to it's representative
     pub fn transform_to_representative(&self, edges: &EdgeList, vertex: usize) -> Matrix3x3 {
@@ -487,6 +484,9 @@ impl EquivalenceClass {
 pub struct Embedding3D {
     /// all vertices are expected to lie on this surface.
     surface: ConvexTriangleHull,
+    /// some surface vertices may only be there for technical reasons. these will not be drawn.
+    nr_visible_surface_vertices: usize,
+
     /// maps edges of surface to the sequence of vertex indices of self.vertices dividing that edge
     /// (beginning and end vertices have the same index in self.vertices and self.surface.vertex_positions)
     /// Vec is indexed by surface.vertex_neighbors.edge_direction_index
@@ -522,6 +522,14 @@ impl Embedding3D {
 
     pub fn equivalence(&self) -> Option<&EquivalenceClass> {
         self.equivalence.as_ref()
+    }
+
+    #[inline(always)]
+    fn add_vertex(&mut self, pos: Pos3) -> usize {
+        let new_index = self.nr_vertices();
+        self.vertices.push(pos);
+        self.edges.push();
+        new_index
     }
 
     fn subdivide_platonic_with_triangles(surface: ConvexTriangleHull, divisions: usize) -> Self {
@@ -607,8 +615,10 @@ impl Embedding3D {
             inner_vertices.push(faces_inner);
         }
 
+        let nr_visible_surface_vertices = surface.nr_vertices();
         let mut res = Self { 
             surface,
+            nr_visible_surface_vertices,
             edge_dividing_vertices,
             inner_vertices,
             vertices, 
@@ -639,6 +649,208 @@ impl Embedding3D {
         Self::subdivide_platonic_with_triangles(oct, divisions)
     }
 
+    /// face_info stores circumference in .0 and weather to make the inner vertices of given face type visible in .1
+    fn embed_archimedian_solid(mut vertices: Vec<Pos3>, mut edges: EdgeList, face_info: &[(usize, bool)]) -> (Self, Vec<Vec<usize>>) {
+        //vertices should be centered around origin (among other things...)
+        debug_assert!(Pos3::average_ref(vertices.iter()).to_vec3().length() < 1e-4);
+        //all visible face inner thingies must be at the start, because of how the data structure works
+        debug_assert!(face_info.iter().tuple_windows().all(|((_, a), (_, b))| a >= b));
+
+        let mut faces = Vec::new();
+        let mut hull = ConvexTriangleHull {
+            vertices: vertices.clone(),
+            edges: edges.clone(),
+            face_normals: Vec::new(),
+            triangles: Vec::new(),
+        };
+        for &(circumference, _) in face_info {
+            debug_assert!(circumference > 2);
+            let new_faces = find_all_circles(&edges, circumference).into_iter().collect_vec();
+            debug_assert!(new_faces.iter().all(|f| f.len() == circumference));
+            faces.push(new_faces);
+        }
+        for (faces, &(_, show)) in faces.iter_mut().zip(face_info) {
+            for face in faces.iter_mut() {
+                let compute_normal = |vs: &[Pos3], v1, v2, v3| {
+                    let p1: Pos3 = vs[v1];
+                    let p2: Pos3 = vs[v2];
+                    let p3: Pos3 = vs[v3];
+                    let dir1_2 = p2 - p1;
+                    let dir1_3 = p3 - p1;
+                    let normal = Vec3::cross(dir1_2, dir1_3).normalized();
+                    if normal.dot(p1.to_vec3()) > 0.0 {
+                        normal
+                    } else {
+                        -normal
+                    }                
+                };
+    
+                if let [u, v, w] = face[..] {
+                    hull.face_normals.push(compute_normal(&hull.vertices, u, v, w));
+                    hull.triangles.push([u, v, w]);
+                    continue;
+                }
+                //order face s.t. neighboring vertices in graph are neighbors in face
+                'find_swap: for i in 2..face.len() {
+                    let last_v = face[i - 2];
+                    for j in (i - 1)..face.len() {
+                        if edges.neighbors_of(last_v).contains(&face[j]) {
+                            face.swap(i - 1, j);
+                            continue 'find_swap;
+                        }
+                    }
+                    panic!();
+                }
+                let center = Pos3::average(face.iter().map(|&v| hull.vertices[v]));
+                let center_v = hull.edges.push();
+                debug_assert_eq!(center_v, hull.vertices.len());
+                hull.vertices.push(center);
+                if show { 
+                    vertices.push(center); 
+                    edges.push();
+                }
+                for (&v1, &v2) in face.iter().circular_tuple_windows() {
+                    debug_assert!(edges.neighbors_of(v1).contains(&v2));
+                    hull.edges.add_edge(v1, center_v);
+                    if show { 
+                        edges.add_edge(v1, center_v) 
+                    }
+                    let tri = [center_v, v1, v2];
+                    hull.face_normals.push(compute_normal(&hull.vertices, center_v, v1, v2));
+                    hull.triangles.push(tri);
+                }
+            }
+        }
+        
+        let edge_dividing_vertices = vec![BidirectionalRange::empty(); hull.edges.used_space()];
+        let inner_vertices = vec![0..0; hull.face_normals.len()];
+        let res = Self {
+            surface: hull,
+            nr_visible_surface_vertices: vertices.len(),
+            edge_dividing_vertices,
+            inner_vertices,
+            vertices,
+            edges,
+            equivalence: None,
+        };
+        (res, faces.join(&Vec::new()))
+    }
+
+    fn football_vertices() -> Vec<Pos3> {            
+        let phi = (1.0 + f32::sqrt(5.0)) / 2.0;
+        #[allow(unused_parens)]
+        let mut vertices = vec![
+            pos3(0.0, 1.0, 3.0 * phi),
+            pos3(0.0, 1.0, -3.0 * phi),
+            pos3(0.0, -1.0, 3.0 * phi),
+            pos3(0.0, -1.0, -3.0 * phi),
+            pos3(3.0 * phi, 0.0, 1.0),
+            pos3(3.0 * phi, 0.0, -1.0),
+            pos3(-3.0 * phi, 0.0, 1.0),
+            pos3(-3.0 * phi, 0.0, -1.0),
+            pos3(1.0, 3.0 * phi, 0.0),
+            pos3(1.0, -3.0 * phi, 0.0),
+            pos3(-1.0, 3.0 * phi, 0.0),
+            pos3(-1.0, -3.0 * phi, 0.0),
+
+            pos3(1.0, (2.0 + phi), 2.0 * phi),
+            pos3(1.0, (2.0 + phi), -2.0 * phi),
+            pos3(1.0, -(2.0 + phi), 2.0 * phi),
+            pos3(1.0, -(2.0 + phi), -2.0 * phi),
+            pos3(-1.0, (2.0 + phi), 2.0 * phi),
+            pos3(-1.0, (2.0 + phi), -2.0 * phi),
+            pos3(-1.0, -(2.0 + phi), 2.0 * phi),
+            pos3(-1.0, -(2.0 + phi), -2.0 * phi),
+            pos3(2.0 * phi, 1.0, (2.0 + phi)),
+            pos3(2.0 * phi, 1.0, -(2.0 + phi)),
+            pos3(2.0 * phi, -1.0, (2.0 + phi)),
+            pos3(2.0 * phi, -1.0, -(2.0 + phi)),
+            pos3(-2.0 * phi, 1.0, (2.0 + phi)),
+            pos3(-2.0 * phi, 1.0, -(2.0 + phi)),
+            pos3(-2.0 * phi, -1.0, (2.0 + phi)),
+            pos3(-2.0 * phi, -1.0, -(2.0 + phi)),
+            pos3((2.0 + phi), 2.0 * phi, 1.0),
+            pos3((2.0 + phi), 2.0 * phi, -1.0),
+            pos3((2.0 + phi), -2.0 * phi, 1.0),
+            pos3((2.0 + phi), -2.0 * phi, -1.0),
+            pos3(-(2.0 + phi), 2.0 * phi, 1.0),
+            pos3(-(2.0 + phi), 2.0 * phi, -1.0),
+            pos3(-(2.0 + phi), -2.0 * phi, 1.0),
+            pos3(-(2.0 + phi), -2.0 * phi, -1.0),
+
+            pos3(phi, 2.0, (2.0 * phi + 1.0)),
+            pos3(phi, 2.0, -(2.0 * phi + 1.0)),
+            pos3(phi, -2.0, (2.0 * phi + 1.0)),
+            pos3(phi, -2.0, -(2.0 * phi + 1.0)),
+            pos3(-phi, 2.0, (2.0 * phi + 1.0)),
+            pos3(-phi, 2.0, -(2.0 * phi + 1.0)),
+            pos3(-phi, -2.0, (2.0 * phi + 1.0)),
+            pos3(-phi, -2.0, -(2.0 * phi + 1.0)),
+            pos3((2.0 * phi + 1.0), phi, 2.0),
+            pos3((2.0 * phi + 1.0), phi, -2.0),
+            pos3((2.0 * phi + 1.0), -phi, 2.0),
+            pos3((2.0 * phi + 1.0), -phi, -2.0),
+            pos3(-(2.0 * phi + 1.0), phi, 2.0),
+            pos3(-(2.0 * phi + 1.0), phi, -2.0),
+            pos3(-(2.0 * phi + 1.0), -phi, 2.0),
+            pos3(-(2.0 * phi + 1.0), -phi, -2.0),
+            pos3(2.0,  (2.0 * phi + 1.0), phi),
+            pos3(2.0,  (2.0 * phi + 1.0), -phi),
+            pos3(2.0,  -(2.0 * phi + 1.0), phi),
+            pos3(2.0,  -(2.0 * phi + 1.0), -phi),
+            pos3(-2.0,  (2.0 * phi + 1.0), phi),
+            pos3(-2.0,  (2.0 * phi + 1.0), -phi),
+            pos3(-2.0,  -(2.0 * phi + 1.0), phi),
+            pos3(-2.0,  -(2.0 * phi + 1.0), -phi),
+        ];
+        for pos in &mut vertices {
+            *pos = pos.to_vec3().normalized().to_pos3();
+        }
+        vertices
+    }
+
+    /// turns each edge into a path of length `nr_subdivisions + 1`, 
+    /// e.g. `graph.subdivide_all_edges(0)` does nothing
+    pub fn subdivide_all_edges(&mut self, nr_subdivisions: usize) {
+        if nr_subdivisions == 0 {
+            return;
+        }
+        let nr_og_vertices = self.nr_vertices();
+
+        let mut v1_neighbors = Vec::new();
+        for v1 in 0..nr_og_vertices {
+            v1_neighbors.clear();
+            v1_neighbors.extend(self.edges.neighbors_of(v1));
+            for &v2 in &v1_neighbors {
+                if v2 < nr_og_vertices {
+                    let pos1 = self.vertices[v1];
+                    let pos2 = self.vertices[v2];
+                    let step = (pos2 - pos1) / (nr_subdivisions as f32 + 1.0);
+                    self.edges.remove_edge(v1, v2);
+                    let mut curr = v1;
+                    for i in 1..=nr_subdivisions {
+                        let next = self.add_vertex(pos1 + (i as f32) * step);
+                        self.edges.add_edge(curr, next);
+                        curr = next;
+                    }
+                    self.edges.add_edge(curr, v2);
+                }
+            }
+        }
+    }
+
+    pub fn new_fabian_hamann_map(divisions: usize) -> Self {
+        let vertices = Self::football_vertices();
+        let edges = edges_from_uniform_positions(&vertices);
+        debug_assert_eq!(vertices.len(), 60);
+        debug_assert_eq!(edges.count_entries(), 180);
+
+        let face_info = [(6, true), (5, false)];
+        let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info);
+        res.subdivide_all_edges(divisions);
+        res
+    }
+
     /// draws all visible edges, updates visible while doing it
     pub fn draw_visible_edges_3d(&self, to_screen: &geo::ToScreen, painter: &Painter, 
         stroke: Stroke, visible: &mut [bool]) 
@@ -663,17 +875,25 @@ impl Embedding3D {
             if !to_screen.faces_camera(normal) {
                 continue;
             }
-            let p1 = self.vertices[v1];
-            let p2 = self.vertices[v2];
-            let p3 = self.vertices[v3];
+            let p1 = self.surface.vertices[v1];
+            let p2 = self.surface.vertices[v2];
+            let p3 = self.surface.vertices[v3];
             if !to_screen.triangle_visible(p1, p2, p3) {
                 continue;
             }
 
             //draw visible edges of self.surface
-            draw_line(&self.vertices, v1, v2);
-            draw_line(&self.vertices, v2, v3);
-            draw_line(&self.vertices, v3, v1);
+            let show_v = |v| v < self.nr_visible_surface_vertices;
+            let show_edge = |u, v| show_v(u) && show_v(v);
+            if show_edge(v1, v2) {
+                draw_line(&self.surface.vertices, v1, v2);
+            }
+            if show_edge(v2, v3) {
+                draw_line(&self.surface.vertices, v2, v3);
+            }
+            if show_edge(v3, v1) {
+                draw_line(&self.surface.vertices, v3, v1);
+            }
 
             //draw inner edges
             //this dosn't draw each actual tiny edge, but instead all edges lying in 
@@ -695,9 +915,10 @@ impl Embedding3D {
             }
 
             //update vertex visibility
-            visible[v1] = true;
-            visible[v2] = true;
-            visible[v3] = true;
+            let mut mark_visible_at = |v| if v < visible.len() { visible[v] = true; };
+            mark_visible_at(v1);
+            mark_visible_at(v2);
+            mark_visible_at(v3);
             inner.clone().fold((), |(), v| visible[v] = true);
             edge_1_2.fold((), |(), v| visible[v] = true);
             edge_1_3.fold((), |(), v| visible[v] = true);
@@ -723,6 +944,7 @@ impl Embedding3D {
     pub fn empty() -> Self {
         Self { 
             surface: ConvexTriangleHull::empty(), 
+            nr_visible_surface_vertices: usize::MAX,
             edge_dividing_vertices: Vec::new(), 
             inner_vertices: Vec::new(), 
             vertices: Vec::new(), 
@@ -737,6 +959,7 @@ impl Embedding3D {
         let vertices = positions_2d.iter().map(|p| pos3(p.x, p.y, z)).collect_vec();
         Self { 
             surface: ConvexTriangleHull::empty(), 
+            nr_visible_surface_vertices: usize::MAX,
             edge_dividing_vertices: Vec::new(), 
             inner_vertices: Vec::new(), 
             vertices, 
@@ -751,6 +974,53 @@ impl Embedding3D {
 
 
 
+fn find_next_in_circle(edges: &EdgeList, path: &mut Vec<usize>, nr_left: usize) -> bool {
+    debug_assert!(path.len() > 0);
+    if nr_left == 0 {
+        let first = *path.first().unwrap();
+        let last = path.last().unwrap();
+        return edges.neighbors_of(first).contains(last);
+    }
+
+    let curr = *path.last().unwrap();
+    let last = if path.len() > 1 { path[path.len() - 2] } else { usize::MAX };
+    for n in edges.neighbors_of(curr) {
+        if n != last {
+            path.push(n);
+            if find_next_in_circle(edges, path, nr_left - 1) {
+                return true;
+            }
+            path.pop();
+        }
+    }
+    false
+}
+
+fn find_all_circles_at(edges: &EdgeList, start: usize, circumference: usize) -> Vec<Vec<usize>> {
+    if circumference < 3 {
+        return Vec::new();
+    }
+    let mut res = Vec::new();
+    for n in edges.neighbors_of(start) {
+        let mut path = vec![start, n];
+        if find_next_in_circle(edges, &mut path, circumference - 2) {
+            res.push(path);
+        }
+    }
+    res
+}
+
+fn find_all_circles(edges: &EdgeList, circumference: usize) -> BTreeSet<Vec<usize>> {
+    let mut res = BTreeSet::new();
+    for v in 0..edges.nr_vertices() {
+        let new_circles = find_all_circles_at(edges, v, circumference);
+        for mut circle in new_circles {
+            circle.sort();
+            res.insert(circle);
+        }
+    }
+    res
+}
 
 
 

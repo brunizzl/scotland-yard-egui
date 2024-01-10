@@ -18,7 +18,7 @@ pub enum Shape {
     Cube2D,
     Football2D,
     FabianHamann2D,
-    Dodecahedron2D,
+    Dodecahedron,
     Random2D, 
 }
 
@@ -167,11 +167,12 @@ impl Map {
             },
             Shape::Cube2D => 
                 Embedding3D::from_2d(graph::projected_subdivided_cube(res)),
-            Shape::Dodecahedron2D => 
+            Shape::Dodecahedron => 
                 Embedding3D::from_2d(graph::projected_subdivided_dodecahedron(res)),
             Shape::Football2D => 
                 Embedding3D::from_2d(graph::projected_subdivided_truncated_icosahedron(res)),
             Shape::FabianHamann2D => 
+                //Embedding3D::new_fabian_hamann_map(res),
                 Embedding3D::from_2d(graph::subdivided_robber_win_graph(res)),
             Shape::Random2D => 
                 Embedding3D::from_2d(graph::random_triangulated(res, 8)),
@@ -225,8 +226,8 @@ impl Map {
                     self.recompute_and_adjust(info);
                 }
             }
+            ui.radio_value(&mut self.shape, Shape::Dodecahedron, "Dodekaeder");
             ui.radio_value(&mut self.shape, Shape::Cube2D, "2D Würfel Projektion");
-            ui.radio_value(&mut self.shape, Shape::Dodecahedron2D, "2D Dodekaeder Projektion");
             ui.radio_value(&mut self.shape, Shape::Football2D, "2D Fußball Projektion");
             ui.radio_value(&mut self.shape, Shape::FabianHamann2D, "2D Projektion von Fabian Hamanns Graph");
             ui.radio_value(&mut self.shape, Shape::RegularPolygon2D, "2D Polygon trianguliert");
