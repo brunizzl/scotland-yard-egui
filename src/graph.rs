@@ -17,8 +17,6 @@ pub use planar3d::*;
 pub mod bruteforce;
 pub use bruteforce::*;
 
-
-
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InSet { 

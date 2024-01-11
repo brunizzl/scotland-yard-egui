@@ -7,6 +7,7 @@ use itertools::{ izip, Itertools };
 
 use egui::*;
 
+use crate::geo::{self, Vec3, Matrix3x3};
 use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult, SymmetricMap};
 use crate::app::character::CharacterState;
 
@@ -225,6 +226,9 @@ pub struct Info {
 
     bruteforce_worker: Option<thread::JoinHandle<BruteForceResult>>,
     bruteforce_result: BruteForceResult,
+
+    angle: isize,
+    mirror: bool,
 }
 
 mod storage_keys {
@@ -271,6 +275,9 @@ impl Info {
 
             bruteforce_worker: None,
             bruteforce_result: BruteForceResult::None,
+
+            angle: 0,
+            mirror: false,
         }
     }
 
@@ -356,6 +363,9 @@ impl Info {
         self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
         
         self.draw_bruteforce_menu(ui, map);
+
+        add_drag_value(ui, &mut self.angle, "Winkel: ", 0, 1000);
+        ui.add(Checkbox::new(&mut self.mirror, "Spiegeln"));
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
@@ -618,24 +628,24 @@ impl Info {
                     }
                 }
             },
-            (RobberInfo::CopsRotatedToEquivalence, _) => if let Some(equiv) = con.equivalence_class {
-                let active_cops = self.characters.active_cops().collect_vec();
-                if active_cops.len() > 0 {
-                    let rot = equiv.transform_to_representative(con.edges, active_cops[0].nearest_node);
-                    for cop in active_cops {
-                        let v_rot = equiv.apply_transform(con.edges, &rot, cop.nearest_node);
-                        let pos_rot = con.positions[v_rot];
-                        if con.visible[v_rot] {
-                            draw_circle_at(pos_rot, self.options.automatic_marker_color);                            
-                        }
-                        else { //only draw half size
-                            let draw_pos = con.cam.transform(pos_rot);
-                            let marker_circle = Shape::circle_filled(draw_pos, con.scale * 3.0, 
-                                self.options.automatic_marker_color);
-                            con.painter.add(marker_circle);
-                        }
-                    }
-                }
+            (RobberInfo::CopsRotatedToEquivalence, _) => if let Some(_equiv) = con.equivalence_class {
+                //let active_cops = self.characters.active_cops().collect_vec();
+                //if active_cops.len() > 0 {
+                //    let rot = equiv.transform_to_representative(con.edges, active_cops[0].nearest_node);
+                //    for cop in active_cops {
+                //        let v_rot = equiv.apply_transform(con.edges, &rot, cop.nearest_node);
+                //        let pos_rot = con.positions[v_rot];
+                //        if con.visible[v_rot] {
+                //            draw_circle_at(pos_rot, self.options.automatic_marker_color);                            
+                //        }
+                //        else { //only draw half size
+                //            let draw_pos = con.cam.transform(pos_rot);
+                //            let marker_circle = Shape::circle_filled(draw_pos, con.scale * 3.0, 
+                //                self.options.automatic_marker_color);
+                //            con.painter.add(marker_circle);
+                //        }
+                //    }
+                //}
             },
             (RobberInfo::Debugging, _) =>             
             for &v in self.escapable.inner_connecting_line() {
@@ -730,6 +740,27 @@ impl Info {
         }
     }
 
+    pub fn draw_rotated(&mut self, con: &DrawContext<'_>) {
+        let Some(r) = self.characters.robber() else { return; };
+        let axis = con.positions[r.nearest_node].to_vec3().normalized();
+        let angle = self.angle as f32 * std::f32::consts::TAU / 3.0;
+        let mut rot = geo::Matrix3x3::new_rotation_from_axis_angle(axis, angle);
+
+        let mut active_cops = self.characters.active_cops();
+        let Some(c1) = active_cops.next() else { return; };
+        let pre = con.positions[c1.nearest_node].to_vec3();
+        if self.mirror {
+            let Some(c2) = active_cops.next() else { return; };
+            let on_mirror_plane = con.positions[c2.nearest_node].to_vec3();
+            let normal = Vec3::cross(axis, on_mirror_plane).normalized();
+            rot = &rot * &Matrix3x3::new_reflector(normal);
+        }
+        let post = &rot * pre;
+        let post_pos = con.cam.transform(post.to_pos3());
+        let post_circle = Shape::circle_filled(post_pos, con.scale * 4.5, self.options.automatic_marker_color);
+        con.painter.add(post_circle);
+    }
+
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         self.process_general_input(ui, con);
         if self.menu_change { self.definitely_update(con); } else { self.maybe_update(con); }
@@ -739,6 +770,9 @@ impl Info {
         self.draw_manual_markers(con);
         self.draw_character_tails(con);
         self.draw_numbers(ui, con);
+
+        self.draw_rotated(con);
+
         self.characters.draw(ui, con);
         self.characters.frame_is_finished();
     }

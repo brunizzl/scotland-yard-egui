@@ -41,19 +41,19 @@ impl Matrix3x3 {
         let one_cos = 1.0 - cos;
         let Vec3 { x: ux, y: uy, z: uz } = axis;
         Self {
-            x_row: vec3(cos + ux * ux + one_cos,        ux * uy * one_cos - uz * sin,   ux * uz * one_cos + uy * sin),
+            x_row: vec3(cos + ux * ux * one_cos,        ux * uy * one_cos - uz * sin,   ux * uz * one_cos + uy * sin),
             y_row: vec3(uy * ux * one_cos + uz * sin,   cos + uy * uy * one_cos,        uy * uz * one_cos - ux * sin),
             z_row: vec3(uz * ux * one_cos - uy * sin,   uz * uy * one_cos + ux * sin,   cos + uz * uz * one_cos),
         }
     }
 
     pub fn new_reflector(normal: Vec3) -> Self {
-        debug_assert!((normal.length_sq() - 1.0).abs() < 1e-4);
+        debug_assert!(normal.is_normalized());
         let Vec3 { x, y, z } = normal;
         Self {
-            x_row: vec3(1.0 - 2.0 * x * x,        2.0 * x * y,        2.0 * x * z), 
-            y_row: vec3(      2.0 * y * x,  1.0 - 2.0 * y * y,        2.0 * y * z),
-            z_row: vec3(      2.0 * z * x,        2.0 * z * y,  1.0 - 2.0 * z * y),
+            x_row: vec3(1.0 - 2.0 * x * x,       -2.0 * x * y,       -2.0 * x * z), 
+            y_row: vec3(     -2.0 * y * x,  1.0 - 2.0 * y * y,       -2.0 * y * z),
+            z_row: vec3(     -2.0 * z * x,       -2.0 * z * y,  1.0 - 2.0 * z * z),
         }
     }
 
@@ -63,10 +63,13 @@ impl Matrix3x3 {
             y_row: Vec3 { x: d, y: e, z: f }, 
             z_row: Vec3 { x: g, y: h, z: i }, 
         } = *self;
-        let d1 = a * (e * i - h * f);
-        let d2 = b * (d * i - g * f);
-        let d3 = c * (d * h - g * e);
-        d1 - d2 + d3
+        //rule of sarrus
+        a * e * i 
+        + b * f * g 
+        + c * d * h 
+        - c * e * g 
+        - b * d * i 
+        - a * f * h
     }
 }
 
@@ -93,5 +96,22 @@ impl std::ops::Mul<&Matrix3x3> for &Matrix3x3 {
             y_row: self * rhs.snd_col(),
             z_row: self * rhs.trd_col(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn matrix_vec_prod() {
+        let mat = Matrix3x3 {
+            x_row: vec3(1.0, 2.0, 3.0),
+            y_row: vec3(4.0, 5.0, 6.0),
+            z_row: vec3(9.0, 8.0, 7.0),
+        };
+
+        let vec = vec3(100.0, 1000.0, 10.0);
+        assert_eq!(&mat * vec, vec3(2130.0, 5460.0, 8970.0));
     }
 }

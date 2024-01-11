@@ -120,6 +120,7 @@ impl eframe::App for State {
                 draw_usage_info(ui);
                 self.map.draw_menu(ui, &mut self.info);
                 self.info.draw_menu(ui, &self.map);
+                ui.add_space(50.0);
             });
         });
 

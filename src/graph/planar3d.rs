@@ -5,10 +5,12 @@ use std::collections::BTreeSet;
 use egui::*;
 use itertools::{izip, Itertools};
 
-use crate::geo::{Pos3, Vec3, pos3, self, Matrix3x3};
+use crate::geo::{Pos3, Vec3, pos3, self};
 
 use crate::graph::*;
 
+pub mod equivalence;
+pub use equivalence::*;
 
 /// triangulation of a closed 2d surface embedded in 3d
 pub struct ConvexTriangleHull {
@@ -297,185 +299,6 @@ impl Iterator for BidirectionalRange {
             self.start = Self::add(self.start, self.step);
             Some(res)
         }
-    }
-}
-
-/// in symmetric graphs, each vertex can be put into an equivalence class. 
-#[derive(Clone)]
-pub struct EquivalenceClass {
-    /// one entry per vertex, stores to which class vertex belongs
-    class: Vec<u16>,
-    /// one entry per class, stores which vertex is taken to represent it's whole class (this is arbitrary)
-    representative: Vec<usize>,
-    /// one entry per vertex, all positions normalized
-    vertex_directions: Vec<Vec3>,
-}
-
-impl EquivalenceClass {
-    pub fn new_for_subdivided_platonic(graph: &Embedding3D, divisions: usize) -> Option<Self> {
-        //indicator that passed in graph actually is a subdivision of a platonic (just nessecairy cond, not sufficient though)
-        if graph.surface.edges.max_degree() != graph.surface.edges.min_degree() {
-            return None;
-        }
-
-        let mut equivalence = Self {
-            class: vec![u16::MAX; graph.vertices.len()], 
-            representative: Vec::new(),
-            vertex_directions: Vec::from_iter(graph.positions().iter().map(|p| p.to_vec3().normalized())),
-        };
-        //the vertices of a platonic solid are all equivalent:
-        //the graph looks the same from each position.
-        equivalence.representative.push(0);
-        for v in 0..graph.surface.nr_vertices() {
-            equivalence.class[v] = 0;
-        }
-        //all edges of a platonic solid look the same (as all vertices look the same, duh),
-        //however one can differentiate in a subdivided edge how far from the middle one is.
-        //-> inner vertices of a subdivided edge will have this as their class distinction.
-        {
-            //divisions == 1 => one inner vertex => one class
-            //divisions == 2 => two inner vertices => one class
-            //divisions == 3 => three inner vertices => two classes
-            //...
-            let nr_edge_classes = (divisions + 1) / 2;
-            for (v, class) in izip!(graph.edge_dividing_vertices[0], 1..=nr_edge_classes) {
-                debug_assert_eq!(class, equivalence.representative.len());
-                equivalence.representative.push(v);
-            }
-            for &(mut edge) in &graph.edge_dividing_vertices {
-                for class in 1..=nr_edge_classes {
-                    let v = edge.next().unwrap();
-                    debug_assert!(equivalence.class[v] == u16::MAX || class == nr_edge_classes);
-                    equivalence.class[v] = class as u16;
-                }
-            }
-            debug_assert!({
-                for &edge in &graph.edge_dividing_vertices {
-                    for v in edge {
-                        debug_assert_ne!(equivalence.class[v], u16::MAX);
-                    }
-                }
-                true
-            });
-        }
-        //vertices in a given face belong to a different class depending on how far away 
-        //from a vertex subdividing an original edge and how far away from an original vertex they are.
-        {
-            let mut distance_to_og_vertices = vec![isize::MAX; graph.vertices.len()];
-            let mut distance_to_og_edges = vec![isize::MAX; graph.vertices.len()];
-            let mut queue = std::collections::VecDeque::new();
-            for v in 0..graph.surface.nr_vertices() {
-                distance_to_og_vertices[v] = 0;
-                distance_to_og_edges[v] = 0;
-                queue.push_back(v);
-            }
-            graph.edges.calc_distances_to(&mut queue, &mut distance_to_og_vertices);
-
-            debug_assert!(queue.is_empty());
-            for &edge in &graph.edge_dividing_vertices {
-                for v in edge {
-                    distance_to_og_edges[v] = 0;
-                    queue.push_back(v);
-                }
-            }
-            graph.edges.calc_distances_to(&mut queue, &mut distance_to_og_edges);
-
-            let mut class_map = std::collections::HashMap::new();
-            for v in 0..graph.vertices.len() {
-                if equivalence.class[v] == u16::MAX {
-                    let dists = (distance_to_og_edges[v], distance_to_og_vertices[v]);
-                    if let Some(&class) = class_map.get(&dists) {
-                        equivalence.class[v] = class;
-                    }
-                    else {
-                        let new_class = equivalence.representative.len() as u16;
-                        equivalence.representative.push(v);
-                        class_map.insert(dists, new_class);
-                        equivalence.class[v] = new_class;
-                    }
-                }
-            }            
-        }
-        Some(equivalence)
-    }
-
-    pub fn classes(&self) -> &[u16] {
-        &self.class
-    } 
-
-    /// if vertex is representative of it's class returns None, else
-    /// the rotation (+ perhaps reflection) mapping vertex to it's representative
-    pub fn transform_to_representative(&self, edges: &EdgeList, vertex: usize) -> Matrix3x3 {
-        debug_assert_eq!(edges.nr_vertices(), self.vertex_directions.len());
-        let class = self.class[vertex];
-        let repr = self.representative[class as usize];
-        if repr == vertex {
-            return Matrix3x3::IDENTITY;
-        }
-        let pre_dir = self.vertex_directions[vertex];
-        let post_dir = self.vertex_directions[repr];
-        debug_assert!(pre_dir.is_normalized());
-        debug_assert!(post_dir.is_normalized());
-        let angle = Vec3::angle_between(pre_dir, post_dir);
-        let axis = Vec3::cross(pre_dir, post_dir).normalized();
-        let rot1 = Matrix3x3::new_rotation_from_axis_angle(axis, angle);
-        {
-            let det = rot1.determinant();
-            debug_assert!((det - 1.0).abs() < 1e-4);
-        }
-
-        //TODO: make this more general. (currently only works for trianglulations)
-        let n1 = edges.neighbors_of(vertex).next().unwrap();
-        let class_n1 = self.class[n1];
-        let repr_n1 = edges.neighbors_of(repr)
-            .find(|&rn| self.class[rn] == class_n1)
-            .unwrap();
-
-        let n2 = edges.neighbors_of(vertex)
-            .find(|&n| edges.neighbors_of(n1).contains(&n))
-            .unwrap();
-        let class_n2 = self.class[n2];
-        let repr_n2 = edges.neighbors_of(repr)
-            .find(|&rn| rn != repr_n1 && self.class[rn] == class_n2 && edges.neighbors_of(repr_n1).contains(&rn))
-            .unwrap();
-
-        let rot1_n1_dir = &rot1 * self.vertex_directions[n1];
-        let post_n1_dir = self.vertex_directions[repr_n1];
-        debug_assert!(post_n1_dir.is_normalized());
-        debug_assert!(rot1_n1_dir.is_normalized());
-        let angle_n1 = Vec3::angle_between(rot1_n1_dir, post_n1_dir);
-        let axis_n1 = Vec3::cross(rot1_n1_dir, post_n1_dir).normalized();
-        let rot2 = Matrix3x3::new_rotation_from_axis_angle(axis_n1, angle_n1);
-        {
-            let det = rot2.determinant();
-            debug_assert!((det - 1.0).abs() < 1e-4);
-        }
-
-        let rot21 = &rot2 * &rot1;
-        let rot21_n2_dir = &rot21 * self.vertex_directions[n2];
-        let post_n2_dir = self.vertex_directions[repr_n2];
-        if (rot21_n2_dir - post_n2_dir).length_sq() < 1e-4 {
-            rot21
-        }
-        else {
-            let normal = Vec3::cross(post_dir, post_dir - post_n1_dir).normalized();
-            let flip = Matrix3x3::new_reflector(normal);
-            {
-                let det = flip.determinant();
-                debug_assert!((det + 1.0).abs() < 1e-4);
-            }
-            let res = &flip * &rot21;
-            debug_assert!((&res * self.vertex_directions[n2] - post_n2_dir).length_sq() < 1e-4);
-            res
-        }
-    }
-
-    pub fn apply_transform(&self, edges: &EdgeList, rot: &Matrix3x3, vertex: usize) -> usize {
-        let pre_dir = self.vertex_directions[vertex];
-        let post_dir = rot * pre_dir;
-        let (res, error) = edges.find_local_minimum(|v| -self.vertex_directions[v].dot(post_dir), vertex);
-        debug_assert!(error < 1e-4);
-        res
     }
 }
 
