@@ -176,3 +176,8 @@ pub fn gram_schmidt_3d([v1, v2, v3]: &mut [Vec3; 3]) {
     *v3 = (*v3 - v1.dot(*v3) * *v1 - v2.dot(*v3) * *v2).normalized();
 }
 
+#[inline]
+pub fn plane_normal(p1: Pos3, p2: Pos3, p3: Pos3) -> Vec3 {
+    Vec3::cross(p2 - p1, p3 - p1).normalized()
+}
+

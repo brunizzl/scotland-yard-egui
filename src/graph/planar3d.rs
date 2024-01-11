@@ -70,6 +70,16 @@ impl ConvexTriangleHull {
         }
     }
 
+    /// adjusts each vertex position to have length 1,
+    /// updates face normals
+    fn normalize_positions(&mut self) {
+        normalize_positions(&mut self.vertices);
+        for (normal, [v1, v2, v3]) in izip!(&mut self.face_normals, &self.triangles) {
+            let pos = |&v| self.vertices[v];
+            *normal = geo::plane_normal(pos(v1), pos(v2), pos(v3));
+        }
+    }
+
     fn discover_faces(vertices: &[Pos3], edges: &EdgeList) -> (Vec<[usize; 3]>, Vec<Vec3>) {
         //enumerates each edge twice: once in each direction
         let mut unused_edges = edges.all_valid_edge_indices();
@@ -125,10 +135,7 @@ impl ConvexTriangleHull {
             unused_edges[index_3_1] = false;
             
             let v3_pos = vertices[v3];
-            let dir_1_2 = v2_pos - v1_pos;
-            let dir_2_3 = v3_pos - v2_pos;
-            let face_normal = Vec3::cross(dir_1_2, dir_2_3).normalized();
-            normals.push(face_normal);
+            normals.push(geo::plane_normal(v1_pos, v2_pos, v3_pos));
             triangles.push([v1, v2, v3]);
         }
         assert!(!unused_edges.into_iter().any(|e| e));
@@ -907,7 +914,7 @@ impl Embedding3D {
 
         let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info);
         if triangulate {
-            normalize_positions(&mut res.surface.vertices);
+            res.surface.normalize_positions();
             res = Self::subdivide_platonic_with_triangles(res.surface, divisions);
         } else {
             res.subdivide_all_edges(divisions);
