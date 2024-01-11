@@ -172,8 +172,8 @@ impl Map {
             Shape::Football2D => 
                 Embedding3D::from_2d(graph::projected_subdivided_truncated_icosahedron(res)),
             Shape::FabianHamann2D => 
-                //Embedding3D::new_fabian_hamann_map(res),
-                Embedding3D::from_2d(graph::subdivided_robber_win_graph(res)),
+                Embedding3D::new_fabian_hamann_map(res),
+                //Embedding3D::from_2d(graph::subdivided_robber_win_graph(res)),
             Shape::Random2D => 
                 Embedding3D::from_2d(graph::random_triangulated(res, 8)),
         };

@@ -486,6 +486,8 @@ pub struct Embedding3D {
     surface: ConvexTriangleHull,
     /// some surface vertices may only be there for technical reasons. these will not be drawn.
     nr_visible_surface_vertices: usize,
+    /// allows faster rendering of triangles in interior of face
+    is_regular_triangulation: bool, 
 
     /// maps edges of surface to the sequence of vertex indices of self.vertices dividing that edge
     /// (beginning and end vertices have the same index in self.vertices and self.surface.vertex_positions)
@@ -619,6 +621,7 @@ impl Embedding3D {
         let mut res = Self { 
             surface,
             nr_visible_surface_vertices,
+            is_regular_triangulation: true,
             edge_dividing_vertices,
             inner_vertices,
             vertices, 
@@ -727,6 +730,7 @@ impl Embedding3D {
         let res = Self {
             surface: hull,
             nr_visible_surface_vertices: vertices.len(),
+            is_regular_triangulation: false,
             edge_dividing_vertices,
             inner_vertices,
             vertices,
@@ -811,11 +815,13 @@ impl Embedding3D {
 
     /// turns each edge into a path of length `nr_subdivisions + 1`, 
     /// e.g. `graph.subdivide_all_edges(0)` does nothing
-    pub fn subdivide_all_edges(&mut self, nr_subdivisions: usize) {
+    fn subdivide_all_edges(&mut self, nr_subdivisions: usize) {
         if nr_subdivisions == 0 {
             return;
         }
         let nr_og_vertices = self.nr_vertices();
+        assert!(self.surface.nr_vertices() >= self.nr_vertices());
+        debug_assert!(self.surface.vertices[..self.nr_vertices()] == self.vertices[..]);
 
         let mut v1_neighbors = Vec::new();
         for v1 in 0..nr_og_vertices {
@@ -828,12 +834,21 @@ impl Embedding3D {
                     let step = (pos2 - pos1) / (nr_subdivisions as f32 + 1.0);
                     self.edges.remove_edge(v1, v2);
                     let mut curr = v1;
+                    let fst_inner = self.vertices.len();
                     for i in 1..=nr_subdivisions {
                         let next = self.add_vertex(pos1 + (i as f32) * step);
                         self.edges.add_edge(curr, next);
                         curr = next;
                     }
                     self.edges.add_edge(curr, v2);
+
+                    let inner_end = curr + 1;
+                    for (u, v) in [(v1, v2), (v2, v1)] {
+                        let i = self.surface.edges.directed_index(u, v);
+                        debug_assert!(self.edge_dividing_vertices[i].count() == 0);
+                        self.edge_dividing_vertices[i] = 
+                            BidirectionalRange::new_forward(fst_inner, inner_end);
+                    }
                 }
             }
         }
@@ -885,37 +900,35 @@ impl Embedding3D {
             //draw visible edges of self.surface
             let show_v = |v| v < self.nr_visible_surface_vertices;
             let show_edge = |u, v| show_v(u) && show_v(v);
-            if show_edge(v1, v2) {
-                draw_line(&self.surface.vertices, v1, v2);
-            }
-            if show_edge(v2, v3) {
-                draw_line(&self.surface.vertices, v2, v3);
-            }
-            if show_edge(v3, v1) {
-                draw_line(&self.surface.vertices, v3, v1);
+            for (u, v) in [v1, v2, v3].into_iter().circular_tuple_windows() {
+                if show_edge(u, v) {
+                    draw_line(&self.surface.vertices, u, v);
+                }
             }
 
-            //draw inner edges
-            //this dosn't draw each actual tiny edge, but instead all edges lying in 
-            //  one line at once.
             let edge_1_2_index = self.surface.edges.directed_index(v1, v2);
             let edge_1_3_index = self.surface.edges.directed_index(v1, v3);
             let edge_2_3_index = self.surface.edges.directed_index(v2, v3);
             let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index]; 
             let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index];
             let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index];
-            for (v1, v2) in edge_1_2.zip(edge_1_3) {
-                draw_line(&self.vertices, v1, v2);
-            }
-            for (v1, v2) in edge_2_3.zip(edge_1_3) {
-                draw_line(&self.vertices, v1, v2);
-            }
-            for (v1, v2) in edge_1_2.zip(edge_2_3.reversed()) {
-                draw_line(&self.vertices, v1, v2);
-            }
+            if self.is_regular_triangulation {
+                //draw inner edges
+                //this dosn't draw each actual tiny edge, but instead all edges lying in 
+                //  one line at once.
+                for (v1, v2) in edge_1_2.zip(edge_1_3) {
+                    draw_line(&self.vertices, v1, v2);
+                }
+                for (v1, v2) in edge_2_3.zip(edge_1_3) {
+                    draw_line(&self.vertices, v1, v2);
+                }
+                for (v1, v2) in edge_1_2.zip(edge_2_3.reversed()) {
+                    draw_line(&self.vertices, v1, v2);
+                }
+            } 
 
             //update vertex visibility
-            let mut mark_visible_at = |v| if v < visible.len() { visible[v] = true; };
+            let mut mark_visible_at = |v| if show_v(v) { visible[v] = true; };
             mark_visible_at(v1);
             mark_visible_at(v2);
             mark_visible_at(v3);
@@ -923,6 +936,10 @@ impl Embedding3D {
             edge_1_2.fold((), |(), v| visible[v] = true);
             edge_1_3.fold((), |(), v| visible[v] = true);
             edge_2_3.fold((), |(), v| visible[v] = true);
+        }
+
+        if !self.is_regular_triangulation {
+            //TODO: draw interior edges
         }
     }
 
@@ -945,6 +962,7 @@ impl Embedding3D {
         Self { 
             surface: ConvexTriangleHull::empty(), 
             nr_visible_surface_vertices: usize::MAX,
+            is_regular_triangulation: false,
             edge_dividing_vertices: Vec::new(), 
             inner_vertices: Vec::new(), 
             vertices: Vec::new(), 
@@ -960,6 +978,7 @@ impl Embedding3D {
         Self { 
             surface: ConvexTriangleHull::empty(), 
             nr_visible_surface_vertices: usize::MAX,
+            is_regular_triangulation: false,
             edge_dividing_vertices: Vec::new(), 
             inner_vertices: Vec::new(), 
             vertices, 
