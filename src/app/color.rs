@@ -1,15 +1,20 @@
 
 use itertools::izip;
 
-use egui::*;
+use egui::Color32;
 
-pub const GREY: Color32 = Color32::from_rgb(130, 130, 150);
-pub const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
-pub const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
-pub const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
-pub const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
-pub const RED: Color32 = Color32::from_rgb(230, 50, 50);
-pub const YELLOW: Color32 = Color32::from_rgb(240, 240, 50);
+#[allow(dead_code)]
+mod names {
+    use egui::Color32;
+    pub const GREY: Color32 = Color32::from_rgb(130, 130, 150);
+    pub const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
+    pub const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
+    pub const WHITE: Color32 = Color32::from_rgb(255, 255, 255);
+    pub const BLACK: Color32 = Color32::from_rgb(0, 0, 0);
+    pub const RED: Color32 = Color32::from_rgb(230, 50, 50);
+    pub const YELLOW: Color32 = Color32::from_rgb(240, 240, 50);
+}
+pub use names::*;
 
 #[allow(dead_code)]
 const HAND_PICKED_MARKER_COLORS: [[f32; 3]; 16] = [

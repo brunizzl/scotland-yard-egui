@@ -43,10 +43,6 @@ pub enum DrawNumbers {
     Debugging 
 }
 
-
-#[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum RobberStrat { None, EscapeHullNonLazy }
-
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
     manual_marker_color: Color32,
@@ -57,7 +53,6 @@ struct Options {
     marked_cop_dist: isize, //determines cop dist marked in RobberInfo::CopDist
     small_robber_dist: isize, //determines max dist marked in RobberInfo::SmallRobberDist
 
-    robber_strat: RobberStrat,
     vertex_info: DrawNumbers,
     show_convex_hull: bool,
     show_hull_boundary: bool,
@@ -70,7 +65,6 @@ const DEFAULT_OPTIONS: Options = Options {
     robber_info: RobberInfo::None,
     marked_cop_dist: 10,
     small_robber_dist: 10,
-    robber_strat: RobberStrat::None,
     vertex_info: DrawNumbers::None,
     show_convex_hull: false,
     show_hull_boundary: false,
@@ -208,16 +202,6 @@ impl Options {
 
             menu_change |= old != self.vertex_info;
         });
-        ui.collapsing("Strategie Räuber", |ui|{
-            let old = self.robber_strat;
-            ui.radio_value(&mut self.robber_strat, RobberStrat::None, 
-                "Keine");
-
-            ui.radio_value(&mut self.robber_strat, RobberStrat::EscapeHullNonLazy, 
-                "Entkomme Hülle")
-                .on_hover_text("Heuristik für Fluchtoption (1)");
-            menu_change |= old != self.robber_strat;
-        });
         menu_change
     }
 }
@@ -247,11 +231,6 @@ mod storage_keys {
     pub const OPTIONS: &'static str = "app::info::options";
     pub const CHARACTERS: &'static str = "app::info::characters";
     pub const MARKED_MANUALLY: &'static str = "app::info::manually_marked";
-    pub const ROBBER_INFO: &'static str = "app::info::robber_info";
-    pub const ROBBER_STRAT: &'static str = "app::info::robber_strat";
-    pub const VERTEX_INFO: &'static str = "app::info::vertex_info";
-    pub const SHOW_HULL: &'static str = "app::info::show_convex_hull";
-    pub const SHOW_HULL_BND: &'static str = "app::info::show_hull_boundary";
 }
 
 impl Info {
@@ -275,25 +254,7 @@ impl Info {
         use storage_keys::*;
         let characters = load_or(cc.storage, CHARACTERS, CharacterState::new);
         let marked_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
-
-        let robber_info = load_or(cc.storage, ROBBER_INFO, || DEFAULT_OPTIONS.robber_info);
-        let robber_strat = load_or(cc.storage, ROBBER_STRAT, || DEFAULT_OPTIONS.robber_strat);
-        let vertex_info = load_or(cc.storage, VERTEX_INFO, || DEFAULT_OPTIONS.vertex_info);
-        let show_convex_hull = load_or(cc.storage, SHOW_HULL, || DEFAULT_OPTIONS.show_convex_hull);
-        let show_hull_boundary = load_or(cc.storage, SHOW_HULL_BND, || DEFAULT_OPTIONS.show_hull_boundary);
-
-        let options = load_or(cc.storage, OPTIONS, || Options {
-            manual_marker_color: DEFAULT_OPTIONS.manual_marker_color,
-            automatic_marker_color: DEFAULT_OPTIONS.automatic_marker_color,
-            robber_info,
-            marked_cop_dist: DEFAULT_OPTIONS.marked_cop_dist,
-            small_robber_dist: DEFAULT_OPTIONS.small_robber_dist,
-            robber_strat,
-            vertex_info,
-            show_convex_hull,
-            show_hull_boundary,
-            draw_vertices: DEFAULT_OPTIONS.draw_vertices,
-        });
+        let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
 
         Self { 
             cop_hull_data: ConvexHullData::new(),
@@ -725,51 +686,6 @@ impl Info {
         }
     }
 
-    fn draw_robber_strat(&self, con: &DrawContext<'_>) {
-        if self.options.robber_strat == RobberStrat::None {
-            return;
-        }
-        let potential = |v| match self.options.robber_strat {
-            RobberStrat::None => panic!(),
-            RobberStrat::EscapeHullNonLazy => {
-                //the robber will always try to increase the robber advantage, except for when that would lead to beeing
-                //catched in the next move
-                let min_cop_dist = self.min_cop_dist[v];
-                if min_cop_dist < 2 {
-                    10000.0
-                }
-                else {
-                    //if multiple vertices have the same robber advantage, we use the min_cop_dist as tiebreaker.
-                    //(because all vertices v tested are neighbors of the current robber position, their cop advantage
-                    //  and min_cop_dist can vary between all of them by at most 2. thus 0.1 is sufficiently small
-                    //  as factor to only let the min_cop_dist work as tiebreaker)
-                    self.cop_advantage[v] as f32 - 0.1 * min_cop_dist as f32
-                }
-            }
-        };
-        if let Some(r) = self.characters.robber() {
-            let mut best = Vec::with_capacity(10);   
-            best.push(r.nearest_node);
-            let mut smallest_pot = potential(r.nearest_node);
-            for neigh in con.edges.neighbors_of(r.nearest_node) {
-                let neigh_pot = potential(neigh);
-                if neigh_pot < smallest_pot {
-                    best.clear();
-                    best.push(neigh);
-                    smallest_pot = neigh_pot;
-                }
-                else if neigh_pot == smallest_pot {
-                    best.push(neigh);
-                }
-            }
-            for v in best {
-                let draw_pos = con.cam.transform(con.positions[v]);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.0, RED);
-                con.painter.add(marker_circle);
-            }
-        }
-    }
-
     fn draw_character_tails(&self, con: &DrawContext<'_>) {
         if !self.characters.show_steps() {
             return;
@@ -822,7 +738,6 @@ impl Info {
         self.draw_green_circles(con);
         self.draw_manual_markers(con);
         self.draw_character_tails(con);
-        self.draw_robber_strat(con);
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con);
         self.characters.frame_is_finished();
