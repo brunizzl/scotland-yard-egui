@@ -31,7 +31,7 @@ fn is_small(x: f32) -> bool {
 
 /// connects the closest vertices to have edges,
 /// assumes all connected vertices to have same respective distances.
-pub fn edges_from_uniform_positions(vertex_positions: &[Pos3]) -> EdgeList {
+fn edges_from_uniform_positions(vertex_positions: &[Pos3]) -> EdgeList {
     debug_assert!(vertex_positions.len() >= 4); //can't make a hull of 3 points in 3d
 
     let neighbor_vertex_dist = {
@@ -45,6 +45,14 @@ pub fn edges_from_uniform_positions(vertex_positions: &[Pos3]) -> EdgeList {
         )
     ));
     EdgeList::from_iter(related, 6)
+}
+
+fn normalize_positions(positions: &mut [Pos3]) {
+    //makes only sense if graph is centered around origin
+    debug_assert!(Pos3::average_ref(positions.iter()).to_vec3().length() < 1e-4);
+    for p in positions {
+        *p = p.to_vec3().normalized().to_pos3();
+    }
 }
 
 impl ConvexTriangleHull {
@@ -82,7 +90,7 @@ impl ConvexTriangleHull {
 
             //see coment above 'discover_faces loop: we choose the rotation by taking v3
             //as having positive component in direction_check_vec's direction
-            let direction_check_vec = v1_pos.to_vec3().cross(v2_pos.to_vec3());
+            let direction_check_vec = Vec3::cross(v1_pos.to_vec3(), v2_pos.to_vec3());
 
             let mut v3 = usize::MAX; 
             let mut index_2_3 = usize::MAX;
@@ -128,17 +136,6 @@ impl ConvexTriangleHull {
         (triangles, normals)
     }
 
-    fn for_each_vertex_as_vec3(&mut self, mut f: impl FnMut(Vec3) -> Vec3) {
-        for v in &mut self.vertices {
-            *v = f(v.to_vec3()).to_pos3();
-        }
-    }
-
-    fn rescale_vectices(mut self, scale: f32) -> Self {
-        self.for_each_vertex_as_vec3(|v| v * scale);
-        self
-    }
-
     /// connects the closest vertices to have edges,
     /// positions are assumed to lie centered around the origin
     /// assumes all edges to have same length.
@@ -159,22 +156,21 @@ impl ConvexTriangleHull {
         }
     }
 
-    pub fn new_tetrahedron(scale: f32) -> Self {
+    pub fn new_tetrahedron() -> Self {
         let a = 1.0;
         let s = std::f32::consts::FRAC_1_SQRT_2;
-        let vs = vec![
+        let mut vs = vec![
             pos3(a, 0.0, -s),
             pos3(-a, 0.0, -s),
             pos3(0.0, a, s),
             pos3(0.0, -a, s),
         ];
-        let corrected_scale = scale / vs[0].to_vec3().length();
+        normalize_positions(&mut vs);
         Self::new_uniform_from_positions(vs)
-            .rescale_vectices(corrected_scale)
     }
 
-    pub fn new_octahedron(scale: f32) -> Self {
-        let vs = vec![
+    pub fn new_octahedron() -> Self {
+        let mut vs = vec![
             pos3(1.0, 0.0, 0.0),
             pos3(-1.0, 0.0, 0.0),
             pos3(0.0, 1.0, 0.0),
@@ -182,15 +178,14 @@ impl ConvexTriangleHull {
             pos3(0.0, 0.0, 1.0),
             pos3(0.0, 0.0, -1.0),
         ];
-        let corrected_scale = scale / vs[0].to_vec3().length();
+        normalize_positions(&mut vs);
         Self::new_uniform_from_positions(vs)
-            .rescale_vectices(corrected_scale)
     }
 
-    pub fn new_icosahedron(scale: f32) -> Self {        
+    pub fn new_icosahedron() -> Self {        
         let a = 1.0;
         let c = (1.0 + f32::sqrt(5.0)) / 2.0;
-        let vs = vec![
+        let mut vs = vec![
             pos3(0.0, a, c),
             pos3(0.0, a, -c),
             pos3(0.0, -a, c),
@@ -204,42 +199,38 @@ impl ConvexTriangleHull {
             pos3(-c, 0.0, a),
             pos3(-c, 0.0, -a),
         ];
-        let corrected_scale = scale / vs[0].to_vec3().length();
+        normalize_positions(&mut vs);
         Self::new_uniform_from_positions(vs)
-            .rescale_vectices(corrected_scale)
     }
 
-    pub fn new_subdivided_icosahedron(scale: f32, divisions: usize) -> Self {
-        let iso = Self::new_icosahedron(1.0);
+    pub fn new_subdivided_icosahedron(divisions: usize) -> Self {
+        let mut iso = Self::new_icosahedron();
+        normalize_positions(&mut iso.vertices);
         Self::subdivide_hull(iso, divisions)
-            .rescale_vectices(scale)
     }
 
     #[allow(dead_code)]
-    pub fn new_subdivided_octahedron(scale: f32, divisions: usize) -> Self {
-        let oct = Self::new_octahedron(1.0);
+    pub fn new_subdivided_octahedron(divisions: usize) -> Self {
+        let mut oct = Self::new_octahedron();
+        normalize_positions(&mut oct.vertices);
         Self::subdivide_hull(oct, divisions)
-            .rescale_vectices(scale)
     }
 
     #[allow(dead_code)]
-    pub fn new_subdivided_tetrahedron(scale: f32, divisions: usize) -> Self {
-        let tet = Self::new_tetrahedron(1.0);
+    pub fn new_subdivided_tetrahedron(divisions: usize) -> Self {
+        let mut tet = Self::new_tetrahedron();
+        normalize_positions(&mut tet.vertices);
         Self::subdivide_hull(tet, divisions)
-            .rescale_vectices(scale)
     }
 
     /// each triangle of the original shape is subdivided in smaller triangles, where divisions
     /// denotes the number of vertices added per original boundary
     fn subdivide_hull(plat: Self, divisions: usize) -> Self {
-        let scale = plat.vertices.first().map_or(1.0, |v| v.to_vec3().length());
         let embedding = Embedding3D::subdivide_platonic_with_triangles(plat, divisions);
         let (mut vertices, edges) = (embedding.vertices, embedding.edges);
 
         //bring all vertices to sphere surface
-        for pos in &mut vertices {
-            *pos = pos.to_vec3().normalized().to_pos3();
-        }
+        normalize_positions(&mut vertices);
 
         let (triangles, face_normals) = 
             Self::discover_faces(&vertices, &edges);
@@ -249,7 +240,7 @@ impl ConvexTriangleHull {
             edges, 
             triangles, 
             face_normals 
-        }.rescale_vectices(scale)
+        }
     }
 }
 
@@ -632,23 +623,23 @@ impl Embedding3D {
         res
     }
 
-    pub fn new_subdivided_icosahedron(scale: f32, divisions: usize) -> Self {
-        let ico = ConvexTriangleHull::new_icosahedron(scale);
+    pub fn new_subdivided_icosahedron(divisions: usize) -> Self {
+        let ico = ConvexTriangleHull::new_icosahedron();
         Self::subdivide_platonic_with_triangles(ico, divisions)
     }
 
-    pub fn new_subdivided_subdivided_icosahedron(scale: f32, d1: usize, d2: usize) -> Self {
-        let ico = ConvexTriangleHull::new_subdivided_icosahedron(scale, d1);
+    pub fn new_subdivided_subdivided_icosahedron(d1: usize, d2: usize) -> Self {
+        let ico = ConvexTriangleHull::new_subdivided_icosahedron(d1);
         Self::subdivide_platonic_with_triangles(ico, d2)
     }
 
-    pub fn new_subdivided_tetrahedron(scale: f32, divisions: usize) -> Self {
-        let tet = ConvexTriangleHull::new_tetrahedron(scale);
+    pub fn new_subdivided_tetrahedron(divisions: usize) -> Self {
+        let tet = ConvexTriangleHull::new_tetrahedron();
         Self::subdivide_platonic_with_triangles(tet, divisions)
     }
 
-    pub fn new_subdivided_octahedron(scale: f32, divisions: usize) -> Self {
-        let oct = ConvexTriangleHull::new_octahedron(scale);
+    pub fn new_subdivided_octahedron(divisions: usize) -> Self {
+        let oct = ConvexTriangleHull::new_octahedron();
         Self::subdivide_platonic_with_triangles(oct, divisions)
     }
 
@@ -672,6 +663,19 @@ impl Embedding3D {
             debug_assert!(new_faces.iter().all(|f| f.len() == circumference));
             faces.push(new_faces);
         }
+
+        fn direct_triangle(pos: &[Pos3], [v1, v2, v3]: [usize; 3]) -> [usize; 3] {
+            let p1 = pos[v1].to_vec3();
+            let p2 = pos[v2].to_vec3();
+            let p3 = pos[v3].to_vec3();
+            if Vec3::cross(p1, p2).dot(p3) < 0.0 {
+                [v2, v1, v3]
+            }
+            else {
+                [v1, v2, v3]
+            }
+        }
+
         for (faces, &(_, show)) in faces.iter_mut().zip(face_info) {
             for face in faces.iter_mut() {
                 let compute_normal = |vs: &[Pos3], v1, v2, v3| {
@@ -688,7 +692,8 @@ impl Embedding3D {
                     }                
                 };
     
-                if let [u, v, w] = face[..] {
+                if let [v1, v2, v3] = face[..] {
+                    let [u, v, w] = direct_triangle(&hull.vertices, [v1, v2, v3]);
                     hull.face_normals.push(compute_normal(&hull.vertices, u, v, w));
                     hull.triangles.push([u, v, w]);
                     continue;
@@ -718,7 +723,7 @@ impl Embedding3D {
                     if show { 
                         edges.add_edge(v1, center_v) 
                     }
-                    let tri = [center_v, v1, v2];
+                    let tri = direct_triangle(&hull.vertices, [center_v, v1, v2]);
                     hull.face_normals.push(compute_normal(&hull.vertices, center_v, v1, v2));
                     hull.triangles.push(tri);
                 }
@@ -807,9 +812,7 @@ impl Embedding3D {
             pos3(-2.0,  -(2.0 * phi + 1.0), phi),
             pos3(-2.0,  -(2.0 * phi + 1.0), -phi),
         ];
-        for pos in &mut vertices {
-            *pos = pos.to_vec3().normalized().to_pos3();
-        }
+        normalize_positions(&mut vertices);
         vertices
     }
 
@@ -854,13 +857,80 @@ impl Embedding3D {
         }
     }
 
-    pub fn new_fabian_hamann_map(divisions: usize) -> Self {
+    /// custom subdivision of graph described in Fabian Hamann's masters thesis.
+    pub fn new_subdivided_football(divisions: usize, show_hex_mid: bool) -> Self {
         let vertices = Self::football_vertices();
         let edges = edges_from_uniform_positions(&vertices);
         debug_assert_eq!(vertices.len(), 60);
         debug_assert_eq!(edges.count_entries(), 180);
 
-        let face_info = [(6, true), (5, false)];
+        let face_info = [(6, show_hex_mid), (5, false)];
+        let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info);
+        res.subdivide_all_edges(divisions);
+        res
+    }
+
+    fn dodecahedron_vertices() -> Vec<Pos3> {
+        let a = 1.0;
+        let p = (1.0 + f32::sqrt(5.0)) / 2.0;
+        let d = 2.0 / (1.0 + f32::sqrt(5.0));
+        let mut vs = vec![
+            pos3(a, a, a),
+            pos3(a, a, -a),
+            pos3(a, -a, a),
+            pos3(a, -a, -a),
+            pos3(-a, a, a),
+            pos3(-a, a, -a),
+            pos3(-a, -a, a),
+            pos3(-a, -a, -a),
+            pos3(0.0, p, d),
+            pos3(0.0, p, -d),
+            pos3(0.0, -p, d),
+            pos3(0.0, -p, -d),
+            pos3(d, 0.0, p),
+            pos3(d, 0.0, -p),
+            pos3(-d, 0.0, p),
+            pos3(-d, 0.0, -p),
+            pos3(p, d, 0.0),
+            pos3(p, -d, 0.0),
+            pos3(-p, d, 0.0),
+            pos3(-p, -d, 0.0),
+        ];
+        normalize_positions(&mut vs);
+        vs
+    }
+
+    pub fn new_subdivided_dodecahedron(divisions: usize, show_divisions: bool, triangulate: bool) -> Self { 
+        let vertices = Self::dodecahedron_vertices();
+        let edges = edges_from_uniform_positions(&vertices);
+        let face_info = [(5, show_divisions || triangulate)];
+
+        let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info);
+        if triangulate {
+            normalize_positions(&mut res.surface.vertices);
+            res = Self::subdivide_platonic_with_triangles(res.surface, divisions);
+        } else {
+            res.subdivide_all_edges(divisions);
+        }
+        res
+    }
+
+    pub fn new_subdivided_cube(divisions: usize) -> Self {        
+        let p = 1.0;
+        let n = -1.0;
+        let mut vertices = vec![
+            pos3(p, p, p),
+            pos3(p, p, n),
+            pos3(p, n, p),
+            pos3(p, n, n),
+            pos3(n, p, p),
+            pos3(n, p, n),
+            pos3(n, n, p),
+            pos3(n, n, n),
+        ];
+        normalize_positions(&mut vertices);
+        let edges = edges_from_uniform_positions(&vertices);
+        let face_info = [(4, false)];
         let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info);
         res.subdivide_all_edges(divisions);
         res
@@ -925,7 +995,7 @@ impl Embedding3D {
                 for (v1, v2) in edge_1_2.zip(edge_2_3.reversed()) {
                     draw_line(&self.vertices, v1, v2);
                 }
-            } 
+            }
 
             //update vertex visibility
             let mut mark_visible_at = |v| if show_v(v) { visible[v] = true; };

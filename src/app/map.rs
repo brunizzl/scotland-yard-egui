@@ -15,9 +15,9 @@ pub enum Shape {
     Icosahedron, 
     DividedIcosahedron, //Map::nr_ico_divisions belongs to this
     RegularPolygon2D, //Map::nr_polygon_sides belongs to this
-    Cube2D,
-    Football2D,
-    FabianHamann2D,
+    Cube,
+    Football,
+    FabianHamann,
     Dodecahedron,
     Random2D, 
 }
@@ -148,32 +148,30 @@ impl Map {
 
     fn recompute(&mut self) {
         let res = self.resolution as usize;
-        let radius = 1.0;
         self.data = match self.shape {
             Shape::Icosahedron => 
-                Embedding3D::new_subdivided_icosahedron(radius, res),
+                Embedding3D::new_subdivided_icosahedron(res),
             Shape::Octahedron => 
-                Embedding3D::new_subdivided_octahedron(radius, res),
+                Embedding3D::new_subdivided_octahedron(res),
             Shape::Tetrahedron => 
-                Embedding3D::new_subdivided_tetrahedron(radius, res),
+                Embedding3D::new_subdivided_tetrahedron(res),
             Shape::DividedIcosahedron => {
                 let res1 = usize::min(res, self.nr_ico_divisions as usize);
                 let res2 = res / usize::max(res1, 1);
-                Embedding3D::new_subdivided_subdivided_icosahedron(radius, res1, res2) 
+                Embedding3D::new_subdivided_subdivided_icosahedron(res1, res2) 
             },
             Shape::RegularPolygon2D => {
                 let sides = self.nr_polygon_sides as usize;
                 Embedding3D::from_2d(graph::triangulated_regular_polygon(sides, res))
             },
-            Shape::Cube2D => 
-                Embedding3D::from_2d(graph::projected_subdivided_cube(res)),
+            Shape::Cube => 
+                Embedding3D::new_subdivided_cube(res),
             Shape::Dodecahedron => 
-                Embedding3D::from_2d(graph::projected_subdivided_dodecahedron(res)),
-            Shape::Football2D => 
-                Embedding3D::from_2d(graph::projected_subdivided_truncated_icosahedron(res)),
-            Shape::FabianHamann2D => 
-                Embedding3D::new_fabian_hamann_map(res),
-                //Embedding3D::from_2d(graph::subdivided_robber_win_graph(res)),
+                Embedding3D::new_subdivided_dodecahedron(res, false, false),
+            Shape::Football => 
+                Embedding3D::new_subdivided_football(res, false),
+            Shape::FabianHamann => 
+                Embedding3D::new_subdivided_football(res, true),
             Shape::Random2D => 
                 Embedding3D::from_2d(graph::random_triangulated(res, 8)),
         };
@@ -217,35 +215,30 @@ impl Map {
         }
         ui.collapsing("Form", |ui| {
             let old_shape = self.shape;
+            let mut change = false;
             ui.radio_value(&mut self.shape, Shape::Tetrahedron, "Tetraeder");
             ui.radio_value(&mut self.shape, Shape::Octahedron, "Oktaeder");
             ui.radio_value(&mut self.shape, Shape::Icosahedron, "Ikosaeder");
             ui.radio_value(&mut self.shape, Shape::DividedIcosahedron, "aufgepusteter Ikosaeder");
             if self.shape == Shape::DividedIcosahedron {
-                if add_drag_value(ui, &mut self.nr_ico_divisions, "Druck: ", 0, self.resolution) {
-                    self.recompute_and_adjust(info);
-                }
+                change |= add_drag_value(ui, &mut self.nr_ico_divisions, "Druck: ", 0, self.resolution);
             }
             ui.radio_value(&mut self.shape, Shape::Dodecahedron, "Dodekaeder");
-            ui.radio_value(&mut self.shape, Shape::Cube2D, "2D Würfel Projektion");
-            ui.radio_value(&mut self.shape, Shape::Football2D, "2D Fußball Projektion");
-            ui.radio_value(&mut self.shape, Shape::FabianHamann2D, "2D Projektion von Fabian Hamanns Graph");
+            ui.radio_value(&mut self.shape, Shape::Cube, "Würfel");
+            ui.radio_value(&mut self.shape, Shape::Football, "Fußball");
+            ui.radio_value(&mut self.shape, Shape::FabianHamann, "Fabian Hamanns Graph");
             ui.radio_value(&mut self.shape, Shape::RegularPolygon2D, "2D Polygon trianguliert");
             if self.shape == Shape::RegularPolygon2D {
-                if add_drag_value(ui, &mut self.nr_polygon_sides, "Seiten: ", 3, 10) {
-                    self.recompute_and_adjust(info);
-                }
+                change |= add_drag_value(ui, &mut self.nr_polygon_sides, "Seiten: ", 3, 10);
             }
             ui.radio_value(&mut self.shape, Shape::Random2D, "2D Kreisscheibe zufällig trianguliert");
             if self.shape == Shape::Random2D {
-                if ui.button("neu berechnen").clicked() {
-                    self.recompute_and_adjust(info);
-                }
+                change |= ui.button("neu berechnen").clicked();
             }
-            if self.shape != old_shape {
-                self.recompute_and_adjust(info);
-            }
-            if add_drag_value(ui, &mut self.resolution, "Auflösung: ", 0, 200) {
+            change |= self.shape != old_shape;
+            change |= add_drag_value(ui, &mut self.resolution, "Auflösung: ", 0, 200);
+
+            if change {
                 self.recompute_and_adjust(info);
             }
             ui.label(format!("    ➡ {} Knoten", self.data.nr_vertices()));
@@ -255,7 +248,13 @@ impl Map {
     pub fn scale(&self) -> f32 {
         let zoom = self.camera.zoom();
 
-        let detail_factor = f32::min(12.0 / self.resolution as f32, 4.0);
+        let detail = (self.data.nr_vertices() > 1)
+            .then(||self.data.positions()[0])
+            .and_then(|v0_pos| self.data.edges().neighbors_of(0).next()
+                .map(|n| (v0_pos - self.data.positions()[n]).length() * 10.0)
+            )
+            .unwrap_or(12.0 / self.resolution as f32);
+        let detail_factor = f32::min(detail, 4.0);
 
         let screen_size = self.camera.to_screen().move_rect.to().size();
         let screen_res_factor = screen_size.x.min(screen_size.y) * 0.001;
