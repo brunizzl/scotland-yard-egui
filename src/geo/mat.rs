@@ -2,6 +2,7 @@
 
 use super::*;
 
+#[derive(Clone, Copy)]
 pub struct Matrix3x3 {
     pub x_row: Vec3,
     pub y_row: Vec3,
