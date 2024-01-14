@@ -2,7 +2,7 @@
 
 use super::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Matrix3x3 {
     pub x_row: Vec3,
     pub y_row: Vec3,
@@ -33,6 +33,14 @@ impl Matrix3x3 {
         y_row: Vec3::Y,
         z_row: Vec3::Z,
     };
+
+    pub fn transposed(&self) -> Self {
+        Self { 
+            x_row: vec3(self.x_row.x, self.y_row.x, self.z_row.x), 
+            y_row: vec3(self.x_row.y, self.y_row.y, self.z_row.y), 
+            z_row: vec3(self.x_row.z, self.y_row.z, self.z_row.z),
+        }
+    }
 
     pub fn new_rotation_from_axis_angle(axis: Vec3, angle: f32) -> Self {
         debug_assert!(axis.is_normalized());

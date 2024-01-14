@@ -342,6 +342,8 @@ impl Info {
             } else { 
                 nr_cops.to_string() + " Cops" 
             };
+            ui.label("AKTUELL SIND BRUTEFORCEBERECHNUNGEN VON IKOSAEDER, TETRAEDER UND OKTAEDER FALSCH. \
+            aufgepusteter Ikosaeder funktioniert aber.");
             match &self.bruteforce_result {
                 BruteForceResult::None => ui.label("Noch keine beendete Rechnung"),
                 BruteForceResult::Error(what) => ui.label("Fehler bei letzter Rechnung: \n".to_owned() + what),
@@ -603,12 +605,29 @@ impl Info {
                 if let BruteForceResult::RobberWins(nr_cops, safe, configs) = &self.bruteforce_result {
                     let same_map = con.edges.nr_vertices() == safe.nr_map_vertices();
                     let same_nr_cops = self.characters.active_cops().count() == *nr_cops;
-                    if same_map && same_nr_cops {
-                        let cop_positions = configs.pack(self.characters.active_cops().map(|c| c.nearest_node));
-                        let safe_vertices = safe.robber_safe_at(cop_positions);
-                        for (safe, &vis, &pos) in izip!(safe_vertices, con.visible, con.positions) {
-                            if safe && vis {
-                                draw_circle_at(pos, self.options.automatic_marker_color);
+                    if same_map && same_nr_cops && *nr_cops > 0 {
+                        let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
+
+                        let (_, cop_positions) = configs.pack(active_cops.iter().map(|&c| c));
+                        let safe_vertices = safe.robber_safe_when(cop_positions);
+                        if let Some(equiv) = &con.equivalence_class {
+                            let fw_rot = equiv.transform_all(con.edges, &mut active_cops);
+                            let rotate = fw_rot.transposed();
+                            for (v, safe) in izip!(0.., safe_vertices) {
+                                if safe {
+                                    let v_rot = equiv.apply_transform(con.edges, &rotate, v);
+                                    if con.visible[v_rot] {
+                                        let rot_pos = con.positions[v_rot];
+                                        draw_circle_at(rot_pos, self.options.automatic_marker_color);
+                                    } 
+                                }
+                            }
+                        }
+                        else {
+                            for (safe, &vis, &pos) in izip!(safe_vertices, con.visible, con.positions) {
+                                if safe && vis {
+                                    draw_circle_at(pos, self.options.automatic_marker_color);
+                                }
                             }
                         }
                     }
@@ -625,7 +644,7 @@ impl Info {
                 if let Some(r) = self.characters.robber() {
                     let v0 = r.nearest_node;
                     let r_pos = con.positions[v0].to_vec3();
-                    for mat in &e.symmetry_transforms {
+                    for mat in e.all_transforms() {
                         let sym_v = e.apply_transform(con.edges, mat, v0);
                         if con.visible[sym_v] {
                             let sym_pos = (mat * r_pos).to_pos3();
@@ -635,23 +654,18 @@ impl Info {
                 }
             }
             (RobberInfo::CopsRotatedToEquivalence, _) => if let Some(equiv) = con.equivalence_class {
-                let active_cops = self.characters.active_cops().collect_vec();
-                if active_cops.len() > 0 {
-                    let rot = equiv.transform_of(active_cops[0].nearest_node);
-                    for cop in active_cops {
-                        let v = cop.nearest_node;
-                        let v_repr = equiv.apply_transform(con.edges, rot, v);
-                        debug_assert_eq!(equiv.classes()[v], equiv.classes()[v_repr]);
-                        let pos_rot = con.positions[v_repr];
-                        if con.visible[v_repr] {
-                            draw_circle_at(pos_rot, self.options.automatic_marker_color);                            
-                        }
-                        else { //only draw half size
-                            let draw_pos = con.cam.transform(pos_rot);
-                            let marker_circle = Shape::circle_filled(draw_pos, con.scale * 3.0, 
-                                self.options.automatic_marker_color);
-                            con.painter.add(marker_circle);
-                        }
+                let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
+                equiv.transform_all(con.edges, &mut active_cops);
+                for v in active_cops {
+                    let pos = con.positions[v];
+                    if con.visible[v] {
+                        draw_circle_at(pos, self.options.automatic_marker_color);                            
+                    }
+                    else { //only draw half size
+                        let draw_pos = con.cam.transform(pos);
+                        let marker_circle = Shape::circle_filled(draw_pos, con.scale * 3.0, 
+                            self.options.automatic_marker_color);
+                        con.painter.add(marker_circle);
                     }
                 }
             },

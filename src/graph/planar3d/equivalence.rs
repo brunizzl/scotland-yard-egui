@@ -8,22 +8,28 @@ use super::*;
 
 /// in symmetric graphs, each vertex can be put into an equivalence class. 
 #[derive(Clone)]
-pub struct EquivalenceClass {
+pub struct EquivalenceClasses {
     /// one entry per vertex, stores to which class vertex belongs
     class: Vec<u16>,
+
+    /// one entry per vertex, logs to which vertex each vertex is mapped to
+    vertex_representative: Vec<usize>,
+
+    /// one entry epr class, keeps track which vertex represents a class
+    class_representative: Vec<usize>,
 
     /// one entry per vertex, all positions normalized
     vertex_directions: Vec<Vec3>,
 
     /// lists all rotations / +reflections which respect the symmetry of the embedding
-    pub symmetry_transforms: Vec<Matrix3x3>,
+    symmetry_transforms: Vec<Matrix3x3>,
 
     /// one entry per vertex, indexes in [`self.symmetry_maps`]. 
     /// this map transforms the vertex to it's class representative
     to_representative: Vec<usize>,
 }
 
-impl EquivalenceClass {
+impl EquivalenceClasses {
 
     //only works for those platonic solids with threeangles as base shape
     pub fn enumerate_platonic_symmetry_transforms(plat: &ConvexTriangleHull) -> Vec<Matrix3x3> {
@@ -202,34 +208,36 @@ impl EquivalenceClass {
         }
 
         let vertex_directions = Vec::from_iter(graph.positions().iter().map(|p| p.to_vec3().normalized()));
+        let vertex_representative = Vec::from_iter(class.iter().map(|&c| class_representative[c as usize]));
 
-        let (symmetry_transforms, to_representative) = 'try_reuse: {
+        let symmetry_transforms = 'try_reuse: {
             /// for a given platonic solid, this stores nr of vertices, vertex degree, all the transforms and to_representative.
             static KNOWN_PLATONIC_SYMMETRY_TRANSFORMS: 
-                std::sync::Mutex<Vec<(usize, usize, Vec<Matrix3x3>, Vec<usize>)>> 
+                std::sync::Mutex<Vec<(usize, usize, Vec<Matrix3x3>)>> 
                 = std::sync::Mutex::new(Vec::new());
 
             let nr_surface_vs = graph.surface.nr_vertices();
             if let Ok(guard) = KNOWN_PLATONIC_SYMMETRY_TRANSFORMS.try_lock() {
-                for (nr_vs, deg, transforms, tos) in guard.iter() {
+                for (nr_vs, deg, transforms) in guard.iter() {
                     if *nr_vs == nr_surface_vs && *deg == degree {
-                        break 'try_reuse (transforms.clone(), tos.clone());
+                        break 'try_reuse transforms.clone();
                     }
                 }
             }
             let transforms = Self::enumerate_platonic_symmetry_transforms(&graph.surface);
-            let vertex_representative = Vec::from_iter(class.iter().map(|&c| class_representative[c as usize]));
-            let to = Self::find_symmetry_transforms(&vertex_directions, &transforms, &vertex_representative);
 
-            let new_stored_entry = (nr_surface_vs, degree, transforms.clone(), to.clone());
+            let new_stored_entry = (nr_surface_vs, degree, transforms.clone());
             if let Ok(mut lock) = KNOWN_PLATONIC_SYMMETRY_TRANSFORMS.lock() {
                 lock.push(new_stored_entry);
             }
-            (transforms, to)
+            transforms
         };
+        let to_representative = Self::find_symmetry_transforms(&vertex_directions, &symmetry_transforms, &vertex_representative);
 
         Some(Self {
             class, 
+            vertex_representative,
+            class_representative,
             vertex_directions,
             symmetry_transforms,
             to_representative,
@@ -240,15 +248,76 @@ impl EquivalenceClass {
         &self.class
     }
 
+    pub fn class_representatives(&self) -> &[usize] {
+        &self.class_representative
+    }
+
+    pub fn all_transforms(&self) -> &[Matrix3x3] {
+        &self.symmetry_transforms
+    }
+
+    #[allow(dead_code)]
+    pub fn nr_classes(&self) -> usize {
+        self.class_representative.len()
+    }
+
     pub fn apply_transform(&self, edges: &EdgeList, rot: &Matrix3x3, v: usize) -> usize {
         let pre_dir = self.vertex_directions[v];
         let post_dir = rot * pre_dir;
         let (res, error) = edges.find_local_minimum(|v| -self.vertex_directions[v].dot(post_dir), v);
         debug_assert!(error < 1e-4);
+        debug_assert_eq!(self.class[v], self.class[res]);
+        debug_assert_eq!(self.vertex_representative[v], self.vertex_representative[res]);
         res
     }
 
-    pub fn transform_of(&self, v: usize) -> &Matrix3x3 {
-        &self.symmetry_transforms[self.to_representative[v]]
+    fn transform_of(&self, v: usize) -> (&Matrix3x3, usize) {
+        let transform_nr = self.to_representative[v];
+        (
+            &self.symmetry_transforms[transform_nr], 
+            self.vertex_representative[v],
+        )
+    }
+
+    /// chooses the rotation, such that in the rotated result the cop defining the rotation is moved
+    /// to the smallest index.
+    pub fn transform_all(&self, edges: &EdgeList, cops: &mut [usize]) -> Matrix3x3 {
+        if cops.len() == 0 {
+            return Matrix3x3::IDENTITY;
+        }
+        if cops.len() == 1 {
+            let (rot, repr) = self.transform_of(cops[0]);
+            cops[0] = repr;
+            return *rot;
+        }
+        for i in 0..cops.len() {
+            let mut rotated = [0usize; 8];
+            let rotated = &mut rotated[..cops.len()];
+            for j in 0..cops.len() {
+                rotated[j] = cops[j];
+            }
+            rotated.swap(0, i);
+            let fst_cop = rotated[0];
+            let rest_cops = &mut rotated[1..];
+            let (rot, fst_cop_repr) = self.transform_of(fst_cop);
+            debug_assert_eq!(
+                fst_cop_repr, 
+                self.apply_transform(edges, rot, fst_cop)
+            );
+            for c in rest_cops.iter_mut() {
+                *c = self.apply_transform(edges, rot, *c);
+            }
+            rest_cops.sort();
+            if rest_cops[0] >= fst_cop_repr {
+                cops[0] = fst_cop_repr;
+                for j in 1..cops.len() {
+                    cops[j] = rotated[j];
+                }
+
+                return *rot;
+            }
+        }
+        panic!("one always finds a cop that defines \
+        a rotation and occupies the smallest vertex after rotating.");
     }
 }

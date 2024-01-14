@@ -235,7 +235,7 @@ impl ConvexTriangleHull {
     /// each triangle of the original shape is subdivided in smaller triangles, where divisions
     /// denotes the number of vertices added per original boundary
     fn subdivide_hull(plat: Self, divisions: usize) -> Self {
-        let embedding = Embedding3D::subdivide_platonic_with_triangles(plat, divisions);
+        let embedding = Embedding3D::subdivide_surface_with_triangles(plat, divisions, false);
         let (mut vertices, edges) = (embedding.vertices, embedding.edges);
 
         //bring all vertices to sphere surface
@@ -322,7 +322,7 @@ pub struct Embedding3D {
     /// neighbors of each vertex
     edges: EdgeList,
 
-    equivalence: Option<EquivalenceClass>,
+    equivalence: Option<EquivalenceClasses>,
 }
 
 impl Embedding3D {
@@ -343,7 +343,7 @@ impl Embedding3D {
         &self.vertices
     }
 
-    pub fn equivalence(&self) -> Option<&EquivalenceClass> {
+    pub fn equivalence(&self) -> Option<&EquivalenceClasses> {
         self.equivalence.as_ref()
     }
 
@@ -355,7 +355,7 @@ impl Embedding3D {
         new_index
     }
 
-    fn subdivide_platonic_with_triangles(surface: ConvexTriangleHull, divisions: usize) -> Self {
+    fn subdivide_surface_with_triangles(surface: ConvexTriangleHull, divisions: usize, is_platonic: bool) -> Self {
         let mut vertices = surface.vertices.clone();
         let mut edges = EdgeList::new(6, vertices.len());
         let mut edge_dividing_vertices = vec![BidirectionalRange::empty(); surface.edges.used_space()];
@@ -449,28 +449,30 @@ impl Embedding3D {
             edges,
             equivalence: None,
         };
-        res.equivalence = EquivalenceClass::new_for_subdivided_platonic(&res, divisions);
+        if is_platonic {
+            res.equivalence = EquivalenceClasses::new_for_subdivided_platonic(&res, divisions);
+        }
         res
     }
 
     pub fn new_subdivided_icosahedron(divisions: usize) -> Self {
         let ico = ConvexTriangleHull::new_icosahedron();
-        Self::subdivide_platonic_with_triangles(ico, divisions)
+        Self::subdivide_surface_with_triangles(ico, divisions, true)
     }
 
     pub fn new_subdivided_subdivided_icosahedron(d1: usize, d2: usize) -> Self {
         let ico = ConvexTriangleHull::new_subdivided_icosahedron(d1);
-        Self::subdivide_platonic_with_triangles(ico, d2)
+        Self::subdivide_surface_with_triangles(ico, d2, false)
     }
 
     pub fn new_subdivided_tetrahedron(divisions: usize) -> Self {
         let tet = ConvexTriangleHull::new_tetrahedron();
-        Self::subdivide_platonic_with_triangles(tet, divisions)
+        Self::subdivide_surface_with_triangles(tet, divisions, true)
     }
 
     pub fn new_subdivided_octahedron(divisions: usize) -> Self {
         let oct = ConvexTriangleHull::new_octahedron();
-        Self::subdivide_platonic_with_triangles(oct, divisions)
+        Self::subdivide_surface_with_triangles(oct, divisions, true)
     }
 
     /// face_info stores circumference in .0 and weather to make the inner vertices of given face type visible in .1
@@ -738,7 +740,7 @@ impl Embedding3D {
         let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info);
         if triangulate {
             res.surface.normalize_positions();
-            res = Self::subdivide_platonic_with_triangles(res.surface, divisions);
+            res = Self::subdivide_surface_with_triangles(res.surface, divisions, false);
         } else {
             res.subdivide_all_edges(divisions);
         }
@@ -893,12 +895,15 @@ impl Embedding3D {
 
 
 
-fn find_next_in_circle(edges: &EdgeList, path: &mut Vec<usize>, nr_left: usize) -> bool {
+fn find_rest_of_circle(edges: &EdgeList, path: &mut Vec<usize>, circles: &mut Vec<Vec<usize>>, nr_left: usize) {
     debug_assert!(path.len() > 0);
     if nr_left == 0 {
         let first = *path.first().unwrap();
         let last = path.last().unwrap();
-        return edges.neighbors_of(first).contains(last);
+        if edges.neighbors_of(first).contains(last) {
+            circles.push(path.clone());
+        }
+        return;
     }
 
     let curr = *path.last().unwrap();
@@ -906,13 +911,10 @@ fn find_next_in_circle(edges: &EdgeList, path: &mut Vec<usize>, nr_left: usize) 
     for n in edges.neighbors_of(curr) {
         if n != last {
             path.push(n);
-            if find_next_in_circle(edges, path, nr_left - 1) {
-                return true;
-            }
+            find_rest_of_circle(edges, path, circles, nr_left - 1);
             path.pop();
         }
     }
-    false
 }
 
 fn find_all_circles_at(edges: &EdgeList, start: usize, circumference: usize) -> Vec<Vec<usize>> {
@@ -922,9 +924,8 @@ fn find_all_circles_at(edges: &EdgeList, start: usize, circumference: usize) -> 
     let mut res = Vec::new();
     for n in edges.neighbors_of(start) {
         let mut path = vec![start, n];
-        if find_next_in_circle(edges, &mut path, circumference - 2) {
-            res.push(path);
-        }
+        let nr_left = circumference - path.len();
+        find_rest_of_circle(edges, &mut path, &mut res, nr_left);
     }
     res
 }

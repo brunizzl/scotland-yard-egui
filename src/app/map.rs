@@ -30,7 +30,7 @@ pub struct Map {
     shape: Shape,
     resolution: isize,
     nr_polygon_sides: isize, //not stored as part of enum to remember when switching shape back and forth
-    nr_ico_divisions: isize, //not stored as part of enum to remember when switching shape back and forth
+    ico_pressure: isize, //not stored as part of enum to remember when switching shape back and forth
     camera: Camera3D,
 }
 
@@ -68,7 +68,7 @@ impl Map {
             shape, 
             resolution, 
             nr_polygon_sides,
-            nr_ico_divisions,
+            ico_pressure: nr_ico_divisions,
             camera,
         };
         result.recompute();
@@ -87,7 +87,7 @@ impl Map {
         eframe::set_value(storage, SHAPE, &self.shape);
         eframe::set_value(storage, RESOLUTION, &self.resolution);
         eframe::set_value(storage, NR_POLY_SIDES, &self.nr_polygon_sides);
-        eframe::set_value(storage, NR_ICO_DIVISIONS, &self.nr_ico_divisions);
+        eframe::set_value(storage, NR_ICO_DIVISIONS, &self.ico_pressure);
         eframe::set_value(storage, CAMERA, &self.camera);
     }
 
@@ -156,8 +156,8 @@ impl Map {
             Shape::Tetrahedron => 
                 Embedding3D::new_subdivided_tetrahedron(res),
             Shape::DividedIcosahedron => {
-                let res1 = usize::min(res, self.nr_ico_divisions as usize);
-                let res2 = res / usize::max(res1, 1);
+                let res1 = usize::min(res, self.ico_pressure as usize);
+                let res2 = if res1 == 0 { res } else { (usize::max(res, 1) - 1) / (res1 + 1) };
                 Embedding3D::new_subdivided_subdivided_icosahedron(res1, res2) 
             },
             Shape::RegularPolygon2D => {
@@ -221,7 +221,7 @@ impl Map {
             ui.radio_value(&mut self.shape, Shape::Icosahedron, "Ikosaeder");
             ui.radio_value(&mut self.shape, Shape::DividedIcosahedron, "aufgepusteter Ikosaeder");
             if self.shape == Shape::DividedIcosahedron {
-                change |= add_drag_value(ui, &mut self.nr_ico_divisions, "Druck: ", 0, self.resolution);
+                change |= add_drag_value(ui, &mut self.ico_pressure, "Druck: ", 0, self.resolution);
             }
             ui.radio_value(&mut self.shape, Shape::Dodecahedron, "Dodekaeder");
             ui.radio_value(&mut self.shape, Shape::Cube, "Würfel");
