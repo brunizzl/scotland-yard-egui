@@ -5,6 +5,94 @@ use itertools::izip;
 use crate::geo::*;
 use super::*;
 
+/// represents a graph automorphism:
+/// 
+/// -> iff vertices `u` and `v` share an edge, then vertices `self.forward[u]` and `self.forward[v]` share an edge.
+/// 
+/// -> for any vertex `v` holds that `v == self.forward[self.backward[v]]`
+#[derive(Clone)]
+pub struct SymmetryTransform {
+    /// forward[v] is vertex where v is mapped to
+    forward: Vec<usize>,
+    /// backward[v] is vertex which maps to v
+    backward: Vec<usize>,
+}
+
+impl SymmetryTransform {
+    pub fn identity(n: usize) -> Self {
+        Self { 
+            forward: (0..n).collect_vec(), 
+            backward: (0..n).collect_vec(),
+        }
+    }
+
+    pub fn forward(&self) -> &[usize] {
+        &self.forward
+    }
+
+    pub fn backward(&self) -> &[usize] {
+        &self.backward
+    }
+
+    pub fn new(edges: &EdgeList, positions: &[Pos3], matrix: Matrix3x3) -> Self {
+        let mut forward = vec![usize::MAX; edges.nr_vertices()];
+        let mut backward = vec![usize::MAX; edges.nr_vertices()];
+
+        //idea: find image of vertex 0 initially. 
+        //then use already mapped vertex to search image of it's neighbors only in the neighborhood of it's image
+        let mut mapped = vec![false; edges.nr_vertices()];
+        let mut queue = std::collections::VecDeque::new();
+        {
+            let mapped_v0_pos = (&matrix * positions[0].to_vec3()).to_pos3();
+            let mut best_v = usize::MAX;
+            let mut best_dist = f32::MAX;
+            for (v, &pos) in izip!(0.., positions) {
+                let new_dist = (pos - mapped_v0_pos).length();
+                if new_dist < best_dist {
+                    best_v = v;
+                    best_dist = new_dist;
+                }
+            }
+            debug_assert!(best_dist < 1e-4);
+            mapped[0] = true;
+            forward[0] = best_v;
+            backward[best_v] = 0;
+            for n in edges.neighbors_of(0) {
+                queue.push_back((best_v, n));
+                mapped[n] = true;
+            }
+        }
+        while let Some((im_neigh, pre_v)) = queue.pop_front() {
+            debug_assert!(mapped[pre_v]);
+            let mapped_v_pos = (&matrix * positions[pre_v].to_vec3()).to_pos3();
+            let mut best_im_v = usize::MAX;
+            let mut best_dist = f32::MAX;
+            for n in edges.neighbors_of(im_neigh) {
+                let new_dist = (positions[n] - mapped_v_pos).length();
+                if new_dist < best_dist {
+                    best_im_v = n;
+                    best_dist = new_dist;
+                }
+            }
+            debug_assert!(best_dist < 1e-4);
+            debug_assert!(forward[pre_v] == usize::MAX);
+            debug_assert!(backward[best_im_v] == usize::MAX);
+            forward[pre_v] = best_im_v;
+            backward[best_im_v] = pre_v;
+            for n in edges.neighbors_of(pre_v) {
+                if !mapped[n] {
+                    queue.push_back((best_im_v, n));
+                    mapped[n] = true;
+                }
+            }
+        }
+        debug_assert!(forward.iter().all(|&v| v != usize::MAX));
+        debug_assert!(backward.iter().all(|&v| v != usize::MAX));
+        
+        Self { forward, backward }
+    }
+}
+
 
 /// in symmetric graphs, each vertex can be put into an equivalence class. 
 #[derive(Clone)]
@@ -18,11 +106,8 @@ pub struct EquivalenceClasses {
     /// one entry epr class, keeps track which vertex represents a class
     class_representative: Vec<usize>,
 
-    /// one entry per vertex, all positions normalized
-    vertex_directions: Vec<Vec3>,
-
-    /// lists all rotations / +reflections which respect the symmetry of the embedding
-    symmetry_transforms: Vec<Matrix3x3>,
+    //one entry per element in symmetry group, starting with the identity
+    symmetry_transforms: Vec<SymmetryTransform>,
 
     /// one entry per vertex, indexes in [`self.symmetry_maps`]. 
     /// this map transforms the vertex to it's class representative
@@ -210,7 +295,7 @@ impl EquivalenceClasses {
         let vertex_directions = Vec::from_iter(graph.positions().iter().map(|p| p.to_vec3().normalized()));
         let vertex_representative = Vec::from_iter(class.iter().map(|&c| class_representative[c as usize]));
 
-        let symmetry_transforms = 'try_reuse: {
+        let symmetry_transform_matrices = 'try_reuse: {
             /// for a given platonic solid, this stores nr of vertices, vertex degree, all the transforms and to_representative.
             static KNOWN_PLATONIC_SYMMETRY_TRANSFORMS: 
                 std::sync::Mutex<Vec<(usize, usize, Vec<Matrix3x3>)>> 
@@ -232,13 +317,19 @@ impl EquivalenceClasses {
             }
             transforms
         };
-        let to_representative = Self::find_symmetry_transforms(&vertex_directions, &symmetry_transforms, &vertex_representative);
+        let to_representative = Self::find_symmetry_transforms(
+            &vertex_directions, 
+            &symmetry_transform_matrices, 
+            &vertex_representative
+        );
+        let symmetry_transforms = symmetry_transform_matrices.iter().map(|m| 
+            SymmetryTransform::new(graph.edges(), graph.positions(), *m)
+        ).collect_vec();
 
         Some(Self {
             class, 
             vertex_representative,
             class_representative,
-            vertex_directions,
             symmetry_transforms,
             to_representative,
         })
@@ -252,7 +343,7 @@ impl EquivalenceClasses {
         &self.class_representative
     }
 
-    pub fn all_transforms(&self) -> &[Matrix3x3] {
+    pub fn all_transforms(&self) -> &[SymmetryTransform] {
         &self.symmetry_transforms
     }
 
@@ -261,17 +352,7 @@ impl EquivalenceClasses {
         self.class_representative.len()
     }
 
-    pub fn apply_transform(&self, edges: &EdgeList, rot: &Matrix3x3, v: usize) -> usize {
-        let pre_dir = self.vertex_directions[v];
-        let post_dir = rot * pre_dir;
-        let (res, error) = edges.find_local_minimum(|v| -self.vertex_directions[v].dot(post_dir), v);
-        debug_assert!(error < 1e-4);
-        debug_assert_eq!(self.class[v], self.class[res]);
-        debug_assert_eq!(self.vertex_representative[v], self.vertex_representative[res]);
-        res
-    }
-
-    fn transform_of(&self, v: usize) -> (&Matrix3x3, usize) {
+    fn transform_of(&self, v: usize) -> (&SymmetryTransform, usize) {
         let transform_nr = self.to_representative[v];
         (
             &self.symmetry_transforms[transform_nr], 
@@ -281,14 +362,14 @@ impl EquivalenceClasses {
 
     /// chooses the rotation, such that in the rotated result the cop defining the rotation is moved
     /// to the smallest index.
-    pub fn transform_all(&self, edges: &EdgeList, cops: &mut [usize]) -> Matrix3x3 {
+    pub fn transform_all(&self, cops: &mut [usize]) -> &SymmetryTransform {
         if cops.len() == 0 {
-            return Matrix3x3::IDENTITY;
+            return &self.symmetry_transforms[0];
         }
         if cops.len() == 1 {
             let (rot, repr) = self.transform_of(cops[0]);
             cops[0] = repr;
-            return *rot;
+            return rot;
         }
         for i in 0..cops.len() {
             let mut rotated = [0usize; 8];
@@ -300,12 +381,9 @@ impl EquivalenceClasses {
             let fst_cop = rotated[0];
             let rest_cops = &mut rotated[1..];
             let (rot, fst_cop_repr) = self.transform_of(fst_cop);
-            debug_assert_eq!(
-                fst_cop_repr, 
-                self.apply_transform(edges, rot, fst_cop)
-            );
+            debug_assert_eq!(fst_cop_repr, rot.forward[fst_cop]);
             for c in rest_cops.iter_mut() {
-                *c = self.apply_transform(edges, rot, *c);
+                *c = rot.forward[*c];
             }
             rest_cops.sort();
             if rest_cops[0] >= fst_cop_repr {
@@ -314,7 +392,7 @@ impl EquivalenceClasses {
                     cops[j] = rotated[j];
                 }
 
-                return *rot;
+                return rot;
             }
         }
         panic!("one always finds a cop that defines \

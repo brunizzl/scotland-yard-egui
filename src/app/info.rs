@@ -7,7 +7,7 @@ use itertools::{ izip, Itertools };
 
 use egui::*;
 
-use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult, SymmetricMap};
+use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult, SymmetricMap, SymmetryTransform, Symmetry};
 use crate::app::character::CharacterState;
 
 use super::{*, color::*};
@@ -306,9 +306,14 @@ impl Info {
                     Id::new(&self.bruteforce_worker as *const _), 0.0, 0.0);
 
                 let nr_characters = self.characters.active_cops().count();
+                let symmetry = if let Some(equiv) = map.data().equivalence() {
+                    Symmetry::Some(equiv.clone())
+                } else {
+                    Symmetry::None(SymmetryTransform::identity(map.data().nr_vertices()))
+                };
                 let symmetric_map = SymmetricMap {
                     edges: map.edges().clone(),
-                    eqivalence: map.data().equivalence().cloned(),
+                    symmetry,
                 };
                 //use threads natively
                 #[cfg(not(target_arch = "wasm32"))]
@@ -612,15 +617,11 @@ impl Info {
                         let (_, cop_positions) = configs.pack(active_cops.iter().map(|&c| c));
                         let safe_vertices = safe.robber_safe_when(cop_positions);
                         if let Some(equiv) = &con.equivalence_class {
-                            let fw_rot = equiv.transform_all(con.edges, &mut active_cops);
-                            let rotate = fw_rot.transposed();
-                            for (v, safe) in izip!(0.., safe_vertices) {
-                                if safe {
-                                    let v_rot = equiv.apply_transform(con.edges, &rotate, v);
-                                    if con.visible[v_rot] {
-                                        let rot_pos = con.positions[v_rot];
-                                        draw_circle_at(rot_pos, self.options.automatic_marker_color);
-                                    } 
+                            let transform = equiv.transform_all(&mut active_cops);
+                            for (&v_rot, safe) in izip!(transform.backward(), safe_vertices) {
+                                if safe && con.visible[v_rot] {
+                                    let rot_pos = con.positions[v_rot];
+                                    draw_circle_at(rot_pos, self.options.automatic_marker_color);
                                 }
                             }
                         }
@@ -644,11 +645,10 @@ impl Info {
             (RobberInfo::RobberVertexClass, _) => if let Some(e) = con.equivalence_class {
                 if let Some(r) = self.characters.robber() {
                     let v0 = r.nearest_node;
-                    let r_pos = con.positions[v0].to_vec3();
-                    for mat in e.all_transforms() {
-                        let sym_v = e.apply_transform(con.edges, mat, v0);
+                    for transform in e.all_transforms() {
+                        let sym_v = transform.forward()[v0];
                         if con.visible[sym_v] {
-                            let sym_pos = (mat * r_pos).to_pos3();
+                            let sym_pos = con.positions[sym_v];
                             draw_circle_at(sym_pos, self.options.automatic_marker_color);
                         }
                     }
@@ -656,7 +656,7 @@ impl Info {
             }
             (RobberInfo::CopsRotatedToEquivalence, _) => if let Some(equiv) = con.equivalence_class {
                 let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
-                equiv.transform_all(con.edges, &mut active_cops);
+                equiv.transform_all(&mut active_cops);
                 for v in active_cops {
                     let pos = con.positions[v];
                     if con.visible[v] {
