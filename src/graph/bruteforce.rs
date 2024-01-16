@@ -7,13 +7,20 @@ use bitvec::prelude as bv;
 use super::{EdgeList, EquivalenceClasses};
 use crate::geo::Matrix3x3;
 
+pub const MAX_COPS: usize = 8;
 
+/// this corresponds to one entry in CopConfigurations:
+/// [`self.fst_cop`] is expected to be a vertex symmetry class representative and the (rotated / mirrored) position of one of the cops.
+/// [`self.rest_cops`] represents the compacted sorted tuple of the other cops positions (obv. rotated the same as fst_cop).
+/// thus `(0..nr_symmetry_classes).contains(&self.fst_cop)` and `self.nr_rest_cops < nr_map_vertices * nr_cops`
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct CompactCops {
     fst_cop: usize,
     rest_cops: usize,
 }
 
+/// same structure as [`CompactCops`], only now [`self.rest_index`] is an index into the [`CopConfigurations::configurations`] entry
+/// at key [`self.fst_index`]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CompactCopsIndex {
     fst_index: usize,
@@ -53,6 +60,17 @@ impl CopConfigurations {
         self.configurations.iter().map(|(_, c)| c.len()).sum()
     }
 
+    /// this function exists mostly as an explainer of [`CompactCopsIndex`] and [`CompactCops`]
+    #[allow(dead_code)]
+    fn get(&self, index: CompactCopsIndex) -> CompactCops {
+        let configs_part = self.configurations.get(&index.fst_index).unwrap();
+        CompactCops {
+            fst_cop: index.fst_index,
+            rest_cops: configs_part[index.rest_index]
+        }
+    }
+
+    /// returns [`Self`] is enough memory is available
     pub fn new(map: SymmetricMap, nr_cops: usize) -> Option<Self> {
         let nr_vertices = map.edges.nr_vertices();
         let curr_rest_config_size = 0.max(nr_cops as isize - 1) as usize;
@@ -122,6 +140,7 @@ impl CopConfigurations {
         configs_part[index.rest_index]
     }
 
+    /// returns the configuration stored at index
     pub fn unpack(&self, index: CompactCopsIndex) -> impl Iterator<Item = usize> + Clone {
         let mut positions = self.rest_positions_at(index);
         let nr_vertices = self.nr_og_vertices();
@@ -134,9 +153,11 @@ impl CopConfigurations {
         }))
     }
 
+    /// returns the index where the (rotated / mirrored) configuration represented by cops is stored as `_.1`
+    /// and returns the transformation that rotated and / or mirrored the input in order to find it in [`self.configurations`]
     pub fn pack(&self, cops: impl Iterator<Item = usize>) -> (Matrix3x3, CompactCopsIndex) {
-        assert!(self.nr_cops <= 8);
-        let mut unpacked = [0usize; 8];
+        assert!(self.nr_cops <= MAX_COPS);
+        let mut unpacked = [0usize; MAX_COPS];
         for (i, pos) in cops.enumerate() {
             debug_assert!(pos < self.nr_og_vertices());
             debug_assert_ne!(i, self.nr_cops);
@@ -163,12 +184,14 @@ impl CopConfigurations {
         })        
     }
 
-    /// returns all cop positions reachable in a single lazy-cop move from positions, except the do-nothing move
+    /// returns all cop positions reachable in a single lazy-cop move from positions, except the do-nothing move.
+    /// because these positions may be stored in a different rotation and / or flipped, that rotation + flip to get from
+    /// the move as rotated in the input to the output is also returned (see [`Self::pack`])
     pub fn lazy_cop_moves_from<'a>(&'a self, positions: CompactCopsIndex) 
     -> impl Iterator<Item = (Matrix3x3, CompactCopsIndex)> + 'a + Clone 
     {
-        assert!(self.nr_cops <= 8);
-        let mut unpacked = [0usize; 8];
+        assert!(self.nr_cops <= MAX_COPS);
+        let mut unpacked = [0usize; MAX_COPS];
         for (storage, cop_pos) in izip!(&mut unpacked, self.unpack(positions)) {
             *storage = cop_pos;
         }
@@ -187,16 +210,20 @@ impl CopConfigurations {
 
 }
 
+/// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
+/// wether that vertex is safe for the robber to stand on or not.
 pub struct SafeRobberPositions {
     safe: std::collections::BTreeMap<usize, bv::BitVec<u32>>,
     nr_map_vertices: usize,
 }
 
+/// the indices of all game map vertices for one cop configuration in [`SafeRobberPositions`]
 struct RobberPosRange {
     fst_index: usize,
     range: std::ops::Range<usize>,
 }
 
+/// the index of one vertex in one cop configuration in [`SafeRobberPositions`] 
 struct RobberPosIndex {
     fst_index: usize,
     rest_index: usize,
@@ -212,6 +239,7 @@ impl RobberPosRange {
 }
 
 impl SafeRobberPositions {
+    /// returns [`Self`] is enough memory is available
     fn new(cop_moves: &CopConfigurations) -> Option<Self> {
         let mut safe = std::collections::BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
@@ -257,11 +285,6 @@ impl SafeRobberPositions {
         let safe_part = self.safe.get_mut(&index.fst_index).unwrap();
         safe_part.set(index.rest_index, value);
     }
-
-    fn robber_is_safe_at(&self, index: RobberPosIndex) -> bool {
-        let safe_part = self.safe.get(&index.fst_index).unwrap();
-        safe_part[index.rest_index]
-    }
 }
 
 pub enum BruteForceResult {
@@ -269,11 +292,31 @@ pub enum BruteForceResult {
     Error(String),
     /// stores for how many cops result was computed and for a graph over how many vertices
     CopsWin(usize, usize),
-    /// stores for how many cops result was computed
+    /// stores for how many cops result was computed, + result
     RobberWins(usize, SafeRobberPositions, CopConfigurations),
 }
 
-/// algorithm 2.2
+/// algorithm 2.2 of Fabian Hamann's masters thesis.
+/// 
+/// idea: store for each cop configuration and each vertex of the game map, if this vertex is safe for the robber to be on.
+/// (this storage is [`SafeRobberPositions::safe`]).
+/// 
+/// start with every vertex marked as safe, that is not a cop's position and not a neighbor of a cop's position.
+/// put every cop state in the queue to update.
+/// 
+/// for any cop state `c`:
+/// if the cops can arrive at `c` in a single move (e.g. all positions except one are identical and that one neighbors the old position),
+/// the robber was only safe on a vertex with respect to a previous cop state `c'`, if he can move to a vertex marked as safe for `c`.
+/// 
+/// thus the main loop of the algorithm takes a cop state `c` out of the queue, 
+/// marks the neighborhood of the vertices marked safe for state `c` as *"safe should the cops move to `c`"* and goes though all
+/// potential previous cop states `c'`. a vertex will now lose it's safety status w.r.t. `c'`, if it is not also contained 
+/// in the freshly marked neighborhood of the vertices marked safe for state `c`.
+/// should at least one vertex lose it's safe status for cop configuration `c'`, we need to test cop states `c''` which could turn into `c'`
+/// via a single move. hence `c'` is entered into the queue.
+/// 
+/// the hole thing is somewhat more complicated by the fact, that neighboring cop states `c` and `c'` may not both be stored in the same
+/// rotation. therefore one needs to constantly rotate between the two.
 pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> BruteForceResult {
     let Some(cop_moves) = CopConfigurations::new(map, nr_cops) else {
         return BruteForceResult::Error("Zu wenig Speicherplatz (Cops passen nicht in Int)".to_owned());
@@ -284,7 +327,7 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
 
     let mut queue = VecDeque::new();
     if queue.try_reserve(cop_moves.nr_configurations()).is_err() {
-        return BruteForceResult::Error("Zu wenig Speicherplatz (Queue zu lang)".to_owned());
+        return BruteForceResult::Error("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
     }
 
     for (&fst_index, sub_configs) in &cop_moves.configurations {
@@ -315,72 +358,79 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
     //return BruteForceResult::RobberWins(nr_cops, f, cop_moves);
 
     let nr_map_vertices = cop_moves.map.edges.nr_vertices();
-    let mut safe_robber_neighbors = vec![false; nr_map_vertices];
+    //if the current game state has cop configuration `curr`, this contains all robber positions that 
+    //where safe last game state, given that the cops move to `curr`.
+    let mut safe_should_cops_move_to_curr = vec![false; nr_map_vertices];
+    //intersection of `safe_should_cops_move_to_curr` and the vertices previously marked as safe for gamestate bevor curr
     let mut f_temp = vec![false; nr_map_vertices];
 
     //lines 4 + 5
-    while let Some(cop_positions) = queue.pop_back() {
+    while let Some(curr_cop_positions) = queue.pop_back() {
         //line 6
-        for (stored, is_safe) in izip!(&mut safe_robber_neighbors, f.robber_safe_when(cop_positions)) {
-            *stored = is_safe;
+        for (safe_before, safe_now) in izip!(&mut safe_should_cops_move_to_curr, f.robber_safe_when(curr_cop_positions)) {
+            *safe_before = safe_now;
         }
-        for (v, is_safe) in f.robber_safe_when(cop_positions).enumerate() {
-            if is_safe {
+        for (v, safe_now) in f.robber_safe_when(curr_cop_positions).enumerate() {
+            if safe_now {
                 for n in cop_moves.map.edges.neighbors_of(v) {
-                    safe_robber_neighbors[n] = true;
+                    safe_should_cops_move_to_curr[n] = true;
                 }
             }
         }
 
         //line 7
-        for (neigh_rotate, rotated_neigh_cop_positions) in cop_moves.lazy_cop_moves_from(cop_positions) {
+        for (neigh_rotate, rotated_neigh_cop_positions) in cop_moves.lazy_cop_moves_from(curr_cop_positions) {
             //line 8
             let mut f_neighbor_changed = false;
-            //rotate back brings the maybe rotated cop placement back s.t. it is actually obtainable by 
+            //rotate_back brings the (potentially) rotated cop placement back s.t. it is actually obtainable by 
             //only moving one cop.
-            let rotate_back = neigh_rotate.transposed();
+            let rotate_back;
             if let Some(e) = &cop_moves.map.eqivalence {
+                rotate_back = neigh_rotate.transposed();
                 //guarantee that rotations do the right thing
                 debug_assert!({
-                    let mut unpacked_curr = [0usize; 8];
-                    for (storage, pos) in izip!(&mut unpacked_curr, cop_moves.unpack(cop_positions)) {
+                    let mut unpacked_curr = [0usize; MAX_COPS];
+                    for (storage, pos) in izip!(&mut unpacked_curr, cop_moves.unpack(curr_cop_positions)) {
                         *storage = pos;
                     }
+                    //all positions of current cop configuration.
                     let unpacked_curr = &mut unpacked_curr[..cop_moves.nr_cops];
-                    let mut found_step = false;
+                    let mut moved_cop_pos = usize::MAX;
                     for rotated_neigh_pos in cop_moves.unpack(rotated_neigh_cop_positions) {
                         let unrotated = e.apply_transform(&cop_moves.map.edges, &rotate_back, rotated_neigh_pos);
                         let rerotated = e.apply_transform(&cop_moves.map.edges, &neigh_rotate, unrotated);
                         debug_assert_eq!(rerotated, rotated_neigh_pos);
+                        //if the neighbor configuration's position is found in curr configuration,
+                        //remove entry from curr configuration.
                         if let Some(i) = unpacked_curr.iter().position(|&c| c == unrotated) {
                             unpacked_curr[i] = usize::MAX;
                         }
                         else {
-                            debug_assert!(!found_step);
-                            debug_assert!(
-                                cop_moves.map.edges
-                                .neighbors_of(unrotated)
-                                .any(|n| unpacked_curr.contains(&n))
-                            );
-                            found_step = true;
+                            //position is not found -> that must have been the cop that moved.
+                            //remember for later.
+                            debug_assert!(moved_cop_pos == usize::MAX);
+                            moved_cop_pos = unrotated;
                         }
                     }
-                    found_step
-                }, "rotate_back is wrong");
+                    //now only the curr position of the cop which just moved there should be left in unpacked_curr.
+                    debug_assert!(moved_cop_pos != usize::MAX);
+                    unpacked_curr.iter().all(
+                        |&c| c == usize::MAX || cop_moves.map.edges.neighbors_of(c).contains(&moved_cop_pos)
+                    )
+                });
 
-                let f_indices = f.robber_indices_at(rotated_neigh_cop_positions);
-                for v in 0..nr_map_vertices {
+                for (v, marked_safe_for_neigh) in izip!(0..nr_map_vertices, f.robber_safe_when(rotated_neigh_cop_positions)) {
+                    //v is in original rotation of rotated_neigh_cop_positions. 
+                    //therefore we need to rotate back to get the vertex in the current frame of reference
                     let rotated_v = e.apply_transform(&cop_moves.map.edges, &rotate_back, v);
-                    let robber_safe = f.robber_is_safe_at(f_indices.at(rotated_v));
-                    f_neighbor_changed |= robber_safe && !safe_robber_neighbors[rotated_v];
-                    f_temp[rotated_v] = robber_safe && safe_robber_neighbors[rotated_v];
+                    f_neighbor_changed |= marked_safe_for_neigh && !safe_should_cops_move_to_curr[rotated_v];
+                    f_temp[rotated_v] = marked_safe_for_neigh && safe_should_cops_move_to_curr[rotated_v];
                 }
             }
             else {
-                debug_assert!(neigh_rotate == Matrix3x3::IDENTITY, 
-                    "we only rotate when there are equivalent vertices");
+                debug_assert!(neigh_rotate == Matrix3x3::IDENTITY);
                 let robber_safe = f.robber_safe_when(rotated_neigh_cop_positions);
-                for (stored, b1, &b2) in izip!(&mut f_temp, robber_safe, &safe_robber_neighbors) {
+                for (stored, b1, &b2) in izip!(&mut f_temp, robber_safe, &safe_should_cops_move_to_curr) {
                     f_neighbor_changed |= b1 && !b2;
                     *stored = b1 && b2;
                 }
@@ -407,6 +457,7 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
 
             //lines 13 + 14 + 15
             if f.robber_safe_when(rotated_neigh_cop_positions).all(|x| !x) {
+                //it is redundant to return `f` (or `cop_moves`), because no vertex would be marked anyway.
                 return BruteForceResult::CopsWin(nr_cops, nr_map_vertices);
             }
         }

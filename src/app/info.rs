@@ -342,8 +342,6 @@ impl Info {
             } else { 
                 nr_cops.to_string() + " Cops" 
             };
-            ui.label("AKTUELL SIND BRUTEFORCEBERECHNUNGEN VON IKOSAEDER, TETRAEDER UND OKTAEDER FALSCH. \
-            aufgepusteter Ikosaeder funktioniert aber.");
             match &self.bruteforce_result {
                 BruteForceResult::None => ui.label("Noch keine beendete Rechnung"),
                 BruteForceResult::Error(what) => ui.label("Fehler bei letzter Rechnung: \n".to_owned() + what),
@@ -358,9 +356,12 @@ impl Info {
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
         self.menu_change = false;
         self.menu_change |= self.options.draw_menu(ui);
-        self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
         
+        //everything going on here happens on a nother thread -> no need to recompute our data
+        //-> no need to log wether something changed
         self.draw_bruteforce_menu(ui, map);
+
+        self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {

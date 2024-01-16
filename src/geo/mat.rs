@@ -36,9 +36,9 @@ impl Matrix3x3 {
 
     pub fn transposed(&self) -> Self {
         Self { 
-            x_row: vec3(self.x_row.x, self.y_row.x, self.z_row.x), 
-            y_row: vec3(self.x_row.y, self.y_row.y, self.z_row.y), 
-            z_row: vec3(self.x_row.z, self.y_row.z, self.z_row.z),
+            x_row: self.fst_col(), 
+            y_row: self.snd_col(), 
+            z_row: self.trd_col(),
         }
     }
 
