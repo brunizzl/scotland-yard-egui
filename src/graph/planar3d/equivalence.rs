@@ -3,6 +3,8 @@
 use itertools::izip;
 
 use crate::geo::*;
+use self::bool_csr::BoolCSR;
+
 use super::*;
 
 /// represents a graph automorphism:
@@ -103,18 +105,25 @@ pub struct EquivalenceClasses {
     /// one entry per vertex, logs to which vertex each vertex is mapped to
     vertex_representative: Vec<usize>,
 
-    /// one entry epr class, keeps track which vertex represents a class
+    /// one entry per class, keeps track which vertex represents a class
     class_representative: Vec<usize>,
 
     //one entry per element in symmetry group, starting with the identity
     symmetry_transforms: Vec<SymmetryTransform>,
 
-    /// one entry per vertex, indexes in [`self.symmetry_maps`]. 
-    /// this map transforms the vertex to it's class representative
-    to_representative: Vec<usize>,
+    /// one row per vertex, indexes in [`self.symmetry_maps`]. 
+    /// all entries in row are indices of transforms mapping vertex to it's representative
+    to_representative: BoolCSR,
 }
 
 impl EquivalenceClasses {
+
+    pub fn nr_vertices(&self) -> usize {
+        let len = self.class.len();
+        debug_assert_eq!(len, self.vertex_representative.len());
+        debug_assert_eq!(len, self.to_representative.nr_rows());
+        len
+    }
 
     //only works for those platonic solids with threeangles as base shape
     pub fn enumerate_platonic_symmetry_transforms(plat: &ConvexTriangleHull) -> Vec<Matrix3x3> {
@@ -184,25 +193,22 @@ impl EquivalenceClasses {
         rotations
     }
 
-    fn find_symmetry_transforms(vertex_directions: &[Vec3], transforms: &[Matrix3x3], representative: &[usize]) -> Vec<usize> {
-        let mut res = vec![usize::MAX; vertex_directions.len()];
-        debug_assert!(transforms.len() > 3);
+    fn find_symmetry_transforms(vertex_directions: &[Vec3], transforms: &[Matrix3x3], representative: &[usize]) -> BoolCSR {
+        debug_assert!(transforms.len() > 0);
+        let mut res = BoolCSR::new(transforms.len());
 
         for (v, &dir) in izip!(0.., vertex_directions) {
+            res.add_row();
             debug_assert!(dir.is_normalized());
             let repr_dir = vertex_directions[representative[v]];
-            let mut best_dist = f32::MAX;
-            let mut best_mat = usize::MAX;
             for (m, mat) in izip!(0.., transforms) {
                 let im = mat * dir;
                 let im_dist = (im - repr_dir).length();
-                if im_dist < best_dist {
-                    best_dist = im_dist;
-                    best_mat = m;
+                if im_dist < 1e-5 {
+                    res.add_entry_in_last_row(m);
                 }
             }
-            debug_assert!(best_dist.abs() < 1e-4);
-            res[v] = best_mat;
+            debug_assert!(res.last_row().len() > 0);
         }
         res
     }
@@ -215,11 +221,11 @@ impl EquivalenceClasses {
         }
 
         let mut class = vec![u16::MAX; graph.vertices.len()];
-        let mut class_representative = Vec::new(); //one entry per class, later used to compute vertex_representative
+        let mut nr_classes = 0;
         
         //the vertices of a platonic solid are all equivalent:
         //the graph looks the same from each position.
-        class_representative.push(0);
+        nr_classes += 1;
         for v in 0..graph.surface.nr_vertices() {
             class[v] = 0;
         }
@@ -232,10 +238,7 @@ impl EquivalenceClasses {
             //divisions == 3 => three inner vertices => two classes
             //...
             let nr_edge_classes = (divisions + 1) / 2;
-            for (v, class) in izip!(graph.edge_dividing_vertices[0], 1..=nr_edge_classes) {
-                debug_assert_eq!(class, class_representative.len());
-                class_representative.push(v);
-            }
+            nr_classes += nr_edge_classes;
             //this loop relies on each edge beeing iterated over once in each direction 
             for &(mut edge) in &graph.edge_dividing_vertices {
                 for c in 1..=nr_edge_classes {
@@ -283,14 +286,19 @@ impl EquivalenceClasses {
                         class[v] = c;
                     }
                     else {
-                        let new_c = class_representative.len() as u16;
-                        class_representative.push(v);
+                        let new_c = nr_classes as u16;
+                        nr_classes += 1;
                         class_map.insert(dists, new_c);
                         class[v] = new_c;
                     }
                 }
             }
         }
+
+        let class_representative = (0..nr_classes).map(|c| {
+            //take first vertex of a class as the class' representative
+            class.iter().enumerate().filter_map(|(i, &cc)| (cc as usize == c).then_some(i)).next().unwrap()
+        }).collect_vec();
 
         let vertex_directions = Vec::from_iter(graph.positions().iter().map(|p| p.to_vec3().normalized()));
         let vertex_representative = Vec::from_iter(class.iter().map(|&c| class_representative[c as usize]));
@@ -343,6 +351,10 @@ impl EquivalenceClasses {
         &self.class_representative
     }
 
+    pub fn vertex_representatives(&self) -> &[usize] {
+        &self.vertex_representative
+    }
+
     pub fn all_transforms(&self) -> &[SymmetryTransform] {
         &self.symmetry_transforms
     }
@@ -352,10 +364,10 @@ impl EquivalenceClasses {
         self.class_representative.len()
     }
 
-    fn transform_of(&self, v: usize) -> (&SymmetryTransform, usize) {
-        let transform_nr = self.to_representative[v];
+    fn transforms_of<'a>(&'a self, v: usize) -> (impl ExactSizeIterator<Item = &'a SymmetryTransform> + Clone, usize) {
+        let transform_indices = self.to_representative.row(v);
         (
-            &self.symmetry_transforms[transform_nr], 
+            transform_indices.iter().map(|&i| &self.symmetry_transforms[i]), 
             self.vertex_representative[v],
         )
     }
@@ -366,36 +378,49 @@ impl EquivalenceClasses {
         if cops.len() == 0 {
             return &self.symmetry_transforms[0];
         }
+        cops.sort_by_key(|&c| self.class[c]);
+        let (mut rots, fst_cop_repr) = self.transforms_of(cops[0]);
         if cops.len() == 1 {
-            let (rot, repr) = self.transform_of(cops[0]);
-            cops[0] = repr;
+            let rot = rots.next().unwrap();
+            cops[0] = fst_cop_repr;
             return rot;
         }
-        for i in 0..cops.len() {
-            let mut rotated = [0usize; 8];
-            let rotated = &mut rotated[..cops.len()];
-            for j in 0..cops.len() {
-                rotated[j] = cops[j];
-            }
-            rotated.swap(0, i);
-            let fst_cop = rotated[0];
-            let rest_cops = &mut rotated[1..];
-            let (rot, fst_cop_repr) = self.transform_of(fst_cop);
-            debug_assert_eq!(fst_cop_repr, rot.forward[fst_cop]);
-            for c in rest_cops.iter_mut() {
-                *c = rot.forward[*c];
-            }
-            rest_cops.sort();
-            if rest_cops[0] >= fst_cop_repr {
-                cops[0] = fst_cop_repr;
-                for j in 1..cops.len() {
-                    cops[j] = rotated[j];
-                }
 
-                return rot;
+        let rot_val = |rotated_rest: &[_]| { 
+            let mut acc = 0;
+            for c in rotated_rest.iter().rev() {
+                acc += c;
+                acc *= self.nr_vertices();
+            }
+            acc
+         };
+        let mut best_i = usize::MAX;
+        let mut best_val = usize::MAX;
+        for (i, rot) in rots.clone().enumerate() {
+            let mut rotated_rest = [0usize; bruteforce::MAX_COPS - 1];
+            let rotated_rest = &mut rotated_rest[..cops.len() - 1];
+
+            let fst_cop = cops[0];
+            debug_assert_eq!(fst_cop_repr, rot.forward[fst_cop]);
+            for (rotated, &c) in izip!(rotated_rest.iter_mut(), &cops[1..]) {
+                *rotated = rot.forward[c];
+            }
+            rotated_rest.sort();
+            if rotated_rest[0] >= fst_cop_repr {
+                let new_val = rot_val(&rotated_rest);
+                if new_val < best_val {
+                    best_val = new_val;
+                    best_i = i;
+                }
             }
         }
-        panic!("one always finds a cop that defines \
-        a rotation and occupies the smallest vertex after rotating.");
+        assert!(best_i != usize::MAX);
+        cops[0] = fst_cop_repr;
+        let best_rot = rots.nth(best_i).unwrap();
+        for c in &mut cops[1..] {
+            *c = best_rot.forward[*c];
+        }
+        cops[1..].sort();
+        best_rot
     }
 }

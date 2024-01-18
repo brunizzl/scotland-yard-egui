@@ -54,6 +54,23 @@ fn pack_rest(nr_vertices: usize, other_cops: &[usize]) -> usize {
     positions
 }
 
+fn is_stored_config(sym: &SymmetricMap, fst_cop: usize, rest_cops: &[usize]) -> bool {
+    match &sym.symmetry {
+        Symmetry::None(_) => true,
+        Symmetry::Some(e) => {
+            debug_assert_eq!(fst_cop, e.vertex_representatives()[fst_cop]);
+            let mut config_copy = [usize::MAX; MAX_COPS];
+            let config_copy = &mut config_copy[..(1 + rest_cops.len())];
+            config_copy[0] = fst_cop;
+            for i in 0..rest_cops.len() {
+                config_copy[i + 1] = rest_cops[i];
+            }
+            e.transform_all(config_copy);
+            config_copy[0] == fst_cop && config_copy[1..] == rest_cops[..]
+        }
+    }
+}
+
 impl CopConfigurations {
 
     fn nr_og_vertices(&self) -> usize {
@@ -102,14 +119,18 @@ impl CopConfigurations {
         let mut add_configs_for_first = |fst_cop: usize| {
             curr_rest_config.iter_mut().for_each(|c| *c = fst_cop);
             let mut new_configuration = Vec::new();
+            let mut i = 0;
             if nr_cops > 1 {
                 loop {
+                    i += 1;
                     debug_assert!(curr_rest_config.iter().tuple_windows().all(|(a, b)| a <= b));
-                    let packed = pack_rest(map.edges.nr_vertices(), &curr_rest_config);
-                    if let Err(_) = new_configuration.try_reserve(1) {
-                        return false;
+                    if is_stored_config(&map, fst_cop, &curr_rest_config) {
+                        let packed = pack_rest(map.edges.nr_vertices(), &curr_rest_config);
+                        if let Err(_) = new_configuration.try_reserve(1) {
+                            return false;
+                        }
+                        new_configuration.push(packed);
                     }
-                    new_configuration.push(packed);
                     if !advance(&mut curr_rest_config) {
                         break;
                     }
@@ -117,6 +138,7 @@ impl CopConfigurations {
             } else {
                 new_configuration.push(0);
             }
+            println!("{} -> {} / {}", fst_cop, new_configuration.len(), i);
             let old = configurations.insert(fst_cop, new_configuration);
             debug_assert!(old.is_none());
             true

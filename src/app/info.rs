@@ -704,10 +704,13 @@ impl Info {
                     DrawNumbers::VertexEquivalenceClass => 
                         con.equivalence_class.map(|e| e.classes()[v].to_string()).unwrap_or(String::new()),
                     //DrawNumbers::Debugging => self.escapable.owners()[i].to_string(),
-                    DrawNumbers::Debugging => { 
-                        let d = self.escapable.boundary_segment_dist()[v];
-                        if d == isize::MAX { String::new() } else { d.to_string() }
-                    }
+                    //DrawNumbers::Debugging => { 
+                    //    let d = self.escapable.boundary_segment_dist()[v];
+                    //    if d == isize::MAX { String::new() } else { d.to_string() }
+                    //}
+                    DrawNumbers::Debugging => if let Some(equiv) = con.equivalence_class { 
+                        equiv.vertex_representatives()[v].to_string()
+                    } else { String::new() },
                 };
                 let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
                 layout_job.halign = Align::Center;
