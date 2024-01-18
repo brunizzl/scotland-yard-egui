@@ -43,7 +43,7 @@ pub struct CopConfigurations {
     configurations: std::collections::BTreeMap<usize, Vec<usize>>,
 }
 
-
+/// fits whole tuple `other_cops` in integer, assuming all entries are always smaller than `nr_vertices`
 fn pack_rest(nr_vertices: usize, other_cops: &[usize]) -> usize {
     let mut positions: usize = 0;
     for &cop in other_cops.iter() {
@@ -138,7 +138,8 @@ impl CopConfigurations {
             } else {
                 new_configuration.push(0);
             }
-            println!("{} -> {} / {}", fst_cop, new_configuration.len(), i);
+            println!("{} -> {} / {} = {}", fst_cop, new_configuration.len(), i, 
+                new_configuration.len() as f32 / i as f32);
             let old = configurations.insert(fst_cop, new_configuration);
             debug_assert!(old.is_none());
             true

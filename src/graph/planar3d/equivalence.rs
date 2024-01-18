@@ -299,6 +299,9 @@ impl EquivalenceClasses {
             //take first vertex of a class as the class' representative
             class.iter().enumerate().filter_map(|(i, &cc)| (cc as usize == c).then_some(i)).next().unwrap()
         }).collect_vec();
+        //this is only guaranteed because we know the order in which a triangulated platonic solid
+        //adds it's vertices during construction.
+        debug_assert!(class_representative.iter().tuple_windows().all(|(a, b)| a <= b));
 
         let vertex_directions = Vec::from_iter(graph.positions().iter().map(|p| p.to_vec3().normalized()));
         let vertex_representative = Vec::from_iter(class.iter().map(|&c| class_representative[c as usize]));
@@ -334,6 +337,18 @@ impl EquivalenceClasses {
             SymmetryTransform::new(graph.edges(), graph.positions(), *m)
         ).collect_vec();
 
+        debug_assert!({
+            let mut nr_rots = vec![0; nr_classes];
+            for (&c, rots) in izip!(&class, to_representative.iter_rows()) {
+                nr_rots[c as usize] += rots.len();
+            }
+            for &nr in &nr_rots {
+                //each rotation must be able to map some vertex of any class to the class' representative
+                assert_eq!(nr, symmetry_transforms.len());
+            }
+            true
+        });
+
         Some(Self {
             class, 
             vertex_representative,
@@ -364,6 +379,8 @@ impl EquivalenceClasses {
         self.class_representative.len()
     }
 
+    /// returns all transforms mapping vertex v to it's class' representative as fst
+    /// and the representative itself as snd
     fn transforms_of<'a>(&'a self, v: usize) -> (impl ExactSizeIterator<Item = &'a SymmetryTransform> + Clone, usize) {
         let transform_indices = self.to_representative.row(v);
         (
@@ -385,10 +402,14 @@ impl EquivalenceClasses {
             cops[0] = fst_cop_repr;
             return rot;
         }
-
-        let rot_val = |rotated_rest: &[_]| { 
+        //each configuration gets a value. the only important thing is that
+        //config_hash_value is injective, because we choose the configuration with lowest value.
+        //if two transforations of the same configuration can be chosen, the bruteforce algorithm will fail.
+        //(because only one of those will be put in the update queue when they need to be updated)
+        let config_hash_value = |rotated_rest: &[_]| { 
             let mut acc = 0;
-            for c in rotated_rest.iter().rev() {
+            for &c in rotated_rest.iter().rev() {
+                debug_assert!(c < self.nr_vertices());
                 acc += c;
                 acc *= self.nr_vertices();
             }
@@ -407,7 +428,25 @@ impl EquivalenceClasses {
             }
             rotated_rest.sort();
             if rotated_rest[0] >= fst_cop_repr {
-                let new_val = rot_val(&rotated_rest);
+                let new_val = config_hash_value(&rotated_rest);
+                debug_assert!(new_val != best_val || {
+                    //two transformations yielding the same function value is only expected to
+                    //happen, if both also yield the same configuration.
+                    let prev_best_rot = rots.clone().nth(best_i).unwrap();
+                    let mut hit = [false; bruteforce::MAX_COPS - 1];
+                    for &c in &cops[1..] {
+                        let prev_rotated = prev_best_rot.forward[c];
+                        if let Some(j) = rotated_rest
+                            .iter()
+                            .enumerate()
+                            .position(|(j, &cc)| !hit[j] && cc == prev_rotated) 
+                        {
+                            hit[j] = true;
+                        }
+                        else { panic!() }
+                    }
+                    hit[..rotated_rest.len()].into_iter().all(|&x| x)
+                });
                 if new_val < best_val {
                     best_val = new_val;
                     best_i = i;
