@@ -379,14 +379,14 @@ impl EquivalenceClasses {
         self.class_representative.len()
     }
 
-    /// returns all transforms mapping vertex v to it's class' representative as fst
-    /// and the representative itself as snd
-    fn transforms_of<'a>(&'a self, v: usize) -> (impl ExactSizeIterator<Item = &'a SymmetryTransform> + Clone, usize) {
+    /// returns all transforms mapping vertex v to it's class' representative
+    fn transforms_of<'a>(&'a self, v: usize) -> impl ExactSizeIterator<Item = &'a SymmetryTransform> + Clone {
         let transform_indices = self.to_representative.row(v);
-        (
-            transform_indices.iter().map(|&i| &self.symmetry_transforms[i]), 
-            self.vertex_representative[v],
-        )
+        debug_assert_eq!(
+            self.vertex_representative[v], 
+            self.symmetry_transforms[transform_indices[0]].forward[v]
+        );
+        transform_indices.iter().map(|&i| &self.symmetry_transforms[i])
     }
 
     /// chooses the rotation, such that in the rotated result the cop defining the rotation is moved
@@ -395,71 +395,74 @@ impl EquivalenceClasses {
         if cops.len() == 0 {
             return &self.symmetry_transforms[0];
         }
+
         cops.sort_by_key(|&c| self.class[c]);
-        let (mut rots, fst_cop_repr) = self.transforms_of(cops[0]);
+        let rotate_class = self.class[cops[0]];
+        let mut rotations = cops
+            .iter()
+            .take_while(|&&c| self.class[c] == rotate_class)
+            .flat_map(|&c| self.transforms_of(c));
+
         if cops.len() == 1 {
-            let rot = rots.next().unwrap();
-            cops[0] = fst_cop_repr;
+            let rot = rotations.next().unwrap();
+            cops[0] = rot.forward[cops[0]];
             return rot;
         }
+
         //each configuration gets a value. the only important thing is that
         //config_hash_value is injective, because we choose the configuration with lowest value.
         //if two transforations of the same configuration can be chosen, the bruteforce algorithm will fail.
         //(because only one of those will be put in the update queue when they need to be updated)
-        let config_hash_value = |rotated_rest: &[_]| { 
+        let config_hash_value = |rotated: &[_]| { 
             let mut acc = 0;
-            for &c in rotated_rest.iter().rev() {
+            for &c in rotated.iter().rev() {
                 debug_assert!(c < self.nr_vertices());
                 acc += c;
                 acc *= self.nr_vertices();
             }
             acc
-         };
+        };        
         let mut best_i = usize::MAX;
         let mut best_val = usize::MAX;
-        for (i, rot) in rots.clone().enumerate() {
-            let mut rotated_rest = [0usize; bruteforce::MAX_COPS - 1];
-            let rotated_rest = &mut rotated_rest[..cops.len() - 1];
-
-            let fst_cop = cops[0];
-            debug_assert_eq!(fst_cop_repr, rot.forward[fst_cop]);
-            for (rotated, &c) in izip!(rotated_rest.iter_mut(), &cops[1..]) {
-                *rotated = rot.forward[c];
+        for (i, rotation) in rotations.clone().enumerate() {
+            let mut rotated = [0usize; bruteforce::MAX_COPS];
+            let rotated = &mut rotated[..cops.len()];
+            for (rotated, &c) in izip!(rotated.iter_mut(), cops.iter()) {
+                *rotated = rotation.forward[c];
             }
-            rotated_rest.sort();
-            if rotated_rest[0] >= fst_cop_repr {
-                let new_val = config_hash_value(&rotated_rest);
-                debug_assert!(new_val != best_val || {
-                    //two transformations yielding the same function value is only expected to
-                    //happen, if both also yield the same configuration.
-                    let prev_best_rot = rots.clone().nth(best_i).unwrap();
-                    let mut hit = [false; bruteforce::MAX_COPS - 1];
-                    for &c in &cops[1..] {
-                        let prev_rotated = prev_best_rot.forward[c];
-                        if let Some(j) = rotated_rest
-                            .iter()
-                            .enumerate()
-                            .position(|(j, &cc)| !hit[j] && cc == prev_rotated) 
-                        {
-                            hit[j] = true;
-                        }
-                        else { panic!() }
+            rotated.sort();
+
+            let new_val = config_hash_value(&rotated);
+            debug_assert!(new_val != best_val || {
+                //two transformations yielding the same function value is only expected to
+                //happen, if both also yield the same configuration.
+                let prev_best_rot = rotations.clone().nth(best_i).unwrap();
+                let mut hit = [false; bruteforce::MAX_COPS];
+                for &c in cops.iter() {
+                    let prev_rotated = prev_best_rot.forward[c];
+                    if let Some(j) = rotated
+                        .iter()
+                        .enumerate()
+                        .position(|(j, &cc)| !hit[j] && cc == prev_rotated) 
+                    {
+                        hit[j] = true;
                     }
-                    hit[..rotated_rest.len()].into_iter().all(|&x| x)
-                });
-                if new_val < best_val {
-                    best_val = new_val;
-                    best_i = i;
+                    else { panic!() }
                 }
+                hit[..rotated.len()].into_iter().all(|&x| x)
+            });
+            if new_val < best_val {
+                best_val = new_val;
+                best_i = i;
             }
         }
+        
         assert!(best_i != usize::MAX);
-        cops[0] = fst_cop_repr;
-        let best_rot = rots.nth(best_i).unwrap();
-        for c in &mut cops[1..] {
+        let best_rot = rotations.nth(best_i).unwrap();
+        for c in cops.iter_mut() {
             *c = best_rot.forward[*c];
         }
-        cops[1..].sort();
+        cops.sort();
         best_rot
     }
 }

@@ -7,10 +7,11 @@ use crate::geo::Pos3;
 mod cam;
 pub mod character;
 mod info;
-mod map;
+pub mod map;
 mod color;
 
 pub struct DrawContext<'a> {
+    pub shape: map::Shape,
     pub extreme_vertices: &'a [usize],
     pub edges: &'a EdgeList,
     pub visible: &'a [bool],

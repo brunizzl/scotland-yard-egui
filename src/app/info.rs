@@ -312,6 +312,7 @@ impl Info {
                     Symmetry::None(SymmetryTransform::identity(map.data().nr_vertices()))
                 };
                 let symmetric_map = SymmetricMap {
+                    shape: map.shape(),
                     edges: map.edges().clone(),
                     symmetry,
                 };
@@ -350,9 +351,9 @@ impl Info {
             match &self.bruteforce_result {
                 BruteForceResult::None => ui.label("Noch keine beendete Rechnung"),
                 BruteForceResult::Error(what) => ui.label("Fehler bei letzter Rechnung: \n".to_owned() + what),
-                BruteForceResult::CopsWin(nr_cops, nr_vertices) => ui.label(
+                BruteForceResult::CopsWin(nr_cops, nr_vertices, _) => ui.label(
                     format!("Räuber verliert gegen {} auf {} Knoten", write_cops(*nr_cops), nr_vertices)),
-                BruteForceResult::RobberWins(nr_cops, safe, _cofigs) => ui.label(
+                BruteForceResult::RobberWins(nr_cops, _, safe, _) => ui.label(
                     format!("Räuber gewinnt gegen {} auf {} Knoten", write_cops(*nr_cops), safe.nr_map_vertices()))
             }
         });
@@ -608,8 +609,8 @@ impl Info {
                 }
             }
             (RobberInfo::BruteForceRes, _) => 
-                if let BruteForceResult::RobberWins(nr_cops, safe, configs) = &self.bruteforce_result {
-                    let same_map = con.edges.nr_vertices() == safe.nr_map_vertices();
+                if let BruteForceResult::RobberWins(nr_cops, shape, safe, configs) = &self.bruteforce_result {
+                    let same_map = con.edges.nr_vertices() == safe.nr_map_vertices() && con.shape == *shape;
                     let same_nr_cops = self.characters.active_cops().count() == *nr_cops;
                     if same_map && same_nr_cops && *nr_cops > 0 {
                         let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();

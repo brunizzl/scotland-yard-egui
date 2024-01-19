@@ -44,6 +44,10 @@ mod storage_keys {
 
 impl Map {
 
+    pub fn shape(&self) -> Shape {
+        self.shape
+    }
+
     pub fn data(&self) -> &Embedding3D {
         &self.data
     }
@@ -289,6 +293,7 @@ impl Map {
         }
 
         DrawContext { 
+            shape: self.shape,
             extreme_vertices: &self.extreme_vertices,
             edges: self.edges(),
             visible: self.visible(), 

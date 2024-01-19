@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use itertools::{izip, Itertools};
 use bitvec::prelude as bv;
 
+use crate::app::map;
 use super::{EdgeList, EquivalenceClasses, SymmetryTransform};
 
 pub const MAX_COPS: usize = 8;
@@ -32,6 +33,7 @@ pub enum Symmetry {
 }
 
 pub struct SymmetricMap {
+    pub shape: map::Shape,
     pub edges: EdgeList,
     pub symmetry: Symmetry,
 }
@@ -180,6 +182,14 @@ impl CopConfigurations {
         }))
     }
 
+    fn eager_unpack(&self, index: CompactCopsIndex) -> [usize; MAX_COPS] {
+        let mut unpacked = [usize::MAX; MAX_COPS];
+        for (i, c) in self.unpack(index).enumerate() {
+            unpacked[i] = c;
+        }
+        unpacked
+    }
+
     /// returns the index where the (rotated / mirrored) configuration represented by cops is stored as `_.1`
     /// and returns the transformation that rotated and / or mirrored the input in order to find it in [`self.configurations`]
     pub fn pack<'a>(&'a self, cops: impl Iterator<Item = usize>) -> (&'a SymmetryTransform, CompactCopsIndex) {
@@ -202,6 +212,7 @@ impl CopConfigurations {
 
         let fst_cop = unpacked[0];
         let rest_cops = &unpacked[1..];
+        debug_assert!(rest_cops.len() == 0 || fst_cop <= rest_cops[0]);
 
         let packed = pack_rest(self.map.edges.nr_vertices(), rest_cops);
         let configs_part = self.configurations.get(&fst_cop).unwrap();
@@ -219,10 +230,7 @@ impl CopConfigurations {
     -> impl Iterator<Item = (&SymmetryTransform, CompactCopsIndex)> + 'a + Clone 
     {
         assert!(self.nr_cops <= MAX_COPS);
-        let mut unpacked = [0usize; MAX_COPS];
-        for (storage, cop_pos) in izip!(&mut unpacked, self.unpack(positions)) {
-            *storage = cop_pos;
-        }
+        let unpacked = self.eager_unpack(positions);
 
         let iter = (0..self.nr_cops).flat_map(move |i| {
             let cop_i_pos = unpacked[i];
@@ -318,10 +326,10 @@ impl SafeRobberPositions {
 pub enum BruteForceResult {
     None,
     Error(String),
-    /// stores for how many cops result was computed and for a graph over how many vertices
-    CopsWin(usize, usize),
+    /// stores for how many cops result was computed and for a graph over how many vertices of what shape
+    CopsWin(usize, usize, map::Shape),
     /// stores for how many cops result was computed, + result
-    RobberWins(usize, SafeRobberPositions, CopConfigurations),
+    RobberWins(usize, map::Shape, SafeRobberPositions, CopConfigurations),
 }
 
 /// algorithm 2.2 of Fabian Hamann's masters thesis.
@@ -346,6 +354,12 @@ pub enum BruteForceResult {
 /// the hole thing is somewhat more complicated by the fact, that neighboring cop states `c` and `c'` may not both be stored in the same
 /// rotation. therefore one needs to constantly rotate between the two.
 pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> BruteForceResult {
+    if nr_cops == 0 {
+        return BruteForceResult::Error("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
+    }
+    if nr_cops > MAX_COPS {
+        return BruteForceResult::Error(format!("Rechnung kann für höchstens {MAX_COPS} Cops durchgeführt werden."));
+    }
     let Some(cop_moves) = CopConfigurations::new(map, nr_cops) else {
         return BruteForceResult::Error("Zu wenig Speicherplatz (Cops passen nicht in Int)".to_owned());
     };
@@ -408,6 +422,13 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
 
         //line 7
         for (neigh_rotate, rotated_neigh_cop_positions) in cop_moves.lazy_cop_moves_from(curr_cop_positions) {
+            //if it only takes a single move to go from curr_cop_positions to rotated_neigh_cop_positions, so
+            //should the other direction.
+            debug_assert!(cop_moves
+                .lazy_cop_moves_from(rotated_neigh_cop_positions)
+                .any(|(_, pos)| pos == curr_cop_positions)
+            );
+
             //line 8
             let mut f_neighbor_changed = false;
             //guarantee that rotations do the right thing
@@ -464,13 +485,13 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
             //lines 13 + 14 + 15
             if f.robber_safe_when(rotated_neigh_cop_positions).all(|x| !x) {
                 //it is redundant to return `f` (or `cop_moves`), because no vertex would be marked anyway.
-                return BruteForceResult::CopsWin(nr_cops, nr_map_vertices);
+                return BruteForceResult::CopsWin(nr_cops, nr_map_vertices, cop_moves.map.shape);
             }
         }
 
     }
 
-    BruteForceResult::RobberWins(nr_cops, f, cop_moves)
+    BruteForceResult::RobberWins(nr_cops, cop_moves.map.shape, f, cop_moves)
 }
 
 
