@@ -7,7 +7,7 @@ use itertools::{ izip, Itertools };
 
 use egui::*;
 
-use crate::graph::{EdgeList, ConvexHullData, EscapeableNodes, compute_safe_robber_positions, BruteForceResult, SymmetricMap, SymmetryTransform, Symmetry};
+use crate::graph::*;
 use crate::app::character::CharacterState;
 
 use super::{*, color::*};
@@ -309,7 +309,7 @@ impl Info {
                 let symmetry = if let Some(equiv) = map.data().equivalence() {
                     Symmetry::Some(equiv.clone())
                 } else {
-                    Symmetry::None(SymmetryTransform::identity(map.data().nr_vertices()))
+                    Symmetry::None(ExplicitAutomorphism::identity(map.data().nr_vertices()))
                 };
                 let symmetric_map = SymmetricMap {
                     shape: map.shape(),
@@ -618,8 +618,8 @@ impl Info {
                         let (_, cop_positions) = configs.pack(active_cops.iter().map(|&c| c));
                         let safe_vertices = safe.robber_safe_when(cop_positions);
                         if let Some(equiv) = &con.equivalence_class {
-                            let transform = equiv.transform_all(&mut active_cops)[0];
-                            for (&v_rot, safe) in izip!(transform.backward(), safe_vertices) {
+                            let transform = equiv.to_representative(&mut active_cops)[0];
+                            for (v_rot, safe) in izip!(transform.backward(), safe_vertices) {
                                 if safe && con.visible[v_rot] {
                                     let rot_pos = con.positions[v_rot];
                                     draw_circle_at(rot_pos, self.options.automatic_marker_color);
@@ -647,7 +647,7 @@ impl Info {
                 if let Some(r) = self.characters.robber() {
                     let v0 = r.nearest_node;
                     for transform in e.all_transforms() {
-                        let sym_v = transform.forward()[v0];
+                        let sym_v = transform.apply_forward(v0);
                         if con.visible[sym_v] {
                             let sym_pos = con.positions[sym_v];
                             draw_circle_at(sym_pos, self.options.automatic_marker_color);
@@ -657,7 +657,7 @@ impl Info {
             }
             (RobberInfo::CopsRotatedToEquivalence, _) => if let Some(equiv) = con.equivalence_class {
                 let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
-                equiv.transform_all(&mut active_cops);
+                equiv.to_representative(&mut active_cops);
                 for v in active_cops {
                     let pos = con.positions[v];
                     if con.visible[v] {

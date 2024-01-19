@@ -6,7 +6,7 @@ use bitvec::prelude as bv;
 use smallvec::SmallVec;
 
 use crate::app::map;
-use super::{EdgeList, EquivalenceClasses, SymmetryTransform};
+use super::*;
 
 pub const MAX_COPS: usize = 8;
 
@@ -30,7 +30,7 @@ pub struct CompactCopsIndex {
 
 pub enum Symmetry {
     Some(EquivalenceClasses), 
-    None(SymmetryTransform), //identity transform
+    None(ExplicitAutomorphism), //identity transform
 }
 
 pub struct SymmetricMap {
@@ -68,7 +68,7 @@ fn is_stored_config(sym: &SymmetricMap, fst_cop: usize, rest_cops: &[usize]) -> 
             for i in 0..rest_cops.len() {
                 config_copy[i + 1] = rest_cops[i];
             }
-            e.transform_all(config_copy);
+            e.to_representative(config_copy);
             config_copy[0] == fst_cop && config_copy[1..] == rest_cops[..]
         }
     }
@@ -194,7 +194,7 @@ impl CopConfigurations {
     /// returns the index where the (rotated / mirrored) configuration represented by cops is stored as `_.1`
     /// and returns the transformation that rotated and / or mirrored the input in order to find it in [`self.configurations`]
     pub fn pack<'a>(&'a self, cops: impl Iterator<Item = usize>) -> 
-        (SmallVec<[&'a SymmetryTransform; 4]>, CompactCopsIndex) 
+        (SmallVec<[&'a ExplicitAutomorphism; 4]>, CompactCopsIndex) 
     {
         assert!(self.nr_cops <= MAX_COPS);
         let mut unpacked = [0usize; MAX_COPS];
@@ -205,7 +205,7 @@ impl CopConfigurations {
         }
         let unpacked = &mut unpacked[..self.nr_cops];
         let rotation = match &self.map.symmetry {
-            Symmetry::Some(e) => e.transform_all(unpacked),
+            Symmetry::Some(e) => e.to_representative(unpacked),
             Symmetry::None(id) => {
                 unpacked.sort();
                 smallvec::smallvec![id]
@@ -230,7 +230,7 @@ impl CopConfigurations {
     /// because these positions may be stored in a different rotation and / or flipped, that rotation + flip to get from
     /// the move as rotated in the input to the output is also returned (see [`Self::pack`])
     pub fn lazy_cop_moves_from<'a>(&'a self, positions: CompactCopsIndex) 
-    -> impl Iterator<Item = (SmallVec<[&'a SymmetryTransform; 4]>, CompactCopsIndex)> + 'a + Clone 
+    -> impl Iterator<Item = (SmallVec<[&'a ExplicitAutomorphism; 4]>, CompactCopsIndex)> + 'a + Clone 
     {
         assert!(self.nr_cops <= MAX_COPS);
         let unpacked = self.eager_unpack(positions);
@@ -446,8 +446,8 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
                     let unpacked_curr = &mut unpacked_curr[..cop_moves.nr_cops];
                     let mut moved_cop_pos = usize::MAX;
                     for rotated_neigh_pos in cop_moves.unpack(rotated_neigh_cop_positions) {
-                        let unrotated = neigh_rotate.backward()[rotated_neigh_pos];
-                        let rerotated = neigh_rotate.forward()[unrotated];
+                        let unrotated = neigh_rotate.apply_backward(rotated_neigh_pos);
+                        let rerotated = neigh_rotate.apply_forward(unrotated);
                         debug_assert_eq!(rerotated, rotated_neigh_pos);
                         //if the neighbor configuration's position is found in curr configuration,
                         //remove entry from curr configuration.
@@ -468,7 +468,7 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
                     )
                 });
 
-                for (&v, marked_safe_for_neigh) in izip!(neigh_rotate.backward(), f.robber_safe_when(rotated_neigh_cop_positions)) {
+                for (v, marked_safe_for_neigh) in izip!(neigh_rotate.backward(), f.robber_safe_when(rotated_neigh_cop_positions)) {
                     f_neighbor_changed |= marked_safe_for_neigh && !safe_should_cops_move_to_curr[v];
                     f_temp[v] = marked_safe_for_neigh && safe_should_cops_move_to_curr[v];
                 }
@@ -477,7 +477,7 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
                 if f_neighbor_changed {
                     //line 10
                     let range = f.robber_indices_at(rotated_neigh_cop_positions);
-                    for (&v, &val) in izip!(neigh_rotate.forward(), &f_temp) {
+                    for (v, &val) in izip!(neigh_rotate.forward(), &f_temp) {
                         f.mark_robber_at(range.at(v), val);
                     }
                     //line 11

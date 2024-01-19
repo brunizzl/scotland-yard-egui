@@ -8,33 +8,101 @@ use self::bool_csr::BoolCSR;
 
 use super::*;
 
+/// automorphism of vertex set of a graph
+/// vertices are named [`0..self.nr_vertices()`]
+pub trait Automorphism {
+    type Iter<'a>: ExactSizeIterator<Item = usize> + 'a + Clone where Self: 'a;
+
+    fn forward<'a>(&'a self) -> Self::Iter<'a>;
+    fn backward<'a>(&'a self) -> Self::Iter<'a>;
+
+    fn nr_vertices(&self) -> usize;
+
+    fn apply_forward(&self, v: usize) -> usize {
+        debug_assert!(v < self.nr_vertices());
+        self.forward().nth(v).unwrap()
+    }
+
+    fn apply_backward(&self, v: usize) -> usize {
+        debug_assert!(v < self.nr_vertices());
+        self.backward().nth(v).unwrap()
+    }
+}
+
+pub struct Identity {
+    nr_vertices: usize,
+}
+
+impl Identity {
+    pub fn new(nr_vertices: usize) -> Self {
+        Identity { nr_vertices }
+    }
+}
+
+impl Automorphism for Identity {
+    type Iter<'a> = std::ops::Range<usize>;
+
+    fn forward<'a>(&'a self) -> Self::Iter<'a> {
+        0..self.nr_vertices()
+    }
+
+    fn backward<'a>(&'a self) -> Self::Iter<'a> {
+        0..self.nr_vertices()
+    }
+
+    fn nr_vertices(&self) -> usize {
+        self.nr_vertices
+    }
+}
+
+pub trait SymmetryClass {
+    type Auto: Automorphism;
+    type AutoIter<'a>: IntoIterator<Item = &'a Self::Auto> where Self: 'a;
+
+    /// applies an authomorphism to vertices in place, returns all authomorphisms which 
+    /// map original vertices to result.
+    /// order of vertices may be altered.
+    /// this function must guarantee to find a unique representative of vertices and 
+    /// ALL autos bringing them there.
+    fn to_representative<'a>(&'a self, vertices: & mut[usize]) -> Self::AutoIter<'a>;
+}
+
 /// represents a graph automorphism:
 /// 
 /// -> iff vertices `u` and `v` share an edge, then vertices `self.forward[u]` and `self.forward[v]` share an edge.
 /// 
 /// -> for any vertex `v` holds that `v == self.forward[self.backward[v]]`
 #[derive(Clone)]
-pub struct SymmetryTransform {
+pub struct ExplicitAutomorphism {
     /// forward[v] is vertex where v is mapped to
     forward: Vec<usize>,
     /// backward[v] is vertex which maps to v
     backward: Vec<usize>,
 }
 
-impl SymmetryTransform {
+impl Automorphism for ExplicitAutomorphism {
+    type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, usize>>;
+
+    fn forward<'a>(&'a self) -> Self::Iter<'a> {
+        self.forward.iter().copied()
+    }
+
+    fn backward<'a>(&'a self) -> Self::Iter<'a> {
+        self.backward.iter().copied()
+    }
+
+    fn nr_vertices(&self) -> usize {
+        debug_assert_eq!(self.forward.len(), self.backward.len());
+        self.forward.len()
+    }
+}
+
+impl ExplicitAutomorphism {
     pub fn identity(n: usize) -> Self {
         Self { 
             forward: (0..n).collect_vec(), 
             backward: (0..n).collect_vec(),
         }
-    }
-
-    pub fn forward(&self) -> &[usize] {
-        &self.forward
-    }
-
-    pub fn backward(&self) -> &[usize] {
-        &self.backward
     }
 
     pub fn new(edges: &EdgeList, positions: &[Pos3], matrix: Matrix3x3) -> Self {
@@ -110,7 +178,7 @@ pub struct EquivalenceClasses {
     class_representative: Vec<usize>,
 
     //one entry per element in symmetry group, starting with the identity
-    symmetry_transforms: Vec<SymmetryTransform>,
+    symmetry_transforms: Vec<ExplicitAutomorphism>,
 
     /// one row per vertex, indexes in [`self.symmetry_maps`]. 
     /// all entries in row are indices of transforms mapping vertex to it's representative
@@ -302,6 +370,7 @@ impl EquivalenceClasses {
         }).collect_vec();
         //this is only guaranteed because we know the order in which a triangulated platonic solid
         //adds it's vertices during construction.
+        //it is however needed in Self::transform_all.
         debug_assert!(class_representative.iter().tuple_windows().all(|(a, b)| a <= b));
 
         let vertex_directions = Vec::from_iter(graph.positions().iter().map(|p| p.to_vec3().normalized()));
@@ -335,7 +404,7 @@ impl EquivalenceClasses {
             &vertex_representative
         );
         let symmetry_transforms = symmetry_transform_matrices.iter().map(|m| 
-            SymmetryTransform::new(graph.edges(), graph.positions(), *m)
+            ExplicitAutomorphism::new(graph.edges(), graph.positions(), *m)
         ).collect_vec();
 
         debug_assert!({
@@ -371,7 +440,7 @@ impl EquivalenceClasses {
         &self.vertex_representative
     }
 
-    pub fn all_transforms(&self) -> &[SymmetryTransform] {
+    pub fn all_transforms(&self) -> &[ExplicitAutomorphism] {
         &self.symmetry_transforms
     }
 
@@ -381,7 +450,7 @@ impl EquivalenceClasses {
     }
 
     /// returns all transforms mapping vertex v to it's class' representative
-    fn transforms_of<'a>(&'a self, v: usize) -> impl ExactSizeIterator<Item = &'a SymmetryTransform> + Clone {
+    fn transforms_of<'a>(&'a self, v: usize) -> impl ExactSizeIterator<Item = &'a ExplicitAutomorphism> + Clone {
         let transform_indices = self.to_representative.row(v);
         debug_assert_eq!(
             self.vertex_representative[v], 
@@ -392,7 +461,7 @@ impl EquivalenceClasses {
 
     /// chooses the rotation, such that in the rotated result the cop defining the rotation is moved
     /// to the smallest index.
-    pub fn transform_all(&self, cops: &mut [usize]) -> SmallVec<[&SymmetryTransform; 4]> {
+    fn transform_all(&self, cops: &mut [usize]) -> SmallVec<[&ExplicitAutomorphism; 4]> {
         if cops.len() == 0 {
             return smallvec::smallvec![&self.symmetry_transforms[0]];
         }
@@ -432,6 +501,8 @@ impl EquivalenceClasses {
                 *rotated = rotation.forward[c];
             }
             rotated.sort();
+            //this relies on the classes beeing sorted by what the smallest vertex appearing in one is.
+            debug_assert_eq!(self.class[rotated[0]], rotate_class);
 
             let new_val = config_hash_value(&rotated);
             if new_val == best_val {
@@ -463,7 +534,7 @@ impl EquivalenceClasses {
         }
         
         assert!(!best_is.is_empty());
-        let mut best_rotations = SmallVec::<[&SymmetryTransform; 4]>::new();
+        let mut best_rotations = SmallVec::<[&ExplicitAutomorphism; 4]>::new();
         let mut indexted_rotations = rotations.enumerate();
         for best_i in best_is {
             loop {
@@ -479,5 +550,14 @@ impl EquivalenceClasses {
         }
         cops.sort();
         best_rotations
+    }
+}
+
+impl SymmetryClass for EquivalenceClasses {
+    type Auto = ExplicitAutomorphism;
+    type AutoIter<'a> = SmallVec<[&'a ExplicitAutomorphism; 4]>;
+
+    fn to_representative<'a>(&'a self, vertices: & mut[usize]) -> Self::AutoIter<'a> {
+        self.transform_all(vertices)
     }
 }
