@@ -1,6 +1,7 @@
 
 
 use itertools::izip;
+use smallvec::SmallVec;
 
 use crate::geo::*;
 use self::bool_csr::BoolCSR;
@@ -391,9 +392,9 @@ impl EquivalenceClasses {
 
     /// chooses the rotation, such that in the rotated result the cop defining the rotation is moved
     /// to the smallest index.
-    pub fn transform_all(&self, cops: &mut [usize]) -> &SymmetryTransform {
+    pub fn transform_all(&self, cops: &mut [usize]) -> SmallVec<[&SymmetryTransform; 4]> {
         if cops.len() == 0 {
-            return &self.symmetry_transforms[0];
+            return smallvec::smallvec![&self.symmetry_transforms[0]];
         }
 
         cops.sort_by_key(|&c| self.class[c]);
@@ -406,7 +407,7 @@ impl EquivalenceClasses {
         if cops.len() == 1 {
             let rot = rotations.next().unwrap();
             cops[0] = rot.forward[cops[0]];
-            return rot;
+            return smallvec::smallvec![rot];
         }
 
         //each configuration gets a value. the only important thing is that
@@ -421,8 +422,8 @@ impl EquivalenceClasses {
                 acc *= self.nr_vertices();
             }
             acc
-        };        
-        let mut best_i = usize::MAX;
+        };
+        let mut best_is = SmallVec::<[usize; 4]>::new();
         let mut best_val = usize::MAX;
         for (i, rotation) in rotations.clone().enumerate() {
             let mut rotated = [0usize; bruteforce::MAX_COPS];
@@ -433,36 +434,50 @@ impl EquivalenceClasses {
             rotated.sort();
 
             let new_val = config_hash_value(&rotated);
-            debug_assert!(new_val != best_val || {
-                //two transformations yielding the same function value is only expected to
-                //happen, if both also yield the same configuration.
-                let prev_best_rot = rotations.clone().nth(best_i).unwrap();
-                let mut hit = [false; bruteforce::MAX_COPS];
-                for &c in cops.iter() {
-                    let prev_rotated = prev_best_rot.forward[c];
-                    if let Some(j) = rotated
-                        .iter()
-                        .enumerate()
-                        .position(|(j, &cc)| !hit[j] && cc == prev_rotated) 
-                    {
-                        hit[j] = true;
+            if new_val == best_val {
+                debug_assert!({
+                    //two transformations yielding the same function value is only expected to
+                    //happen, if both also yield the same configuration.
+                    let prev_best_rot = rotations.clone().nth(best_is[0]).unwrap();
+                    let mut hit = [false; bruteforce::MAX_COPS];
+                    for &c in cops.iter() {
+                        let prev_rotated = prev_best_rot.forward[c];
+                        if let Some(j) = rotated
+                            .iter()
+                            .enumerate()
+                            .position(|(j, &cc)| !hit[j] && cc == prev_rotated) 
+                        {
+                            hit[j] = true;
+                        }
+                        else { panic!() }
                     }
-                    else { panic!() }
-                }
-                hit[..rotated.len()].into_iter().all(|&x| x)
-            });
+                    hit[..rotated.len()].into_iter().all(|&x| x)
+                });
+                best_is.push(i);
+            }
             if new_val < best_val {
                 best_val = new_val;
-                best_i = i;
+                best_is.clear();
+                best_is.push(i);
             }
         }
         
-        assert!(best_i != usize::MAX);
-        let best_rot = rotations.nth(best_i).unwrap();
+        assert!(!best_is.is_empty());
+        let mut best_rotations = SmallVec::<[&SymmetryTransform; 4]>::new();
+        let mut indexted_rotations = rotations.enumerate();
+        for best_i in best_is {
+            loop {
+                let (i, rotation) = indexted_rotations.next().unwrap();
+                if i == best_i {
+                    best_rotations.push(rotation);
+                    break;
+                }
+            }
+        }
         for c in cops.iter_mut() {
-            *c = best_rot.forward[*c];
+            *c = best_rotations[0].forward[*c];
         }
         cops.sort();
-        best_rot
+        best_rotations
     }
 }

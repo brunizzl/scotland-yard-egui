@@ -618,7 +618,7 @@ impl Info {
                         let (_, cop_positions) = configs.pack(active_cops.iter().map(|&c| c));
                         let safe_vertices = safe.robber_safe_when(cop_positions);
                         if let Some(equiv) = &con.equivalence_class {
-                            let transform = equiv.transform_all(&mut active_cops);
+                            let transform = equiv.transform_all(&mut active_cops)[0];
                             for (&v_rot, safe) in izip!(transform.backward(), safe_vertices) {
                                 if safe && con.visible[v_rot] {
                                     let rot_pos = con.positions[v_rot];
