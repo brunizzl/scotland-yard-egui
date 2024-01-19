@@ -55,16 +55,45 @@ impl Automorphism for Identity {
     }
 }
 
-pub trait SymmetryClass {
+pub trait SymmetryGroup {
     type Auto: Automorphism;
-    type AutoIter<'a>: IntoIterator<Item = &'a Self::Auto> where Self: 'a;
+    type AutoIter<'a>: IntoIterator<Item = &'a Self::Auto> + Clone where Self: 'a;
 
     /// applies an authomorphism to vertices in place, returns all authomorphisms which 
     /// map original vertices to result.
     /// order of vertices may be altered.
+    /// 
     /// this function must guarantee to find a unique representative of vertices and 
     /// ALL autos bringing them there.
     fn to_representative<'a>(&'a self, vertices: & mut[usize]) -> Self::AutoIter<'a>;
+
+    /// enumerates one vertex of each vertex class. this vertex will be result of [`Self::to_representative`]
+    /// if a vertex of it's class is passed as only vertex.
+    fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a>;
+}
+
+pub struct NoSymmetry {
+    identity: Identity,
+}
+
+impl NoSymmetry {
+    pub fn new(nr_vertices: usize) -> Self {
+        Self { identity: Identity::new(nr_vertices) }
+    }
+}
+
+impl SymmetryGroup for NoSymmetry {
+    type Auto = Identity;
+    type AutoIter<'a> = std::iter::Once<&'a Identity>;
+
+    fn to_representative<'a>(&'a self, vertices: & mut[usize]) -> Self::AutoIter<'a> {
+        vertices.sort();
+        std::iter::once(&self.identity)
+    }
+
+    fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a> {
+        self.identity.forward()
+    }
 }
 
 /// represents a graph automorphism:
@@ -164,10 +193,9 @@ impl ExplicitAutomorphism {
     }
 }
 
-
-/// in symmetric graphs, each vertex can be put into an equivalence class. 
+/// stores every automorphism explicitly
 #[derive(Clone)]
-pub struct EquivalenceClasses {
+pub struct ExplicitClasses {
     /// one entry per vertex, stores to which class vertex belongs
     class: Vec<u16>,
 
@@ -185,13 +213,28 @@ pub struct EquivalenceClasses {
     to_representative: BoolCSR,
 }
 
-impl EquivalenceClasses {
+impl ExplicitClasses {
 
     pub fn nr_vertices(&self) -> usize {
         let len = self.class.len();
         debug_assert_eq!(len, self.vertex_representative.len());
         debug_assert_eq!(len, self.to_representative.nr_rows());
         len
+    }
+
+    pub fn new_no_symmetry(nr_vertices: usize) -> Self {
+        let mut to_representative = BoolCSR::new(nr_vertices);
+        for _ in 0..nr_vertices {
+            to_representative.add_row();
+            to_representative.add_entry_in_last_row(0);
+        }
+        Self { 
+            class: (0..(nr_vertices as u16)).collect_vec(), 
+            vertex_representative: (0..nr_vertices).collect_vec(), 
+            class_representative: (0..nr_vertices).collect_vec(), 
+            symmetry_transforms: vec![ExplicitAutomorphism::identity(nr_vertices)], 
+            to_representative
+        }
     }
 
     //only works for those platonic solids with threeangles as base shape
@@ -432,10 +475,6 @@ impl EquivalenceClasses {
         &self.class
     }
 
-    pub fn class_representatives(&self) -> &[usize] {
-        &self.class_representative
-    }
-
     pub fn vertex_representatives(&self) -> &[usize] {
         &self.vertex_representative
     }
@@ -553,11 +592,15 @@ impl EquivalenceClasses {
     }
 }
 
-impl SymmetryClass for EquivalenceClasses {
+impl SymmetryGroup for ExplicitClasses {
     type Auto = ExplicitAutomorphism;
     type AutoIter<'a> = SmallVec<[&'a ExplicitAutomorphism; 4]>;
 
     fn to_representative<'a>(&'a self, vertices: & mut[usize]) -> Self::AutoIter<'a> {
         self.transform_all(vertices)
+    }
+
+    fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a> {
+        self.class_representative.iter().copied()
     }
 }

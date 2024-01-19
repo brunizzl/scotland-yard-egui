@@ -322,7 +322,7 @@ pub struct Embedding3D {
     /// neighbors of each vertex
     edges: EdgeList,
 
-    equivalence: Option<EquivalenceClasses>,
+    equivalence: Option<ExplicitClasses>,
 }
 
 impl Embedding3D {
@@ -343,7 +343,7 @@ impl Embedding3D {
         &self.vertices
     }
 
-    pub fn equivalence(&self) -> Option<&EquivalenceClasses> {
+    pub fn equivalence(&self) -> Option<&ExplicitClasses> {
         self.equivalence.as_ref()
     }
 
@@ -450,7 +450,7 @@ impl Embedding3D {
             equivalence: None,
         };
         if is_platonic {
-            res.equivalence = EquivalenceClasses::new_for_subdivided_platonic(&res, divisions);
+            res.equivalence = ExplicitClasses::new_for_subdivided_platonic(&res, divisions);
         }
         res
     }

@@ -1,7 +1,6 @@
 
 
 use std::collections::VecDeque;
-use std::thread;
 
 use itertools::{ izip, Itertools };
 
@@ -9,6 +8,8 @@ use egui::*;
 
 use crate::graph::*;
 use crate::app::character::CharacterState;
+
+use self::bruteforce_state::BruteforceWorker;
 
 use super::{*, color::*};
 
@@ -226,8 +227,7 @@ pub struct Info {
     options: Options,
     menu_change: bool,
 
-    bruteforce_worker: Option<thread::JoinHandle<BruteForceResult>>,
-    bruteforce_result: BruteForceResult,
+    worker: BruteforceWorker,
 }
 
 mod storage_keys {
@@ -272,91 +272,8 @@ impl Info {
             options,
             menu_change: false,
 
-            bruteforce_worker: None,
-            bruteforce_result: BruteForceResult::None,
+            worker: BruteforceWorker::new(),
         }
-    }
-
-    /// doesn't only draw menu but also manages computation
-    pub fn draw_bruteforce_menu(&mut self, ui: &mut Ui, map: &map::Map) {
-        ui.collapsing("Bruteforce", |ui|{
-            if self.bruteforce_worker.is_some() {
-                let float = ui.ctx().animate_value_with_time(
-                    Id::new(&self.bruteforce_worker as *const _), 4e20, 1e20);
-
-                ui.label(format!("Berechne Wert {}",
-                    match (float as isize) % 8 { 
-                        0 => "", 
-                        1 => " .", 
-                        2 => " . .", 
-                        3 => " . . .", 
-                        4 => " . . . .", 
-                        5 => "   . . .", 
-                        6 => "     . .", 
-                        _ => "       ."
-                    }));
-            }
-            else if ui.button("Starte Rechnung")
-                .on_hover_text("WARNUNG: weil WASM keine Threads mag, blockt \
-                die Websiteversion bei dieser Rechnung die GUI.\n\
-                Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
-                Bruteforceberechnungen nicht in RAM möglich macht.").clicked() 
-            {
-                let _ = ui.ctx().animate_value_with_time(
-                    Id::new(&self.bruteforce_worker as *const _), 0.0, 0.0);
-
-                let nr_characters = self.characters.active_cops().count();
-                let symmetry = if let Some(equiv) = map.data().equivalence() {
-                    Symmetry::Some(equiv.clone())
-                } else {
-                    Symmetry::None(ExplicitAutomorphism::identity(map.data().nr_vertices()))
-                };
-                let symmetric_map = SymmetricMap {
-                    shape: map.shape(),
-                    edges: map.edges().clone(),
-                    symmetry,
-                };
-                //use threads natively
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    self.bruteforce_worker = Some(thread::spawn(move || {
-                        compute_safe_robber_positions(nr_characters, symmetric_map)
-                    }));
-                }
-                //wasm doesn't like threads -> just block gui                 
-                #[cfg(target_arch = "wasm32")]
-                {
-                    self.bruteforce_result = compute_safe_robber_positions(nr_characters, symmetric_map);
-                }
-            }
-            self.bruteforce_worker = match std::mem::take(&mut self.bruteforce_worker) {
-                None => None,
-                Some(handle) => if handle.is_finished() {
-                    self.bruteforce_result = match handle.join() {
-                        Err(_) => BruteForceResult::Error("Programmabsturz".to_owned()),
-                        Ok(res) => res,
-                    };
-                    None
-                }
-                else {
-                    Some(handle)
-                }
-            };
-
-            let write_cops = |nr_cops: usize| if nr_cops == 1 { 
-                "einen Cop".to_owned() 
-            } else { 
-                nr_cops.to_string() + " Cops" 
-            };
-            match &self.bruteforce_result {
-                BruteForceResult::None => ui.label("Noch keine beendete Rechnung"),
-                BruteForceResult::Error(what) => ui.label("Fehler bei letzter Rechnung: \n".to_owned() + what),
-                BruteForceResult::CopsWin(nr_cops, nr_vertices, _) => ui.label(
-                    format!("Räuber verliert gegen {} auf {} Knoten", write_cops(*nr_cops), nr_vertices)),
-                BruteForceResult::RobberWins(nr_cops, _, safe, _) => ui.label(
-                    format!("Räuber gewinnt gegen {} auf {} Knoten", write_cops(*nr_cops), safe.nr_map_vertices()))
-            }
-        });
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
@@ -365,7 +282,8 @@ impl Info {
         
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
-        self.draw_bruteforce_menu(ui, map);
+        let nr_cops = self.characters.active_cops().count();
+        self.worker.draw_menu(nr_cops, ui, map);
 
         self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
     }
@@ -609,7 +527,7 @@ impl Info {
                 }
             }
             (RobberInfo::BruteForceRes, _) => 
-                if let BruteForceResult::RobberWins(nr_cops, shape, safe, configs) = &self.bruteforce_result {
+                if let BruteForceResult::RobberWins(nr_cops, shape, safe, configs) = &self.worker.result() {
                     let same_map = con.edges.nr_vertices() == safe.nr_map_vertices() && con.shape == *shape;
                     let same_nr_cops = self.characters.active_cops().count() == *nr_cops;
                     if same_map && same_nr_cops && *nr_cops > 0 {

@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 
 use itertools::{izip, Itertools};
 use bitvec::prelude as bv;
-use smallvec::SmallVec;
 
 use crate::app::map;
 use super::*;
@@ -28,20 +27,15 @@ pub struct CompactCopsIndex {
     rest_index: usize,
  }
 
-pub enum Symmetry {
-    Some(EquivalenceClasses), 
-    None(ExplicitAutomorphism), //identity transform
-}
-
-pub struct SymmetricMap {
+pub struct SymmetricMap<S: SymmetryGroup> {
     pub shape: map::Shape,
     pub edges: EdgeList,
-    pub symmetry: Symmetry,
+    pub symmetry: S,
 }
 
 /// keeps track of all multisets of size `self.nr_cops` and elements in  `self.nr_original_vertices` 
-pub struct CopConfigurations {
-    map: SymmetricMap,
+pub struct CopConfigurations<S: SymmetryGroup = ExplicitClasses> {
+    map: SymmetricMap<S>,
     nr_cops: usize, //stored in usize, but this can in praxis only be veeeery small
     configurations: std::collections::BTreeMap<usize, Vec<usize>>,
 }
@@ -57,26 +51,20 @@ fn pack_rest(nr_vertices: usize, other_cops: &[usize]) -> usize {
     positions
 }
 
-fn is_stored_config(sym: &SymmetricMap, fst_cop: usize, rest_cops: &[usize]) -> bool {
-    match &sym.symmetry {
-        Symmetry::None(_) => true,
-        Symmetry::Some(e) => {
-            debug_assert_eq!(fst_cop, e.vertex_representatives()[fst_cop]);
-            let mut config_copy = [usize::MAX; MAX_COPS];
-            let config_copy = &mut config_copy[..(1 + rest_cops.len())];
-            config_copy[0] = fst_cop;
-            for i in 0..rest_cops.len() {
-                config_copy[i + 1] = rest_cops[i];
-            }
-            e.to_representative(config_copy);
-            config_copy[0] == fst_cop && config_copy[1..] == rest_cops[..]
-        }
+fn is_stored_config(sym: &impl SymmetryGroup, fst_cop: usize, rest_cops: &[usize]) -> bool {
+    let mut config_copy = [usize::MAX; MAX_COPS];
+    let config_copy = &mut config_copy[..(1 + rest_cops.len())];
+    config_copy[0] = fst_cop;
+    for i in 0..rest_cops.len() {
+        config_copy[i + 1] = rest_cops[i];
     }
+    sym.to_representative(config_copy);
+    config_copy[0] == fst_cop && config_copy[1..] == rest_cops[..]
 }
 
-impl CopConfigurations {
+impl<S: SymmetryGroup> CopConfigurations<S> {
 
-    fn nr_og_vertices(&self) -> usize {
+    pub fn nr_og_vertices(&self) -> usize {
         self.map.edges.nr_vertices()
     } 
 
@@ -95,7 +83,7 @@ impl CopConfigurations {
     }
 
     /// returns [`Self`] if enough memory is available
-    pub fn new(map: SymmetricMap, nr_cops: usize) -> Option<Self> {
+    pub fn new(map: SymmetricMap<S>, nr_cops: usize) -> Option<Self> {
         let nr_vertices = map.edges.nr_vertices();
         let curr_rest_config_size = 0.max(nr_cops as isize - 1) as usize;
         let mut curr_rest_config = vec![0usize; curr_rest_config_size];
@@ -127,7 +115,7 @@ impl CopConfigurations {
                 loop {
                     i += 1;
                     debug_assert!(curr_rest_config.iter().tuple_windows().all(|(a, b)| a <= b));
-                    if is_stored_config(&map, fst_cop, &curr_rest_config) {
+                    if is_stored_config(&map.symmetry, fst_cop, &curr_rest_config) {
                         let packed = pack_rest(map.edges.nr_vertices(), &curr_rest_config);
                         if let Err(_) = new_configuration.try_reserve(1) {
                             return false;
@@ -147,18 +135,9 @@ impl CopConfigurations {
             debug_assert!(old.is_none());
             true
         };
-        if let Symmetry::Some(equiv) = &map.symmetry {
-            for &fst_cop in equiv.class_representatives() {
-                if !add_configs_for_first(fst_cop) {
-                    return None;
-                }
-            }
-        }
-        else {
-            for fst_cop in 0..map.edges.nr_vertices() {
-                if !add_configs_for_first(fst_cop) {
-                    return None;
-                }
+        for fst_cop in map.symmetry.class_representatives() {
+            if !add_configs_for_first(fst_cop) {
+                return None;
             }
         }
 
@@ -193,9 +172,7 @@ impl CopConfigurations {
 
     /// returns the index where the (rotated / mirrored) configuration represented by cops is stored as `_.1`
     /// and returns the transformation that rotated and / or mirrored the input in order to find it in [`self.configurations`]
-    pub fn pack<'a>(&'a self, cops: impl Iterator<Item = usize>) -> 
-        (SmallVec<[&'a ExplicitAutomorphism; 4]>, CompactCopsIndex) 
-    {
+    pub fn pack<'a>(&'a self, cops: impl Iterator<Item = usize>) -> (S::AutoIter<'a>, CompactCopsIndex) {
         assert!(self.nr_cops <= MAX_COPS);
         let mut unpacked = [0usize; MAX_COPS];
         for (i, pos) in cops.enumerate() {
@@ -204,13 +181,7 @@ impl CopConfigurations {
             unpacked[i] = pos;
         }
         let unpacked = &mut unpacked[..self.nr_cops];
-        let rotation = match &self.map.symmetry {
-            Symmetry::Some(e) => e.to_representative(unpacked),
-            Symmetry::None(id) => {
-                unpacked.sort();
-                smallvec::smallvec![id]
-            },
-        };
+        let rotation = self.map.symmetry.to_representative(unpacked);
         debug_assert!(unpacked.iter().tuple_windows().all(|(a, b)| a <= b));
 
         let fst_cop = unpacked[0];
@@ -230,7 +201,7 @@ impl CopConfigurations {
     /// because these positions may be stored in a different rotation and / or flipped, that rotation + flip to get from
     /// the move as rotated in the input to the output is also returned (see [`Self::pack`])
     pub fn lazy_cop_moves_from<'a>(&'a self, positions: CompactCopsIndex) 
-    -> impl Iterator<Item = (SmallVec<[&'a ExplicitAutomorphism; 4]>, CompactCopsIndex)> + 'a + Clone 
+    -> impl Iterator<Item = (S::AutoIter<'a>, CompactCopsIndex)> + 'a + Clone 
     {
         assert!(self.nr_cops <= MAX_COPS);
         let unpacked = self.eager_unpack(positions);
@@ -245,6 +216,15 @@ impl CopConfigurations {
         });
         
         iter
+    }
+
+    pub fn replace_symmetry<S2: SymmetryGroup>(self, new_sym: S2) -> CopConfigurations<S2> {
+        let map = SymmetricMap {
+            edges: self.map.edges,
+            shape: self.map.shape,
+            symmetry: new_sym,
+        };
+        CopConfigurations { map, nr_cops: self.nr_cops, configurations: self.configurations }
     }
 
 }
@@ -279,7 +259,7 @@ impl RobberPosRange {
 
 impl SafeRobberPositions {
     /// returns [`Self`] if enough memory is available
-    fn new(cop_moves: &CopConfigurations) -> Option<Self> {
+    fn new<S: SymmetryGroup>(cop_moves: &CopConfigurations<S>) -> Option<Self> {
         let mut safe = std::collections::BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
             let nr_entries = indices.len().checked_mul(cop_moves.nr_og_vertices())?;
@@ -326,13 +306,28 @@ impl SafeRobberPositions {
     }
 }
 
-pub enum BruteForceResult {
+pub enum BruteForceResult<S: SymmetryGroup> {
     None,
     Error(String),
     /// stores for how many cops result was computed and for a graph over how many vertices of what shape
     CopsWin(usize, usize, map::Shape),
     /// stores for how many cops result was computed, + result
-    RobberWins(usize, map::Shape, SafeRobberPositions, CopConfigurations),
+    RobberWins(usize, map::Shape, SafeRobberPositions, CopConfigurations<S>),
+}
+
+impl BruteForceResult<NoSymmetry> {
+    pub fn to_explicit(self) -> BruteForceResult<ExplicitClasses> {
+        match self {            
+            BruteForceResult::None => BruteForceResult::None,
+            BruteForceResult::CopsWin(x, y, z) => BruteForceResult::CopsWin(x, y, z),
+            BruteForceResult::Error(e) => BruteForceResult::Error(e),
+            BruteForceResult::RobberWins(nr_cops, shape, safe, configs) => {
+                let new_id = ExplicitClasses::new_no_symmetry(configs.nr_og_vertices());
+                let new_configs = configs.replace_symmetry(new_id);
+                BruteForceResult::RobberWins(nr_cops, shape, safe, new_configs)
+            }
+        }
+    }
 }
 
 /// algorithm 2.2 of Fabian Hamann's masters thesis.
@@ -356,7 +351,7 @@ pub enum BruteForceResult {
 /// 
 /// the hole thing is somewhat more complicated by the fact, that neighboring cop states `c` and `c'` may not both be stored in the same
 /// rotation. therefore one needs to constantly rotate between the two.
-pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> BruteForceResult {
+pub fn compute_safe_robber_positions<'a, S: SymmetryGroup>(nr_cops: usize, map: SymmetricMap<S>) -> BruteForceResult<S> {
     if nr_cops == 0 {
         return BruteForceResult::Error("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
     }
@@ -431,9 +426,9 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
                 .lazy_cop_moves_from(rotated_neigh_cop_positions)
                 .any(|(_, pos)| pos == curr_cop_positions)
             );
-            debug_assert!(!neigh_rotations.is_empty());
+            debug_assert!(!neigh_rotations.clone().into_iter().count() > 0);
 
-            for neigh_rotate in neigh_rotations {                    
+            for neigh_rotate in neigh_rotations {               
                 //line 8
                 let mut f_neighbor_changed = false;
                 //guarantee that rotations do the right thing
@@ -499,8 +494,6 @@ pub fn compute_safe_robber_positions<'a>(nr_cops: usize, map: SymmetricMap) -> B
 
     BruteForceResult::RobberWins(nr_cops, cop_moves.map.shape, f, cop_moves)
 }
-
-
 
 
 

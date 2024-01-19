@@ -1,7 +1,7 @@
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
-use crate::graph::{EdgeList, EquivalenceClasses};
+use crate::graph::{EdgeList, ExplicitClasses};
 use crate::geo::Pos3;
 
 mod cam;
@@ -9,6 +9,8 @@ pub mod character;
 mod info;
 pub mod map;
 mod color;
+
+mod bruteforce_state;
 
 pub struct DrawContext<'a> {
     pub shape: map::Shape,
@@ -22,7 +24,7 @@ pub struct DrawContext<'a> {
     pub resolution: isize,
     pub painter: Painter,
     pub response: Response,
-    pub equivalence_class: Option<&'a EquivalenceClasses>,
+    pub equivalence_class: Option<&'a ExplicitClasses>,
 }
 
 impl<'a> DrawContext<'a> {
