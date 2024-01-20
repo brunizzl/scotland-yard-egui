@@ -1,22 +1,27 @@
 
-use std::thread;
+use std::{thread, path::{Path, PathBuf}, fs};
 
 use itertools::izip;
+use rmp_serde::Serializer;
+use serde::Serialize;
 
 use crate::graph::*;
 use super::*;
 
 pub struct BruteforceWorker {
     worker: Option<thread::JoinHandle<BruteForceResult<ExplicitClasses>>>,
-    result: BruteForceResult<ExplicitClasses>,    
+    result: BruteForceResult<ExplicitClasses>,
 }
 
 impl BruteforceWorker {
     pub fn new() -> Self {
-        Self { worker: None, result: BruteForceResult::None }
+        Self { 
+            worker: None, 
+            result: BruteForceResult::None, 
+        }
     }
 
-    pub fn in_computation(&self) -> bool {
+    fn in_computation(&self) -> bool {
         self.worker.is_some()
     }
 
@@ -108,23 +113,77 @@ impl BruteforceWorker {
         }
     }
 
-    pub fn draw_menu(&mut self, nr_characters: usize, ui: &mut Ui, map: &map::Map) {
-        ui.collapsing("Bruteforce", |ui|{
-            if self.worker.is_some() {
-                let float = ui.ctx().animate_value_with_time(
-                    Id::new(&self as *const _), 4e20, 1e20);
+    fn save_result_as(&self, path: &Path) {
+        let mut buf = Vec::new();
+        self.result.serialize(&mut Serializer::new(&mut buf))
+            .ok()
+            .and_then(|_| fs::write(path, buf).ok());
+    }
 
-                ui.label(format!("Berechne Wert {}",
-                    match (float as isize) % 8 { 
-                        0 => "", 
-                        1 => " .", 
-                        2 => " . .", 
-                        3 => " . . .", 
-                        4 => " . . . .", 
-                        5 => "   . . .", 
-                        6 => "     . .", 
-                        _ => "       ."
-                    }));
+    fn load_result_from(&mut self, path: &Path) {
+        let Ok(buf) = fs::read(path) else { return; };
+        let Ok(res) = rmp_serde::from_slice(&buf) else { return; };
+        self.result = res;
+    }
+
+    fn draw_result(&self, ui: &mut Ui) {
+        let write_cops = |nr_cops: usize| if nr_cops == 1 { 
+            "einen Cop".to_owned() 
+        } else { 
+            nr_cops.to_string() + " Cops" 
+        };
+        match &self.result {
+            BruteForceResult::None => ui.label("Noch keine beendete Rechnung"),
+            BruteForceResult::Error(what) => ui.label("Fehler bei letzter Rechnung: \n".to_owned() + what),
+            BruteForceResult::CopsWin(nr_cops, nr_vertices, _) => ui.label(
+                format!(
+                    "Räuber verliert gegen {} auf {} Knoten", 
+                    write_cops(*nr_cops), 
+                    nr_vertices
+                )
+            ),
+            BruteForceResult::RobberWins(data) => ui.label(
+                format!(
+                    "Räuber gewinnt gegen {} auf {} Knoten\n{}", 
+                    write_cops(data.nr_cops), 
+                    data.nr_map_vertices(),
+                    match &data.validation {
+                        WinValidation::NoSymmetry => "(Algo ohne Symmetrie)".to_string(),
+                        WinValidation::SymmetryOnly => "(Algo mit Symmetrie)".to_string(),
+                        WinValidation::Both => "(Algos mit und ohne Symmetrie)".to_string(),
+                        WinValidation::Error(what) => format!("Fehler: {}", what),
+                    }
+                )
+            )
+        };
+    }
+
+    fn file_name_of(nr_cops: usize, nr_vertices: usize, shape: map::Shape) -> PathBuf {
+        PathBuf::from(format!(
+            "bruteforce/{}-{}-{}.msgpack",
+            nr_cops,
+            shape.to_str(),
+            nr_vertices
+        ))
+    }
+
+    pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map) {
+        ui.collapsing("Bruteforce", |ui|{
+            if self.in_computation() {
+                ui.horizontal(|ui| {
+                    ui.add(egui::widgets::Spinner::new());
+                    ui.label(" rechne");
+                });
+                if let Some(handle) = std::mem::take(&mut self.worker) {
+                    if handle.is_finished() {
+                        self.result = match handle.join() {
+                            Err(_) => BruteForceResult::Error("Programmabsturz".to_owned()),
+                            Ok(res) => res,
+                        };
+                    } else {
+                        self.worker = Some(handle);
+                    }
+                }
             }
             else if ui.button("Starte Rechnung")
                 .on_hover_text("WARNUNG: weil WASM keine Threads mag, blockt \
@@ -132,54 +191,29 @@ impl BruteforceWorker {
                 Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
                 Bruteforceberechnungen nicht in RAM möglich macht.").clicked() 
             {
-                let _ = ui.ctx().animate_value_with_time(
-                    Id::new(&self as *const _), 0.0, 0.0);
-
-                self.start_computation(nr_characters, map);
+                self.start_computation(nr_cops, map);
             }
-            self.worker = match std::mem::take(&mut self.worker) {
-                None => None,
-                Some(handle) => if handle.is_finished() {
-                    self.result = match handle.join() {
-                        Err(_) => BruteForceResult::Error("Programmabsturz".to_owned()),
-                        Ok(res) => res,
+
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if !matches!(self.result, BruteForceResult::None | BruteForceResult::Error(_)) 
+                && ui.button("speichere Daten").clicked() {
+                    let (nr_cops, nr_vertices, shape) = match &self.result {
+                        BruteForceResult::CopsWin(nr_cops, nr_vertices, shape) => (*nr_cops, *nr_vertices, *shape),
+                        BruteForceResult::RobberWins(data) => (data.nr_cops, data.nr_map_vertices(), data.shape()),
+                        _ => panic!(),
                     };
-                    None
+                    let path = Self::file_name_of(nr_cops, nr_vertices, shape);
+                    self.save_result_as(&path);
                 }
-                else {
-                    Some(handle)
+                if !self.in_computation() 
+                && ui.button("lade Daten").clicked() {
+                    let path = Self::file_name_of(nr_cops, map.data().nr_vertices(), map.shape());
+                    self.load_result_from(&path);
                 }
-            };
-
-            let write_cops = |nr_cops: usize| if nr_cops == 1 { 
-                "einen Cop".to_owned() 
-            } else { 
-                nr_cops.to_string() + " Cops" 
-            };
-            match &self.result {
-                BruteForceResult::None => ui.label("Noch keine beendete Rechnung"),
-                BruteForceResult::Error(what) => ui.label("Fehler bei letzter Rechnung: \n".to_owned() + what),
-                BruteForceResult::CopsWin(nr_cops, nr_vertices, _) => ui.label(
-                    format!(
-                        "Räuber verliert gegen {} auf {} Knoten", 
-                        write_cops(*nr_cops), 
-                        nr_vertices
-                    )
-                ),
-                BruteForceResult::RobberWins(data) => ui.label(
-                    format!(
-                        "Räuber gewinnt gegen {} auf {} Knoten\n{}", 
-                        write_cops(data.nr_cops), 
-                        data.nr_map_vertices(),
-                        match &data.validation {
-                            WinValidation::NoSymmetry => "(Algo ohne Symmetrie)".to_string(),
-                            WinValidation::SymmetryOnly => "(Algo mit Symmetrie)".to_string(),
-                            WinValidation::Both => "(Algos mit und ohne Symmetrie)".to_string(),
-                            WinValidation::Error(what) => format!("Fehler: {}", what),
-                        }
-                    )
-                )
             }
+
+            self.draw_result(ui);
         });
     }
 }

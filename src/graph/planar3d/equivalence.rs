@@ -2,6 +2,7 @@
 
 use itertools::izip;
 use smallvec::SmallVec;
+use serde::{Deserialize, Serialize};
 
 use crate::geo::*;
 use self::bool_csr::BoolCSR;
@@ -29,6 +30,7 @@ pub trait Automorphism {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Identity {
     nr_vertices: usize,
 }
@@ -74,6 +76,7 @@ pub trait SymmetryGroup {
     const HAS_SYMMETRY: bool = true;
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct NoSymmetry {
     identity: Identity,
 }
@@ -106,6 +109,7 @@ impl SymmetryGroup for NoSymmetry {
 /// 
 /// -> for any vertex `v` holds that `v == self.forward[self.backward[v]]`
 #[derive(Clone)]
+#[derive(Serialize, Deserialize)]
 pub struct ExplicitAutomorphism {
     /// forward[v] is vertex where v is mapped to
     forward: Vec<usize>,
@@ -199,6 +203,7 @@ impl ExplicitAutomorphism {
 
 /// stores every automorphism explicitly
 #[derive(Clone)]
+#[derive(Serialize, Deserialize)]
 pub struct ExplicitClasses {
     /// one entry per vertex, stores to which class vertex belongs
     class: Vec<u16>,

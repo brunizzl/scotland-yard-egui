@@ -1,10 +1,12 @@
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
 /// stores a matrix of bool entries in CSR format.
 /// because CSR stores only nonzero entries and there is only one nonzero entry in bool,
 /// no actual storage of the elements is required, only where they are.
 #[derive(Clone)]
+#[derive(Serialize, Deserialize)]
 pub struct BoolCSR {
     nr_cols: usize,
     row_offsets: Vec<usize>,

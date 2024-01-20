@@ -22,6 +22,23 @@ pub enum Shape {
     Random2D, 
 }
 
+impl Shape {
+    pub fn to_str(self) -> &'static str {
+        match self {
+            Self::Cube => "Wuerfel",
+            Self::DividedIcosahedron => "Ikosaeder-unterteilt",
+            Self::Dodecahedron => "Dodekaeder",
+            Self::FabianHamann => "Fabian-Hamann",
+            Self::Football => "Fussball",
+            Self::Octahedron => "Oktaeder",
+            Self::Random2D => "Zufaellig",
+            Self::RegularPolygon2D => "2d-Polygon",
+            Self::Tetrahedron => "Tetraeder",
+            Self::Icosahedron => "Ikosaeder",
+        }
+    }
+}
+
 pub struct Map {
     data: Embedding3D,
     visible: Vec<bool>, //one entry per vertex, stores if that vertex can currently be seen on screen

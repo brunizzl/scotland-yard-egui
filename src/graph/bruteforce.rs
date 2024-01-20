@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 
 use itertools::{izip, Itertools};
 use bitvec::prelude as bv;
+use serde::{Deserialize, Serialize};
 
 use crate::app::map;
 use super::*;
@@ -27,6 +28,7 @@ pub struct CompactCopsIndex {
     rest_index: usize,
  }
 
+ #[derive(Serialize, Deserialize)]
 pub struct SymmetricMap<S: SymmetryGroup> {
     pub shape: map::Shape,
     pub edges: EdgeList,
@@ -34,7 +36,8 @@ pub struct SymmetricMap<S: SymmetryGroup> {
 }
 
 /// keeps track of all multisets of size `self.nr_cops` and elements in  `self.nr_original_vertices` 
-pub struct CopConfigurations<S: SymmetryGroup = ExplicitClasses> {
+#[derive(Serialize, Deserialize)]
+pub struct CopConfigurations<S: SymmetryGroup + Serialize = ExplicitClasses> {
     map: SymmetricMap<S>,
     nr_cops: usize, //stored in usize, but this can in praxis only be veeeery small
     configurations: std::collections::BTreeMap<usize, Vec<usize>>,
@@ -62,7 +65,7 @@ fn is_stored_config(sym: &impl SymmetryGroup, fst_cop: usize, rest_cops: &[usize
     config_copy[0] == fst_cop && config_copy[1..] == rest_cops[..]
 }
 
-impl<S: SymmetryGroup> CopConfigurations<S> {
+impl<S: SymmetryGroup + Serialize> CopConfigurations<S> {
 
     pub fn nr_map_vertices(&self) -> usize {
         self.map.edges.nr_vertices()
@@ -218,7 +221,7 @@ impl<S: SymmetryGroup> CopConfigurations<S> {
         iter
     }
 
-    pub fn replace_symmetry<S2: SymmetryGroup>(self, new_sym: S2) -> CopConfigurations<S2> {
+    pub fn replace_symmetry<S2: SymmetryGroup + Serialize>(self, new_sym: S2) -> CopConfigurations<S2> {
         let map = SymmetricMap {
             edges: self.map.edges,
             shape: self.map.shape,
@@ -239,6 +242,7 @@ impl<S: SymmetryGroup> CopConfigurations<S> {
 
 /// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
 /// wether that vertex is safe for the robber to stand on or not.
+#[derive(Serialize, Deserialize)]
 pub struct SafeRobberPositions {
     safe: std::collections::BTreeMap<usize, bv::BitVec<u32>>,
     nr_map_vertices: usize,
@@ -267,7 +271,7 @@ impl RobberPosRange {
 
 impl SafeRobberPositions {
     /// returns [`Self`] if enough memory is available
-    fn new<S: SymmetryGroup>(cop_moves: &CopConfigurations<S>) -> Option<Self> {
+    fn new<S: SymmetryGroup + Serialize>(cop_moves: &CopConfigurations<S>) -> Option<Self> {
         let mut safe = std::collections::BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
             let nr_entries = indices.len().checked_mul(cop_moves.nr_map_vertices())?;
@@ -319,6 +323,7 @@ impl SafeRobberPositions {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum WinValidation {
     NoSymmetry,
     SymmetryOnly,
@@ -326,14 +331,15 @@ pub enum WinValidation {
     Error(String)
 }
 
-pub struct RobberWinData<S: SymmetryGroup> {
+#[derive(Serialize, Deserialize)]
+pub struct RobberWinData<S: SymmetryGroup + Serialize> {
     pub nr_cops: usize,
     pub safe: SafeRobberPositions,
     pub cop_moves: CopConfigurations<S>,
     pub validation: WinValidation,
 }
 
-impl<S: SymmetryGroup> RobberWinData<S> {
+impl<S: SymmetryGroup + Serialize> RobberWinData<S> {
     pub fn shape(&self) -> map::Shape {
         self.cop_moves.map.shape
     }
@@ -344,7 +350,8 @@ impl<S: SymmetryGroup> RobberWinData<S> {
     }
 }
 
-pub enum BruteForceResult<S: SymmetryGroup> {
+#[derive(Serialize, Deserialize)]
+pub enum BruteForceResult<S: SymmetryGroup + Serialize> {
     None,
     Error(String),
     /// stores for how many cops result was computed and for a graph over how many vertices of what shape
@@ -393,7 +400,9 @@ impl BruteForceResult<NoSymmetry> {
 /// 
 /// the hole thing is somewhat more complicated by the fact, that neighboring cop states `c` and `c'` may not both be stored in the same
 /// rotation. therefore one needs to constantly rotate between the two.
-pub fn compute_safe_robber_positions<'a, S: SymmetryGroup>(nr_cops: usize, map: SymmetricMap<S>) -> BruteForceResult<S> {
+pub fn compute_safe_robber_positions<'a, S>(nr_cops: usize, map: SymmetricMap<S>) -> BruteForceResult<S>
+where S: SymmetryGroup + Serialize
+{
     if nr_cops == 0 {
         return BruteForceResult::Error("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
     }

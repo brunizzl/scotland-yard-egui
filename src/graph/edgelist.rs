@@ -2,10 +2,13 @@
 use std::collections::VecDeque;
 use std::iter::{Map, ExactSizeIterator};
 use std::slice::{Chunks, Iter};
+use serde::{Deserialize, Serialize};
 
 use itertools::Itertools;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Serialize, Deserialize)]
+#[repr(transparent)]
 pub struct Index {
     val: u32,
 }
@@ -62,6 +65,7 @@ fn take_active(xs: &[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
 /// CAUTION: if not most vertices have close to the maximum degree (e.g. with one central vertex),
 /// this structure is way worse than using a vector for each vertices' neighbors.
 #[derive(Clone)]
+#[derive(Serialize, Deserialize)]
 pub struct EdgeList {
     next_shrink_check_len: usize,
     max_neighbors: usize,
