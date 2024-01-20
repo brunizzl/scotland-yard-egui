@@ -359,6 +359,12 @@ pub enum BruteForceResult<S: SymmetryGroup + Serialize> {
     RobberWins(RobberWinData<S>),
 }
 
+impl<S: SymmetryGroup + Serialize> Default for BruteForceResult<S> {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 impl BruteForceResult<NoSymmetry> {
     pub fn to_explicit(self) -> BruteForceResult<ExplicitClasses> {
         match self {            

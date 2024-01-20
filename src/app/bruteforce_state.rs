@@ -1,15 +1,18 @@
 
-use std::{thread, path::{Path, PathBuf}, fs};
+use std::{thread, path::{Path, PathBuf}, fs, io::Write};
 
 use itertools::izip;
-use rmp_serde::Serializer;
-use serde::Serialize;
 
 use crate::graph::*;
 use super::*;
 
-pub struct BruteforceWorker {
+const NATIVE: bool = cfg!(not(target_arch = "wasm32"));
+
+enum WorkTask { None, Compute, Load, Store }
+
+    pub struct BruteforceWorker {
     worker: Option<thread::JoinHandle<BruteForceResult<ExplicitClasses>>>,
+    curr_task: WorkTask,
     result: BruteForceResult<ExplicitClasses>,
 }
 
@@ -17,11 +20,12 @@ impl BruteforceWorker {
     pub fn new() -> Self {
         Self { 
             worker: None, 
+            curr_task: WorkTask::None,
             result: BruteForceResult::None, 
         }
     }
 
-    fn in_computation(&self) -> bool {
+    fn worker_employed(&self) -> bool {
         self.worker.is_some()
     }
 
@@ -29,8 +33,38 @@ impl BruteforceWorker {
         &self.result
     }
 
+    fn employ_worker<F>(&mut self, work: F, job_description: WorkTask)
+    where F: FnOnce() -> BruteForceResult<ExplicitClasses> + Send + 'static
+    {
+        assert!(!self.worker_employed());
+        self.curr_task = job_description;
+
+        if NATIVE {
+            //use threads natively
+            self.worker = Some(thread::spawn(work));
+        }
+        else {
+            //wasm doesn't like threads -> just block gui
+            self.result = work();
+        }
+    }
+
+    fn check_on_worker(&mut self) {
+        if let Some(handle) = std::mem::take(&mut self.worker) {
+            if handle.is_finished() {
+                self.result = match handle.join() {
+                    Err(_) => BruteForceResult::Error("Programmabsturz".to_owned()),
+                    Ok(res) => res,
+                };
+                self.curr_task = WorkTask::None;
+            } else {
+                self.worker = Some(handle);
+            }
+        }
+    }
+
     fn start_computation(&mut self, nr_cops: usize, map: &map::Map) {
-        if self.in_computation() {
+        if self.worker_employed() {
             return;
         }
         if let Some(equiv) = map.data().equivalence() {
@@ -81,16 +115,7 @@ impl BruteforceWorker {
                 }
                 with_sym
             };
-            //use threads natively
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                self.worker = Some(thread::spawn(compute));
-            }
-            //wasm doesn't like threads -> just block gui                 
-            #[cfg(target_arch = "wasm32")]
-            {
-                self.result = compute();
-            }
+            self.employ_worker(compute, WorkTask::Compute);
         }
         else {
             let sym = SymmetricMap {
@@ -99,31 +124,35 @@ impl BruteforceWorker {
                 symmetry: NoSymmetry::new(map.data().nr_vertices()),
             };
             let compute = move || compute_safe_robber_positions(nr_cops, sym).to_explicit();
-            //use threads natively
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                self.worker = Some(thread::spawn(compute));
-            }
-            //wasm doesn't like threads -> just block gui                 
-            #[cfg(target_arch = "wasm32")]
-            {
-                self.result = compute();
-            }
-
+            self.employ_worker(compute, WorkTask::Compute);
         }
     }
 
-    fn save_result_as(&self, path: &Path) {
-        let mut buf = Vec::new();
-        self.result.serialize(&mut Serializer::new(&mut buf))
-            .ok()
-            .and_then(|_| fs::write(path, buf).ok());
+    fn save_result_as(&mut self, path: &Path) {
+        if self.worker_employed() {
+            return;
+        }
+        let Ok(file) = fs::File::create(path) else { return; };
+        let res = std::mem::take(&mut self.result);
+        let work = move || {
+            let mut file_buffer = std::io::BufWriter::new(file);
+            rmp_serde::encode::write(&mut file_buffer, &res).ok();
+            file_buffer.flush().ok();
+            res
+        };
+        self.employ_worker(work, WorkTask::Store);
     }
 
     fn load_result_from(&mut self, path: &Path) {
-        let Ok(buf) = fs::read(path) else { return; };
-        let Ok(res) = rmp_serde::from_slice(&buf) else { return; };
-        self.result = res;
+        let Ok(file) = fs::File::open(path) else { return; };
+        let work = move || {
+            let buff_reader = std::io::BufReader::new(file);
+            let Ok(res) = rmp_serde::decode::from_read(buff_reader) else { 
+                return BruteForceResult::Error("Fehler beim decoden".to_string()); 
+            };
+            res
+        };
+        self.employ_worker(work, WorkTask::Load);
     }
 
     fn draw_result(&self, ui: &mut Ui) {
@@ -169,21 +198,17 @@ impl BruteforceWorker {
 
     pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map) {
         ui.collapsing("Bruteforce", |ui|{
-            if self.in_computation() {
+            if self.worker_employed() {
                 ui.horizontal(|ui| {
+                    ui.label(match &self.curr_task {
+                        WorkTask::Compute => "rechne ",
+                        WorkTask::Load => "lade ",
+                        WorkTask::Store => "speichere ",
+                        WorkTask::None => panic!(),
+                    });
                     ui.add(egui::widgets::Spinner::new());
-                    ui.label(" rechne");
                 });
-                if let Some(handle) = std::mem::take(&mut self.worker) {
-                    if handle.is_finished() {
-                        self.result = match handle.join() {
-                            Err(_) => BruteForceResult::Error("Programmabsturz".to_owned()),
-                            Ok(res) => res,
-                        };
-                    } else {
-                        self.worker = Some(handle);
-                    }
-                }
+                self.check_on_worker();
             }
             else if ui.button("Starte Rechnung")
                 .on_hover_text("WARNUNG: weil WASM keine Threads mag, blockt \
@@ -193,24 +218,21 @@ impl BruteforceWorker {
             {
                 self.start_computation(nr_cops, map);
             }
-
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                if !matches!(self.result, BruteForceResult::None | BruteForceResult::Error(_)) 
-                && ui.button("speichere Daten").clicked() {
-                    let (nr_cops, nr_vertices, shape) = match &self.result {
-                        BruteForceResult::CopsWin(nr_cops, nr_vertices, shape) => (*nr_cops, *nr_vertices, *shape),
-                        BruteForceResult::RobberWins(data) => (data.nr_cops, data.nr_map_vertices(), data.shape()),
-                        _ => panic!(),
-                    };
-                    let path = Self::file_name_of(nr_cops, nr_vertices, shape);
-                    self.save_result_as(&path);
-                }
-                if !self.in_computation() 
-                && ui.button("lade Daten").clicked() {
-                    let path = Self::file_name_of(nr_cops, map.data().nr_vertices(), map.shape());
-                    self.load_result_from(&path);
-                }
+            else if NATIVE 
+            && !matches!(self.result, BruteForceResult::None | BruteForceResult::Error(_)) 
+            && ui.button("speichere Daten").clicked() {
+                let (nr_cops, nr_vertices, shape) = match &self.result {
+                    BruteForceResult::CopsWin(nr_cops, nr_vertices, shape) => (*nr_cops, *nr_vertices, *shape),
+                    BruteForceResult::RobberWins(data) => (data.nr_cops, data.nr_map_vertices(), data.shape()),
+                    _ => panic!(),
+                };
+                let path = Self::file_name_of(nr_cops, nr_vertices, shape);
+                self.save_result_as(&path);
+            }
+            else if NATIVE 
+            && ui.button("lade Daten").clicked() {
+                let path = Self::file_name_of(nr_cops, map.data().nr_vertices(), map.shape());
+                self.load_result_from(&path);
             }
 
             self.draw_result(ui);
