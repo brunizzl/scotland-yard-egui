@@ -527,14 +527,17 @@ impl Info {
                 }
             }
             (RobberInfo::BruteForceRes, _) => 
-                if let BruteForceResult::RobberWins(nr_cops, shape, safe, configs) = &self.worker.result() {
-                    let same_map = con.edges.nr_vertices() == safe.nr_map_vertices() && con.shape == *shape;
-                    let same_nr_cops = self.characters.active_cops().count() == *nr_cops;
-                    if same_map && same_nr_cops && *nr_cops > 0 {
+                if let BruteForceResult::RobberWins(data) = &self.worker.result() {
+                    let same_map = con.shape == data.shape() &&
+                        con.edges.nr_vertices() == data.safe.nr_map_vertices();
+
+                    let same_nr_cops = self.characters.active_cops().count() == data.nr_cops;
+
+                    if same_map && same_nr_cops {
                         let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
 
-                        let (_, cop_positions) = configs.pack(active_cops.iter().map(|&c| c));
-                        let safe_vertices = safe.robber_safe_when(cop_positions);
+                        let (_, cop_positions) = data.cop_moves.pack(active_cops.iter().map(|&c| c));
+                        let safe_vertices = data.safe.robber_safe_when(cop_positions);
                         if let Some(equiv) = &con.equivalence_class {
                             let transform = equiv.to_representative(&mut active_cops)[0];
                             for (v_rot, safe) in izip!(transform.backward(), safe_vertices) {

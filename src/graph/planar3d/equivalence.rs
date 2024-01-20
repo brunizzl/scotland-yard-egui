@@ -70,6 +70,8 @@ pub trait SymmetryGroup {
     /// enumerates one vertex of each vertex class. this vertex will be result of [`Self::to_representative`]
     /// if a vertex of it's class is passed as only vertex.
     fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a>;
+
+    const HAS_SYMMETRY: bool = true;
 }
 
 pub struct NoSymmetry {
@@ -94,6 +96,8 @@ impl SymmetryGroup for NoSymmetry {
     fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a> {
         self.identity.forward()
     }
+
+    const HAS_SYMMETRY: bool = false;
 }
 
 /// represents a graph automorphism:

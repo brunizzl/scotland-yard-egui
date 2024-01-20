@@ -64,7 +64,7 @@ fn is_stored_config(sym: &impl SymmetryGroup, fst_cop: usize, rest_cops: &[usize
 
 impl<S: SymmetryGroup> CopConfigurations<S> {
 
-    pub fn nr_og_vertices(&self) -> usize {
+    pub fn nr_map_vertices(&self) -> usize {
         self.map.edges.nr_vertices()
     } 
 
@@ -152,7 +152,7 @@ impl<S: SymmetryGroup> CopConfigurations<S> {
     /// returns the configuration stored at index
     pub fn unpack(&self, index: CompactCopsIndex) -> impl Iterator<Item = usize> + Clone {
         let mut positions = self.rest_positions_at(index);
-        let nr_vertices = self.nr_og_vertices();
+        let nr_vertices = self.nr_map_vertices();
         
         std::iter::once(index.fst_index)
         .chain((1..self.nr_cops).map(move |_| {
@@ -176,7 +176,7 @@ impl<S: SymmetryGroup> CopConfigurations<S> {
         assert!(self.nr_cops <= MAX_COPS);
         let mut unpacked = [0usize; MAX_COPS];
         for (i, pos) in cops.enumerate() {
-            debug_assert!(pos < self.nr_og_vertices());
+            debug_assert!(pos < self.nr_map_vertices());
             debug_assert_ne!(i, self.nr_cops);
             unpacked[i] = pos;
         }
@@ -227,6 +227,14 @@ impl<S: SymmetryGroup> CopConfigurations<S> {
         CopConfigurations { map, nr_cops: self.nr_cops, configurations: self.configurations }
     }
 
+    pub fn all_positions_unpacked(&self) -> impl Iterator<Item = [usize; MAX_COPS]> + '_ {
+        self.configurations.iter().flat_map(move |(&k, configs_part)| { 
+            (0..configs_part.len()).map(move |i| {
+                self.eager_unpack(CompactCopsIndex { fst_index: k, rest_index: i })
+            })
+         })
+    }
+
 }
 
 /// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
@@ -237,19 +245,19 @@ pub struct SafeRobberPositions {
 }
 
 /// the indices of all game map vertices for one cop configuration in [`SafeRobberPositions`]
-struct RobberPosRange {
+pub struct RobberPosRange {
     fst_index: usize,
     range: std::ops::Range<usize>,
 }
 
 /// the index of one vertex in one cop configuration in [`SafeRobberPositions`] 
-struct RobberPosIndex {
+pub struct RobberPosIndex {
     fst_index: usize,
     rest_index: usize,
 }
 
 impl RobberPosRange {
-    fn at(&self, i: usize) -> RobberPosIndex {
+    pub fn at(&self, i: usize) -> RobberPosIndex {
         RobberPosIndex { 
             fst_index: self.fst_index,
             rest_index: self.range.start + i,
@@ -262,7 +270,7 @@ impl SafeRobberPositions {
     fn new<S: SymmetryGroup>(cop_moves: &CopConfigurations<S>) -> Option<Self> {
         let mut safe = std::collections::BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
-            let nr_entries = indices.len().checked_mul(cop_moves.nr_og_vertices())?;
+            let nr_entries = indices.len().checked_mul(cop_moves.nr_map_vertices())?;
             let vec_data_len = (nr_entries + 31) / 32;
             let mut bit_vec_data = Vec::<u32>::new();
             if bit_vec_data.try_reserve(vec_data_len).is_err() {
@@ -276,7 +284,7 @@ impl SafeRobberPositions {
             debug_assert!(old.is_none());
         }
 
-        let nr_map_vertices = cop_moves.nr_og_vertices();
+        let nr_map_vertices = cop_moves.nr_map_vertices();
 
         Some(Self { safe, nr_map_vertices })
     }
@@ -285,7 +293,7 @@ impl SafeRobberPositions {
         self.nr_map_vertices
     }
 
-    fn robber_indices_at(&self, index: CompactCopsIndex) -> RobberPosRange {
+    pub fn robber_indices_at(&self, index: CompactCopsIndex) -> RobberPosRange {
         let start = index.rest_index * self.nr_map_vertices();
         let stop = start + self.nr_map_vertices();
         RobberPosRange {
@@ -304,6 +312,36 @@ impl SafeRobberPositions {
         let safe_part = self.safe.get_mut(&index.fst_index).unwrap();
         safe_part.set(index.rest_index, value);
     }
+
+    pub fn robber_safe_at(&self, index: RobberPosIndex) -> bool {
+        let safe_part = self.safe.get(&index.fst_index).unwrap();
+        safe_part[index.rest_index]
+    }
+}
+
+pub enum WinValidation {
+    NoSymmetry,
+    SymmetryOnly,
+    Both,
+    Error(String)
+}
+
+pub struct RobberWinData<S: SymmetryGroup> {
+    pub nr_cops: usize,
+    pub safe: SafeRobberPositions,
+    pub cop_moves: CopConfigurations<S>,
+    pub validation: WinValidation,
+}
+
+impl<S: SymmetryGroup> RobberWinData<S> {
+    pub fn shape(&self) -> map::Shape {
+        self.cop_moves.map.shape
+    }
+
+    pub fn nr_map_vertices(&self) -> usize {
+        debug_assert_eq!(self.safe.nr_map_vertices(), self.cop_moves.nr_map_vertices());
+        self.safe.nr_map_vertices()
+    }
 }
 
 pub enum BruteForceResult<S: SymmetryGroup> {
@@ -311,8 +349,7 @@ pub enum BruteForceResult<S: SymmetryGroup> {
     Error(String),
     /// stores for how many cops result was computed and for a graph over how many vertices of what shape
     CopsWin(usize, usize, map::Shape),
-    /// stores for how many cops result was computed, + result
-    RobberWins(usize, map::Shape, SafeRobberPositions, CopConfigurations<S>),
+    RobberWins(RobberWinData<S>),
 }
 
 impl BruteForceResult<NoSymmetry> {
@@ -321,10 +358,15 @@ impl BruteForceResult<NoSymmetry> {
             BruteForceResult::None => BruteForceResult::None,
             BruteForceResult::CopsWin(x, y, z) => BruteForceResult::CopsWin(x, y, z),
             BruteForceResult::Error(e) => BruteForceResult::Error(e),
-            BruteForceResult::RobberWins(nr_cops, shape, safe, configs) => {
-                let new_id = ExplicitClasses::new_no_symmetry(configs.nr_og_vertices());
-                let new_configs = configs.replace_symmetry(new_id);
-                BruteForceResult::RobberWins(nr_cops, shape, safe, new_configs)
+            BruteForceResult::RobberWins(data) => {
+                let new_id = ExplicitClasses::new_no_symmetry(data.cop_moves.nr_map_vertices());
+                let new_configs = data.cop_moves.replace_symmetry(new_id);
+                BruteForceResult::RobberWins(RobberWinData { 
+                    nr_cops: data.nr_cops,
+                    safe: data.safe,
+                    cop_moves: new_configs,
+                    validation: WinValidation::NoSymmetry,
+                })
             }
         }
     }
@@ -492,7 +534,12 @@ pub fn compute_safe_robber_positions<'a, S: SymmetryGroup>(nr_cops: usize, map: 
 
     }
 
-    BruteForceResult::RobberWins(nr_cops, cop_moves.map.shape, f, cop_moves)
+    BruteForceResult::RobberWins(RobberWinData { 
+        nr_cops, 
+        safe: f, 
+        cop_moves, 
+        validation: if S::HAS_SYMMETRY { WinValidation::SymmetryOnly } else { WinValidation::NoSymmetry }, 
+    })
 }
 
 
