@@ -67,6 +67,10 @@ fn is_stored_config(sym: &impl SymmetryGroup, fst_cop: usize, rest_cops: &[usize
 
 impl<S: SymmetryGroup + Serialize> CopConfigurations<S> {
 
+    pub fn map(&self) -> &SymmetricMap<S> {
+        &self.map
+    }
+
     pub fn nr_map_vertices(&self) -> usize {
         self.map.edges.nr_vertices()
     } 
@@ -323,7 +327,7 @@ impl SafeRobberPositions {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub enum WinValidation {
     NoSymmetry,
     SymmetryOnly,

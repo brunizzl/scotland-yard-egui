@@ -8,11 +8,11 @@ use super::*;
 
 const NATIVE: bool = cfg!(not(target_arch = "wasm32"));
 
-enum WorkTask { None, Compute, Load, Store }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkTask { Compute, ComputeVerification, Verify, Load, Store }
 
-    pub struct BruteforceWorker {
-    worker: Option<thread::JoinHandle<BruteForceResult<ExplicitClasses>>>,
-    curr_task: WorkTask,
+pub struct BruteforceWorker {
+    worker: Option<(thread::JoinHandle<BruteForceResult<ExplicitClasses>>, WorkTask)>,
     result: BruteForceResult<ExplicitClasses>,
 }
 
@@ -20,13 +20,12 @@ impl BruteforceWorker {
     pub fn new() -> Self {
         Self { 
             worker: None, 
-            curr_task: WorkTask::None,
             result: BruteForceResult::None, 
         }
     }
 
-    fn worker_employed(&self) -> bool {
-        self.worker.is_some()
+    fn current_worker_task(&self) -> Option<WorkTask> {
+        self.worker.as_ref().map(|w| w.1)
     }
 
     pub fn result(&self) -> &BruteForceResult<ExplicitClasses> {
@@ -36,12 +35,11 @@ impl BruteforceWorker {
     fn employ_worker<F>(&mut self, work: F, job_description: WorkTask)
     where F: FnOnce() -> BruteForceResult<ExplicitClasses> + Send + 'static
     {
-        assert!(!self.worker_employed());
-        self.curr_task = job_description;
+        assert!(self.current_worker_task().is_none());
 
         if NATIVE {
             //use threads natively
-            self.worker = Some(thread::spawn(work));
+            self.worker = Some((thread::spawn(work), job_description));
         }
         else {
             //wasm doesn't like threads -> just block gui
@@ -50,21 +48,77 @@ impl BruteforceWorker {
     }
 
     fn check_on_worker(&mut self) {
-        if let Some(handle) = std::mem::take(&mut self.worker) {
+        if let Some((handle, curr_task)) = std::mem::take(&mut self.worker) {
             if handle.is_finished() {
-                self.result = match handle.join() {
+                let old_result = std::mem::replace(&mut self.result, match handle.join() {
                     Err(_) => BruteForceResult::Error("Programmabsturz".to_owned()),
                     Ok(res) => res,
-                };
-                self.curr_task = WorkTask::None;
+                });
+                if curr_task == WorkTask::Compute {
+                    if let BruteForceResult::RobberWins(data) = &self.result {
+                        let nr_cops = data.nr_cops;
+                        if NATIVE && data.validation == WinValidation::SymmetryOnly {                        
+                            let no_sym = SymmetricMap {
+                                shape: data.shape(),
+                                edges: data.cop_moves.map().edges.clone(),
+                                symmetry: NoSymmetry::new(data.nr_map_vertices()),
+                            };
+                            let work = move || compute_safe_robber_positions(nr_cops, no_sym).to_explicit();
+                            self.employ_worker(work, WorkTask::ComputeVerification);
+                        }
+                    }
+                }
+                if curr_task == WorkTask::ComputeVerification {
+                    //swap back to display old result, as new result contains same information (assuming correctness), but is way larger.
+                    let new_result = std::mem::replace(&mut self.result, old_result);
+                    if let BruteForceResult::RobberWins(data) = &self.result {
+                        let nr_cops = data.nr_cops;
+                        if data.validation != WinValidation::SymmetryOnly || nr_cops > 3 || data.nr_map_vertices() > 500 {
+                            return;
+                        }
+                        if let BruteForceResult::RobberWins(all_data) = new_result {
+                            let mut sym_res = std::mem::take(&mut self.result);
+                            let work = move || {
+                                let BruteForceResult::RobberWins(sym_data) = &mut sym_res else {
+                                    return sym_res;
+                                };
+                                for cop_config in all_data.cop_moves.all_positions_unpacked() {
+                                    let cop_config = &cop_config[..nr_cops];
+                                    let (_, all_index) = all_data.cop_moves.pack(cop_config.iter().copied());
+                                    let (autos, sym_index) = sym_data.cop_moves.pack(cop_config.iter().copied());
+                                    for auto in autos {
+                                        let sym_robber_range = sym_data.safe.robber_indices_at(sym_index);
+                                        let all_robber_range = all_data.safe.robber_indices_at(all_index);
+                                        for (v, v_rot) in izip!(0.., auto.forward()) {
+                                            if sym_data.safe.robber_safe_at(sym_robber_range.at(v_rot)) 
+                                            != all_data.safe.robber_safe_at(all_robber_range.at(v)) {
+                                                sym_data.validation = WinValidation::Error(format!(
+                                                    "Fehler: Konfig {:?} uneinig in Knoten {} (rotiert = {})",
+                                                    cop_config,
+                                                    v,
+                                                    v_rot
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                                if sym_data.validation == WinValidation::SymmetryOnly {
+                                    sym_data.validation = WinValidation::Both;
+                                }
+                                sym_res
+                            };
+                            self.employ_worker(work, WorkTask::Verify);
+                        }
+                    }
+                }
             } else {
-                self.worker = Some(handle);
+                self.worker = Some((handle, curr_task));
             }
         }
     }
 
     fn start_computation(&mut self, nr_cops: usize, map: &map::Map) {
-        if self.worker_employed() {
+        if self.current_worker_task().is_some() {
             return;
         }
         if let Some(equiv) = map.data().equivalence() {
@@ -73,48 +127,7 @@ impl BruteforceWorker {
                 edges: map.edges().clone(),
                 symmetry: equiv.clone(),
             };
-            let no_sym = SymmetricMap {
-                shape: map.shape(),
-                edges: map.edges().clone(),
-                symmetry: NoSymmetry::new(map.data().nr_vertices()),
-            };
-            let compute = move || {
-                let nr_vertices = sym.edges.nr_vertices();
-                let mut with_sym = compute_safe_robber_positions(nr_cops, sym);
-                if nr_cops > 3 || nr_vertices > 500 {
-                    return with_sym;
-                }
-                let without_sym = compute_safe_robber_positions(nr_cops, no_sym);
-                if let (
-                    BruteForceResult::RobberWins(sym_data), 
-                    BruteForceResult::RobberWins(all_data)
-                ) = (&mut with_sym, &without_sym) {
-                    for cop_config in all_data.cop_moves.all_positions_unpacked() {
-                        let cop_config = &cop_config[..nr_cops];
-                        let (_, all_index) = all_data.cop_moves.pack(cop_config.iter().copied());
-                        let (autos, sym_index) = sym_data.cop_moves.pack(cop_config.iter().copied());
-                        for auto in autos {
-                            let sym_robber_range = sym_data.safe.robber_indices_at(sym_index);
-                            let all_robber_range = all_data.safe.robber_indices_at(all_index);
-                            for (v, v_rot) in izip!(0.., auto.forward()) {
-                                if sym_data.safe.robber_safe_at(sym_robber_range.at(v_rot)) 
-                                != all_data.safe.robber_safe_at(all_robber_range.at(v)) {
-                                    sym_data.validation = WinValidation::Error(format!(
-                                        "Fehler: Konfig {:?} uneinig in Knoten {} (rotiert = {})",
-                                        cop_config,
-                                        v,
-                                        v_rot
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    if let WinValidation::SymmetryOnly = &sym_data.validation {
-                        sym_data.validation = WinValidation::Both;
-                    }
-                }
-                with_sym
-            };
+            let compute = move || compute_safe_robber_positions(nr_cops, sym);
             self.employ_worker(compute, WorkTask::Compute);
         }
         else {
@@ -129,7 +142,7 @@ impl BruteforceWorker {
     }
 
     fn save_result_as(&mut self, path: &Path) {
-        if self.worker_employed() {
+        if self.current_worker_task().is_some() {
             return;
         }
         let Ok(file) = fs::File::create(path) else { return; };
@@ -144,6 +157,9 @@ impl BruteforceWorker {
     }
 
     fn load_result_from(&mut self, path: &Path) {
+        if self.current_worker_task().is_some() {
+            return;
+        }
         let Ok(file) = fs::File::open(path) else { return; };
         let work = move || {
             let buff_reader = std::io::BufReader::new(file);
@@ -198,13 +214,14 @@ impl BruteforceWorker {
 
     pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map) {
         ui.collapsing("Bruteforce", |ui|{
-            if self.worker_employed() {
+            if let Some((_, curr_task)) = &self.worker {
                 ui.horizontal(|ui| {
-                    ui.label(match &self.curr_task {
+                    ui.label(match curr_task {
                         WorkTask::Compute => "rechne ",
                         WorkTask::Load => "lade ",
                         WorkTask::Store => "speichere ",
-                        WorkTask::None => panic!(),
+                        WorkTask::ComputeVerification => "berechne ohne Sym. ",
+                        WorkTask::Verify => "verifiziere ",
                     });
                     ui.add(egui::widgets::Spinner::new());
                 });
