@@ -83,7 +83,7 @@ fn draw_usage_info(ui: &mut Ui) {
     ui.collapsing("Bedienung", |ui| {
         ui.label("Spielfeld rotieren / verschieben: 
 ziehen mit rechter Maustaste
-oder vertikal strg, horizontal strg + shift
+oder skrollen, horizontal shift + skrollen
 
 zoom: 
 strg + scrollen

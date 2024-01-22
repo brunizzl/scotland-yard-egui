@@ -250,6 +250,10 @@ impl Info {
         if self.marked_manually.iter().any(|&x| x) {
             eframe::set_value(storage, MARKED_MANUALLY, &self.marked_manually);
         }
+        else {
+            let empty = Vec::<bool>::new();
+            eframe::set_value(storage, MARKED_MANUALLY, &empty);
+        }
         eframe::set_value(storage, OPTIONS, &self.options);
     }
 
@@ -437,12 +441,12 @@ impl Info {
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
                 self.characters.redo_move(con.edges, con.positions, &mut self.queue);
             }
-            if info.key_pressed(Key::M) {
+            if info.key_down(Key::M) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.add_marker_at(pointer_pos, con);
                 }
             }  
-            if info.key_pressed(Key::N) {
+            if info.key_down(Key::N) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.remove_marker_at(pointer_pos, con);
                 }
