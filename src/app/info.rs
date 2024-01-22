@@ -458,7 +458,7 @@ impl Info {
         if self.options.show_convex_hull {
             for (&in_hull, &pos, &vis) in izip!(self.cop_hull_data.hull(), con.positions, con.visible) {
                 if vis && in_hull.inside()  {
-                    let draw_pos = con.cam.transform(pos);
+                    let draw_pos = con.cam().transform(pos);
                     let marker_circle = Shape::circle_filled(draw_pos, con.scale * 9.0, LIGHT_BLUE);
                     con.painter.add(marker_circle);
                 }
@@ -481,7 +481,7 @@ impl Info {
         }
         for (&vis, &pos) in izip!(con.visible, con.positions) {
             if vis {
-                let draw_pos = con.cam.transform(pos);
+                let draw_pos = con.cam().transform(pos);
                 let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.0, Color32::GRAY);
                 con.painter.add(marker_circle);
             }
@@ -490,7 +490,7 @@ impl Info {
 
     fn draw_green_circles(&self, con: &DrawContext<'_>) {
         let draw_circle_at = |pos, color|{
-            let draw_pos = con.cam.transform(pos);
+            let draw_pos = con.cam().transform(pos);
             let marker_circle = Shape::circle_filled(draw_pos, con.scale * 6.0, color);
             con.painter.add(marker_circle);
         };
@@ -511,7 +511,7 @@ impl Info {
                 },
             (RobberInfo::SmallRobberDist, Some(r)) => {
                 let bnd = RobberInfo::scale_small_dist_with_resolution(
-                    self.options.small_robber_dist, con.resolution);
+                    self.options.small_robber_dist, con.resolution());
                 for (&dist, &pos, &vis) in izip!(&r.distances, con.positions, con.visible) {
                     if vis && dist <= bnd {
                         draw_circle_at(pos, self.options.automatic_marker_color);
@@ -532,7 +532,7 @@ impl Info {
             }
             (RobberInfo::BruteForceRes, _) => 
                 if let BruteForceResult::RobberWins(data) = &self.worker.result() {
-                    let same_map = con.shape == data.shape() &&
+                    let same_map = con.shape() == data.shape() &&
                         con.edges.nr_vertices() == data.safe.nr_map_vertices();
 
                     let same_nr_cops = self.characters.active_cops().count() == data.nr_cops;
@@ -542,7 +542,7 @@ impl Info {
 
                         let (_, cop_positions) = data.cop_moves.pack(active_cops.iter().map(|&c| c));
                         let safe_vertices = data.safe.robber_safe_when(cop_positions);
-                        if let Some(equiv) = &con.equivalence_class {
+                        if let Some(equiv) = con.equivalence() {
                             let transform = equiv.to_representative(&mut active_cops)[0];
                             for (v_rot, safe) in izip!(transform.backward(), safe_vertices) {
                                 if safe && con.visible[v_rot] {
@@ -560,7 +560,7 @@ impl Info {
                         }
                     }
                 },
-            (RobberInfo::VertexEquivalenceClasses, _) => if let Some(equiv) = con.equivalence_class {                
+            (RobberInfo::VertexEquivalenceClasses, _) => if let Some(equiv) = con.equivalence() {                
                 for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
                     if vis {
                         let colors = &super::color::MARKER_COLORS;
@@ -568,7 +568,7 @@ impl Info {
                     }
                 }
             },
-            (RobberInfo::RobberVertexClass, _) => if let Some(e) = con.equivalence_class {
+            (RobberInfo::RobberVertexClass, _) => if let Some(e) = con.equivalence() {
                 if let Some(r) = self.characters.robber() {
                     let v0 = r.nearest_node;
                     for transform in e.all_transforms() {
@@ -580,7 +580,7 @@ impl Info {
                     }
                 }
             }
-            (RobberInfo::CopsRotatedToEquivalence, _) => if let Some(equiv) = con.equivalence_class {
+            (RobberInfo::CopsRotatedToEquivalence, _) => if let Some(equiv) = con.equivalence() {
                 let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
                 equiv.to_representative(&mut active_cops);
                 for v in active_cops {
@@ -589,7 +589,7 @@ impl Info {
                         draw_circle_at(pos, self.options.automatic_marker_color);                            
                     }
                     else { //only draw half size
-                        let draw_pos = con.cam.transform(pos);
+                        let draw_pos = con.cam().transform(pos);
                         let marker_circle = Shape::circle_filled(draw_pos, con.scale * 3.0, 
                             self.options.automatic_marker_color);
                         con.painter.add(marker_circle);
@@ -628,20 +628,20 @@ impl Info {
                     DrawNumbers::RobberAdvantage => { (-1 -self.cop_advantage[v]).to_string() }
                     DrawNumbers::EscapeableNodes => { true_bits(self.escapable.escapable()[v]) }
                     DrawNumbers::VertexEquivalenceClass => 
-                        con.equivalence_class.map(|e| e.classes()[v].to_string()).unwrap_or(String::new()),
+                        con.equivalence().map(|e| e.classes()[v].to_string()).unwrap_or(String::new()),
                     //DrawNumbers::Debugging => self.escapable.owners()[i].to_string(),
                     //DrawNumbers::Debugging => { 
                     //    let d = self.escapable.boundary_segment_dist()[v];
                     //    if d == isize::MAX { String::new() } else { d.to_string() }
                     //}
-                    DrawNumbers::Debugging => if let Some(equiv) = con.equivalence_class { 
+                    DrawNumbers::Debugging => if let Some(equiv) = con.equivalence() { 
                         equiv.vertex_representatives()[v].to_string()
                     } else { String::new() },
                 };
                 let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
                 layout_job.halign = Align::Center;
                 let galley = ui.fonts(|f| f.layout_job(layout_job));
-                let screen_pos = con.cam.transform(pos);
+                let screen_pos = con.cam().transform(pos);
                 let text = Shape::Text(TextShape::new(screen_pos, galley));
                 con.painter.add(text);
             }
@@ -685,7 +685,7 @@ impl Info {
     fn draw_manual_markers(&self, con: &DrawContext<'_>) {
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
             if vis && marked {
-                let draw_pos = con.cam.transform(pos);
+                let draw_pos = con.cam().transform(pos);
                 let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, self.options.manual_marker_color);
                 con.painter.add(marker_circle);
             }

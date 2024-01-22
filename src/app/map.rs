@@ -61,6 +61,10 @@ mod storage_keys {
 
 impl Map {
 
+    pub fn resolution(&self) -> isize {
+        self.resolution
+    }
+
     pub fn shape(&self) -> Shape {
         self.shape
     }
@@ -310,18 +314,15 @@ impl Map {
         }
 
         DrawContext { 
-            shape: self.shape,
+            map: &self,
             extreme_vertices: &self.extreme_vertices,
             edges: self.edges(),
             visible: self.visible(), 
             positions: self.positions(), 
-            cam: self.camera(), 
             tolerance: self.tolerance(),
             scale, 
-            resolution: self.resolution, 
             painter,
             response,
-            equivalence_class: self.data.equivalence(),
         }
     }
 }

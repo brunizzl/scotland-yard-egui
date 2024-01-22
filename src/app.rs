@@ -4,6 +4,8 @@ use egui::{*, epaint::TextShape, text::LayoutJob};
 use crate::graph::{EdgeList, ExplicitClasses};
 use crate::geo::Pos3;
 
+use self::cam::Camera3D;
+
 mod cam;
 pub mod character;
 mod info;
@@ -13,28 +15,41 @@ mod color;
 mod bruteforce_state;
 
 pub struct DrawContext<'a> {
-    pub shape: map::Shape,
+    pub map: &'a map::Map,
     pub extreme_vertices: &'a [usize],
     pub edges: &'a EdgeList,
     pub visible: &'a [bool],
     pub positions: &'a [Pos3],
-    pub cam: &'a cam::Camera3D,
     pub tolerance: f32,
     pub scale: f32,
-    pub resolution: isize,
     pub painter: Painter,
     pub response: Response,
-    pub equivalence_class: Option<&'a ExplicitClasses>,
 }
 
 impl<'a> DrawContext<'a> {
+    pub fn cam(&self) -> &Camera3D {
+        &self.map.camera()
+    }
+
+    pub fn resolution(&self) -> isize {
+        self.map.resolution()
+    }
+
+    pub fn shape(&self) -> map::Shape {
+        self.map.shape()
+    }
+
+    pub fn equivalence(&self) -> Option<&ExplicitClasses> {
+        self.map.data().equivalence()
+    }
+
     pub fn vertex_draw_pos(&self, v: usize) -> Pos2 {
-        self.cam.transform(self.positions[v]) 
+        self.cam().transform(self.positions[v]) 
     }
 
     pub fn find_closest_vertex(&self, screen_pos: Pos2) -> (usize, f32) {
         debug_assert!(self.positions.len() > 0);
-        let find_screen_facing = |v: usize| -self.positions[v].to_vec3().normalized().dot(self.cam.screen_normal());
+        let find_screen_facing = |v: usize| -self.positions[v].to_vec3().normalized().dot(self.cam().screen_normal());
         let (screen_facing, _) = self.edges.find_local_minimum(find_screen_facing, 0);
         let screen_pos_diff = |v| {
             let dist_2d = (self.vertex_draw_pos(v) - screen_pos).length();
