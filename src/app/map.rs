@@ -23,7 +23,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub fn to_str(self) -> &'static str {
+    pub fn to_filename(self) -> &'static str {
         match self {
             Self::Cube => "Wuerfel",
             Self::DividedIcosahedron => "Ikosaeder-unterteilt",
@@ -35,6 +35,35 @@ impl Shape {
             Self::RegularPolygon2D => "2d-Polygon",
             Self::Tetrahedron => "Tetraeder",
             Self::Icosahedron => "Ikosaeder",
+        }
+    }
+
+    pub fn to_str(self, lang: Lang) -> &'static str {
+        match lang {
+            Lang::DE => match self {
+                Self::Cube => "Würfel",
+                Self::DividedIcosahedron => "aufgepusteter Ikosaeder",
+                Self::Dodecahedron => "Dodekaeder",
+                Self::FabianHamann => "Fabian Hamanns Graph",
+                Self::Football => "Fußball",
+                Self::Octahedron => "Oktaeder",
+                Self::Random2D => "2D Kreisscheibe zufällig trianguliert",
+                Self::RegularPolygon2D => "2D Polygon trianguliert",
+                Self::Tetrahedron => "Tetraeder",
+                Self::Icosahedron => "Ikosaeder",
+            }
+            Lang::EN => match self {
+                Self::Cube => "Cube",
+                Self::DividedIcosahedron => "Blown-up Icosaeder",
+                Self::Dodecahedron => "Dodecahedron",
+                Self::FabianHamann => "Fabian Hamann's Graph",
+                Self::Football => "Football",
+                Self::Octahedron => "Octahedron",
+                Self::Random2D => "Random 2D Disk Triangulation",
+                Self::RegularPolygon2D => "2D Polygon Triangulation",
+                Self::Tetrahedron => "Tetrahedron",
+                Self::Icosahedron => "Icosahedron",
+            }
         }
     }
 }
@@ -234,39 +263,52 @@ impl Map {
         info.characters.forget_move_history();
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) { 
+    pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info, lang: Lang) { 
         if ui.button("🏠 Position").clicked() {
             self.camera.reset();
         }
         ui.collapsing("Form", |ui| {
             let old_shape = self.shape;
             let mut change = false;
-            ui.radio_value(&mut self.shape, Shape::Tetrahedron, "Tetraeder");
-            ui.radio_value(&mut self.shape, Shape::Octahedron, "Oktaeder");
-            ui.radio_value(&mut self.shape, Shape::Icosahedron, "Ikosaeder");
-            ui.radio_value(&mut self.shape, Shape::DividedIcosahedron, "aufgepusteter Ikosaeder");
-            if self.shape == Shape::DividedIcosahedron {
-                change |= add_drag_value(ui, &mut self.ico_pressure, "Druck: ", 0, self.resolution);
-            }
-            ui.radio_value(&mut self.shape, Shape::Dodecahedron, "Dodekaeder");
-            ui.radio_value(&mut self.shape, Shape::Cube, "Würfel");
-            ui.radio_value(&mut self.shape, Shape::Football, "Fußball");
-            ui.radio_value(&mut self.shape, Shape::FabianHamann, "Fabian Hamanns Graph");
-            ui.radio_value(&mut self.shape, Shape::RegularPolygon2D, "2D Polygon trianguliert");
-            if self.shape == Shape::RegularPolygon2D {
-                change |= add_drag_value(ui, &mut self.nr_polygon_sides, "Seiten: ", 3, 10);
-            }
-            ui.radio_value(&mut self.shape, Shape::Random2D, "2D Kreisscheibe zufällig trianguliert");
-            if self.shape == Shape::Random2D {
-                change |= ui.button("neu berechnen").clicked();
+            let (pressure, sides, recompute, resolution, vertices) = match lang {
+                Lang::EN => ("Pressure", "Sides", "Recompute", "Resolution", "Vertices"),
+                Lang::DE => ("Druck", "Seiten", "neu berechen", "Auflösung", "Knoten"),
+            };
+            for shape in [
+                Shape::Tetrahedron, 
+                Shape::Octahedron, 
+                Shape::Icosahedron, 
+                Shape::DividedIcosahedron, 
+                Shape::Dodecahedron,
+                Shape::Cube,
+                Shape::Football,
+                Shape::FabianHamann, 
+                Shape::RegularPolygon2D,
+                Shape::Random2D,
+            ] {
+                ui.radio_value(&mut self.shape, shape, shape.to_str(lang));
+                if self.shape == shape {
+                    match shape {
+                        Shape::DividedIcosahedron => {
+                            change |= add_drag_value(ui, &mut self.ico_pressure, pressure, 0, self.resolution);
+                        }
+                        Shape::RegularPolygon2D => {
+                            change |= add_drag_value(ui, &mut self.nr_polygon_sides, sides, 3, 10);
+                        }
+                        Shape::Random2D => {
+                            change |= ui.button(recompute).clicked();
+                        }
+                        _ => {}
+                    }
+                }
             }
             change |= self.shape != old_shape;
-            change |= add_drag_value(ui, &mut self.resolution, "Auflösung: ", 0, 200);
+            change |= add_drag_value(ui, &mut self.resolution, resolution, 0, 200);
 
             if change {
                 self.recompute_and_adjust(info);
             }
-            ui.label(format!("    ➡ {} Knoten", self.data.nr_vertices()));
+            ui.label(format!("    ➡ {} {}", self.data.nr_vertices(), vertices));
         });
     }
 
@@ -289,6 +331,10 @@ impl Map {
 
     pub fn tolerance(&self) -> f32 {
         f32::min(0.25, 0.75 / self.resolution as f32)
+    }
+
+    fn identity(&self) -> &Self {
+        self
     }
 
     pub fn update_and_draw<'a>(&'a mut self, ui: &mut Ui) -> DrawContext<'a> {
@@ -314,7 +360,7 @@ impl Map {
         }
 
         DrawContext { 
-            map: &self,
+            map: self.identity(),
             extreme_vertices: &self.extreme_vertices,
             edges: self.edges(),
             visible: self.visible(), 

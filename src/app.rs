@@ -1,5 +1,6 @@
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
+use serde::{Deserialize, Serialize};
 
 use crate::graph::{EdgeList, ExplicitClasses};
 use crate::geo::Pos3;
@@ -76,9 +77,17 @@ fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isi
     }).inner
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lang { DE, EN }
+
 pub struct State {
     map: map::Map,
     info: info::Info,
+    language: Lang
+}
+
+mod storage_keys {
+    pub const LANGUAGE: &'static str = "app::Language";
 }
 
 impl State {
@@ -86,32 +95,54 @@ impl State {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut info = info::Info::new(cc);
         let map = map::Map::new(&mut info, cc);
+        let language = load_or(cc.storage, storage_keys::LANGUAGE, || Lang::EN);
         Self { 
             map,
             info,
+            language,
         }
     }
 
 }
 
-fn draw_usage_info(ui: &mut Ui) {
-    ui.collapsing("Bedienung", |ui| {
-        ui.label("Spielfeld rotieren / verschieben: 
+fn draw_usage_info(ui: &mut Ui, lang: Lang) {
+    let title = match lang { Lang::DE => "Bedienung", Lang::EN => "Usage" };
+    ui.collapsing(title, |ui| {
+        ui.label(
+            match lang {
+                Lang::DE => "Spielfeld rotieren / verschieben: 
 ziehen mit rechter Maustaste
 oder skrollen, horizontal shift + skrollen
 
 zoom: 
 strg + scrollen
 
-verschieben einer Figur:
-ziehen mit linker Maustaste
-
-manuell Marker an Mausposition:
-setzen: m-Taste
-entfernen: n-Taste
-
+Figuren:
+verschieben: ziehen mit linker Maustaste
 Zug rückgängig: strg + z
-Zug wiederholen: strg + y");
+Zug wiederholen: strg + y
+
+manuelle Marker:
+setzen an cursor: m-Taste
+entfernen an cursor: n-Taste",
+
+                Lang::EN => "rotate / translate map:
+drag with right mouse button
+or scrolling / shift + scrolling
+
+zoom:
+ctrl + scrolling
+
+characters:
+drag with left mouse button
+undo move: ctrl + z
+redo move: ctrl + y
+
+manual markers:
+add at cursor: m-key
+remove at cursor: n-key",
+            }
+        );
     });
 }
 
@@ -133,11 +164,15 @@ impl eframe::App for State {
         SidePanel::left("left_panel").show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
                 let compile_datetime = compile_time::datetime_str!();
-                ui.label(format!("kompiliert am {compile_datetime}"));
+                ui.label(format!("last compilation: {compile_datetime}"));
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.language, Lang::EN, "󾓦  ENG");
+                    ui.selectable_value(&mut self.language, Lang::DE, "󾓬  GER");
+                });
                 widgets::global_dark_light_mode_buttons(ui);
-                draw_usage_info(ui);
-                self.map.draw_menu(ui, &mut self.info);
-                self.info.draw_menu(ui, &self.map);
+                draw_usage_info(ui, self.language);
+                self.map.draw_menu(ui, &mut self.info, self.language);
+                self.info.draw_menu(ui, &self.map, self.language);
                 ui.add_space(50.0);
             });
         });

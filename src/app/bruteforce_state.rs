@@ -207,12 +207,12 @@ impl BruteforceWorker {
         PathBuf::from(format!(
             "bruteforce/{}-{}-{}.msgpack",
             nr_cops,
-            shape.to_str(),
+            shape.to_filename(),
             nr_vertices
         ))
     }
 
-    pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map) {
+    pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map, _lang: Lang) {
         ui.collapsing("Bruteforce", |ui|{
             if let Some((_, curr_task)) = &self.worker {
                 ui.horizontal(|ui| {

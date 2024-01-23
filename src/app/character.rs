@@ -121,8 +121,8 @@ impl Character {
 
     /// returns true iff character was just released and has changed its node
     fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) -> bool {       
-        let to_plane = con.cam.to_screen().to_plane;
-        let move_rect = con.cam.to_screen().move_rect;
+        let to_plane = con.cam().to_screen().to_plane;
+        let move_rect = con.cam().to_screen().move_rect;
 
         let node_pos = to_plane.project_pos(con.positions[self.nearest_node]);
         let draw_at_node = self.on_node && !self.dragging;
@@ -171,7 +171,7 @@ impl Character {
         if !self.dragging {
             return;
         }   
-        let to_plane = con.cam.to_screen().to_plane;
+        let to_plane = con.cam().to_screen().to_plane;
         let mut best_dist_sq = f32::MAX;
         let mut best_vertex = usize::MAX;
         for (v, &vis, &pos) in izip!(0.., con.visible, con.positions) {
@@ -308,8 +308,9 @@ impl CharacterState {
     }
 
     /// returns a menu change (e.g. a new character was added, one removed...)
-    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, queue: &mut VecDeque<usize>) -> bool {
+    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, queue: &mut VecDeque<usize>, lang: Lang) -> bool {
         let mut change = false;
+        use Lang::*;
         ui.horizontal(|ui| {
             let nr_characters = self.characters.len();
             let minus_emoji = self.characters.last().map_or("🚫", |c| c.style().emoji);
@@ -320,8 +321,9 @@ impl CharacterState {
                 let next_cop = nr_cops % NR_COP_STYLES;
                 next_cop + 1 //+ 1 as robber is at beginning
             };
-            let minus_text = format!("- Figur ({})", minus_emoji);
-            let plus_text = format!("+ Figur ({})", STYLES[next_index].emoji);
+            let character = match lang { EN => "Character", DE => "Figur" };
+            let minus_text = format!("- {} ({})", character, minus_emoji);
+            let plus_text = format!("+ {} ({})", character, STYLES[next_index].emoji);
             if ui.button(minus_text).clicked() {
                 self.characters.pop();
                 self.forget_move_history();
@@ -337,27 +339,32 @@ impl CharacterState {
             }
         });
         ui.horizontal(|ui| {
-            ui.add(Checkbox::new(&mut self.show_steps, "zeige Schritte"));
+            ui.add(Checkbox::new(&mut self.show_steps, 
+                match lang { DE => "zeige Schritte", EN => "show past moves"}));
             if ui.button("Reset").clicked() {
                 self.forget_move_history();
                 change = true;
             }
         });        
         ui.horizontal(|ui| {
-            if ui.button(" ⟲ ").on_hover_text("strg + z").clicked() {
+            let ctrl_z = match lang { DE => "strg + z", EN => "ctrl + z" };
+            let ctrl_y = match lang { DE => "strg + y", EN => "ctrl + y" };
+            if ui.button(" ⟲ ").on_hover_text(ctrl_z).clicked() {
                 self.reverse_move(map.edges(), map.positions(), queue);
                 change = true;
             }
-            if ui.button(" ⟳ ").on_hover_text("strg + y").clicked() {
+            if ui.button(" ⟳ ").on_hover_text(ctrl_y).clicked() {
                 self.redo_move(map.edges(), map.positions(), queue);
                 change = true;
             }
         });
         if let Some(ch) = self.last_moved() {
-            ui.label(format!("letzter Schritt: {} ({})", ch.style().job, ch.style().emoji));
+            let last_move = match lang { DE => "letzter Schritt", EN => "Last Move" };
+            ui.label(format!("{last_move}: {} ({})", ch.style().job, ch.style().emoji));
         }
         if let Some(ch) = self.next_moved() {
-            ui.label(format!("nächster Schritt: {} ({})", ch.style().job, ch.style().emoji));
+            let next_move = match lang { DE => "nächster Schritt", EN => "Next Move" };
+            ui.label(format!("{next_move}: {} ({})", ch.style().job, ch.style().emoji));
         }
         change
     }

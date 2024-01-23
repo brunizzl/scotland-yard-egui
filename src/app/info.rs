@@ -74,11 +74,16 @@ const DEFAULT_OPTIONS: Options = Options {
 };
 
 impl Options {
-    pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
+    pub fn draw_menu(&mut self, ui: &mut Ui, lang: Lang) -> bool {
+        use Lang::*;
         let mut menu_change = false;
-        if ui.button("Optionen zurücksetzen")
-            .on_hover_text("Figuren und Spielfeld bleiben erhalten, \
-            nur Informationsanzeige wird deaktiviert und benutze Farben zurückgesetzt.")
+        let reset_descr = match lang {
+            DE => "Figuren und Spielfeld bleiben erhalten, \
+                nur Informationsanzeige wird deaktiviert und benutze Farben zurückgesetzt.",
+            EN => "Characters and map are kept, only colors + what info is shown are reset.",
+        };
+        if ui.button(match lang { DE => "Optionen zurücksetzen", EN => "Reset Options" })
+            .on_hover_text(reset_descr)
             .clicked() {
             *self = DEFAULT_OPTIONS;
             menu_change = true;
@@ -280,16 +285,16 @@ impl Info {
         }
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
+    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, lang: Lang) {
         self.menu_change = false;
-        self.menu_change |= self.options.draw_menu(ui);
+        self.menu_change |= self.options.draw_menu(ui, lang);
         
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
         let nr_cops = self.characters.active_cops().count();
-        self.worker.draw_menu(nr_cops, ui, map);
+        self.worker.draw_menu(nr_cops, ui, map, lang);
 
-        self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
+        self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue, lang);
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
