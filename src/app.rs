@@ -97,8 +97,8 @@ impl State {
 fn draw_usage_info(ui: &mut Ui) {
     ui.collapsing("Bedienung", |ui| {
         ui.label("Spielfeld rotieren / verschieben: 
-ziehen mit rechter Maustaste
-oder skrollen, horizontal shift + skrollen
+ziehen mit rechter Maustaste oder scrollen, 
+horizontal shift + scrollen
 
 zoom: 
 strg + scrollen

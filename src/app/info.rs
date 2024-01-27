@@ -642,7 +642,8 @@ impl Info {
                 layout_job.halign = Align::Center;
                 let galley = ui.fonts(|f| f.layout_job(layout_job));
                 let screen_pos = con.cam().transform(pos);
-                let text = Shape::Text(TextShape::new(screen_pos, galley));
+                //let text = Shape::Text(TextShape::new(screen_pos, galley));
+                let text = Shape::Text(TextShape::new(screen_pos, galley, color));
                 con.painter.add(text);
             }
         }

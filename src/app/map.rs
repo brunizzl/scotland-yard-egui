@@ -291,6 +291,10 @@ impl Map {
         f32::min(0.25, 0.75 / self.resolution as f32)
     }
 
+    fn identity(&self) -> &Self {
+        self
+    }
+
     pub fn update_and_draw<'a>(&'a mut self, ui: &mut Ui) -> DrawContext<'a> {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, Sense::hover()); 
@@ -314,7 +318,7 @@ impl Map {
         }
 
         DrawContext { 
-            map: &self,
+            map: self.identity(),
             extreme_vertices: &self.extreme_vertices,
             edges: self.edges(),
             visible: self.visible(), 

@@ -108,7 +108,8 @@ impl Character {
         let mut layout_job = text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
         layout_job.halign = Align::Center;
         let galley = ui.fonts(|f| f.layout_job(layout_job));
-        let emoji = Shape::Text(epaint::TextShape::new(emoji_pos, galley));
+        //let emoji = Shape::Text(epaint::TextShape::new(emoji_pos, galley));
+        let emoji = Shape::Text(epaint::TextShape::new(emoji_pos, galley, WHITE));
         painter.add(emoji);
     }
 
@@ -121,8 +122,8 @@ impl Character {
 
     /// returns true iff character was just released and has changed its node
     fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) -> bool {       
-        let to_plane = con.cam.to_screen().to_plane;
-        let move_rect = con.cam.to_screen().move_rect;
+        let to_plane = con.cam().to_screen().to_plane;
+        let move_rect = con.cam().to_screen().move_rect;
 
         let node_pos = to_plane.project_pos(con.positions[self.nearest_node]);
         let draw_at_node = self.on_node && !self.dragging;
@@ -171,7 +172,7 @@ impl Character {
         if !self.dragging {
             return;
         }   
-        let to_plane = con.cam.to_screen().to_plane;
+        let to_plane = con.cam().to_screen().to_plane;
         let mut best_dist_sq = f32::MAX;
         let mut best_vertex = usize::MAX;
         for (v, &vis, &pos) in izip!(0.., con.visible, con.positions) {

@@ -78,58 +78,59 @@ impl Camera3D {
     }
 
     /// only z-rotation, zoom is centered around mouse pointer
-    pub fn update_2d(&mut self, ui: &mut Ui, screen: Rect) {        
-        ui.input(|info| {
-            if !ui.rect_contains_pointer(screen) {
-                return;
-            }
-            if info.pointer.button_down(PointerButton::Secondary) {
-                self.position += info.pointer.delta();
-            }
-            self.position += info.scroll_delta;
-            if let Some(drag) = info.multi_touch() {
-                self.position += drag.translation_delta;
-                self.rotate_z(drag.rotation_delta);
-            }
-
-            let zoom_delta = info.zoom_delta();
-            self.zoom *= zoom_delta;
-            if zoom_delta != 1.0 {
-                if let Some(ptr_pos) = info.pointer.latest_pos() {
-                    //keep fixed point of zoom at mouse pointer
-                    let mid_to_ptr = ptr_pos - screen.center();
-                    let mut zoom_center = self.position.to_vec2() - mid_to_ptr;
-                    zoom_center *= zoom_delta;
-                    self.position = zoom_center.to_pos2() + mid_to_ptr;
+    pub fn update_2d(&mut self, ui: &mut Ui, screen: Rect) {  
+        if ui.rect_contains_pointer(screen) { 
+            //Note: referencing ui inside lambda may cause deadlock
+            ui.input(|info| {
+                if info.pointer.button_down(PointerButton::Secondary) {
+                    self.position += info.pointer.delta();
                 }
-            }
-        });
+                self.position += info.scroll_delta;
+                if let Some(drag) = info.multi_touch() {
+                    self.position += drag.translation_delta;
+                    self.rotate_z(drag.rotation_delta);
+                }
+    
+                let zoom_delta = info.zoom_delta();
+                self.zoom *= zoom_delta;
+                if zoom_delta != 1.0 {
+                    if let Some(ptr_pos) = info.pointer.latest_pos() {
+                        //keep fixed point of zoom at mouse pointer
+                        let mid_to_ptr = ptr_pos - screen.center();
+                        let mut zoom_center = self.position.to_vec2() - mid_to_ptr;
+                        zoom_center *= zoom_delta;
+                        self.position = zoom_center.to_pos2() + mid_to_ptr;
+                    }
+                }
+            });
+        }     
         self.update_to_screen(screen);
     }
 
     /// no translation, zoom is centered around screen middle    
-    pub fn update_3d(&mut self, ui: &mut Ui, screen: Rect) {        
-        ui.input(|info| {
-            if !ui.rect_contains_pointer(screen) {
-                return;
-            }
-            let mut drag_dist = Vec2::ZERO;
-            if info.pointer.button_down(PointerButton::Secondary) {
-                drag_dist -= info.pointer.delta();
-            }
-            drag_dist -= info.scroll_delta;
-            if let Some(drag) = info.multi_touch() {
-                drag_dist -= drag.translation_delta;
-                self.rotate_z(drag.rotation_delta);
-            }
-            let drag_rot = drag_dist / self.to_screen.move_rect.scale();
-            self.rotate_x(drag_rot.y);
-            self.rotate_y(drag_rot.x);
-            geo::gram_schmidt_3d(&mut self.direction);
-
-            let zoom_delta = info.zoom_delta();
-            self.zoom *= zoom_delta;
-        });
+    pub fn update_3d(&mut self, ui: &mut Ui, screen: Rect) {
+        
+        if ui.rect_contains_pointer(screen) {
+            //Note: referencing ui inside lambda may cause deadlock
+            ui.input(|info| {
+                let mut drag_dist = Vec2::ZERO;
+                if info.pointer.button_down(PointerButton::Secondary) {
+                    drag_dist -= info.pointer.delta();
+                }
+                drag_dist -= info.scroll_delta;
+                if let Some(drag) = info.multi_touch() {
+                    drag_dist -= drag.translation_delta;
+                    self.rotate_z(drag.rotation_delta);
+                }
+                let drag_rot = drag_dist / self.to_screen.move_rect.scale();
+                self.rotate_x(drag_rot.y);
+                self.rotate_y(drag_rot.x);
+                geo::gram_schmidt_3d(&mut self.direction);
+    
+                let zoom_delta = info.zoom_delta();
+                self.zoom *= zoom_delta;
+            });
+        }
         self.update_to_screen(screen);
     }
 
