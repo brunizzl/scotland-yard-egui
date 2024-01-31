@@ -121,7 +121,7 @@ impl BruteforceWorker {
         if self.current_worker_task().is_some() {
             return;
         }
-        if let Some(equiv) = map.data().equivalence() {
+        if let SymGroup::Explicit(equiv) = map.data().sym_group() {
             let sym = SymmetricMap {
                 shape: map.shape(),
                 edges: map.edges().clone(),

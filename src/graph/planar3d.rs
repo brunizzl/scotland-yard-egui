@@ -322,7 +322,7 @@ pub struct Embedding3D {
     /// neighbors of each vertex
     edges: EdgeList,
 
-    equivalence: Option<ExplicitClasses>,
+    sym_group: SymGroup,
 }
 
 impl Embedding3D {
@@ -343,8 +343,8 @@ impl Embedding3D {
         &self.vertices
     }
 
-    pub fn equivalence(&self) -> Option<&ExplicitClasses> {
-        self.equivalence.as_ref()
+    pub fn sym_group(&self) -> &SymGroup {
+        &self.sym_group
     }
 
     #[inline(always)]
@@ -439,6 +439,7 @@ impl Embedding3D {
         }
 
         let nr_visible_surface_vertices = surface.nr_vertices();
+        let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
         let mut res = Self { 
             surface,
             nr_visible_surface_vertices,
@@ -447,10 +448,12 @@ impl Embedding3D {
             inner_vertices,
             vertices, 
             edges,
-            equivalence: None,
+            sym_group,
         };
         if is_platonic {
-            res.equivalence = ExplicitClasses::new_for_subdivided_platonic(&res, divisions);
+            if let Some(expl) = ExplicitClasses::new_for_subdivided_platonic(&res, divisions) {
+                res.sym_group = SymGroup::Explicit(expl);
+            }
         }
         res
     }
@@ -564,6 +567,7 @@ impl Embedding3D {
         
         let edge_dividing_vertices = vec![BidirectionalRange::empty(); hull.edges.used_space()];
         let inner_vertices = vec![0..0; hull.face_normals.len()];
+        let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
         let res = Self {
             surface: hull,
             nr_visible_surface_vertices: vertices.len(),
@@ -572,7 +576,7 @@ impl Embedding3D {
             inner_vertices,
             vertices,
             edges,
-            equivalence: None,
+            sym_group,
         };
         (res, faces.join(&Vec::new()))
     }
@@ -869,7 +873,7 @@ impl Embedding3D {
             inner_vertices: Vec::new(), 
             vertices: Vec::new(), 
             edges: EdgeList::empty(),
-            equivalence: None,
+            sym_group: SymGroup::None(NoSymmetry::new(0)),
         }
     }
 
@@ -877,6 +881,7 @@ impl Embedding3D {
         let z = 0.5;
         let (positions_2d, edges) = planar.to_parts();
         let vertices = positions_2d.iter().map(|p| pos3(p.x, p.y, z)).collect_vec();
+        let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
         Self { 
             surface: ConvexTriangleHull::empty(), 
             nr_visible_surface_vertices: usize::MAX,
@@ -885,7 +890,7 @@ impl Embedding3D {
             inner_vertices: Vec::new(), 
             vertices, 
             edges,
-            equivalence: None,
+            sym_group,
         }
     }
 }

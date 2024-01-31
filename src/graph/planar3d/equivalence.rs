@@ -73,6 +73,8 @@ pub trait SymmetryGroup {
     /// if a vertex of it's class is passed as only vertex.
     fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a>;
 
+    fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto>;
+
     const HAS_SYMMETRY: bool = true;
 }
 
@@ -98,6 +100,10 @@ impl SymmetryGroup for NoSymmetry {
 
     fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a> {
         self.identity.forward()
+    }
+
+    fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto> {
+        std::iter::once(&self.identity)
     }
 
     const HAS_SYMMETRY: bool = false;
@@ -131,6 +137,15 @@ impl Automorphism for ExplicitAutomorphism {
     fn nr_vertices(&self) -> usize {
         debug_assert_eq!(self.forward.len(), self.backward.len());
         self.forward.len()
+    }
+}
+
+impl<T: Automorphism> From<&T> for ExplicitAutomorphism {
+    fn from(auto: &T) -> Self {
+        Self {
+            forward: auto.forward().collect_vec(),
+            backward: auto.backward().collect_vec(),
+        }
     }
 }
 
@@ -488,10 +503,6 @@ impl ExplicitClasses {
         &self.vertex_representative
     }
 
-    pub fn all_transforms(&self) -> &[ExplicitAutomorphism] {
-        &self.symmetry_transforms
-    }
-
     #[allow(dead_code)]
     pub fn nr_classes(&self) -> usize {
         self.class_representative.len()
@@ -611,5 +622,66 @@ impl SymmetryGroup for ExplicitClasses {
 
     fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a> {
         self.class_representative.iter().copied()
+    }
+
+    fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto> {
+        self.symmetry_transforms.iter()
+    }
+}
+
+pub trait DynAutomorphism {
+    fn dyn_nr_vertices(&self) -> usize;
+    fn dyn_apply_forward(&self, v: usize) -> usize;
+    fn dyn_apply_backward(&self, v: usize) -> usize;
+}
+
+impl<T: Automorphism> DynAutomorphism for T {
+    fn dyn_nr_vertices(&self) -> usize {
+        <Self as Automorphism>::nr_vertices(self)
+    }
+
+    fn dyn_apply_forward(&self, v: usize) -> usize {
+        <Self as Automorphism>::apply_forward(self, v)
+    }
+
+    fn dyn_apply_backward(&self, v: usize) -> usize {
+        <Self as Automorphism>::apply_backward(self, v)
+    }
+}
+
+pub trait DynSymmetryGroup {
+    fn dyn_to_representative<'a>(&'a self, vertices: & mut[usize]) -> SmallVec<[&dyn DynAutomorphism; 4]>;
+
+    fn for_each_transform(&self, f: &mut dyn FnMut(&dyn DynAutomorphism));
+}
+
+impl<T: SymmetryGroup> DynSymmetryGroup for T {
+    fn dyn_to_representative<'a>(&'a self, vertices: & mut[usize]) -> SmallVec<[&dyn DynAutomorphism; 4]> {
+        let mut res = SmallVec::new();
+        let iter = <Self as SymmetryGroup>::to_representative(self, vertices);
+        for auto in iter {
+            res.push(auto as &dyn DynAutomorphism);
+        }
+        res
+    }
+
+    fn for_each_transform(&self, f: &mut dyn FnMut(&dyn DynAutomorphism)) {
+        for auto in self.all_automorphisms() {
+            f(auto as &dyn DynAutomorphism);
+        }
+    }
+}
+
+pub enum SymGroup {
+    Explicit(ExplicitClasses),
+    None(NoSymmetry),
+}
+
+impl SymGroup {
+    pub fn to_dyn(&self) -> &dyn DynSymmetryGroup {
+        match self {
+            Self::Explicit(e) => e as &dyn DynSymmetryGroup,
+            Self::None(n) => n as &dyn DynSymmetryGroup,
+        }
     }
 }

@@ -1,7 +1,7 @@
 
 use egui::{*, epaint::TextShape, text::LayoutJob};
 
-use crate::graph::{EdgeList, ExplicitClasses};
+use crate::graph::{EdgeList, SymGroup};
 use crate::geo::Pos3;
 
 use self::cam::Camera3D;
@@ -39,8 +39,8 @@ impl<'a> DrawContext<'a> {
         self.map.shape()
     }
 
-    pub fn equivalence(&self) -> Option<&ExplicitClasses> {
-        self.map.data().equivalence()
+    pub fn sym_group(&self) -> &SymGroup {
+        self.map.data().sym_group()
     }
 
     pub fn vertex_draw_pos(&self, v: usize) -> Pos2 {
