@@ -108,7 +108,6 @@ impl Character {
         let mut layout_job = text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
         layout_job.halign = Align::Center;
         let galley = ui.fonts(|f| f.layout_job(layout_job));
-        //let emoji = Shape::Text(epaint::TextShape::new(emoji_pos, galley));
         let emoji = Shape::Text(epaint::TextShape::new(emoji_pos, galley, WHITE));
         painter.add(emoji);
     }
