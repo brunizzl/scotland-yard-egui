@@ -19,24 +19,23 @@ pub use names::*;
 #[derive(Copy, Clone, Debug, Default)]
 pub struct F32Color([f32; 3], f32);
 
-#[allow(dead_code)]
-const HAND_PICKED_MARKER_COLORS: [F32Color; 16] = [
-    F32Color([171.0, 130.0, 255.0], 1.0), //MediumPurple1
-    F32Color([255.0,  64.0,  64.0], 1.0), //brown1
-    F32Color([255.0, 215.0,   0.0], 1.0), //gold1
-    F32Color([188.0, 238.0, 104.0], 1.0), //DarkOliveGreen2
-    F32Color([240.0, 128.0, 128.0], 1.0), //LightCoral
-    F32Color([127.0, 255.0, 212.0], 1.0), //aquamarine
-    F32Color([255.0, 165.0,   0.0], 1.0), //orange1
-    F32Color([255.0,  62.0, 150.0], 1.0), //VioletRed1
-    F32Color([  0.0, 191.0, 255.0], 1.0), //DeepSkyBlue
-    F32Color([255.0, 211.0, 155.0], 1.0), //burlywood1
-    F32Color([255.0, 185.0,  15.0], 1.0), //DarkGoldenrod1
-    F32Color([152.0, 245.0, 255.0], 1.0), //CadetBlue1
-    F32Color([255.0, 193.0, 193.0], 1.0), //RosyBrown1
-    F32Color([255.0,  20.0, 147.0], 1.0), //DeepPink
-    F32Color([124.0, 252.0,   0.0], 1.0), //LawnGreen
-    F32Color([131.0, 111.0, 255.0], 1.0), //SlateBlue1
+pub const HAND_PICKED_MARKER_COLORS: [Color32; 8] = [
+    Color32::from_rgb(171, 130, 255), //MediumPurple1
+    Color32::from_rgb(255,  64,  64), //brown1
+    Color32::from_rgb(255, 215,   0), //gold1
+    Color32::from_rgb(188, 238, 104), //DarkOliveGreen2
+    Color32::from_rgb(240, 128, 128), //LightCoral
+    Color32::from_rgb(127, 255, 212), //aquamarine
+    Color32::from_rgb(255, 165,   0), //orange1
+    Color32::from_rgb(255,  62, 150), //VioletRed1
+    //Color32::from_rgb(  0, 191, 255), //DeepSkyBlue
+    //Color32::from_rgb(255, 211, 155), //burlywood1
+    //Color32::from_rgb(255, 185,  15), //DarkGoldenrod1
+    //Color32::from_rgb(152, 245, 255), //CadetBlue1
+    //Color32::from_rgb(255, 193, 193), //RosyBrown1
+    //Color32::from_rgb(255,  20, 147), //DeepPink
+    //Color32::from_rgb(124, 252,   0), //LawnGreen
+    //Color32::from_rgb(131, 111, 255), //SlateBlue1
 ];
 
 pub const MARKER_COLORS_F32: [F32Color; 32] = create_distinct_colors();

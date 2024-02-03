@@ -7,6 +7,24 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug executable 'scotland-yard-egui'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=scotland-yard-egui",
+                    "--package=scotland-yard-egui"
+                ],
+                "filter": {
+                    "name": "scotland-yard-egui",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug unit tests in library 'scotland-yard-egui'",
             "cargo": {
                 "args": [
@@ -18,24 +36,6 @@
                 "filter": {
                     "name": "scotland-yard-egui",
                     "kind": "lib"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug executable 'scotland-yard-egui'",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=scotland-yard-egui",
-                    "--package=scotland-yard-egui"
-                ],
-                "filter": {
-                    "name": "scotland-yard-egui",
-                    "kind": "bin"
                 }
             },
             "args": [],

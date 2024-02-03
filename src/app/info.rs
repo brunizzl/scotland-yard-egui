@@ -49,6 +49,8 @@ pub enum VertexNumberInfo {
 struct Options {
     manual_marker_colors: [Color32; 8],
     active_manual_marker: usize, //expected in 0..8
+    shown_manual_markers: u8, //bitmask
+
     automatic_marker_color: Color32,
     vertex_color_info: VertexColorInfo,
 
@@ -63,17 +65,10 @@ struct Options {
 }
 
 const DEFAULT_OPTIONS: Options = Options {
-    manual_marker_colors: [
-        color::MARKER_COLORS_U8[0],
-        color::MARKER_COLORS_U8[1],
-        color::MARKER_COLORS_U8[2],
-        color::MARKER_COLORS_U8[3],
-        color::MARKER_COLORS_U8[4],
-        color::MARKER_COLORS_U8[5],
-        color::MARKER_COLORS_U8[6],
-        color::MARKER_COLORS_U8[7],
-    ],
+    manual_marker_colors: color::HAND_PICKED_MARKER_COLORS,
     active_manual_marker: 0,
+    shown_manual_markers: u8::MAX,
+
     automatic_marker_color: color::GREEN,
     vertex_color_info: VertexColorInfo::None,
     marked_cop_dist: 10,
@@ -84,26 +79,14 @@ const DEFAULT_OPTIONS: Options = Options {
     draw_vertices: false,
 };
 
-fn add_selectable_color_array(ui: &mut Ui, active: &mut usize, colors: &mut [Color32]) {
-    for (i, color) in izip!(0.., colors) {
-        ui.horizontal(|ui| {
-            ui.radio_value(active, i, i.to_string());
-            ui.color_edit_button_srgba(color);
-        });
-    }
-}
-
 impl Options {
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut menu_change = false;
-        if ui.button("Optionen zurücksetzen")
-            .on_hover_text("Figuren und Spielfeld bleiben erhalten, \
-            nur Informationsanzeige wird deaktiviert und benutze Farben zurückgesetzt.")
-            .clicked() {
-            *self = DEFAULT_OPTIONS;
-            menu_change = true;
-        }
         ui.collapsing("Knoteninfo", |ui|{
+            //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
+            ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
+            ui.add_space(5.0);
+
             menu_change |= 
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"))
                 .on_hover_text("Berechnung des Randes kann aus Effizienzgründen für sehr kleine / \
@@ -114,14 +97,15 @@ impl Options {
             menu_change |= ui.add(Checkbox::new(&mut self.show_hull_boundary, "zeige Grenze"))
                 .changed();
 
-            //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
-            ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
 
             ui.add_space(5.0);
             ui.label("Marker:");
             ui.horizontal(|ui| {
                 ui.label("Farbe: ");
                 ui.color_edit_button_srgba(&mut self.automatic_marker_color);
+                if ui.button("Reset").clicked() {
+                    self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
+                }
             });
             let old = self.vertex_color_info;
             //settings to draw extra information
@@ -184,11 +168,30 @@ impl Options {
             menu_change |= old != self.vertex_color_info;
         });
         ui.collapsing("Manuelle Marker", |ui| {
-            ui.label("Info")
+            ui.label("[Info]")
                 .on_hover_text("Manuelle Marker können an dem der Mausposition nächsten Knoten \
                 mit Taste [m] hinzugefügt und [n] entfernt werden.\n\
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.");
-            add_selectable_color_array(ui, &mut self.active_manual_marker, &mut self.manual_marker_colors);
+                
+            for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.active_manual_marker, i, "");
+                    ui.color_edit_button_srgba(color);
+                    if ui.button("Reset").clicked() {
+                        *color = color::HAND_PICKED_MARKER_COLORS[i];
+                    }
+
+                    let bit_i = 1u8 << i;
+                    let curr_shown = self.shown_manual_markers & bit_i != 0;
+                    let mut show = curr_shown;
+                    ui.add(Checkbox::new(&mut show, ""));
+                    if show {
+                        self.shown_manual_markers |= bit_i;
+                    } else if curr_shown {
+                        self.shown_manual_markers -= bit_i;
+                    }
+                });
+            }
         });
         ui.collapsing("Zahlen", |ui|{
             let old = self.vertex_number_info;
@@ -704,11 +707,13 @@ impl Info {
 
     fn draw_manual_markers(&self, con: &DrawContext<'_>) {
         let mut f32_colors = [color::F32Color::default(); 8];
+        let mask = self.options.shown_manual_markers;
         color::zip_to_f32(f32_colors.iter_mut(), self.options.manual_marker_colors.iter());
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
-            if vis && marked != 0 {
+            let masked = marked & mask;
+            if vis && masked != 0 {
                 let draw_pos = con.cam().transform(pos);
-                let color = color::u8_marker_color(marked, &f32_colors);
+                let color = color::u8_marker_color(masked, &f32_colors);
                 let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, color);
                 con.painter.add(marker_circle);
             }
