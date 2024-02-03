@@ -20,18 +20,12 @@ pub enum VertexColorInfo {
     BruteForceRes, 
     EscapeableNodes, 
     NearNodes, 
-    SmallRobberDist, 
+    RobberDist, 
     CopDist, 
     VertexEquivalenceClasses,
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
     Debugging 
-}
-
-impl VertexColorInfo {
-    pub fn scale_small_dist_with_resolution(dist: isize, radius: isize) -> isize {
-        (dist * radius) / 100
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -41,6 +35,7 @@ pub enum VertexNumberInfo {
     RobberAdvantage, 
     EscapeableNodes, 
     MinCopDist, 
+    RobberDist,
     VertexEquivalenceClass,
     Debugging 
 }
@@ -56,7 +51,7 @@ struct Options {
 
     //both are only used, when the respective RobberInfo is active
     marked_cop_dist: isize, //determines cop dist marked in RobberInfo::CopDist
-    small_robber_dist: isize, //determines max dist marked in RobberInfo::SmallRobberDist
+    marked_robber_dist: isize, //determines max dist marked in RobberInfo::SmallRobberDist
 
     vertex_number_info: VertexNumberInfo,
     show_convex_hull: bool,
@@ -72,7 +67,7 @@ const DEFAULT_OPTIONS: Options = Options {
     automatic_marker_color: color::GREEN,
     vertex_color_info: VertexColorInfo::None,
     marked_cop_dist: 10,
-    small_robber_dist: 10,
+    marked_robber_dist: 10,
     vertex_number_info: VertexNumberInfo::None,
     show_convex_hull: false,
     show_hull_boundary: false,
@@ -135,18 +130,18 @@ impl Options {
                 aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
                 die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::SmallRobberDist, 
-                "Punkte nah an Räuber")
-                .on_hover_text("Alle Punkte die Abstand <= Auflösung * (% Auflösung) / 100 zu Räuber haben");
-            if self.vertex_color_info == VertexColorInfo::SmallRobberDist {
-                add_drag_value(ui, &mut self.small_robber_dist, "% Auflösung: ", 1, 100);
-            }
-
             ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::CopDist, 
                 "Punkte mit Abstand zu Cops")
                 .on_hover_text("Abstand einstellbar bei ausgewählter Option");
             if self.vertex_color_info == VertexColorInfo::CopDist {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
+            }
+
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::RobberDist, 
+                "Räuberabstand")
+                .on_hover_text("Alle Punkte die eingestellten Abstand zu Räuber haben");
+            if self.vertex_color_info == VertexColorInfo::RobberDist {
+                add_drag_value(ui, &mut self.marked_robber_dist, "Abstand: ", 0, 1000);
             }
 
             ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::VertexEquivalenceClasses, 
@@ -214,6 +209,10 @@ impl Options {
             ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::MinCopDist, 
                 "minimaler Cop Abstand")
                 .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
+
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::RobberDist, 
+                "Räuberabstand")
+                .on_hover_text("Abstand von Räuberposition zu jedem Knoten");
 
             ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::VertexEquivalenceClass, 
                 "Symmetrieäquivalenzklasse")
@@ -537,11 +536,10 @@ impl Info {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 },
-            (VertexColorInfo::SmallRobberDist, Some(r)) => {
-                let bnd = VertexColorInfo::scale_small_dist_with_resolution(
-                    self.options.small_robber_dist, con.resolution());
+            (VertexColorInfo::RobberDist, Some(r)) => {
+                let bnd = self.options.marked_robber_dist;
                 for (&dist, &pos, &vis) in izip!(&r.distances, con.positions, con.visible) {
-                    if vis && dist <= bnd {
+                    if vis && dist == bnd {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 }
@@ -651,6 +649,9 @@ impl Info {
                     VertexNumberInfo::EscapeableNodes => { true_bits(self.escapable.escapable()[v]) }
                     VertexNumberInfo::VertexEquivalenceClass => if let SymGroup::Explicit(e) = con.sym_group() {
                         e.classes()[v].to_string()
+                    } else { String::new() },
+                    VertexNumberInfo::RobberDist => if let Some(r) = self.characters.robber() {
+                        r.distances[v].to_string()
                     } else { String::new() },
                     //VertexInfoNumber::Debugging => self.escapable.owners()[i].to_string(),
                     //VertexInfoNumber::Debugging => { 

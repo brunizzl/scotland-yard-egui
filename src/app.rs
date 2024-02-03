@@ -31,10 +31,6 @@ impl<'a> DrawContext<'a> {
         &self.map.camera()
     }
 
-    pub fn resolution(&self) -> isize {
-        self.map.resolution()
-    }
-
     pub fn shape(&self) -> map::Shape {
         self.map.shape()
     }

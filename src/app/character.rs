@@ -120,20 +120,20 @@ impl Character {
     }
 
     /// returns true iff character was just released and has changed its node
-    fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>) -> bool {       
+    fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>, nr_others_at_same_pos: usize) -> bool {       
         let to_plane = con.cam().to_screen().to_plane;
         let move_rect = con.cam().to_screen().move_rect;
+        let character_size = f32::max(6.0, con.scale * 8.0);
 
         let node_pos = to_plane.project_pos(con.positions[self.nearest_node]);
         let draw_at_node = self.on_node && !self.dragging;
-        let draw_screen_pos = if draw_at_node { 
-            move_rect.transform_pos(node_pos)
-        } else { 
-            move_rect.transform_pos(self.pos2) 
+        let draw_screen_pos = if draw_at_node {
+            move_rect.transform_pos(node_pos) + (nr_others_at_same_pos as f32) *vec2(0.0, character_size * 0.75)
+        } else {
+            move_rect.transform_pos(self.pos2)
         };
 
-        let character_size = f32::max(6.0, con.scale * 8.0);
-        let rect_len = 3.0 * character_size;
+        let rect_len = if nr_others_at_same_pos > 0 { 1.0 } else { 3.0 } * character_size;
         let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
         let character_id = con.response.id.with(self as *const Self);
         let point_response = ui.interact(point_rect, character_id, Sense::drag());
@@ -353,12 +353,16 @@ impl CharacterState {
                 change = true;
             }
         });
-        if let Some(ch) = self.last_moved() {
-            ui.label(format!("letzter Schritt: {} ({})", ch.style().job, ch.style().emoji));
-        }
-        if let Some(ch) = self.next_moved() {
-            ui.label(format!("nächster Schritt: {} ({})", ch.style().job, ch.style().emoji));
-        }
+
+        let print_style = |ch: Option<&Character>| if let Some(style) = ch.map(Character::style) {
+            format!("{} ({})", style.job, style.emoji)
+        } else { 
+            " 🚫   ".to_string() 
+        };
+
+        ui.label(format!("letzter Schritt: {}", print_style(self.last_moved())));
+        ui.label(format!("nächster Schritt: {}", print_style(self.next_moved())));
+
         change
     }
 
@@ -369,9 +373,13 @@ impl CharacterState {
     }
 
     pub fn draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+        let mut positions = smallvec::SmallVec::<[usize; 20]>::new();
+        positions.extend(self.characters.iter().map(|c| c.nearest_node));
+
         for (i, ch) in self.characters.iter_mut().enumerate() {
+            let nr_others_at_same_pos = positions[..i].iter().filter(|&&p| p == ch.nearest_node).count();
             if ch.on_node && con.visible[ch.nearest_node] || !ch.on_node {
-                let finished_move = ch.drag_and_draw(ui, con);                
+                let finished_move = ch.drag_and_draw(ui, con, nr_others_at_same_pos);                
                 if finished_move {
                     self.past_moves.push(i);
                     self.future_moves.clear();

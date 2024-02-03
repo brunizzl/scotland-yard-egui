@@ -61,10 +61,6 @@ mod storage_keys {
 
 impl Map {
 
-    pub fn resolution(&self) -> isize {
-        self.resolution
-    }
-
     pub fn shape(&self) -> Shape {
         self.shape
     }
