@@ -224,7 +224,7 @@ impl Map {
         let nr_vertices = self.data.nr_vertices();
         if info.marked_manually.len() != nr_vertices {
             info.marked_manually.clear();
-            info.marked_manually.resize(nr_vertices, false);
+            info.marked_manually.resize(nr_vertices, 0);
         }
     }
 

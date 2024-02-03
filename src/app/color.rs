@@ -16,52 +16,65 @@ mod names {
 }
 pub use names::*;
 
+#[derive(Copy, Clone, Debug, Default)]
+pub struct F32Color([f32; 3], f32);
+
 #[allow(dead_code)]
-const HAND_PICKED_MARKER_COLORS: [[f32; 3]; 16] = [
-    [171.0, 130.0, 255.0], //MediumPurple1
-    [255.0,  64.0,  64.0], //brown1
-    [255.0, 215.0,   0.0], //gold1
-    [188.0, 238.0, 104.0], //DarkOliveGreen2
-    [240.0, 128.0, 128.0], //LightCoral
-    [127.0, 255.0, 212.0], //aquamarine
-    [255.0, 165.0,   0.0], //orange1
-    [255.0,  62.0, 150.0], //VioletRed1
-    [  0.0, 191.0, 255.0], //DeepSkyBlue
-    [255.0, 211.0, 155.0], //burlywood1
-    [255.0, 185.0,  15.0], //DarkGoldenrod1
-    [152.0, 245.0, 255.0], //CadetBlue1
-    [255.0, 193.0, 193.0], //RosyBrown1
-    [255.0,  20.0, 147.0], //DeepPink
-    [124.0, 252.0,   0.0], //LawnGreen
-    [131.0, 111.0, 255.0], //SlateBlue1
+const HAND_PICKED_MARKER_COLORS: [F32Color; 16] = [
+    F32Color([171.0, 130.0, 255.0], 1.0), //MediumPurple1
+    F32Color([255.0,  64.0,  64.0], 1.0), //brown1
+    F32Color([255.0, 215.0,   0.0], 1.0), //gold1
+    F32Color([188.0, 238.0, 104.0], 1.0), //DarkOliveGreen2
+    F32Color([240.0, 128.0, 128.0], 1.0), //LightCoral
+    F32Color([127.0, 255.0, 212.0], 1.0), //aquamarine
+    F32Color([255.0, 165.0,   0.0], 1.0), //orange1
+    F32Color([255.0,  62.0, 150.0], 1.0), //VioletRed1
+    F32Color([  0.0, 191.0, 255.0], 1.0), //DeepSkyBlue
+    F32Color([255.0, 211.0, 155.0], 1.0), //burlywood1
+    F32Color([255.0, 185.0,  15.0], 1.0), //DarkGoldenrod1
+    F32Color([152.0, 245.0, 255.0], 1.0), //CadetBlue1
+    F32Color([255.0, 193.0, 193.0], 1.0), //RosyBrown1
+    F32Color([255.0,  20.0, 147.0], 1.0), //DeepPink
+    F32Color([124.0, 252.0,   0.0], 1.0), //LawnGreen
+    F32Color([131.0, 111.0, 255.0], 1.0), //SlateBlue1
 ];
 
-const AUTOMATIC_MARKER_COLORS: [[f32; 3]; 32] = create_distinct_colors();
+pub const MARKER_COLORS_F32: [F32Color; 32] = create_distinct_colors();
 
-fn plus_eq(color1: &mut [f32; 3], color2: &[f32; 3]) {
-    for (c1, c2) in color1.iter_mut().zip(color2.iter()) {
-        *c1 += c2;
+fn floats_to_color(cs: [f32; 3], scale: f32, alpha_f: f32) -> Color32 {
+    debug_assert!((0.0..=1.0).contains(&alpha_f));
+
+    let to_u8 = |c| (c * scale) as u8;
+    let alpha = (255.0 * alpha_f) as u8;
+    Color32::from_rgba_premultiplied(to_u8(cs[0]), to_u8(cs[1]), to_u8(cs[2]), alpha)
+}
+
+fn blend<'a>(colors: impl Iterator<Item = &'a F32Color>) -> Color32 {
+    let mut res_rgb = [0.0f32; 3];
+    let mut res_alpha = 0.0f32;
+    let mut alpha_sum = 0.0f32;
+    for F32Color(rgb, alpha) in colors {
+        let alpha = *alpha;
+        debug_assert!(alpha <= 1.0);
+        alpha_sum += alpha;
+        for (res_channel, new_channel) in izip!(&mut res_rgb, rgb) {
+            *res_channel += alpha * *new_channel;
+        }
+        res_alpha += (1.0 - res_alpha) * alpha;
     }
+    floats_to_color(res_rgb, 1.0 / alpha_sum, res_alpha)
 }
 
-fn floats_to_color(cs: [f32; 3], factor: f32) -> Color32 {
-    let to_u8 = |c| (c * factor) as u8;
-    Color32::from_rgb(to_u8(cs[0]), to_u8(cs[1]), to_u8(cs[2]))
-}
-
-fn blend<'a>(colors: impl Iterator<Item = &'a [f32; 3]>) -> Color32 {
-    let mut res = [0.0f32; 3];
-    let mut count = 0.0f32;
-    for col in colors {
-        count += 1.0;
-        plus_eq(&mut res, col);
-    }
-    floats_to_color(res, 1.0 / count)
-}
-
-pub fn u16_marker_color(marker: u32) -> Color32 {
-    let iter = izip!(&AUTOMATIC_MARKER_COLORS, 0..).filter_map(|(col, i)|
+pub fn u32_marker_color(marker: u32, colors: &[F32Color]) -> Color32 {
+    let iter = izip!(colors, 0..).filter_map(|(col, i)|
         ((1u32 << i) & marker != 0).then_some(col)
+    );
+    blend(iter)
+}
+
+pub fn u8_marker_color(marker: u8, colors: &[F32Color]) -> Color32 {
+    let iter = izip!(colors, 0..).filter_map(|(col, i)|
+        ((1u8 << i) & marker != 0).then_some(col)
     );
     blend(iter)
 }
@@ -93,8 +106,8 @@ const fn hsv_to_rgb(h: usize, s: usize, v: usize) -> [f32; 3] {
     [r_f32, g_f32, b_f32]
 }
 
-const fn create_distinct_colors() -> [[f32; 3]; 32] {
-    let mut res = [[0.0; 3]; 32];
+const fn create_distinct_colors() -> [F32Color; 32] {
+    let mut res = [F32Color([0.0; 3], 1.0); 32];
     let tau = 6000000; //circular constant, e.g. 2 * pi, only blown up and int, because compiletime
     let ang_offsets = [
         tau/32, 
@@ -115,7 +128,7 @@ const fn create_distinct_colors() -> [[f32; 3]; 32] {
             let ang = (tau * k) / 32 + ang_offset;
             let sat = 870;
             let val = 850;
-            res[i] = hsv_to_rgb(ang, sat, val);
+            res[i].0 = hsv_to_rgb(ang, sat, val);
             i += 1;
             k += 32 / 4;
         }
@@ -130,10 +143,18 @@ const fn build_marker_colors() -> [Color32; 32] {
     let mut i = 0;
     let mut res = [Color32::BLACK; 32];
     while i < 32 {
-        let color = AUTOMATIC_MARKER_COLORS[i];
+        let color = MARKER_COLORS_F32[i].0;
+        //assume alpha is always == 1.0 (not verifiable in constant fn).
         res[i] = Color32::from_rgb(color[0] as u8, color[1] as u8, color[2] as u8);
         i += 1;
     }
     res
 }
-pub const MARKER_COLORS: [Color32; 32] = build_marker_colors();
+pub const MARKER_COLORS_U8: [Color32; 32] = build_marker_colors();
+
+pub fn zip_to_f32<'a>(drain: impl Iterator<Item = &'a mut F32Color>, source: impl Iterator<Item = &'a Color32>) {
+    for (d, s) in izip!(drain, source) {
+        d.0 = [s.r() as f32, s.g() as f32, s.b() as f32];
+        d.1 = s.a() as f32 / 255.0;
+    }
+}

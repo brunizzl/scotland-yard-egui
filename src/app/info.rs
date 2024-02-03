@@ -11,7 +11,7 @@ use crate::app::character::CharacterState;
 
 use self::bruteforce_state::BruteforceWorker;
 
-use super::{*, color::*};
+use super::{*, color};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub enum VertexColorInfo { 
@@ -47,7 +47,8 @@ pub enum VertexNumberInfo {
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
-    manual_marker_color: Color32,
+    manual_marker_colors: [Color32; 8],
+    active_manual_marker: usize, //expected in 0..8
     automatic_marker_color: Color32,
     vertex_color_info: VertexColorInfo,
 
@@ -62,8 +63,18 @@ struct Options {
 }
 
 const DEFAULT_OPTIONS: Options = Options {
-    manual_marker_color: YELLOW,
-    automatic_marker_color: GREEN,
+    manual_marker_colors: [
+        color::MARKER_COLORS_U8[0],
+        color::MARKER_COLORS_U8[1],
+        color::MARKER_COLORS_U8[2],
+        color::MARKER_COLORS_U8[3],
+        color::MARKER_COLORS_U8[4],
+        color::MARKER_COLORS_U8[5],
+        color::MARKER_COLORS_U8[6],
+        color::MARKER_COLORS_U8[7],
+    ],
+    active_manual_marker: 0,
+    automatic_marker_color: color::GREEN,
     vertex_color_info: VertexColorInfo::None,
     marked_cop_dist: 10,
     small_robber_dist: 10,
@@ -72,6 +83,15 @@ const DEFAULT_OPTIONS: Options = Options {
     show_hull_boundary: false,
     draw_vertices: false,
 };
+
+fn add_selectable_color_array(ui: &mut Ui, active: &mut usize, colors: &mut [Color32]) {
+    for (i, color) in izip!(0.., colors) {
+        ui.horizontal(|ui| {
+            ui.radio_value(active, i, i.to_string());
+            ui.color_edit_button_srgba(color);
+        });
+    }
+}
 
 impl Options {
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
@@ -162,14 +182,13 @@ impl Options {
                 .on_hover_text("Was auch immer gerade während des letzten mal kompilierens interessant war");
 
             menu_change |= old != self.vertex_color_info;
-
-            ui.horizontal(|ui| {
-                ui.label("Farbe manuelle Marker: ")
-                    .on_hover_text("Manuelle Marker können an dem der Mausposition nächsten Knoten \
-                    mit Taste [m] hinzugefügt und [n] entfernt werden.\n\
-                    Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.");
-                ui.color_edit_button_srgba(&mut self.manual_marker_color);
-            });
+        });
+        ui.collapsing("Manuelle Marker", |ui| {
+            ui.label("Info")
+                .on_hover_text("Manuelle Marker können an dem der Mausposition nächsten Knoten \
+                mit Taste [m] hinzugefügt und [n] entfernt werden.\n\
+                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.");
+            add_selectable_color_array(ui, &mut self.active_manual_marker, &mut self.manual_marker_colors);
         });
         ui.collapsing("Zahlen", |ui|{
             let old = self.vertex_number_info;
@@ -216,7 +235,7 @@ pub struct Info {
     escapable: EscapeableNodes,
     min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
     cop_advantage: Vec<isize>,
-    pub marked_manually: Vec<bool>,
+    pub marked_manually: Vec<u8>,
 
     /// this is only used as intermediary variable during computations. 
     /// to not reallocate between frames/ algorithms, the storage is kept and passed to where needed.
@@ -247,11 +266,11 @@ impl Info {
             ch.distances = dists;
         }
 
-        if self.marked_manually.iter().any(|&x| x) {
+        if self.marked_manually.iter().any(|&x| x != 0) {
             eframe::set_value(storage, MARKED_MANUALLY, &self.marked_manually);
         }
         else {
-            let empty = Vec::<bool>::new();
+            let empty = Vec::<u8>::new();
             eframe::set_value(storage, MARKED_MANUALLY, &empty);
         }
         eframe::set_value(storage, OPTIONS, &self.options);
@@ -417,10 +436,16 @@ impl Info {
         }
     }
     
-    fn change_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>, new_val: bool) {
+    fn change_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>, set: bool) {
+        let bit = 1u8 << self.options.active_manual_marker;
         if con.positions.len() > 0 {
             let (vertex, _) = con.find_closest_vertex(screen_pos);
-            self.marked_manually[vertex] = new_val;
+            if set {
+                self.marked_manually[vertex] |= bit;
+            }
+            else if self.marked_manually[vertex] & bit != 0 {
+                self.marked_manually[vertex] -= bit;
+            }
         }
     }
     
@@ -459,7 +484,7 @@ impl Info {
             for (&in_hull, &pos, &vis) in izip!(self.cop_hull_data.hull(), con.positions, con.visible) {
                 if vis && in_hull.inside()  {
                     let draw_pos = con.cam().transform(pos);
-                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 9.0, LIGHT_BLUE);
+                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 9.0, color::LIGHT_BLUE);
                     con.painter.add(marker_circle);
                 }
             }
@@ -468,7 +493,7 @@ impl Info {
             for &v in self.cop_hull_data.boundary() {
                 if con.visible[v] {
                     let draw_pos = con.vertex_draw_pos(v);
-                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 2.0, WHITE);
+                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 2.0, color::WHITE);
                     con.painter.add(marker_circle);
                 }
             }
@@ -527,7 +552,7 @@ impl Info {
             (VertexColorInfo::EscapeableNodes, _) => 
             for (&esc, &pos, &vis) in izip!(self.escapable.escapable(), con.positions, con.visible) {
                 if vis && esc != 0 {
-                    draw_circle_at(pos, super::color::u16_marker_color(esc));
+                    draw_circle_at(pos, color::u32_marker_color(esc, &color::MARKER_COLORS_F32));
                 }
             }
             (VertexColorInfo::BruteForceRes, _) => 
@@ -556,7 +581,7 @@ impl Info {
             (VertexColorInfo::VertexEquivalenceClasses, _) => if let SymGroup::Explicit(equiv) = con.sym_group() {                
                 for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
                     if vis {
-                        let colors = &super::color::MARKER_COLORS;
+                        let colors = &super::color::MARKER_COLORS_U8;
                         draw_circle_at(pos, colors[class as usize % colors.len()]);
                     }
                 }
@@ -612,7 +637,7 @@ impl Info {
             izip!(NAMES, 0..).filter_map(|(name, i)| ((1u32 << i) & x != 0).then_some(name)).collect()
         };
         let font = FontId::proportional(con.scale * 8.0);
-        let color = if ui.ctx().style().visuals.dark_mode { WHITE } else { BLACK };
+        let color = if ui.ctx().style().visuals.dark_mode { color::WHITE } else { color::BLACK };
         for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
             if vis {
                 let txt = match self.options.vertex_number_info {
@@ -678,10 +703,13 @@ impl Info {
     }
 
     fn draw_manual_markers(&self, con: &DrawContext<'_>) {
+        let mut f32_colors = [color::F32Color::default(); 8];
+        color::zip_to_f32(f32_colors.iter_mut(), self.options.manual_marker_colors.iter());
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
-            if vis && marked {
+            if vis && marked != 0 {
                 let draw_pos = con.cam().transform(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, self.options.manual_marker_color);
+                let color = color::u8_marker_color(marked, &f32_colors);
+                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, color);
                 con.painter.add(marker_circle);
             }
         }
