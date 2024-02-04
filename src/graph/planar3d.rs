@@ -2,8 +2,9 @@
 use std::iter;
 use std::collections::BTreeSet;
 
-use egui::*;
 use itertools::{izip, Itertools};
+use smallvec::{SmallVec, smallvec};
+use egui::*;
 
 use crate::geo::{Pos3, Vec3, pos3, self};
 
@@ -25,6 +26,9 @@ pub struct ConvexTriangleHull {
 
     /// indices of vertices surrounding face
     triangles: Vec<[usize; 3]>, 
+
+    /// two faces are connected, iff they share a (primal) edge.
+    dual_edges: EdgeList,
 }
 
 fn is_small(x: f32) -> bool {
@@ -69,6 +73,7 @@ impl ConvexTriangleHull {
             face_normals: Vec::new(),
             edges: EdgeList::empty(),
             triangles: Vec::new(),
+            dual_edges: EdgeList::empty(),
         }
     }
 
@@ -145,6 +150,24 @@ impl ConvexTriangleHull {
         (triangles, normals)
     }
 
+    /// with faces indexed as in passed-in `triangles`, this returns the dual graph.
+    fn discover_dual(triangles: &[[usize; 3]]) -> EdgeList {
+        let mut res = EdgeList::new(3, triangles.len());
+
+        fn share_edge(tri1: &[usize; 3], tri2: &[usize; 3]) -> bool {
+            tri1.iter().filter(|&v| tri2.contains(v)).count() == 2
+        }
+
+        for (i1, tri1) in izip!(0.., triangles) {
+            for (i2, tri2) in izip!(i1.., &triangles[i1..]) {
+                if share_edge(tri1, tri2) {
+                    res.add_edge(i1, i2);
+                }
+            }
+        }
+        res
+    }
+
     /// connects the closest vertices to have edges,
     /// positions are assumed to lie centered around the origin
     /// assumes all edges to have same length.
@@ -157,11 +180,14 @@ impl ConvexTriangleHull {
             Self::discover_faces(
                 &vertex_positions, &vertex_neighbors);
 
+        let dual_edges = Self::discover_dual(&triangles);
+
         Self { 
             vertices: vertex_positions, 
             edges: vertex_neighbors, 
             triangles, 
-            face_normals 
+            face_normals,
+            dual_edges
         }
     }
 
@@ -244,12 +270,20 @@ impl ConvexTriangleHull {
         let (triangles, face_normals) = 
             Self::discover_faces(&vertices, &edges);
 
+        let dual_edges = Self::discover_dual(&triangles);
+
         Self { 
             vertices, 
             edges, 
             triangles, 
-            face_normals 
+            face_normals,
+            dual_edges
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn triangles(&self) -> &[[usize; 3]] {
+        &self.triangles
     }
 }
 
@@ -345,6 +379,11 @@ impl Embedding3D {
 
     pub fn sym_group(&self) -> &SymGroup {
         &self.sym_group
+    }
+
+    #[allow(dead_code)]
+    pub fn surface(&self) -> &ConvexTriangleHull {
+        &self.surface
     }
 
     #[inline(always)]
@@ -491,6 +530,7 @@ impl Embedding3D {
             edges: edges.clone(),
             face_normals: Vec::new(),
             triangles: Vec::new(),
+            dual_edges: EdgeList::empty(), //caution: needs to be set to correct values at end
         };
         for &(circumference, _) in face_info {
             debug_assert!(circumference > 2);
@@ -564,6 +604,9 @@ impl Embedding3D {
                 }
             }
         }
+
+        let hull_dual_edges = ConvexTriangleHull::discover_dual(&hull.triangles);
+        hull.dual_edges = hull_dual_edges;
         
         let edge_dividing_vertices = vec![BidirectionalRange::empty(); hull.edges.used_space()];
         let inner_vertices = vec![0..0; hull.face_normals.len()];
@@ -654,6 +697,8 @@ impl Embedding3D {
 
     /// turns each edge into a path of length `nr_subdivisions + 1`, 
     /// e.g. `graph.subdivide_all_edges(0)` does nothing
+    /// this assumes, that `self.surface` contains the full graph of `self` so far,
+    /// especially no edge of `self.surface` may already be divided.
     fn subdivide_all_edges(&mut self, nr_subdivisions: usize) {
         if nr_subdivisions == 0 {
             return;
@@ -895,7 +940,65 @@ impl Embedding3D {
     }
 }
 
+impl Embedding3D {
 
+    /// returns all faces of [`Self::surface`], which are touched by `v`. 
+    /// (this means mostly one face, except two when on an edge and more if vertex is vertex of surface.)
+    #[allow(dead_code)]
+    pub fn faces_of(&self, v: usize) -> SmallVec<[usize; 5]> {
+        assert_eq!(self.surface.nr_vertices(), self.nr_visible_surface_vertices);
+
+        let v_pos = self.vertices[v];
+        let (closest_face, _) = self.surface.dual_edges.find_local_minimum(|face_i| {
+            let face_mid = Pos3::average(
+                self.surface.triangles[face_i]
+                .iter().map(|&v| self.surface.vertices[v])
+            );
+            //assumes convexity (like so many other places)
+            (face_mid - v_pos).length_sq()
+        }, 0);
+        if self.inner_vertices[closest_face].contains(&v) {
+            return smallvec![closest_face];
+        }
+        let tri = self.surface.triangles[closest_face];
+        if tri.contains(&v) { // v is vertex of surface -> is corner of multiple faces
+            let mut res = smallvec![closest_face];
+            let mut last_face = usize::MAX;
+            'next_face: loop {
+                let curr_face = *res.last().unwrap();
+                for next_face in self.surface.dual_edges.neighbors_of(curr_face) {
+                    if next_face == last_face {
+                        continue;
+                    }
+                    if next_face == closest_face {
+                        break 'next_face;
+                    }
+                    if self.surface.triangles[next_face].contains(&v) {
+                        res.push(next_face);
+                        last_face = curr_face;
+                        continue 'next_face;
+                    }
+                }
+                break;
+            }
+            return res;
+        }
+        for (&v1, &v2) in tri.iter().circular_tuple_windows() {
+            let edge_index = self.surface.edges.directed_index(v1, v2);
+            let edge = self.edge_dividing_vertices[edge_index];
+            if edge.clone().contains(&v) {
+                let neigh_face = self.surface.dual_edges
+                    .neighbors_of(closest_face)
+                    .find(|&neigh_face| {
+                        let neigh_tri = self.surface.triangles[neigh_face];
+                        neigh_tri.contains(&v1) && neigh_tri.contains(&v2)
+                    }).unwrap();
+                return smallvec![closest_face, neigh_face];
+            }
+        }
+        panic!()
+    }
+}
 
 
 

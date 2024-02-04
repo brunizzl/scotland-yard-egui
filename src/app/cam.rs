@@ -55,7 +55,7 @@ impl Camera3D {
         
         //something something "project" projects to camera coordinates,
         //so we need to invert the axe's rotation or something
-        let project = Project3To2::inverse_of(&self.direction);
+        let project = Project3To2::from_transposed(&self.direction);
         self.to_screen = ToScreen::new(project, move_rect);
     }
 
