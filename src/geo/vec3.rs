@@ -5,8 +5,7 @@ use egui::vec2;
 
 /// copy of egui's Vec2, but with one extra dimension
 #[repr(C)]
-#[derive(Clone, Copy, Default, PartialEq)]
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, Default, PartialEq, serde::Deserialize, serde::Serialize)]
 #[cfg_attr(feature = "bytemuck", derive(bytemuck::Pod, bytemuck::Zeroable))]
 pub struct Vec3 {
     pub x: f32,
@@ -75,7 +74,7 @@ impl Vec3 {
     /// angle in spherical coordinates in radiants
     /// first is latitude (how far from equator) in -pi/2 (south pole) to pi/2 (north pole)
     /// second is longitude (how far on equator) from -pi to pi
-    /// this assumes the x-y plane to intersect the sphere in the equator (positive x-axis has longitude 0) 
+    /// this assumes the x-y plane to intersect the sphere in the equator (positive x-axis has longitude 0)
     /// and the z-axis to go through the poles (positive z is northern hemisphere)
     #[inline(always)]
     pub fn angle(self) -> (f32, f32) {
@@ -106,13 +105,21 @@ impl Vec3 {
     #[must_use]
     #[inline]
     pub fn min(self, other: Self) -> Self {
-        vec3(self.x.min(other.x), self.y.min(other.y), self.z.min(other.z))
+        vec3(
+            self.x.min(other.x),
+            self.y.min(other.y),
+            self.z.min(other.z),
+        )
     }
 
     #[must_use]
     #[inline]
     pub fn max(self, other: Self) -> Self {
-        vec3(self.x.max(other.x), self.y.max(other.y), self.z.max(other.z))
+        vec3(
+            self.x.max(other.x),
+            self.y.max(other.y),
+            self.z.max(other.z),
+        )
     }
 
     /// The dot-product of two vectors.

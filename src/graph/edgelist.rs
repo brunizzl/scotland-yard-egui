@@ -1,13 +1,11 @@
-
-use std::collections::VecDeque;
-use std::iter::{Map, ExactSizeIterator};
-use std::slice::{Chunks, Iter};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::iter::{ExactSizeIterator, Map};
+use std::slice::{Chunks, Iter};
 
 use itertools::Itertools;
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct Index {
     val: u32,
@@ -20,10 +18,16 @@ impl Index {
 
     pub const NONE: Index = Self::new(u32::MAX as usize);
 
-    pub const fn is_none(&self) -> bool { self.val == Self::NONE.val }
+    pub const fn is_none(&self) -> bool {
+        self.val == Self::NONE.val
+    }
 
     pub const fn get(&self) -> Option<usize> {
-        if self.is_none() { None } else { Some(self.val as usize) }
+        if self.is_none() {
+            None
+        } else {
+            Some(self.val as usize)
+        }
     }
 }
 
@@ -39,15 +43,8 @@ impl From<usize> for Index {
     }
 }
 
-
-
 fn find(xs: &mut [Index], y: Index) -> Option<&mut Index> {
-    for x in xs {
-        if *x == y {
-            return Some(x);
-        }
-    }
-    None
+    xs.iter_mut().find(|&&mut x| x == y)
 }
 
 fn next_unused(xs: &mut [Index]) -> Option<&mut Index> {
@@ -64,8 +61,7 @@ fn take_active(xs: &[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
 /// allocates the same space for potential neighbors
 /// CAUTION: if not most vertices have close to the maximum degree (e.g. with one central vertex),
 /// this structure is way worse than using a vector for each vertices' neighbors.
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EdgeList {
     next_shrink_check_len: usize,
     max_neighbors: usize,
@@ -94,19 +90,26 @@ impl EdgeList {
 
     #[allow(dead_code)]
     pub fn min_degree(&self) -> usize {
-        self.neighbors().fold(usize::MAX, |acc, neighs| usize::min(acc, neighs.len()))
+        self.neighbors()
+            .fold(usize::MAX, |acc, neighs| usize::min(acc, neighs.len()))
     }
 
     pub fn new(max_neighbors: usize, length: usize) -> Self {
         let vec_len = max_neighbors * length;
         let entries = vec![Index::NONE; vec_len];
         let next_shrink_check_len = (length * 3) / 2 + 10;
-        Self { next_shrink_check_len, max_neighbors, length, entries }
+        Self {
+            next_shrink_check_len,
+            max_neighbors,
+            length,
+            entries,
+        }
     }
 
-    pub fn from_iter(iter: impl ExactSizeIterator<Item = impl Iterator<Item = usize> + Clone>, 
-        max_neighbors: usize) -> Self 
-    {
+    pub fn from_iter(
+        iter: impl ExactSizeIterator<Item = impl Iterator<Item = usize> + Clone>,
+        max_neighbors: usize,
+    ) -> Self {
         let length = iter.len();
         let mut res = Self::new(max_neighbors, length);
         for (slots, neighs) in res.potential_neighbors_mut().zip(iter) {
@@ -139,7 +142,7 @@ impl EdgeList {
 
     pub fn maybe_shrink_capacity(&mut self, allowed_excess: usize) {
         let new_max_neighs = self.max_degree() + allowed_excess;
-        if new_max_neighs < self.max_neighbors {            
+        if new_max_neighs < self.max_neighbors {
             let mut old_start = 0;
             let mut old_end = self.max_neighbors;
             let mut new_start = 0;
@@ -176,7 +179,10 @@ impl EdgeList {
         self.entries.chunks(self.max_neighbors)
     }
 
-    pub fn neighbors(&self) -> impl ExactSizeIterator<Item = impl ExactSizeIterator<Item = usize> + '_ + Clone> + '_ + Clone {
+    pub fn neighbors(
+        &self,
+    ) -> impl ExactSizeIterator<Item = impl ExactSizeIterator<Item = usize> + '_ + Clone> + '_ + Clone
+    {
         self.potential_neighbors().map(take_active)
     }
 
@@ -190,10 +196,8 @@ impl EdgeList {
     }
 
     #[allow(dead_code)]
-    pub fn neighbors_mut(&mut self) -> 
-        impl ExactSizeIterator<Item = &mut [Index]> + '_ 
-    {
-        self.potential_neighbors_mut().map(|chunk| {            
+    pub fn neighbors_mut(&mut self) -> impl ExactSizeIterator<Item = &mut [Index]> + '_ {
+        self.potential_neighbors_mut().map(|chunk| {
             let end = chunk.iter().position(Index::is_none).unwrap_or(chunk.len());
             debug_assert!(chunk[end..].iter().all(Index::is_none));
             &mut chunk[..end]
@@ -201,7 +205,6 @@ impl EdgeList {
     }
 
     pub fn neighbors_of(&self, v: usize) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
-
         debug_assert!(v < self.length);
         let start = self.max_neighbors * v;
         let storage_end = self.max_neighbors * (v + 1);
@@ -216,7 +219,7 @@ impl EdgeList {
     }
 
     pub fn has_directed_edge(&self, v1: usize, v2: usize) -> bool {
-        self.neighbors_of(v1).contains(&v2.into())
+        self.neighbors_of(v1).contains(&v2)
     }
 
     pub fn has_edge(&self, v1: usize, v2: usize) -> bool {
@@ -227,11 +230,13 @@ impl EdgeList {
 
     /// depends on self.max_neighbors
     pub fn directed_index(&self, v1: usize, v2: usize) -> usize {
-        self.neighbors_of(v1).position(|v| v == v2).map(|v2_pos| {
-            let v1_neighs_range_start = v1 * self.max_neighbors;
-            v1_neighs_range_start + v2_pos
-        })
-        .unwrap()
+        self.neighbors_of(v1)
+            .position(|v| v == v2)
+            .map(|v2_pos| {
+                let v1_neighs_range_start = v1 * self.max_neighbors;
+                v1_neighs_range_start + v2_pos
+            })
+            .unwrap()
     }
 
     #[allow(dead_code)]
@@ -247,7 +252,10 @@ impl EdgeList {
     }
 
     pub fn add_directed_edge(&mut self, v1: usize, v2: usize) {
-        debug_assert!(!self.has_directed_edge(v1, v2), "why would u want to add an already existing edge?");
+        debug_assert!(
+            !self.has_directed_edge(v1, v2),
+            "why would u want to add an already existing edge?"
+        );
         let i2 = Index::new(v2);
         loop {
             if let Some(e1) = next_unused(self.neighbors_mut_of(v1)) {
@@ -277,15 +285,15 @@ impl EdgeList {
         //keep NONE at end
         self.neighbors_mut_of(v1).sort();
         self.neighbors_mut_of(v2).sort();
-    }    
+    }
 
     pub fn add_path_edges_ref<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
         for (&v1, &v2) in path.tuple_windows() {
             self.add_edge(v1, v2);
         }
-    }    
+    }
 
-    pub fn add_path_edges(&mut self, path: impl Iterator<Item= usize>) {
+    pub fn add_path_edges(&mut self, path: impl Iterator<Item = usize>) {
         for (v1, v2) in path.tuple_windows() {
             self.add_edge(v1, v2);
         }
@@ -306,8 +314,13 @@ impl EdgeList {
     }
 
     /// everything in queue is starting point and expected to already have the correct distance
-    pub fn calc_distances_to_with<F>(&self, distances: &mut [isize], mut select: F, queue: &mut VecDeque<usize>) 
-    where F: FnMut(usize, &[isize]) -> bool
+    pub fn calc_distances_to_with<F>(
+        &self,
+        distances: &mut [isize],
+        mut select: F,
+        queue: &mut VecDeque<usize>,
+    ) where
+        F: FnMut(usize, &[isize]) -> bool,
     {
         debug_assert_eq!(distances.len(), self.nr_vertices());
         let mut local_queue = std::mem::take(queue);
@@ -330,20 +343,26 @@ impl EdgeList {
 
     /// paintbucket tool, all in queue are starting vertices, is_old decides if a color is changed to new
     /// and can therefore also access colors as snd parameter
-    pub fn recolor_region_with<Color, F>(&self, new: Color, colors: &mut [Color], 
-        mut is_old: F, queue: &mut VecDeque<usize>) -> usize 
-    where Color: Eq + Clone + std::fmt::Debug,
-          F: FnMut(usize, usize, &[Color]) -> bool
-    {        
+    pub fn recolor_region_with<Color, F>(
+        &self,
+        new: Color,
+        colors: &mut [Color],
+        mut is_old: F,
+        queue: &mut VecDeque<usize>,
+    ) -> usize
+    where
+        Color: Eq + Clone + std::fmt::Debug,
+        F: FnMut(usize, usize, &[Color]) -> bool,
+    {
         debug_assert_eq!(self.nr_vertices(), colors.len());
         let mut nr_colored = 0;
         let mut local_queue = std::mem::take(queue);
         while let Some(v) = local_queue.pop_front() {
             debug_assert_eq!(colors[v], new);
             for n in self.neighbors_of(v) {
-                //seems redundant at first for the simple recolor_region case, 
+                //seems redundant at first for the simple recolor_region case,
                 //but prevents getting stuck in the case of old == new
-                if colors[n] == new { 
+                if colors[n] == new {
                     continue;
                 }
                 if is_old(v, n, colors) {
@@ -358,15 +377,24 @@ impl EdgeList {
     }
 
     /// paintbucket tool, all in queue are starting vertices
-    pub fn recolor_region<Color>(&self, (old, new): (Color, Color), 
-        colors: &mut [Color], queue: &mut VecDeque<usize>) -> usize 
-    where Color: Eq + Clone + std::fmt::Debug
+    pub fn recolor_region<Color>(
+        &self,
+        (old, new): (Color, Color),
+        colors: &mut [Color],
+        queue: &mut VecDeque<usize>,
+    ) -> usize
+    where
+        Color: Eq + Clone + std::fmt::Debug,
     {
         debug_assert_ne!(old, new); //technically not needed, but why would anyone want that?
         self.recolor_region_with(new, colors, |_, n, cs| cs[n] == old, queue)
     }
 
-    pub fn find_local_minimum(&self, mut potential: impl FnMut(usize) -> f32, node_hint: usize) -> (usize, f32) {
+    pub fn find_local_minimum(
+        &self,
+        mut potential: impl FnMut(usize) -> f32,
+        node_hint: usize,
+    ) -> (usize, f32) {
         let mut nearest = node_hint;
         let mut smallest_pot = potential(node_hint);
         let mut maybe_neighbor_better = true;
@@ -382,8 +410,5 @@ impl EdgeList {
             }
         }
         (nearest, smallest_pot)
-    } 
+    }
 } //impl EdgeList
-
-
-

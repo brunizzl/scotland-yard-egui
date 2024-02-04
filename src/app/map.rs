@@ -1,25 +1,24 @@
-
 use egui::*;
 use itertools::izip;
 
-use crate::graph::{ self, Embedding3D, EdgeList };
-use crate::app::{ cam::Camera3D, info::Info };
+use crate::app::{cam::Camera3D, info::Info};
 use crate::geo::Pos3;
+use crate::graph::{self, EdgeList, Embedding3D};
 
-use super::{*, color::*};
+use super::{color::*, *};
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum Shape { 
-    Tetrahedron, 
-    Octahedron, 
-    Icosahedron, 
+pub enum Shape {
+    Tetrahedron,
+    Octahedron,
+    Icosahedron,
     DividedIcosahedron, //Map::nr_ico_divisions belongs to this
-    RegularPolygon2D, //Map::nr_polygon_sides belongs to this
+    RegularPolygon2D,   //Map::nr_polygon_sides belongs to this
     Cube,
     Football,
     FabianHamann,
     Dodecahedron,
-    Random2D, 
+    Random2D,
 }
 
 impl Shape {
@@ -52,15 +51,14 @@ pub struct Map {
 }
 
 mod storage_keys {
-    pub const SHAPE: &'static str = "app::map::shape";
-    pub const RESOLUTION: &'static str = "app::map::resolution";
-    pub const NR_POLY_SIDES: &'static str = "app::map::poly_sides";
-    pub const NR_ICO_DIVISIONS: &'static str = "app::map::nr_ico_divisions";
-    pub const CAMERA: &'static str = "app::map::camera";
+    pub const SHAPE: &str = "app::map::shape";
+    pub const RESOLUTION: &str = "app::map::resolution";
+    pub const NR_POLY_SIDES: &str = "app::map::poly_sides";
+    pub const NR_ICO_DIVISIONS: &str = "app::map::nr_ico_divisions";
+    pub const CAMERA: &str = "app::map::camera";
 }
 
 impl Map {
-
     pub fn shape(&self) -> Shape {
         self.shape
     }
@@ -75,19 +73,23 @@ impl Map {
         //to not accidentally lag on restart, we limit maximal initial resolution
         let (resolution, shrunk) = {
             let last_res = load_or(cc.storage, RESOLUTION, || 12);
-            if last_res > 25 { (25, true) } else { (last_res, false) }
+            if last_res > 25 {
+                (25, true)
+            } else {
+                (last_res, false)
+            }
         };
         let nr_polygon_sides = load_or(cc.storage, NR_POLY_SIDES, || 6);
         let nr_ico_divisions = load_or(cc.storage, NR_ICO_DIVISIONS, || 3);
         let camera = load_or(cc.storage, CAMERA, Camera3D::new);
 
-        let mut result = Self { 
-            data: Embedding3D::empty(), 
+        let mut result = Self {
+            data: Embedding3D::empty(),
             visible: Vec::new(),
             extreme_vertices: Vec::new(),
 
-            shape, 
-            resolution, 
+            shape,
+            resolution,
             nr_polygon_sides,
             ico_pressure: nr_ico_divisions,
             camera,
@@ -170,37 +172,32 @@ impl Map {
     fn recompute(&mut self) {
         let res = self.resolution as usize;
         self.data = match self.shape {
-            Shape::Icosahedron => 
-                Embedding3D::new_subdivided_icosahedron(res),
-            Shape::Octahedron => 
-                Embedding3D::new_subdivided_octahedron(res),
-            Shape::Tetrahedron => 
-                Embedding3D::new_subdivided_tetrahedron(res),
+            Shape::Icosahedron => Embedding3D::new_subdivided_icosahedron(res),
+            Shape::Octahedron => Embedding3D::new_subdivided_octahedron(res),
+            Shape::Tetrahedron => Embedding3D::new_subdivided_tetrahedron(res),
             Shape::DividedIcosahedron => {
                 let res1 = usize::min(res, self.ico_pressure as usize);
-                let res2 = if res1 == 0 { res } else { (usize::max(res, 1) - 1) / (res1 + 1) };
-                Embedding3D::new_subdivided_subdivided_icosahedron(res1, res2) 
+                let res2 = if res1 == 0 {
+                    res
+                } else {
+                    (usize::max(res, 1) - 1) / (res1 + 1)
+                };
+                Embedding3D::new_subdivided_subdivided_icosahedron(res1, res2)
             },
             Shape::RegularPolygon2D => {
                 let sides = self.nr_polygon_sides as usize;
                 Embedding3D::from_2d(graph::triangulated_regular_polygon(sides, res))
             },
-            Shape::Cube => 
-                Embedding3D::new_subdivided_cube(res),
-            Shape::Dodecahedron => 
-                Embedding3D::new_subdivided_dodecahedron(res, false, false),
-            Shape::Football => 
-                Embedding3D::new_subdivided_football(res, false),
-            Shape::FabianHamann => 
-                Embedding3D::new_subdivided_football(res, true),
-            Shape::Random2D => 
-                Embedding3D::from_2d(graph::random_triangulated(res, 8)),
+            Shape::Cube => Embedding3D::new_subdivided_cube(res),
+            Shape::Dodecahedron => Embedding3D::new_subdivided_dodecahedron(res, false, false),
+            Shape::Football => Embedding3D::new_subdivided_football(res, false),
+            Shape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
+            Shape::Random2D => Embedding3D::from_2d(graph::random_triangulated(res, 8)),
         };
         if self.is_3d() {
             self.extreme_vertices.clear();
             self.camera.reset_position();
-        }
-        else {
+        } else {
             self.update_extreme_vertices_2d();
             self.camera.reset_direction();
         }
@@ -230,7 +227,7 @@ impl Map {
         info.characters.forget_move_history();
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) { 
+    pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) {
         if ui.button("🏠 Position").clicked() {
             self.camera.reset();
         }
@@ -240,7 +237,11 @@ impl Map {
             ui.radio_value(&mut self.shape, Shape::Tetrahedron, "Tetraeder");
             ui.radio_value(&mut self.shape, Shape::Octahedron, "Oktaeder");
             ui.radio_value(&mut self.shape, Shape::Icosahedron, "Ikosaeder");
-            ui.radio_value(&mut self.shape, Shape::DividedIcosahedron, "aufgepusteter Ikosaeder");
+            ui.radio_value(
+                &mut self.shape,
+                Shape::DividedIcosahedron,
+                "aufgepusteter Ikosaeder",
+            );
             if self.shape == Shape::DividedIcosahedron {
                 change |= add_drag_value(ui, &mut self.ico_pressure, "Druck: ", 0, self.resolution);
             }
@@ -248,11 +249,19 @@ impl Map {
             ui.radio_value(&mut self.shape, Shape::Cube, "Würfel");
             ui.radio_value(&mut self.shape, Shape::Football, "Fußball");
             ui.radio_value(&mut self.shape, Shape::FabianHamann, "Fabian Hamanns Graph");
-            ui.radio_value(&mut self.shape, Shape::RegularPolygon2D, "2D Polygon trianguliert");
+            ui.radio_value(
+                &mut self.shape,
+                Shape::RegularPolygon2D,
+                "2D Polygon trianguliert",
+            );
             if self.shape == Shape::RegularPolygon2D {
                 change |= add_drag_value(ui, &mut self.nr_polygon_sides, "Seiten: ", 3, 10);
             }
-            ui.radio_value(&mut self.shape, Shape::Random2D, "2D Kreisscheibe zufällig trianguliert");
+            ui.radio_value(
+                &mut self.shape,
+                Shape::Random2D,
+                "2D Kreisscheibe zufällig trianguliert",
+            );
             if self.shape == Shape::Random2D {
                 change |= ui.button("neu berechnen").clicked();
             }
@@ -270,16 +279,20 @@ impl Map {
         let zoom = self.camera.zoom();
 
         let detail = (self.data.nr_vertices() > 1)
-            .then(||self.data.positions()[0])
-            .and_then(|v0_pos| self.data.edges().neighbors_of(0).next()
-                .map(|n| (v0_pos - self.data.positions()[n]).length() * 10.0)
-            )
+            .then(|| self.data.positions()[0])
+            .and_then(|v0_pos| {
+                self.data
+                    .edges()
+                    .neighbors_of(0)
+                    .next()
+                    .map(|n| (v0_pos - self.data.positions()[n]).length() * 10.0)
+            })
             .unwrap_or(12.0 / self.resolution as f32);
         let detail_factor = f32::min(detail, 4.0);
 
         let screen_size = self.camera.to_screen().move_rect.to().size();
         let screen_res_factor = screen_size.x.min(screen_size.y) * 0.001;
-        
+
         screen_res_factor * zoom * detail_factor
     }
 
@@ -293,37 +306,38 @@ impl Map {
 
     pub fn update_and_draw<'a>(&'a mut self, ui: &mut Ui) -> DrawContext<'a> {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
-        let (response, painter) = ui.allocate_painter(draw_space, Sense::hover()); 
+        let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());
         let screen = response.rect;
         if self.is_3d() {
             self.camera.update_3d(ui, screen);
-        }
-        else {
+        } else {
             self.camera.update_2d(ui, screen);
         }
 
         let scale = self.scale();
         let grey_stroke = Stroke::new(scale, GREY);
         if self.is_3d() {
-            self.data.draw_visible_edges_3d(self.camera.to_screen(), 
-                &painter, grey_stroke, &mut self.visible);
-        }
-        else {
+            self.data.draw_visible_edges_3d(
+                self.camera.to_screen(),
+                &painter,
+                grey_stroke,
+                &mut self.visible,
+            );
+        } else {
             self.update_vertex_visibility();
             self.data.draw_all_edges(self.camera.to_screen(), &painter, grey_stroke);
         }
 
-        DrawContext { 
+        DrawContext {
             map: self.identity(),
             extreme_vertices: &self.extreme_vertices,
             edges: self.edges(),
-            visible: self.visible(), 
-            positions: self.positions(), 
+            visible: self.visible(),
+            positions: self.positions(),
             tolerance: self.tolerance(),
-            scale, 
+            scale,
             painter,
             response,
         }
     }
 }
-

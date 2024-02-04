@@ -1,5 +1,4 @@
-
-use egui::{Pos2, Vec2, pos2, emath::RectTransform};
+use egui::{emath::RectTransform, pos2, Pos2, Vec2};
 
 pub mod vec3;
 pub use vec3::*;
@@ -9,7 +8,6 @@ pub use pos3::*;
 
 pub mod mat;
 pub use mat::*;
-
 
 type Line2 = (Pos2, Vec2);
 
@@ -42,13 +40,12 @@ pub fn intersection_step((a, da): Line2, (b, db): Line2) -> f32 {
 }
 
 pub fn lines_intersect(l1: Line2, l2: Line2) -> bool {
-    (0.0..=1.0).contains(&intersection_step(l1, l2)) &&
-    (0.0..=1.0).contains(&intersection_step(l2, l1))
+    (0.0..=1.0).contains(&intersection_step(l1, l2))
+        && (0.0..=1.0).contains(&intersection_step(l2, l1))
 }
 
 /// takes Vec3 to Vec2 where the subspace is spanned by new_x_axis and new_y_axis
-#[derive(Clone, Copy)]
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct Project3To2 {
     /// eigenvector with eigenvalue 1, portion in that direction will be returned as first Vec2 entry
     /// vector is expected to be normalized.
@@ -72,7 +69,11 @@ impl Project3To2 {
         debug_assert!(a.dot(*b).abs() < 1e-5);
         debug_assert!(a.dot(*c).abs() < 1e-5);
         debug_assert!(b.dot(*c).abs() < 1e-5);
-        Self { new_x: *a, new_y: *b, new_z: *c }
+        Self {
+            new_x: *a,
+            new_y: *b,
+            new_z: *c,
+        }
     }
 
     pub fn from_transposed([a, b, c]: &[Vec3; 3]) -> Self {
@@ -95,8 +96,7 @@ impl Project3To2 {
     }
 }
 
-#[derive(Clone, Copy)]
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct ToScreen {
     pub to_plane: Project3To2,
     pub move_rect: RectTransform,
@@ -111,7 +111,11 @@ impl ToScreen {
         let b2 = line_from_to(screen.left_top(), screen.right_top());
         let b3 = line_from_to(screen.right_top(), screen.right_bottom());
         let b4 = line_from_to(screen.right_bottom(), screen.left_bottom());
-        Self { to_plane: project, move_rect, screen_boundaries: [b1, b2, b3, b4] }
+        Self {
+            to_plane: project,
+            move_rect,
+            screen_boundaries: [b1, b2, b3, b4],
+        }
     }
 
     pub fn apply(&self, pos: Pos3) -> Pos2 {
@@ -129,12 +133,11 @@ impl ToScreen {
 
     /// assumes a, b, c to be ordered counterclockwise
     pub fn triangle_visible(&self, a: Pos3, b: Pos3, c: Pos3) -> bool {
-        
         let u = self.apply(a);
         let v = self.apply(b);
         let w = self.apply(c);
         let screen = self.move_rect.to();
-        
+
         if screen.contains(u) || screen.contains(v) || screen.contains(w) {
             //at least one corner is visible
             return true;
@@ -144,8 +147,9 @@ impl ToScreen {
         let line_vw = line_from_to(v, w);
         let line_wu = line_from_to(w, u);
         if self.crosses_screen_boundary(line_uv)
-        || self.crosses_screen_boundary(line_vw)
-        || self.crosses_screen_boundary(line_wu) {
+            || self.crosses_screen_boundary(line_vw)
+            || self.crosses_screen_boundary(line_wu)
+        {
             //at least one edge is visible
             return true;
         }
@@ -156,8 +160,9 @@ impl ToScreen {
         //just to be save numerically, we use the center.
         let screen_center = screen.center();
         if left_of_line(line_uv, screen_center)
-        && left_of_line(line_vw, screen_center)
-        && left_of_line(line_wu, screen_center) {
+            && left_of_line(line_vw, screen_center)
+            && left_of_line(line_wu, screen_center)
+        {
             return true;
         }
 
@@ -180,4 +185,3 @@ pub fn gram_schmidt_3d([v1, v2, v3]: &mut [Vec3; 3]) {
 pub fn plane_normal(p1: Pos3, p2: Pos3, p3: Pos3) -> Vec3 {
     Vec3::cross(p2 - p1, p3 - p1).normalized()
 }
-

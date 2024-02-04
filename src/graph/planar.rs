@@ -1,11 +1,10 @@
-
 use std::collections::VecDeque;
 
-use egui::{Pos2, Vec2, pos2, vec2};
+use egui::{pos2, vec2, Pos2, Vec2};
 use itertools::Itertools;
 
 use super::*;
-use crate::geo::{Pos3, Vec3, vec3};
+use crate::geo::{vec3, Pos3, Vec3};
 
 pub struct Embedding2D {
     positions: Vec<Pos2>,
@@ -19,7 +18,7 @@ impl Default for Embedding2D {
 }
 
 impl Embedding2D {
-    pub fn to_parts(self) -> (Vec<Pos2>, EdgeList) {
+    pub fn into_parts(self) -> (Vec<Pos2>, EdgeList) {
         (self.positions, self.edges)
     }
 
@@ -34,7 +33,10 @@ impl Embedding2D {
     }
 
     pub fn empty() -> Self {
-        Embedding2D { positions: Vec::new(), edges: EdgeList::empty() }
+        Embedding2D {
+            positions: Vec::new(),
+            edges: EdgeList::empty(),
+        }
     }
 
     #[inline(always)]
@@ -74,16 +76,24 @@ impl Embedding2D {
         for (v1, neighs) in self.edges.potential_neighbors_mut().enumerate() {
             let p1 = self.positions[v1];
 
-            let angle = |&i2:&Index| if let Some(v2) = i2.get() {
-                let p2 = self.positions[v2];
-                (p2 - p1).angle()
-            }
-            else { f32::MAX };
+            let angle = |&i2: &Index| {
+                if let Some(v2) = i2.get() {
+                    let p2 = self.positions[v2];
+                    (p2 - p1).angle()
+                } else {
+                    f32::MAX
+                }
+            };
 
-            let order_floats = |f1: f32, f2: f32| 
-                if f1 < f2 { std::cmp::Ordering::Less }
-                else if f1 > f2 { std::cmp::Ordering::Greater }
-                else { std::cmp::Ordering::Equal };
+            let order_floats = |f1: f32, f2: f32| {
+                if f1 < f2 {
+                    std::cmp::Ordering::Less
+                } else if f1 > f2 {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            };
 
             neighs.sort_by(|n1, n2| order_floats(angle(n1), angle(n2)));
         }
@@ -127,8 +137,9 @@ impl Embedding2D {
             for (neigh, &neigh_pos) in self.neigbors_with_positions(curr) {
                 let neigh_line = geo::line_from_to(curr_pos, neigh_pos);
                 if geo::left_of_line(curr_line, neigh_pos)
-                && geo::left_of_line(next_line, neigh_pos)
-                && geo::left_of_line(neigh_line, point) {
+                    && geo::left_of_line(next_line, neigh_pos)
+                    && geo::left_of_line(neigh_line, point)
+                {
                     next = neigh;
                     next_pos = neigh_pos;
                     next_line = neigh_line;
@@ -137,7 +148,7 @@ impl Embedding2D {
             if next == usize::MAX {
                 return Vec::new();
             }
-            if let Some(start) = res.iter().position(|&v| v == next) {                
+            if let Some(start) = res.iter().position(|&v| v == next) {
                 return res[start..].into();
             }
             res.push(next);
@@ -147,7 +158,7 @@ impl Embedding2D {
         }
     }
 
-    /// turns each edge into a path of length `nr_subdivisions + 1`, 
+    /// turns each edge into a path of length `nr_subdivisions + 1`,
     /// e.g. `graph.subdivide_all_edges(0)` does nothing
     #[allow(dead_code)]
     pub fn subdivide_all_edges(&mut self, nr_subdivisions: usize) {
@@ -177,7 +188,6 @@ impl Embedding2D {
             }
         }
     }
-
 }
 
 /// centered at zero, contained in -1.0..1.0 x -1.0..1.0
@@ -221,9 +231,9 @@ pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Embedding2D 
             //note: the last added edge connects b2's nodes
             //e.g. for upper sector we see the following paths added (all drawn right to left):
             //level 1: \      2: \/\     3: \/\/\     4: \/\/\/\       ...
-            graph.add_path_edges(last_levels_nodes.iter()
-                .interleave(this_levels_nodes[1..].iter()));
-            
+            graph
+                .add_path_edges(last_levels_nodes.iter().interleave(this_levels_nodes[1..].iter()));
+
             last_levels_nodes = this_levels_nodes;
         }
     }
@@ -258,12 +268,10 @@ impl Triangualtion {
 
     #[inline(always)]
     fn has_face(&self, v1: usize, v2: usize, v3: usize) -> bool {
-        self.graph.has_edge(v1, v2) &&
-        self.graph.has_edge(v2, v3) &&
-        self.graph.has_edge(v3, v1)
+        self.graph.has_edge(v1, v2) && self.graph.has_edge(v2, v3) && self.graph.has_edge(v3, v1)
     }
 
-    //assumes edge of (v1, v2) and vertex v3 form a face, 
+    //assumes edge of (v1, v2) and vertex v3 form a face,
     //returns other face adjacent to edge
     #[inline(always)]
     fn neighbor_face_vertex(&self, (v1, v2): (usize, usize), v3: usize) -> usize {
@@ -271,7 +279,7 @@ impl Triangualtion {
 
         let v1_neighs = self.graph.edges.neighbors_of(v1);
         let v2_neighs = self.graph.edges.neighbors_of(v2);
-        let v1_pos = self.graph.positions[v1];        
+        let v1_pos = self.graph.positions[v1];
         let v2_pos = self.graph.positions[v2];
         let v3_pos = self.graph.positions[v3];
 
@@ -303,7 +311,7 @@ impl Triangualtion {
         for neigh in self.graph.edges.neighbors_of(v) {
             let n_pos = self.graph.positions[neigh];
             let to_v = v_pos - n_pos;
-            force += to_v / (to_v.length_sq() * one_over_avg_edge_len_sq + 0.1); 
+            force += to_v / (to_v.length_sq() * one_over_avg_edge_len_sq + 0.1);
         }
         force * 0.15
     }
@@ -315,7 +323,8 @@ impl Triangualtion {
         let avg_len = self.avg_edge_len();
         let one_over_avg_edge_len_sq = 1.0 / (avg_len * avg_len);
         //dont wanna move the outher points -> skip circumference
-        'step: for (v, neighs) in self.graph.edges.neighbors().enumerate().skip(self.circumference) {
+        'step: for (v, neighs) in self.graph.edges.neighbors().enumerate().skip(self.circumference)
+        {
             let mut cum_pos = Vec2::ZERO;
             let mut cum_dist = 0.0;
             for (n1, n2) in neighs.circular_tuple_windows() {
@@ -331,7 +340,7 @@ impl Triangualtion {
                     new_positions[v] = Pos2::ZERO + cum_pos / cum_dist;
                     continue 'step;
                 }
-                //if all neighbors are sorted correctly, we move the vertex to the average position of 
+                //if all neighbors are sorted correctly, we move the vertex to the average position of
                 //the edges connecting its neighbors.
                 let p1 = self.graph.positions[n1].to_vec2();
                 let p2 = self.graph.positions[n2].to_vec2();
@@ -373,11 +382,11 @@ impl Triangualtion {
     }
 
     #[inline(always)]
-    fn find_face_of(&self, point: Pos2) -> Option<[usize; 3]> {        
+    fn find_face_of(&self, point: Pos2) -> Option<[usize; 3]> {
         let (start, _) = self.graph.find_nearest_node(point, self.circumference);
         let mut curr_pos = self.graph.positions[start];
         let mut curr_line = geo::line_from_to(point, curr_pos);
-        
+
         let mut res = [start, usize::MAX, usize::MAX];
         let mut i = 0; //index in res
         let mut nr_steps = 0;
@@ -387,11 +396,12 @@ impl Triangualtion {
             let mut next_pos = Pos2::ZERO;
             let mut next_line = curr_line;
             let i_next = if i == 2 { 0 } else { i + 1 };
-            for (neigh, &neigh_pos) in self.graph.neigbors_with_positions(res[i]) {  
+            for (neigh, &neigh_pos) in self.graph.neigbors_with_positions(res[i]) {
                 let neigh_line = geo::line_from_to(curr_pos, neigh_pos);
                 if geo::left_of_line(curr_line, neigh_pos)
-                && geo::left_of_line(next_line, neigh_pos)
-                && geo::left_of_line(neigh_line, point) {              
+                    && geo::left_of_line(next_line, neigh_pos)
+                    && geo::left_of_line(neigh_line, point)
+                {
                     if res[i_next] == neigh {
                         return Some(res);
                     }
@@ -428,8 +438,7 @@ impl Triangualtion {
 
             let new_edge = geo::line_from_to(v0_pos, v3_pos);
             //test if connection from v0 to v3 crosses edge from v1 to v2
-            if geo::left_of_line(new_edge, v1_pos) 
-            == geo::left_of_line(new_edge, v2_pos) {
+            if geo::left_of_line(new_edge, v1_pos) == geo::left_of_line(new_edge, v2_pos) {
                 continue;
             }
             //test if edge from v0 to v3 would be shorter than edge from v1 to v2
@@ -447,7 +456,11 @@ impl Triangualtion {
         }
     }
 
-    fn add_vertex(&mut self, new_pos: Pos2, queue: &mut VecDeque<((usize, usize), usize)>) -> usize {
+    fn add_vertex(
+        &mut self,
+        new_pos: Pos2,
+        queue: &mut VecDeque<((usize, usize), usize)>,
+    ) -> usize {
         if let Some(face) = self.find_face_of(new_pos) {
             let new = self.graph.add_vertex(new_pos);
             for &v in face.iter() {
@@ -458,7 +471,7 @@ impl Triangualtion {
             //e.g. make the triangles less slim. we do this by proxy: the goal is to find
             //  shortest possible sides for our triangles.
             queue.clear();
-            for (&v1, &v2) in face.iter().circular_tuple_windows() {                
+            for (&v1, &v2) in face.iter().circular_tuple_windows() {
                 queue.push_back(((v1, v2), new));
                 debug_assert!({
                     let v1_pos = self.graph.positions[v1];
@@ -472,10 +485,10 @@ impl Triangualtion {
             return new;
         }
 
-        usize::MAX     
+        usize::MAX
     }
 
-    fn new_from_positions(positions :&[Pos2], circumference: usize) -> Triangualtion {
+    fn new_from_positions(positions: &[Pos2], circumference: usize) -> Triangualtion {
         let mut discarded = Vec::new();
         let mut queue = VecDeque::new();
         let mut res = Self::new_wheel(circumference);
@@ -498,13 +511,11 @@ impl Triangualtion {
         use rand::distributions::{Distribution, Uniform};
         let mut rng = rand::thread_rng();
         let coordinate_generator = Uniform::from(-1.0..1.0);
-        let mut random_point = || {
-            loop {
-                let x = coordinate_generator.sample(&mut rng);
-                let y = coordinate_generator.sample(&mut rng);
-                if x * x + y * y < 1.0 {
-                    return pos2(x, y);
-                }
+        let mut random_point = || loop {
+            let x = coordinate_generator.sample(&mut rng);
+            let y = coordinate_generator.sample(&mut rng);
+            if x * x + y * y < 1.0 {
+                return pos2(x, y);
             }
         };
         let mut queue = VecDeque::new();
@@ -546,23 +557,34 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Embedding2D
 #[allow(dead_code)]
 /// takes vertices and edges of a [`super::Embedding3D`] and applies a stereographic projection
 /// (see https://en.wikipedia.org/wiki/Stereographic_projection) with the `north_pole` mapped to infinity.
-fn project_stereographic_from_3d(positions_3d: &[Pos3], edges: EdgeList, north_pole: Vec3) -> Embedding2D {
+fn project_stereographic_from_3d(
+    positions_3d: &[Pos3],
+    edges: EdgeList,
+    north_pole: Vec3,
+) -> Embedding2D {
     let (unrotated_phi, unrotated_tau) = vec3(0.0, 0.0, 1.0).angle();
     let (phi, tau) = north_pole.angle();
     let delta_phi = unrotated_phi - phi;
     let delta_tau = unrotated_tau - tau;
 
-    let positions = positions_3d.iter().map(|p| {
-        let p = p.to_vec3().rotate_z(delta_phi).rotate_x(delta_tau).rotate_z(std::f32::consts::TAU / 4.0).normalized();
-        let raw = Vec2 {
-            x: p.x / (1.0 - p.z),
-            y: p.y / (1.0 - p.z),
-        };
-        let raw_len = raw.length();
-        let corrected = f32::powf(raw_len, 0.5); //TODO: choose monotone function f with f'(0) = 1 
-        (2.0 * raw * (corrected / raw_len)).to_pos2()
-    }).collect_vec();
+    let positions = positions_3d
+        .iter()
+        .map(|p| {
+            let p = p
+                .to_vec3()
+                .rotate_z(delta_phi)
+                .rotate_x(delta_tau)
+                .rotate_z(std::f32::consts::TAU / 4.0)
+                .normalized();
+            let raw = Vec2 {
+                x: p.x / (1.0 - p.z),
+                y: p.y / (1.0 - p.z),
+            };
+            let raw_len = raw.length();
+            let corrected = f32::powf(raw_len, 0.5); //TODO: choose monotone function f with f'(0) = 1
+            (2.0 * raw * (corrected / raw_len)).to_pos2()
+        })
+        .collect_vec();
 
     Embedding2D { positions, edges }
 }
-

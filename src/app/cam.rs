@@ -1,7 +1,6 @@
+use egui::{emath::RectTransform, *};
 
-use egui::{*, emath::RectTransform};
-
-use crate::geo::{self, Pos3, Vec3, Project3To2, ToScreen};
+use crate::geo::{self, Pos3, Project3To2, ToScreen, Vec3};
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
@@ -10,7 +9,7 @@ pub struct Camera3D {
     /// == 1.0 -> no change
     /// < 1.0  -> zoomed out
     /// > 1.0  -> zoomed in
-    zoom: f32, 
+    zoom: f32,
     direction: [Vec3; 3],
     /// offset of center independent of zoom + direction (e.g. in draw plane)
     position: Pos2,
@@ -25,11 +24,14 @@ impl Camera3D {
 
     pub fn new() -> Self {
         let default_rect = Rect::from_center_size(Pos2::ZERO, Vec2::splat(1.0));
-        Self { 
-            zoom: 1.0, 
+        Self {
+            zoom: 1.0,
             direction: DEFAULT_AXES,
-            position: Pos2::new(0.0, 0.0), 
-            to_screen: ToScreen::new(Project3To2::new(&DEFAULT_AXES), RectTransform::identity(default_rect))
+            position: Pos2::new(0.0, 0.0),
+            to_screen: ToScreen::new(
+                Project3To2::new(&DEFAULT_AXES),
+                RectTransform::identity(default_rect),
+            ),
         }
     }
 
@@ -41,10 +43,9 @@ impl Camera3D {
             //shapes are centered around zero, with extreme vertices having length 1.0
             let mut from_size = Vec2::splat(2.05 / self.zoom);
             if ratio < 1.0 {
-                from_size.y /= ratio;    
-            }
-            else {
-                from_size.x *= ratio;   
+                from_size.y /= ratio;
+            } else {
+                from_size.x *= ratio;
             };
             let from = Rect::from_center_size(Pos2::ZERO, from_size);
             RectTransform::from_to(from, screen)
@@ -52,7 +53,7 @@ impl Camera3D {
         let center = self.position.to_vec2() / scale_rect.scale();
         let from = scale_rect.from().translate(-center);
         let move_rect = RectTransform::from_to(from, screen);
-        
+
         //something something "project" projects to camera coordinates,
         //so we need to invert the axe's rotation or something
         let project = Project3To2::from_transposed(&self.direction);
@@ -78,8 +79,8 @@ impl Camera3D {
     }
 
     /// only z-rotation, zoom is centered around mouse pointer
-    pub fn update_2d(&mut self, ui: &mut Ui, screen: Rect) {  
-        if ui.rect_contains_pointer(screen) { 
+    pub fn update_2d(&mut self, ui: &mut Ui, screen: Rect) {
+        if ui.rect_contains_pointer(screen) {
             //Note: referencing ui inside lambda may cause deadlock
             ui.input(|info| {
                 if info.pointer.button_down(PointerButton::Secondary) {
@@ -90,7 +91,7 @@ impl Camera3D {
                     self.position += drag.translation_delta;
                     self.rotate_z(drag.rotation_delta);
                 }
-    
+
                 let zoom_delta = info.zoom_delta();
                 self.zoom *= zoom_delta;
                 if zoom_delta != 1.0 {
@@ -103,13 +104,12 @@ impl Camera3D {
                     }
                 }
             });
-        }     
+        }
         self.update_to_screen(screen);
     }
 
     /// no translation, zoom is centered around screen middle    
     pub fn update_3d(&mut self, ui: &mut Ui, screen: Rect) {
-        
         if ui.rect_contains_pointer(screen) {
             //Note: referencing ui inside lambda may cause deadlock
             ui.input(|info| {
@@ -126,7 +126,7 @@ impl Camera3D {
                 self.rotate_x(drag_rot.y);
                 self.rotate_y(drag_rot.x);
                 geo::gram_schmidt_3d(&mut self.direction);
-    
+
                 let zoom_delta = info.zoom_delta();
                 self.zoom *= zoom_delta;
             });
@@ -145,7 +145,7 @@ impl Camera3D {
     pub fn reset(&mut self) {
         *self = Self::new();
     }
-    
+
     pub fn transform(&self, real_pos: Pos3) -> Pos2 {
         self.to_screen.apply(real_pos)
     }

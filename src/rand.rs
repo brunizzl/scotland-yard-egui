@@ -1,13 +1,11 @@
 use std::usize;
 
-
-
 ///  linear congruential generator
-pub struct LCG {
-    state: u64
+pub struct Lcg {
+    state: u64,
 }
 
-impl LCG {
+impl Lcg {
     pub fn new(seed: u64) -> Self {
         Self { state: seed }
     }
@@ -25,4 +23,3 @@ impl LCG {
         }
     }
 }
-

@@ -4,8 +4,7 @@ use super::vec3::*;
 
 /// copy of egui's Pos2, but with one extra dimension
 #[repr(C)]
-#[derive(Clone, Copy, Default, PartialEq)]
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, Default, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Pos3 {
     pub x: f32,
     pub y: f32,
@@ -62,13 +61,21 @@ impl Pos3 {
     #[must_use]
     #[inline]
     pub fn min(self, other: Self) -> Self {
-        pos3(self.x.min(other.x), self.y.min(other.y), self.z.min(other.z))
+        pos3(
+            self.x.min(other.x),
+            self.y.min(other.y),
+            self.z.min(other.z),
+        )
     }
 
     #[must_use]
     #[inline]
     pub fn max(self, other: Self) -> Self {
-        pos3(self.x.max(other.x), self.y.max(other.y), self.z.max(other.z))
+        pos3(
+            self.x.max(other.x),
+            self.y.max(other.y),
+            self.z.max(other.z),
+        )
     }
 
     #[must_use]
@@ -100,7 +107,7 @@ impl Pos3 {
     }
 
     pub fn average_ref<'a>(positions: impl ExactSizeIterator<Item = &'a Self>) -> Pos3 {
-        Self::average(positions.map(|&p| p))
+        Self::average(positions.copied())
     }
 }
 

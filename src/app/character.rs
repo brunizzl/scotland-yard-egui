@@ -1,12 +1,11 @@
-
 use std::collections::VecDeque;
 
 use egui::*;
 use itertools::izip;
 
-use crate::{graph::EdgeList, geo::Pos3};
+use crate::{geo::Pos3, graph::EdgeList};
 
-use super::{*, color::*};
+use super::{color::*, *};
 
 #[derive(Clone, Copy)]
 pub struct Style {
@@ -16,14 +15,14 @@ pub struct Style {
     pub job: &'static str,
 }
 
-const fn new_cop(emoji: &'static str) -> Style { 
+const fn new_cop(emoji: &'static str) -> Style {
     Style {
         color: Color32::from_rgb(10, 50, 170),
         glow: Color32::from_rgb(60, 120, 235),
         //alternatives: 👮🛂🛃🐈🔫🚔🐂🍩
         emoji,
         job: "Cop",
-    } 
+    }
 }
 
 pub const NR_COP_STYLES: usize = 7;
@@ -37,12 +36,12 @@ pub const STYLES: [Style; 1 + NR_COP_STYLES] = [
         emoji: "🏃",
         job: "Räuber",
     },
-    new_cop("👮"), 
-    new_cop("🍩"), 
-    new_cop("🚔"), 
-    new_cop("🐂"), 
-    new_cop("🔫"), 
-    new_cop("🛂"), 
+    new_cop("👮"),
+    new_cop("🍩"),
+    new_cop("🚔"),
+    new_cop("🐂"),
+    new_cop("🔫"),
+    new_cop("🛂"),
     new_cop("🛃"),
 ];
 
@@ -56,18 +55,18 @@ pub struct Character {
     pub distances: Vec<isize>,
     pub nearest_node: usize,
 
-    /// position to where is is currently held while dragging, 
+    /// position to where is is currently held while dragging,
     /// only updated while dragging (coordinates are the middle ones of ToScreen)
-    pos2: Pos2, 
+    pos2: Pos2,
 
-    /// position of nearest_node. 
-    /// this is only relevant, when a new graph is computed: it places the character at the node on the new graph 
+    /// position of nearest_node.
+    /// this is only relevant, when a new graph is computed: it places the character at the node on the new graph
     /// closest to where he was before.
-    pub pos3: Pos3, 
+    pub pos3: Pos3,
 
     pub on_node: bool,
     dragging: bool, //currently beeing dragged by mouse cursor
-    updated: bool, //nearest_node or distances changed this frame
+    updated: bool,  //nearest_node or distances changed this frame
 }
 
 impl Character {
@@ -77,16 +76,16 @@ impl Character {
 
     pub fn new(style_index: usize, pos2: Pos2) -> Self {
         //dragging set to true snaps to node next update
-        Character { 
-            style_index, 
+        Character {
+            style_index,
 
             last_positions: Vec::new(),
             distances: Vec::new(),
-            nearest_node: 0, 
-            
-            pos2, 
-            pos3: Pos3::ZERO, 
-            on_node: false, 
+            nearest_node: 0,
+
+            pos2,
+            pos3: Pos3::ZERO,
+            on_node: false,
             dragging: true, //causes snap to node next update (as dragging will change to false)
             updated: true,
         }
@@ -120,7 +119,12 @@ impl Character {
     }
 
     /// returns true iff character was just released and has changed its node
-    fn drag_and_draw(&mut self, ui: &Ui, con: &DrawContext<'_>, nr_others_at_same_pos: usize) -> bool {       
+    fn drag_and_draw(
+        &mut self,
+        ui: &Ui,
+        con: &DrawContext<'_>,
+        nr_others_at_same_pos: usize,
+    ) -> bool {
         let to_plane = con.cam().to_screen().to_plane;
         let move_rect = con.cam().to_screen().move_rect;
         let character_size = f32::max(6.0, con.scale * 8.0);
@@ -128,7 +132,8 @@ impl Character {
         let node_pos = to_plane.project_pos(con.positions[self.nearest_node]);
         let draw_at_node = self.on_node && !self.dragging;
         let draw_screen_pos = if draw_at_node {
-            move_rect.transform_pos(node_pos) + (nr_others_at_same_pos as f32) *vec2(0.0, character_size * 0.75)
+            move_rect.transform_pos(node_pos)
+                + (nr_others_at_same_pos as f32) * vec2(0.0, character_size * 0.75)
         } else {
             move_rect.transform_pos(self.pos2)
         };
@@ -162,15 +167,14 @@ impl Character {
         self.dragging = dragging;
         self.draw_large_at(draw_screen_pos, &con.painter, ui, character_size);
 
-        just_released_on_new_node  
+        just_released_on_new_node
     }
 
     /// assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
-    fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>)
-    {
+    fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>) {
         if !self.dragging {
             return;
-        }   
+        }
         let to_plane = con.cam().to_screen().to_plane;
         let mut best_dist_sq = f32::MAX;
         let mut best_vertex = usize::MAX;
@@ -181,7 +185,7 @@ impl Character {
                     best_dist_sq = new_dist_sq;
                     best_vertex = v;
                 }
-            } 
+            }
         }
         self.on_node = best_dist_sq <= con.tolerance * con.tolerance;
 
@@ -205,9 +209,9 @@ impl Character {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct CharacterState {    
+pub struct CharacterState {
     characters: Vec<Character>,
-    past_moves: Vec<usize>, //present is at end (same below)
+    past_moves: Vec<usize>,            //present is at end (same below)
     future_moves: Vec<(usize, usize)>, //fst is character index, snd is vertex index
 
     show_steps: bool,
@@ -219,11 +223,11 @@ impl CharacterState {
     }
 
     pub fn new() -> Self {
-        Self {            
+        Self {
             characters: vec![
                 Character::new(0, Pos2::ZERO),
                 Character::new(1, pos2(0.25, 0.0)),
-                ],
+            ],
             past_moves: Vec::new(),
             future_moves: Vec::new(),
 
@@ -239,7 +243,12 @@ impl CharacterState {
         self.future_moves.last().map(|(c, _)| &self.characters[*c])
     }
 
-    pub fn reverse_move(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
+    pub fn reverse_move(
+        &mut self,
+        edges: &EdgeList,
+        positions: &[Pos3],
+        queue: &mut VecDeque<usize>,
+    ) {
         if let Some(i) = self.past_moves.pop() {
             let ch = &mut self.characters[i];
             if let Some(v_curr) = ch.last_positions.pop() {
@@ -247,7 +256,7 @@ impl CharacterState {
                 if let Some(&v_last) = ch.last_positions.last() {
                     ch.nearest_node = v_last;
                     ch.update_distances(edges, queue);
-                    ch.pos3 = positions[ch.nearest_node];            
+                    ch.pos3 = positions[ch.nearest_node];
                 }
             }
         }
@@ -260,17 +269,17 @@ impl CharacterState {
             ch.last_positions.push(v);
             ch.nearest_node = v;
             ch.update_distances(edges, queue);
-            ch.pos3 = positions[ch.nearest_node];     
+            ch.pos3 = positions[ch.nearest_node];
         }
     }
 
     pub fn all(&self) -> &[Character] {
         &self.characters
-    } 
+    }
 
     pub fn all_mut(&mut self) -> &mut [Character] {
         &mut self.characters
-    } 
+    }
 
     pub fn robber(&self) -> Option<&Character> {
         self.characters.first()
@@ -313,7 +322,7 @@ impl CharacterState {
         ui.horizontal(|ui| {
             let nr_characters = self.characters.len();
             let minus_emoji = self.characters.last().map_or("🚫", |c| c.style().emoji);
-            let next_index = if nr_characters == 0 { 
+            let next_index = if nr_characters == 0 {
                 0 //indexes to ROBBER
             } else {
                 let nr_cops = nr_characters - 1;
@@ -329,7 +338,9 @@ impl CharacterState {
             }
             if ui.button(plus_text).clicked() {
                 let mut new_ch = Character::new(next_index, Pos2::ZERO);
-                let find_screen_facing = |v: usize| -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal());
+                let find_screen_facing = |v: usize| {
+                    -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal())
+                };
                 let (v, _) = map.edges().find_local_minimum(find_screen_facing, 0);
                 new_ch.nearest_node = v;
                 self.characters.push(new_ch);
@@ -342,7 +353,7 @@ impl CharacterState {
                 self.forget_move_history();
                 change = true;
             }
-        });        
+        });
         ui.horizontal(|ui| {
             if ui.button(" ⟲ ").on_hover_text("strg + z").clicked() {
                 self.reverse_move(map.edges(), map.positions(), queue);
@@ -354,14 +365,22 @@ impl CharacterState {
             }
         });
 
-        let print_style = |ch: Option<&Character>| if let Some(style) = ch.map(Character::style) {
-            format!("{} ({})", style.job, style.emoji)
-        } else { 
-            " 🚫   ".to_string() 
+        let print_style = |ch: Option<&Character>| {
+            if let Some(style) = ch.map(Character::style) {
+                format!("{} ({})", style.job, style.emoji)
+            } else {
+                " 🚫   ".to_string()
+            }
         };
 
-        ui.label(format!("letzter Schritt: {}", print_style(self.last_moved())));
-        ui.label(format!("nächster Schritt: {}", print_style(self.next_moved())));
+        ui.label(format!(
+            "letzter Schritt: {}",
+            print_style(self.last_moved())
+        ));
+        ui.label(format!(
+            "nächster Schritt: {}",
+            print_style(self.next_moved())
+        ));
 
         change
     }
@@ -377,15 +396,16 @@ impl CharacterState {
         positions.extend(self.characters.iter().map(|c| c.nearest_node));
 
         for (i, ch) in self.characters.iter_mut().enumerate() {
-            let nr_others_at_same_pos = positions[..i].iter().filter(|&&p| p == ch.nearest_node).count();
-            if ch.on_node && con.visible[ch.nearest_node] || !ch.on_node {
-                let finished_move = ch.drag_and_draw(ui, con, nr_others_at_same_pos);                
+            let nr_others_at_same_pos =
+                positions[..i].iter().filter(|&&p| p == ch.nearest_node).count();
+            //always allow to drag, except character sits on backside of graph
+            if !ch.on_node || con.visible[ch.nearest_node] {
+                let finished_move = ch.drag_and_draw(ui, con, nr_others_at_same_pos);
                 if finished_move {
                     self.past_moves.push(i);
                     self.future_moves.clear();
                 }
-            }
-            else {
+            } else {
                 ch.draw_small_at_node(con);
             }
         }

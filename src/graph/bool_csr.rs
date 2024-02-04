@@ -1,12 +1,10 @@
-
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 /// stores a matrix of bool entries in CSR format.
 /// because CSR stores only nonzero entries and there is only one nonzero entry in bool,
 /// no actual storage of the elements is required, only where they are.
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BoolCSR {
     nr_cols: usize,
     row_offsets: Vec<usize>,
@@ -27,7 +25,11 @@ impl BoolCSR {
     }
 
     pub fn new(nr_cols: usize) -> Self {
-        Self { nr_cols, row_offsets: vec![0], col_indices: Vec::new() }
+        Self {
+            nr_cols,
+            row_offsets: vec![0],
+            col_indices: Vec::new(),
+        }
     }
 
     pub fn add_row(&mut self) {
@@ -41,10 +43,11 @@ impl BoolCSR {
         self.col_indices.push(col);
     }
 
-    pub fn iter_rows<'a>(&'a self) -> impl Iterator<Item = &'a [usize]> + Clone {
-        self.row_offsets.iter().tuple_windows().map(
-            |(&start, &end)| &self.col_indices[start..end]
-        )
+    pub fn iter_rows(&self) -> impl Iterator<Item = &'_ [usize]> + Clone {
+        self.row_offsets
+            .iter()
+            .tuple_windows()
+            .map(|(&start, &end)| &self.col_indices[start..end])
     }
 
     pub fn last_row(&self) -> &[usize] {
@@ -62,7 +65,6 @@ impl BoolCSR {
         &self.col_indices[start..end]
     }
 }
-
 
 #[cfg(test)]
 mod test {
@@ -93,5 +95,3 @@ mod test {
         }
     }
 }
-
-

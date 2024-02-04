@@ -1,50 +1,48 @@
-
-
 use std::collections::VecDeque;
 
-use itertools::{ izip, Itertools };
+use itertools::{izip, Itertools};
 
 use egui::*;
 
-use crate::graph::*;
 use crate::app::character::CharacterState;
+use crate::graph::*;
 
 use self::bruteforce_state::BruteforceWorker;
 
-use super::{*, color};
+use super::{color, *};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
-pub enum VertexColorInfo { 
-    None, 
-    RobberAdvantage, 
-    BruteForceRes, 
-    EscapeableNodes, 
-    NearNodes, 
-    RobberDist, 
-    CopDist, 
+pub enum VertexColorInfo {
+    None,
+    RobberAdvantage,
+    BruteForceRes,
+    EscapeableNodes,
+    NearNodes,
+    RobberDist,
+    CopDist,
     VertexEquivalenceClasses,
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
-    Debugging 
+    Debugging,
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum VertexNumberInfo { 
-    None, 
-    Indices, 
-    RobberAdvantage, 
-    EscapeableNodes, 
-    MinCopDist, 
+pub enum VertexNumberInfo {
+    None,
+    Indices,
+    RobberAdvantage,
+    EscapeableNodes,
+    MinCopDist,
     RobberDist,
     VertexEquivalenceClass,
-    Debugging 
+    Debugging,
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
     manual_marker_colors: [Color32; 8],
     active_manual_marker: usize, //expected in 0..8
-    shown_manual_markers: u8, //bitmask
+    shown_manual_markers: u8,    //bitmask
 
     automatic_marker_color: Color32,
     vertex_color_info: VertexColorInfo,
@@ -82,7 +80,7 @@ impl Options {
             ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
             ui.add_space(5.0);
 
-            menu_change |= 
+            menu_change |=
                 ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"))
                 .on_hover_text("Berechnung des Randes kann aus Effizienzgründen für sehr kleine / \
                 sehr dünne Hüllen fehlerhaft sein. \n\
@@ -104,19 +102,19 @@ impl Options {
             });
             let old = self.vertex_color_info;
             //settings to draw extra information
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::None, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::None,
                 "Keine");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::NearNodes, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::NearNodes,
                 "für Räuber nähere Knoten")
                 .on_hover_text("alle Knoten näher am Räuber als am nächsten Cop");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::RobberAdvantage, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::RobberAdvantage,
                 "Punkte mit direkter Fluchtoption 1")
                 .on_hover_text("alle Punkte in der Konvexen Hülle, \
                 die näher an einem Punkt ausserhalb der Hülle sind, als der nächste Cop an diesem Punkt ist");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::EscapeableNodes, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::EscapeableNodes,
                 "Punkte mit direkter Fluchtoption 2")
                 .on_hover_text("Jedes Paar von benauchbarten Cops am Hüllenrand kontrolliert einen Randbereich. \
                 Will der Räuber durch diesen Bereich fliehen, dürfen die Cops in der Zeit, \
@@ -130,44 +128,45 @@ impl Options {
                 aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
                 die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::CopDist, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::CopDist,
                 "Punkte mit Abstand zu Cops")
                 .on_hover_text("Abstand einstellbar bei ausgewählter Option");
             if self.vertex_color_info == VertexColorInfo::CopDist {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::RobberDist, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::RobberDist,
                 "Räuberabstand")
                 .on_hover_text("Alle Punkte die eingestellten Abstand zu Räuber haben");
             if self.vertex_color_info == VertexColorInfo::RobberDist {
                 add_drag_value(ui, &mut self.marked_robber_dist, "Abstand: ", 0, 1000);
             }
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::VertexEquivalenceClasses, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::VertexEquivalenceClasses,
                 "Symmetrieäquivalenzklassen")
                 .on_hover_text("Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
                 Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
                 Das macht Bruteforce etwas weniger speicherintensiv.");
-            
+
             ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::RobberVertexClass, "Äquivalenzklasse Räuberknoten");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::CopsRotatedToEquivalence, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::CopsRotatedToEquivalence,
                 "Rotierte Coppositionen")
                 .on_hover_text("Coppositionen rotiert auf repräsentative Knoten selber Äquivalenzklasse");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::Debugging, 
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::Debugging,
                 "Debugging")
                 .on_hover_text("Was auch immer gerade während des letzten mal kompilierens interessant war");
 
             menu_change |= old != self.vertex_color_info;
         });
         ui.collapsing("Manuelle Marker", |ui| {
-            ui.label("[Info]")
-                .on_hover_text("Manuelle Marker können an dem der Mausposition nächsten Knoten \
+            ui.label("[Info]").on_hover_text(
+                "Manuelle Marker können an dem der Mausposition nächsten Knoten \
                 mit Taste [m] hinzugefügt und [n] entfernt werden.\n\
-                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.");
-                
+                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
+            );
+
             for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
                 ui.horizontal(|ui| {
                     ui.radio_value(&mut self.active_manual_marker, i, "");
@@ -190,37 +189,37 @@ impl Options {
         });
         ui.collapsing("Zahlen", |ui|{
             let old = self.vertex_number_info;
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::None, 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::None,
                 "Keine");
 
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::Indices, 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::Indices,
                 "Knotenindizes")
                 .on_hover_text("nur relevant für Debugging");
 
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::RobberAdvantage, 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::RobberAdvantage,
                 "Marker Fluchtoption 1")
                 .on_hover_text("Helfer zur Berechnung von Fluchtoption 1");
 
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::EscapeableNodes, 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::EscapeableNodes,
                 "Marker Fluchtoption 2")
                 .on_hover_text("jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
                 Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.");
 
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::MinCopDist, 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::MinCopDist,
                 "minimaler Cop Abstand")
                 .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
 
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::RobberDist, 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::RobberDist,
                 "Räuberabstand")
                 .on_hover_text("Abstand von Räuberposition zu jedem Knoten");
 
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::VertexEquivalenceClass, 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::VertexEquivalenceClass,
                 "Symmetrieäquivalenzklasse")
                 .on_hover_text("Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
                 Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
                 Das macht Bruteforce etwas weniger speicherintensiv.");
 
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::Debugging, 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::Debugging,
                 "Debugging")
                 .on_hover_text("Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
                 gerade spannend zum debuggen war");
@@ -239,10 +238,10 @@ pub struct Info {
     cop_advantage: Vec<isize>,
     pub marked_manually: Vec<u8>,
 
-    /// this is only used as intermediary variable during computations. 
+    /// this is only used as intermediary variable during computations.
     /// to not reallocate between frames/ algorithms, the storage is kept and passed to where needed.
     pub queue: VecDeque<usize>,
-    
+
     pub characters: CharacterState,
 
     options: Options,
@@ -252,16 +251,20 @@ pub struct Info {
 }
 
 mod storage_keys {
-    pub const OPTIONS: &'static str = "app::info::options";
-    pub const CHARACTERS: &'static str = "app::info::characters";
-    pub const MARKED_MANUALLY: &'static str = "app::info::manually_marked";
+    pub const OPTIONS: &str = "app::info::options";
+    pub const CHARACTERS: &str = "app::info::characters";
+    pub const MARKED_MANUALLY: &str = "app::info::manually_marked";
 }
 
 impl Info {
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
         //idea: only store settings, not state that is recomputable.
-        let all_dists = self.characters.all_mut().iter_mut()
-            .map(|c| std::mem::take(&mut c.distances)).collect_vec();
+        let all_dists = self
+            .characters
+            .all_mut()
+            .iter_mut()
+            .map(|c| std::mem::take(&mut c.distances))
+            .collect_vec();
         use storage_keys::*;
         eframe::set_value(storage, CHARACTERS, &self.characters);
         for (ch, dists) in izip!(self.characters.all_mut(), all_dists.into_iter()) {
@@ -270,8 +273,7 @@ impl Info {
 
         if self.marked_manually.iter().any(|&x| x != 0) {
             eframe::set_value(storage, MARKED_MANUALLY, &self.marked_manually);
-        }
-        else {
+        } else {
             let empty = Vec::<u8>::new();
             eframe::set_value(storage, MARKED_MANUALLY, &empty);
         }
@@ -284,7 +286,7 @@ impl Info {
         let marked_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
         let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
 
-        Self { 
+        Self {
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
             min_cop_dist: Vec::new(),
@@ -292,8 +294,8 @@ impl Info {
             marked_manually,
 
             queue: VecDeque::new(),
-            
-            characters,            
+
+            characters,
             options,
             menu_change: false,
 
@@ -304,7 +306,7 @@ impl Info {
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
         self.menu_change = false;
         self.menu_change |= self.options.draw_menu(ui);
-        
+
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
         let nr_cops = self.characters.active_cops().count();
@@ -319,8 +321,7 @@ impl Info {
         let mut active_cops = self.characters.active_cops();
         if let Some(cop) = active_cops.next() {
             min_cop_dist.clone_from(&cop.distances);
-        }
-        else {
+        } else {
             min_cop_dist.resize(edges.nr_vertices(), isize::MAX);
         }
         for cop in active_cops {
@@ -336,15 +337,17 @@ impl Info {
     fn update_cop_advantage(&mut self, edges: &EdgeList) {
         let cop_hull = &self.cop_hull_data.hull();
         let mut advantage = std::mem::take(&mut self.cop_advantage);
-        advantage.resize(edges.nr_vertices(), isize::MAX);        
+        advantage.resize(edges.nr_vertices(), isize::MAX);
         let mut queue = std::mem::take(&mut self.queue);
         queue.clear();
 
-        let zipped = itertools::izip!(0.., 
-            cop_hull.iter(), 
-            advantage.iter_mut(), 
-            self.min_cop_dist.iter(), 
-            edges.neighbors());
+        let zipped = itertools::izip!(
+            0..,
+            cop_hull.iter(),
+            advantage.iter_mut(),
+            self.min_cop_dist.iter(),
+            edges.neighbors()
+        );
         for (node, &hull, adv, &cop_dist, mut neighs) in zipped {
             if !hull.inside() && neighs.any(|n| cop_hull[n].inside()) {
                 queue.push_back(node);
@@ -358,32 +361,37 @@ impl Info {
 
     fn update_convex_cop_hull(&mut self, con: &DrawContext<'_>) {
         let mut temp = [usize::MAX];
-        let vertices_outside_hull = if con.extreme_vertices.len() > 0 {
+        let vertices_outside_hull = if !con.extreme_vertices.is_empty() {
             con.extreme_vertices
-        }
-        else {
+        } else {
             debug_assert_eq!(con.positions.len(), self.min_cop_dist.len());
-            let (furthest_vertex, _) = self.min_cop_dist.iter().enumerate()
-                .fold((0, 0), |best, (v, &dist)| if dist > best.1 { (v, dist) } else { best });
+            let (furthest_vertex, _) =
+                self.min_cop_dist.iter().enumerate().fold((0, 0), |best, (v, &dist)| {
+                    if dist > best.1 {
+                        (v, dist)
+                    } else {
+                        best
+                    }
+                });
             temp[0] = furthest_vertex;
             &temp
         };
 
         self.cop_hull_data.update(
-            &self.characters.cops(), 
-            con.edges, 
+            self.characters.cops(),
+            con.edges,
             &self.min_cop_dist,
-            &mut self.queue, 
+            &mut self.queue,
             vertices_outside_hull,
         );
     }
 
     fn update_escapable(&mut self, con: &DrawContext<'_>) {
         self.escapable.update(
-            self.characters.cops(), 
-            &self.cop_hull_data, 
-            con.edges, 
-            &mut self.queue
+            self.characters.cops(),
+            &self.cop_hull_data,
+            con.edges,
+            &mut self.queue,
         )
     }
 
@@ -403,18 +411,19 @@ impl Info {
         let robber_moved = self.characters.robber_updated();
         let cop_moved = self.characters.active_cop_updated();
 
-        let update_cop_advantage = self.options.vertex_color_info == VertexColorInfo::RobberAdvantage
+        let update_cop_advantage = self.options.vertex_color_info
+            == VertexColorInfo::RobberAdvantage
             || self.options.vertex_color_info == VertexColorInfo::Debugging
             || self.options.vertex_number_info == VertexNumberInfo::RobberAdvantage
             || self.options.vertex_number_info == VertexNumberInfo::Debugging;
-            
+
         let update_escapable = self.options.vertex_color_info == VertexColorInfo::EscapeableNodes
             || self.options.vertex_color_info == VertexColorInfo::Debugging
             || self.options.vertex_number_info == VertexNumberInfo::EscapeableNodes
             || self.options.vertex_number_info == VertexNumberInfo::Debugging;
-        
-        let update_hull = update_cop_advantage 
-            || update_escapable 
+
+        let update_hull = update_cop_advantage
+            || update_escapable
             || self.options.show_convex_hull
             || self.options.show_hull_boundary;
 
@@ -433,34 +442,34 @@ impl Info {
         if (cop_moved || self.escapable.escapable().len() != nr_vertices) && update_escapable {
             self.update_escapable(con);
         }
-        if (cop_moved || robber_moved || self.cop_advantage.len() != nr_vertices) && update_cop_advantage {
+        if (cop_moved || robber_moved || self.cop_advantage.len() != nr_vertices)
+            && update_cop_advantage
+        {
             self.update_cop_advantage(con.edges);
         }
     }
-    
+
     fn change_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>, set: bool) {
         let bit = 1u8 << self.options.active_manual_marker;
-        if con.positions.len() > 0 {
+        if !con.positions.is_empty() {
             let (vertex, _) = con.find_closest_vertex(screen_pos);
             if set {
                 self.marked_manually[vertex] |= bit;
-            }
-            else if self.marked_manually[vertex] & bit != 0 {
+            } else if self.marked_manually[vertex] & bit != 0 {
                 self.marked_manually[vertex] -= bit;
             }
         }
     }
-    
+
     fn add_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
         self.change_marker_at(screen_pos, con, true)
     }
-    
+
     fn remove_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
         self.change_marker_at(screen_pos, con, false)
     }
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
-        
         ui.input(|info| {
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
                 self.characters.reverse_move(con.edges, con.positions, &mut self.queue);
@@ -472,21 +481,24 @@ impl Info {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.add_marker_at(pointer_pos, con);
                 }
-            }  
+            }
             if info.key_down(Key::N) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.remove_marker_at(pointer_pos, con);
                 }
-            }        
+            }
         });
     }
 
     fn draw_convex_cop_hull(&self, con: &DrawContext<'_>) {
         if self.options.show_convex_hull {
-            for (&in_hull, &pos, &vis) in izip!(self.cop_hull_data.hull(), con.positions, con.visible) {
-                if vis && in_hull.inside()  {
+            for (&in_hull, &pos, &vis) in
+                izip!(self.cop_hull_data.hull(), con.positions, con.visible)
+            {
+                if vis && in_hull.inside() {
                     let draw_pos = con.cam().transform(pos);
-                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 9.0, color::LIGHT_BLUE);
+                    let marker_circle =
+                        Shape::circle_filled(draw_pos, con.scale * 9.0, color::LIGHT_BLUE);
                     con.painter.add(marker_circle);
                 }
             }
@@ -495,12 +507,13 @@ impl Info {
             for &v in self.cop_hull_data.boundary() {
                 if con.visible[v] {
                     let draw_pos = con.vertex_draw_pos(v);
-                    let marker_circle = Shape::circle_filled(draw_pos, con.scale * 2.0, color::WHITE);
+                    let marker_circle =
+                        Shape::circle_filled(draw_pos, con.scale * 2.0, color::WHITE);
                     con.painter.add(marker_circle);
                 }
             }
         }
-    } 
+    }
 
     fn draw_vertices(&self, con: &DrawContext<'_>) {
         if !self.options.draw_vertices {
@@ -516,26 +529,33 @@ impl Info {
     }
 
     fn draw_green_circles(&self, con: &DrawContext<'_>) {
-        let draw_circle_at = |pos, color|{
+        let draw_circle_at = |pos, color| {
             let draw_pos = con.cam().transform(pos);
             let marker_circle = Shape::circle_filled(draw_pos, con.scale * 6.0, color);
             con.painter.add(marker_circle);
         };
         match (self.options.vertex_color_info, self.characters.robber()) {
-            (VertexColorInfo::NearNodes, Some(r)) => 
-                for (r_dist, c_dist, &pos, &vis) in 
-                izip!(&r.distances, &self.min_cop_dist, con.positions, con.visible) {
+            (VertexColorInfo::NearNodes, Some(r)) => {
+                for (r_dist, c_dist, &pos, &vis) in
+                    izip!(&r.distances, &self.min_cop_dist, con.positions, con.visible)
+                {
                     if vis && r_dist < c_dist {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
-                },
-            (VertexColorInfo::RobberAdvantage, _) => 
-                for (&adv, &pos, &vis, &hull) in 
-                izip!(&self.cop_advantage, con.positions, con.visible, self.cop_hull_data.hull()) {
+                }
+            },
+            (VertexColorInfo::RobberAdvantage, _) => {
+                for (&adv, &pos, &vis, &hull) in izip!(
+                    &self.cop_advantage,
+                    con.positions,
+                    con.visible,
+                    self.cop_hull_data.hull()
+                ) {
                     if vis && hull.inside() && adv < -1 {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
-                },
+                }
+            },
             (VertexColorInfo::RobberDist, Some(r)) => {
                 let bnd = self.options.marked_robber_dist;
                 for (&dist, &pos, &vis) in izip!(&r.distances, con.positions, con.visible) {
@@ -544,29 +564,37 @@ impl Info {
                     }
                 }
             },
-            (VertexColorInfo::CopDist, _) => 
-            for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, con.positions, con.visible) {
-                if vis && dist == self.options.marked_cop_dist {
-                    draw_circle_at(pos, self.options.automatic_marker_color);
+            (VertexColorInfo::CopDist, _) => {
+                for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, con.positions, con.visible) {
+                    if vis && dist == self.options.marked_cop_dist {
+                        draw_circle_at(pos, self.options.automatic_marker_color);
+                    }
                 }
-            }
-            (VertexColorInfo::EscapeableNodes, _) => 
-            for (&esc, &pos, &vis) in izip!(self.escapable.escapable(), con.positions, con.visible) {
-                if vis && esc != 0 {
-                    draw_circle_at(pos, color::u32_marker_color(esc, &color::MARKER_COLORS_F32));
+            },
+            (VertexColorInfo::EscapeableNodes, _) => {
+                for (&esc, &pos, &vis) in
+                    izip!(self.escapable.escapable(), con.positions, con.visible)
+                {
+                    if vis && esc != 0 {
+                        draw_circle_at(
+                            pos,
+                            color::u32_marker_color(esc, &color::MARKER_COLORS_F32),
+                        );
+                    }
                 }
-            }
-            (VertexColorInfo::BruteForceRes, _) => 
+            },
+            (VertexColorInfo::BruteForceRes, _) => {
                 if let BruteForceResult::RobberWins(data) = &self.worker.result() {
-                    let same_map = con.shape() == data.shape() &&
-                        con.edges.nr_vertices() == data.safe.nr_map_vertices();
+                    let same_map = con.shape() == data.shape()
+                        && con.edges.nr_vertices() == data.safe.nr_map_vertices();
 
                     let same_nr_cops = self.characters.active_cops().count() == data.nr_cops;
 
                     if same_map && same_nr_cops {
-                        let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
+                        let mut active_cops =
+                            self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
 
-                        let (_, cop_positions) = data.cop_moves.pack(active_cops.iter().map(|&c| c));
+                        let (_, cop_positions) = data.cop_moves.pack(active_cops.iter().copied());
                         let safe_vertices = data.safe.robber_safe_when(cop_positions);
                         let sym_group = con.sym_group().to_dyn();
                         let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
@@ -578,89 +606,118 @@ impl Info {
                             }
                         }
                     }
-                },
-            (VertexColorInfo::VertexEquivalenceClasses, _) => if let SymGroup::Explicit(equiv) = con.sym_group() {                
-                for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
-                    if vis {
-                        let colors = &super::color::MARKER_COLORS_U8;
-                        draw_circle_at(pos, colors[class as usize % colors.len()]);
+                }
+            },
+            (VertexColorInfo::VertexEquivalenceClasses, _) => {
+                if let SymGroup::Explicit(equiv) = con.sym_group() {
+                    for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
+                        if vis {
+                            let colors = &super::color::MARKER_COLORS_U8;
+                            draw_circle_at(pos, colors[class as usize % colors.len()]);
+                        }
                     }
                 }
             },
-            (VertexColorInfo::RobberVertexClass, _) => if let Some(r) = self.characters.robber() {
-                let sym_group = con.sym_group().to_dyn();
-                let v0 = r.nearest_node;
-                let mut f = |transform: &dyn DynAutomorphism| {
-                    let sym_v = transform.dyn_apply_forward(v0);
-                    if con.visible[sym_v] {
-                        let sym_pos = con.positions[sym_v];
-                        draw_circle_at(sym_pos, self.options.automatic_marker_color);
-                    }
-                };
-                sym_group.for_each_transform(&mut f as &mut dyn FnMut(&dyn DynAutomorphism));
-            }
+            (VertexColorInfo::RobberVertexClass, _) => {
+                if let Some(r) = self.characters.robber() {
+                    let sym_group = con.sym_group().to_dyn();
+                    let v0 = r.nearest_node;
+                    let mut f = |transform: &dyn DynAutomorphism| {
+                        let sym_v = transform.dyn_apply_forward(v0);
+                        if con.visible[sym_v] {
+                            let sym_pos = con.positions[sym_v];
+                            draw_circle_at(sym_pos, self.options.automatic_marker_color);
+                        }
+                    };
+                    sym_group.for_each_transform(&mut f as &mut dyn FnMut(&dyn DynAutomorphism));
+                }
+            },
             (VertexColorInfo::CopsRotatedToEquivalence, _) => {
                 let sym_group = con.sym_group().to_dyn();
-                let mut active_cops = self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
+                let mut active_cops =
+                    self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
                 sym_group.dyn_to_representative(&mut active_cops);
                 for v in active_cops {
                     let pos = con.positions[v];
                     if con.visible[v] {
-                        draw_circle_at(pos, self.options.automatic_marker_color);                            
-                    }
-                    else { //only draw half size
+                        draw_circle_at(pos, self.options.automatic_marker_color);
+                    } else {
+                        //only draw half size
                         let draw_pos = con.cam().transform(pos);
-                        let marker_circle = Shape::circle_filled(draw_pos, con.scale * 3.0, 
-                            self.options.automatic_marker_color);
+                        let marker_circle = Shape::circle_filled(
+                            draw_pos,
+                            con.scale * 3.0,
+                            self.options.automatic_marker_color,
+                        );
                         con.painter.add(marker_circle);
                     }
                 }
             },
-            (VertexColorInfo::Debugging, _) =>             
-            for &v in self.escapable.inner_connecting_line() {
-                if con.visible[v] {
-                    let pos = con.positions[v];
-                    draw_circle_at(pos, self.options.automatic_marker_color);
+            (VertexColorInfo::Debugging, _) => {
+                for &v in self.escapable.inner_connecting_line() {
+                    if con.visible[v] {
+                        let pos = con.positions[v];
+                        draw_circle_at(pos, self.options.automatic_marker_color);
+                    }
                 }
-            }
+            },
             _ => {},
         }
-    }    
+    }
 
     fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) {
         if self.options.vertex_number_info == VertexNumberInfo::None {
             return;
         }
-        let true_bits = |x:u32| -> String {
-            const NAMES: [char; 32] = 
-                ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 
-                 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', ];
-            izip!(NAMES, 0..).filter_map(|(name, i)| ((1u32 << i) & x != 0).then_some(name)).collect()
+        let true_bits = |x: u32| -> String {
+            const NAMES: [char; 32] = [
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
+                'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
+            ];
+            izip!(NAMES, 0..)
+                .filter_map(|(name, i)| ((1u32 << i) & x != 0).then_some(name))
+                .collect()
         };
         let font = FontId::proportional(con.scale * 8.0);
-        let color = if ui.ctx().style().visuals.dark_mode { color::WHITE } else { color::BLACK };
+        let color = if ui.ctx().style().visuals.dark_mode {
+            color::WHITE
+        } else {
+            color::BLACK
+        };
         for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
             if vis {
                 let txt = match self.options.vertex_number_info {
-                    VertexNumberInfo::Indices => { v.to_string() }
-                    VertexNumberInfo::MinCopDist => { self.min_cop_dist[v].to_string() }
-                    VertexNumberInfo::None => { panic!() }
-                    VertexNumberInfo::RobberAdvantage => { (-1 -self.cop_advantage[v]).to_string() }
-                    VertexNumberInfo::EscapeableNodes => { true_bits(self.escapable.escapable()[v]) }
-                    VertexNumberInfo::VertexEquivalenceClass => if let SymGroup::Explicit(e) = con.sym_group() {
-                        e.classes()[v].to_string()
-                    } else { String::new() },
-                    VertexNumberInfo::RobberDist => if let Some(r) = self.characters.robber() {
-                        r.distances[v].to_string()
-                    } else { String::new() },
+                    VertexNumberInfo::Indices => v.to_string(),
+                    VertexNumberInfo::MinCopDist => self.min_cop_dist[v].to_string(),
+                    VertexNumberInfo::None => panic!(),
+                    VertexNumberInfo::RobberAdvantage => (-1 - self.cop_advantage[v]).to_string(),
+                    VertexNumberInfo::EscapeableNodes => true_bits(self.escapable.escapable()[v]),
+                    VertexNumberInfo::VertexEquivalenceClass => {
+                        if let SymGroup::Explicit(e) = con.sym_group() {
+                            e.classes()[v].to_string()
+                        } else {
+                            String::new()
+                        }
+                    },
+                    VertexNumberInfo::RobberDist => {
+                        if let Some(r) = self.characters.robber() {
+                            r.distances[v].to_string()
+                        } else {
+                            String::new()
+                        }
+                    },
                     //VertexInfoNumber::Debugging => self.escapable.owners()[i].to_string(),
-                    //VertexInfoNumber::Debugging => { 
+                    //VertexInfoNumber::Debugging => {
                     //    let d = self.escapable.boundary_segment_dist()[v];
                     //    if d == isize::MAX { String::new() } else { d.to_string() }
                     //}
-                    VertexNumberInfo::Debugging => if let SymGroup::Explicit(equiv) = con.sym_group() { 
-                        equiv.vertex_representatives()[v].to_string()
-                    } else { String::new() },
+                    VertexNumberInfo::Debugging => {
+                        if let SymGroup::Explicit(equiv) = con.sym_group() {
+                            equiv.vertex_representatives()[v].to_string()
+                        } else {
+                            String::new()
+                        }
+                    },
                 };
                 let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
                 layout_job.halign = Align::Center;
@@ -679,17 +736,17 @@ impl Info {
         for ch in self.characters.all() {
             let f_len = ch.last_positions.len() as f32;
             let draw_size = |i| con.scale * 2.5 * (i + 0.8 * f_len) / f_len;
-            for (i, (&v1, &v2)) in ch.last_positions.iter().tuple_windows().enumerate() { 
+            for (i, (&v1, &v2)) in ch.last_positions.iter().tuple_windows().enumerate() {
                 if !con.visible[v1] {
                     continue;
-                }      
+                }
                 let draw_pos_1 = con.vertex_draw_pos(v1);
                 let size = draw_size(i as f32);
                 let marker_circle = Shape::circle_filled(draw_pos_1, size, ch.style().glow);
                 con.painter.add(marker_circle);
                 if !con.visible[v2] {
                     continue;
-                } 
+                }
                 let points = [draw_pos_1, con.vertex_draw_pos(v2)];
                 let stroke = Stroke::new(size * 0.75, ch.style().glow);
                 let line = Shape::LineSegment { points, stroke };
@@ -709,7 +766,10 @@ impl Info {
     fn draw_manual_markers(&self, con: &DrawContext<'_>) {
         let mut f32_colors = [color::F32Color::default(); 8];
         let mask = self.options.shown_manual_markers;
-        color::zip_to_f32(f32_colors.iter_mut(), self.options.manual_marker_colors.iter());
+        color::zip_to_f32(
+            f32_colors.iter_mut(),
+            self.options.manual_marker_colors.iter(),
+        );
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
             let masked = marked & mask;
             if vis && masked != 0 {
@@ -723,7 +783,11 @@ impl Info {
 
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         self.process_general_input(ui, con);
-        if self.menu_change { self.definitely_update(con); } else { self.maybe_update(con); }
+        if self.menu_change {
+            self.definitely_update(con);
+        } else {
+            self.maybe_update(con);
+        }
         self.draw_vertices(con);
         self.draw_convex_cop_hull(con);
         self.draw_green_circles(con);
@@ -733,4 +797,4 @@ impl Info {
         self.characters.draw(ui, con);
         self.characters.frame_is_finished();
     }
-}  
+}

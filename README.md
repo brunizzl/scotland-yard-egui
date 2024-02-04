@@ -27,3 +27,18 @@ On Fedora Rawhide you need to run:
 ### Website Version
 
  Try it out at <https://brunizzl.github.io/scotland-yard-egui/>.
+
+
+
+### TODO
+
+#### Functionality
+* make computation of hull boundary more robust (use faces?)
+* think about how to extend the esapable regions concept to identify more vertices
+* extend convex hull to prevent jumps
+* Doughnut graph + symmetry
+
+#### Nice To Have
+* pick colors for excapable regions depending on boundary cops (fewer color swaps)
+* ability to delete any cop (not just the one added last)
+* platonic symmetry (way faster to compute than explicit...)

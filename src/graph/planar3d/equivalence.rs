@@ -1,21 +1,21 @@
-
-
 use itertools::izip;
-use smallvec::SmallVec;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
-use crate::geo::*;
 use self::bool_csr::BoolCSR;
+use crate::geo::*;
 
 use super::*;
 
 /// automorphism of vertex set of a graph
 /// vertices are named [`0..self.nr_vertices()`]
 pub trait Automorphism {
-    type Iter<'a>: ExactSizeIterator<Item = usize> + 'a + Clone where Self: 'a;
+    type Iter<'a>: ExactSizeIterator<Item = usize> + 'a + Clone
+    where
+        Self: 'a;
 
-    fn forward<'a>(&'a self) -> Self::Iter<'a>;
-    fn backward<'a>(&'a self) -> Self::Iter<'a>;
+    fn forward(&self) -> Self::Iter<'_>;
+    fn backward(&self) -> Self::Iter<'_>;
 
     fn nr_vertices(&self) -> usize;
 
@@ -44,11 +44,11 @@ impl Identity {
 impl Automorphism for Identity {
     type Iter<'a> = std::ops::Range<usize>;
 
-    fn forward<'a>(&'a self) -> Self::Iter<'a> {
+    fn forward(&self) -> Self::Iter<'_> {
         0..self.nr_vertices()
     }
 
-    fn backward<'a>(&'a self) -> Self::Iter<'a> {
+    fn backward(&self) -> Self::Iter<'_> {
         0..self.nr_vertices()
     }
 
@@ -59,19 +59,21 @@ impl Automorphism for Identity {
 
 pub trait SymmetryGroup {
     type Auto: Automorphism;
-    type AutoIter<'a>: IntoIterator<Item = &'a Self::Auto> + Clone where Self: 'a;
+    type AutoIter<'a>: IntoIterator<Item = &'a Self::Auto> + Clone
+    where
+        Self: 'a;
 
-    /// applies an authomorphism to vertices in place, returns all authomorphisms which 
+    /// applies an authomorphism to vertices in place, returns all authomorphisms which
     /// map original vertices to result.
     /// order of vertices may be altered.
-    /// 
-    /// this function must guarantee to find a unique representative of vertices and 
+    ///
+    /// this function must guarantee to find a unique representative of vertices and
     /// ALL autos bringing them there.
-    fn to_representative<'a>(&'a self, vertices: & mut[usize]) -> Self::AutoIter<'a>;
+    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'a>;
 
     /// enumerates one vertex of each vertex class. this vertex will be result of [`Self::to_representative`]
     /// if a vertex of it's class is passed as only vertex.
-    fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a>;
+    fn class_representatives(&self) -> <Self::Auto as Automorphism>::Iter<'_>;
 
     fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto>;
 
@@ -85,7 +87,9 @@ pub struct NoSymmetry {
 
 impl NoSymmetry {
     pub fn new(nr_vertices: usize) -> Self {
-        Self { identity: Identity::new(nr_vertices) }
+        Self {
+            identity: Identity::new(nr_vertices),
+        }
     }
 }
 
@@ -93,12 +97,12 @@ impl SymmetryGroup for NoSymmetry {
     type Auto = Identity;
     type AutoIter<'a> = std::iter::Once<&'a Identity>;
 
-    fn to_representative<'a>(&'a self, vertices: & mut[usize]) -> Self::AutoIter<'a> {
+    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'a> {
         vertices.sort();
         std::iter::once(&self.identity)
     }
 
-    fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a> {
+    fn class_representatives(&self) -> <Self::Auto as Automorphism>::Iter<'_> {
         self.identity.forward()
     }
 
@@ -110,12 +114,11 @@ impl SymmetryGroup for NoSymmetry {
 }
 
 /// represents a graph automorphism:
-/// 
+///
 /// -> iff vertices `u` and `v` share an edge, then vertices `self.forward[u]` and `self.forward[v]` share an edge.
-/// 
+///
 /// -> for any vertex `v` holds that `v == self.forward[self.backward[v]]`
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ExplicitAutomorphism {
     /// forward[v] is vertex where v is mapped to
     forward: Vec<usize>,
@@ -126,11 +129,11 @@ pub struct ExplicitAutomorphism {
 impl Automorphism for ExplicitAutomorphism {
     type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, usize>>;
 
-    fn forward<'a>(&'a self) -> Self::Iter<'a> {
+    fn forward(&self) -> Self::Iter<'_> {
         self.forward.iter().copied()
     }
 
-    fn backward<'a>(&'a self) -> Self::Iter<'a> {
+    fn backward(&self) -> Self::Iter<'_> {
         self.backward.iter().copied()
     }
 
@@ -151,8 +154,8 @@ impl<T: Automorphism> From<&T> for ExplicitAutomorphism {
 
 impl ExplicitAutomorphism {
     pub fn identity(n: usize) -> Self {
-        Self { 
-            forward: (0..n).collect_vec(), 
+        Self {
+            forward: (0..n).collect_vec(),
             backward: (0..n).collect_vec(),
         }
     }
@@ -161,7 +164,7 @@ impl ExplicitAutomorphism {
         let mut forward = vec![usize::MAX; edges.nr_vertices()];
         let mut backward = vec![usize::MAX; edges.nr_vertices()];
 
-        //idea: find image of vertex 0 initially. 
+        //idea: find image of vertex 0 initially.
         //then use already mapped vertex to search image of it's neighbors only in the neighborhood of it's image
         let mut mapped = vec![false; edges.nr_vertices()];
         let mut queue = std::collections::VecDeque::new();
@@ -211,14 +214,13 @@ impl ExplicitAutomorphism {
         }
         debug_assert!(forward.iter().all(|&v| v != usize::MAX));
         debug_assert!(backward.iter().all(|&v| v != usize::MAX));
-        
+
         Self { forward, backward }
     }
 }
 
 /// stores every automorphism explicitly
-#[derive(Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ExplicitClasses {
     /// one entry per vertex, stores to which class vertex belongs
     class: Vec<u16>,
@@ -232,13 +234,12 @@ pub struct ExplicitClasses {
     //one entry per element in symmetry group, starting with the identity
     symmetry_transforms: Vec<ExplicitAutomorphism>,
 
-    /// one row per vertex, indexes in [`self.symmetry_maps`]. 
+    /// one row per vertex, indexes in [`self.symmetry_maps`].
     /// all entries in row are indices of transforms mapping vertex to it's representative
     to_representative: BoolCSR,
 }
 
 impl ExplicitClasses {
-
     pub fn nr_vertices(&self) -> usize {
         let len = self.class.len();
         debug_assert_eq!(len, self.vertex_representative.len());
@@ -252,12 +253,12 @@ impl ExplicitClasses {
             to_representative.add_row();
             to_representative.add_entry_in_last_row(0);
         }
-        Self { 
-            class: (0..(nr_vertices as u16)).collect_vec(), 
-            vertex_representative: (0..nr_vertices).collect_vec(), 
-            class_representative: (0..nr_vertices).collect_vec(), 
-            symmetry_transforms: vec![ExplicitAutomorphism::identity(nr_vertices)], 
-            to_representative
+        Self {
+            class: (0..(nr_vertices as u16)).collect_vec(),
+            vertex_representative: (0..nr_vertices).collect_vec(),
+            class_representative: (0..nr_vertices).collect_vec(),
+            symmetry_transforms: vec![ExplicitAutomorphism::identity(nr_vertices)],
+            to_representative,
         }
     }
 
@@ -283,10 +284,9 @@ impl ExplicitClasses {
             if axis.x < 0.0 || axis.x == 0.0 && (axis.y < 0.0 || axis.y == 0.0 && axis.z < 0.0) {
                 axis *= -1.0;
             }
-            if let Some(_) = axes.iter().find(|&&a| (a - axis).length() < 1e-4) {
+            if axes.iter().any(|&a| (a - axis).length() < 1e-4) {
                 false
-            }
-            else {
+            } else {
                 axes.push(axis);
                 true
             }
@@ -303,13 +303,15 @@ impl ExplicitClasses {
         };
 
         use std::f32::consts::TAU;
-        { //axes through faces
+        {
+            //axes through faces
             let angles = [TAU / 3.0, 2.0 * TAU / 3.0];
             for &face_normal in &plat.face_normals {
                 add_new_rotations(face_normal, &angles);
             }
         }
-        { //axes through edges
+        {
+            //axes through edges
             let angles = [TAU * 0.5];
             plat.edges.for_each_edge(|v1, v2| {
                 let v1_dir = plat.vertices[v1].to_vec3();
@@ -318,7 +320,8 @@ impl ExplicitClasses {
                 add_new_rotations(axis, &angles);
             });
         }
-        { //axes through vertices
+        {
+            //axes through vertices
             let angles = (1..degree).map(|i| TAU * (i as f32) / (degree as f32)).collect_vec();
             for &pos in &plat.vertices {
                 let axis = pos.to_vec3().normalized();
@@ -329,8 +332,12 @@ impl ExplicitClasses {
         rotations
     }
 
-    fn find_symmetry_transforms(vertex_directions: &[Vec3], transforms: &[Matrix3x3], representative: &[usize]) -> BoolCSR {
-        debug_assert!(transforms.len() > 0);
+    fn find_symmetry_transforms(
+        vertex_directions: &[Vec3],
+        transforms: &[Matrix3x3],
+        representative: &[usize],
+    ) -> BoolCSR {
+        debug_assert!(!transforms.is_empty());
         let mut res = BoolCSR::new(transforms.len());
 
         for (v, &dir) in izip!(0.., vertex_directions) {
@@ -344,7 +351,7 @@ impl ExplicitClasses {
                     res.add_entry_in_last_row(m);
                 }
             }
-            debug_assert!(res.last_row().len() > 0);
+            debug_assert!(!res.last_row().is_empty());
         }
         res
     }
@@ -358,12 +365,12 @@ impl ExplicitClasses {
 
         let mut class = vec![u16::MAX; graph.vertices.len()];
         let mut nr_classes = 0;
-        
+
         //the vertices of a platonic solid are all equivalent:
         //the graph looks the same from each position.
         nr_classes += 1;
-        for v in 0..graph.surface.nr_vertices() {
-            class[v] = 0;
+        for c in class.iter_mut().take(graph.surface.nr_vertices()) {
+            *c = 0;
         }
         //all edges of a platonic solid look the same (as all vertices look the same, duh),
         //however one can differentiate in a subdivided edge how far from the middle one is.
@@ -375,7 +382,7 @@ impl ExplicitClasses {
             //...
             let nr_edge_classes = (divisions + 1) / 2;
             nr_classes += nr_edge_classes;
-            //this loop relies on each edge beeing iterated over once in each direction 
+            //this loop relies on each edge beeing iterated over once in each direction
             for &(mut edge) in &graph.edge_dividing_vertices {
                 for c in 1..=nr_edge_classes {
                     let v = edge.next().unwrap();
@@ -392,7 +399,7 @@ impl ExplicitClasses {
                 true
             });
         }
-        //vertices in a given face belong to a different class depending on how far away 
+        //vertices in a given face belong to a different class depending on how far away
         //from a vertex subdividing an original edge and how far away from an original vertex they are.
         {
             let mut distance_to_og_vertices = vec![isize::MAX; graph.vertices.len()];
@@ -420,8 +427,7 @@ impl ExplicitClasses {
                     let dists = (distance_to_og_edges[v], distance_to_og_vertices[v]);
                     if let Some(&c) = class_map.get(&dists) {
                         class[v] = c;
-                    }
-                    else {
+                    } else {
                         let new_c = nr_classes as u16;
                         nr_classes += 1;
                         class_map.insert(dists, new_c);
@@ -431,23 +437,32 @@ impl ExplicitClasses {
             }
         }
 
-        let class_representative = (0..nr_classes).map(|c| {
-            //take first vertex of a class as the class' representative
-            class.iter().enumerate().filter_map(|(i, &cc)| (cc as usize == c).then_some(i)).next().unwrap()
-        }).collect_vec();
+        let class_representative = (0..nr_classes)
+            .map(|c| {
+                //take first vertex of a class as the class' representative
+                class
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &cc)| (cc as usize == c).then_some(i))
+                    .next()
+                    .unwrap()
+            })
+            .collect_vec();
         //this is only guaranteed because we know the order in which a triangulated platonic solid
         //adds it's vertices during construction.
         //it is however needed in Self::transform_all.
         debug_assert!(class_representative.iter().tuple_windows().all(|(a, b)| a <= b));
 
-        let vertex_directions = Vec::from_iter(graph.positions().iter().map(|p| p.to_vec3().normalized()));
-        let vertex_representative = Vec::from_iter(class.iter().map(|&c| class_representative[c as usize]));
+        let vertex_directions =
+            Vec::from_iter(graph.positions().iter().map(|p| p.to_vec3().normalized()));
+        let vertex_representative =
+            Vec::from_iter(class.iter().map(|&c| class_representative[c as usize]));
 
         let symmetry_transform_matrices = 'try_reuse: {
             /// for a given platonic solid, this stores nr of vertices, vertex degree, all the transforms and to_representative.
-            static KNOWN_PLATONIC_SYMMETRY_TRANSFORMS: 
-                std::sync::Mutex<Vec<(usize, usize, Vec<Matrix3x3>)>> 
-                = std::sync::Mutex::new(Vec::new());
+            static KNOWN_PLATONIC_SYMMETRY_TRANSFORMS: std::sync::Mutex<
+                Vec<(usize, usize, Vec<Matrix3x3>)>,
+            > = std::sync::Mutex::new(Vec::new());
 
             let nr_surface_vs = graph.surface.nr_vertices();
             if let Ok(guard) = KNOWN_PLATONIC_SYMMETRY_TRANSFORMS.try_lock() {
@@ -466,13 +481,14 @@ impl ExplicitClasses {
             transforms
         };
         let to_representative = Self::find_symmetry_transforms(
-            &vertex_directions, 
-            &symmetry_transform_matrices, 
-            &vertex_representative
+            &vertex_directions,
+            &symmetry_transform_matrices,
+            &vertex_representative,
         );
-        let symmetry_transforms = symmetry_transform_matrices.iter().map(|m| 
-            ExplicitAutomorphism::new(graph.edges(), graph.positions(), *m)
-        ).collect_vec();
+        let symmetry_transforms = symmetry_transform_matrices
+            .iter()
+            .map(|m| ExplicitAutomorphism::new(graph.edges(), graph.positions(), *m))
+            .collect_vec();
 
         debug_assert!({
             let mut nr_rots = vec![0; nr_classes];
@@ -487,7 +503,7 @@ impl ExplicitClasses {
         });
 
         Some(Self {
-            class, 
+            class,
             vertex_representative,
             class_representative,
             symmetry_transforms,
@@ -509,10 +525,13 @@ impl ExplicitClasses {
     }
 
     /// returns all transforms mapping vertex v to it's class' representative
-    fn transforms_of<'a>(&'a self, v: usize) -> impl ExactSizeIterator<Item = &'a ExplicitAutomorphism> + Clone {
+    fn transforms_of(
+        &self,
+        v: usize,
+    ) -> impl ExactSizeIterator<Item = &'_ ExplicitAutomorphism> + Clone {
         let transform_indices = self.to_representative.row(v);
         debug_assert_eq!(
-            self.vertex_representative[v], 
+            self.vertex_representative[v],
             self.symmetry_transforms[transform_indices[0]].forward[v]
         );
         transform_indices.iter().map(|&i| &self.symmetry_transforms[i])
@@ -521,7 +540,13 @@ impl ExplicitClasses {
     /// chooses the rotation, such that in the rotated result the cop defining the rotation is moved
     /// to the smallest index.
     fn transform_all(&self, cops: &mut [usize]) -> SmallVec<[&ExplicitAutomorphism; 4]> {
-        if cops.len() == 0 {
+        if cops.is_empty() {
+            //the first entry in self.symmetry_transforms is always the identity
+            debug_assert!(self.symmetry_transforms[0]
+                .forward()
+                .enumerate()
+                .take(20)
+                .all(|(i, j)| i == j));
             return smallvec::smallvec![&self.symmetry_transforms[0]];
         }
 
@@ -542,7 +567,7 @@ impl ExplicitClasses {
         //config_hash_value is injective, because we choose the configuration with lowest value.
         //if two transforations of the same configuration can be chosen, the bruteforce algorithm will fail.
         //(because only one of those will be put in the update queue when they need to be updated)
-        let config_hash_value = |rotated: &[_]| { 
+        let config_hash_value = |rotated: &[_]| {
             let mut acc = 0;
             for &c in rotated.iter().rev() {
                 debug_assert!(c < self.nr_vertices());
@@ -563,7 +588,7 @@ impl ExplicitClasses {
             //this relies on the classes beeing sorted by what the smallest vertex appearing in one is.
             debug_assert_eq!(self.class[rotated[0]], rotate_class);
 
-            let new_val = config_hash_value(&rotated);
+            let new_val = config_hash_value(rotated);
             if new_val == best_val {
                 debug_assert!({
                     //two transformations yielding the same function value is only expected to
@@ -575,13 +600,14 @@ impl ExplicitClasses {
                         if let Some(j) = rotated
                             .iter()
                             .enumerate()
-                            .position(|(j, &cc)| !hit[j] && cc == prev_rotated) 
+                            .position(|(j, &cc)| !hit[j] && cc == prev_rotated)
                         {
                             hit[j] = true;
+                        } else {
+                            panic!()
                         }
-                        else { panic!() }
                     }
-                    hit[..rotated.len()].into_iter().all(|&x| x)
+                    hit[..rotated.len()].iter().all(|&x| x)
                 });
                 best_is.push(i);
             }
@@ -591,7 +617,7 @@ impl ExplicitClasses {
                 best_is.push(i);
             }
         }
-        
+
         assert!(!best_is.is_empty());
         let mut best_rotations = SmallVec::<[&ExplicitAutomorphism; 4]>::new();
         let mut indexted_rotations = rotations.enumerate();
@@ -616,11 +642,11 @@ impl SymmetryGroup for ExplicitClasses {
     type Auto = ExplicitAutomorphism;
     type AutoIter<'a> = SmallVec<[&'a ExplicitAutomorphism; 4]>;
 
-    fn to_representative<'a>(&'a self, vertices: & mut[usize]) -> Self::AutoIter<'a> {
+    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'a> {
         self.transform_all(vertices)
     }
 
-    fn class_representatives<'a>(&'a self) -> <Self::Auto as Automorphism>::Iter<'a> {
+    fn class_representatives(&self) -> <Self::Auto as Automorphism>::Iter<'_> {
         self.class_representative.iter().copied()
     }
 
@@ -650,13 +676,19 @@ impl<T: Automorphism> DynAutomorphism for T {
 }
 
 pub trait DynSymmetryGroup {
-    fn dyn_to_representative<'a>(&'a self, vertices: & mut[usize]) -> SmallVec<[&dyn DynAutomorphism; 4]>;
+    fn dyn_to_representative<'a>(
+        &'a self,
+        vertices: &mut [usize],
+    ) -> SmallVec<[&'a dyn DynAutomorphism; 4]>;
 
     fn for_each_transform(&self, f: &mut dyn FnMut(&dyn DynAutomorphism));
 }
 
 impl<T: SymmetryGroup> DynSymmetryGroup for T {
-    fn dyn_to_representative<'a>(&'a self, vertices: & mut[usize]) -> SmallVec<[&dyn DynAutomorphism; 4]> {
+    fn dyn_to_representative<'a>(
+        &'a self,
+        vertices: &mut [usize],
+    ) -> SmallVec<[&'a dyn DynAutomorphism; 4]> {
         let mut res = SmallVec::new();
         let iter = <Self as SymmetryGroup>::to_representative(self, vertices);
         for auto in iter {

@@ -1,16 +1,15 @@
+use egui::{epaint::TextShape, text::LayoutJob, *};
 
-use egui::{*, epaint::TextShape, text::LayoutJob};
-
-use crate::graph::{EdgeList, SymGroup};
 use crate::geo::Pos3;
+use crate::graph::{EdgeList, SymGroup};
 
 use self::cam::Camera3D;
 
 mod cam;
 pub mod character;
+mod color;
 mod info;
 pub mod map;
-mod color;
 
 mod bruteforce_state;
 
@@ -28,7 +27,7 @@ pub struct DrawContext<'a> {
 
 impl<'a> DrawContext<'a> {
     pub fn cam(&self) -> &Camera3D {
-        &self.map.camera()
+        self.map.camera()
     }
 
     pub fn shape(&self) -> map::Shape {
@@ -40,12 +39,13 @@ impl<'a> DrawContext<'a> {
     }
 
     pub fn vertex_draw_pos(&self, v: usize) -> Pos2 {
-        self.cam().transform(self.positions[v]) 
+        self.cam().transform(self.positions[v])
     }
 
     pub fn find_closest_vertex(&self, screen_pos: Pos2) -> (usize, f32) {
-        debug_assert!(self.positions.len() > 0);
-        let find_screen_facing = |v: usize| -self.positions[v].to_vec3().normalized().dot(self.cam().screen_normal());
+        debug_assert!(!self.positions.is_empty());
+        let find_screen_facing =
+            |v: usize| -self.positions[v].to_vec3().normalized().dot(self.cam().screen_normal());
         let (screen_facing, _) = self.edges.find_local_minimum(find_screen_facing, 0);
         let screen_pos_diff = |v| {
             let dist_2d = (self.vertex_draw_pos(v) - screen_pos).length();
@@ -57,19 +57,20 @@ impl<'a> DrawContext<'a> {
 }
 
 /// returns if val was changed
-fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isize) -> bool {    
-    ui.horizontal(|ui| { 
-        let prev = *val;  
-        ui.label(name);                     
+fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isize) -> bool {
+    ui.horizontal(|ui| {
+        let prev = *val;
+        ui.label(name);
         if ui.button(" - ").clicked() && prev > min {
             *val -= 1;
-        }                     
-        ui.add(DragValue::new(val).clamp_range(min..=max));   
+        }
+        ui.add(DragValue::new(val).clamp_range(min..=max));
         if ui.button(" + ").clicked() && prev < max {
             *val += 1;
         }
         prev != *val
-    }).inner
+    })
+    .inner
 }
 
 pub struct State {
@@ -82,17 +83,14 @@ impl State {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut info = info::Info::new(cc);
         let map = map::Map::new(&mut info, cc);
-        Self { 
-            map,
-            info,
-        }
+        Self { map, info }
     }
-
 }
 
 fn draw_usage_info(ui: &mut Ui) {
     ui.collapsing("Bedienung", |ui| {
-        ui.label("Spielfeld rotieren / verschieben: 
+        ui.label(
+            "Spielfeld rotieren / verschieben: 
 ziehen mit rechter Maustaste oder scrollen, 
 horizontal shift + scrollen
 
@@ -107,13 +105,15 @@ setzen: m-Taste
 entfernen: n-Taste
 
 Zug rückgängig: strg + z
-Zug wiederholen: strg + y");
+Zug wiederholen: strg + y",
+        );
     });
 }
 
-fn load_or<T, F>(storage: Option<&dyn eframe::Storage>, key: &str, f: F) -> T 
-where T: serde::de::DeserializeOwned, 
-      F: FnOnce() -> T
+fn load_or<T, F>(storage: Option<&dyn eframe::Storage>, key: &str, f: F) -> T
+where
+    T: serde::de::DeserializeOwned,
+    F: FnOnce() -> T,
 {
     storage.and_then(|s| eframe::get_value(s, key)).unwrap_or_else(f)
 }

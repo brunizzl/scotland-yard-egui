@@ -1,4 +1,3 @@
-
 use super::geo;
 
 pub mod edgelist;
@@ -22,12 +21,12 @@ pub mod bool_csr;
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum InSet { 
-    No = 0, 
-    Yes = 1, 
-    OnBoundary = 2, 
-    Perhaps = 4, 
-    NewlyAdded = 8, 
+pub enum InSet {
+    No = 0,
+    Yes = 1,
+    OnBoundary = 2,
+    Perhaps = 4,
+    NewlyAdded = 8,
 }
 const _: () = assert!(std::mem::size_of::<InSet>() == 1);
 
@@ -37,7 +36,7 @@ impl InSet {
     }
 
     #[inline(always)]
-    pub const fn inside(self) -> bool { 
+    pub const fn inside(self) -> bool {
         debug_assert!(self.finished_construction());
         !self.outside()
     }
@@ -54,4 +53,3 @@ impl InSet {
         matches!(self, InSet::No)
     }
 }
-
