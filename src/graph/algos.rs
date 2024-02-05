@@ -21,41 +21,37 @@ fn update_convex_hull_boundary(
 
     let mut potential_next = std::mem::take(queue);
     let mut curr_inside = fst_inside;
-    let mut last_inside = usize::MAX;
+    let mut last_inside = fst_inside;
     'find_boundary: loop {
-        let boundary_end = {
-            let len = boundary.len();
-            const VIEW_LEN: usize = 8;
-            let range_start = if len < VIEW_LEN { 0 } else { len - VIEW_LEN };
-            &boundary[range_start..]
-        };
         potential_next.clear();
-        potential_next.extend(edges.neighbors_of(curr_inside).filter(|&n| {
-            // to be completely correct, boundary_end should instead by all of boundary.
-            // that full test is however expensive and thus done below and only if nessecairy.
-            n != last_inside && hull[n].on_boundary() && !boundary_end.contains(&n)
-        }));
+        potential_next.extend(
+            edges
+                .neighbors_of(curr_inside)
+                .filter(|&n| n != last_inside && hull[n].on_boundary()),
+        );
         if potential_next.len() > 1 {
-            // this is a possible expensive query, because boundary might get large
-            // -> only test if nessecairy
-            potential_next.retain(|v| !boundary.contains(v));
+            // if we have choice,
+            // only keep the option visited the longest time ago / not at all
+            for v in boundary.iter().rev() {
+                if potential_next.contains(v) {
+                    potential_next.retain(|next| next != v);
+                    debug_assert!(potential_next.len() > 0);
+                    if potential_next.len() == 1 {
+                        break;
+                    }
+                }
+            }
         }
 
         let next_inside = match potential_next.len() {
             1 => potential_next[0], //common case
             0 => {
-                // take the option visited the longest time ago (note: we assume to
-                // hit this case for only very few hulls (those of thickness 1),
-                // thus don't care about the O(boundary.len()) search.)
-                boundary
-                    .iter()
-                    .copied()
-                    .find(|old| edges.neighbors_of(curr_inside).contains(old))
-                    .unwrap_or_else(|| {
-                        //case where hull consists of only a single vertex
-                        debug_assert_eq!(boundary[..], [fst_inside]);
-                        fst_inside
-                    })
+                // if the hull has some pointy corner where the boundary visits the same vertices twice,
+                // once before visiting the corner, once after leaving,
+                // we need to take last_inside again when curr_inside is corner.
+                // note: the case where the hull consists of only a single vertex is also covered here,
+                // as last_inside (like curr_inside) starts beeing equal to fst_inside.
+                last_inside
             },
             _ => {
                 // if there are multiple options not yet visited,
@@ -64,11 +60,11 @@ fn update_convex_hull_boundary(
                     .iter()
                     .fold(0, |max, &v| isize::max(max, dist_to_boundary_start[v]));
                 potential_next.retain(|&v| dist_to_boundary_start[v] == max_dist);
-                // if boundary has len 1, we are free to chose in which diraction to walk.
+                // if boundary has len 1, we are free to chose in which direction to walk.
                 // else we try to find a vertex which shares neighbors outside the hull with us.
                 // this is a shortcut that only works in triangulations, as the actual property to test for
                 // should be, which vertex borders the same face outside the hull as curr_inside.
-                // however we don't have easy access to faces.
+                // however we don't have easy access to faces, so this must suffice.
                 let curr_outside_neighs =
                     edges.neighbors_of(curr_inside).filter(|&n| hull[n].outside());
                 let shares_outside_neigs = |&v: &usize| {
