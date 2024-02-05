@@ -10,92 +10,89 @@ use crate::app::character::Character;
 /// and that hull is up-to date, including having all boundary vertices marked
 fn update_convex_hull_boundary(
     boundary: &mut Vec<usize>,
+    dist_to_boundary_start: &[isize],
     hull: &[InSet],
     edges: &EdgeList,
     queue: &mut VecDeque<usize>,
 ) {
     debug_assert_eq!(boundary.len(), 1);
     let fst_inside = boundary[0];
+    debug_assert_eq!(dist_to_boundary_start[fst_inside], 0);
 
     let mut potential_next = std::mem::take(queue);
     let mut curr_inside = fst_inside;
     let mut last_inside = usize::MAX;
-    'find_next: loop {
-        if boundary.len() > edges.nr_vertices() {
-            break;
-        }
-        let (boundary_len, boundary_end) = {
+    'find_boundary: loop {
+        let boundary_end = {
             let len = boundary.len();
             const VIEW_LEN: usize = 8;
             let range_start = if len < VIEW_LEN { 0 } else { len - VIEW_LEN };
-            (len, &boundary[range_start..])
-        };
-
-        for n in edges.neighbors_of(curr_inside) {
-            if n == last_inside {
-                continue;
-            }
-            if n == fst_inside {
-                //we did it boys :)
-                potential_next.clear();
-                potential_next.push_back(n);
-                break;
-            }
-            //to be completely correct, this should cover all of boundary.
-            //the common cases are however correctly handeled here, the others are handled in the match below.
-            if boundary_end.contains(&n) {
-                continue;
-            }
-            if !hull[n].on_boundary() {
-                continue;
-            }
-            potential_next.push_back(n);
-        }
-
-        let next_inside = match (potential_next.len(), boundary_len) {
-            (0, 1) => fst_inside, //we are in the hull but have no neighbors inside -> the hull is only us.
-            (1, _) => potential_next[0], //common case
-            (2, 1) => potential_next[0], //the first boundary point decides the direction.
-            (0, _) => 'take_oldest_neigh: {
-                //take the option visited the longest time ago (note: we assume to
-                //hit this case for only very few hulls (those of thickness 1),
-                //thus don't care about the O(boundary.len()) search.)
-                for old in boundary.iter() {
-                    if edges.neighbors_of(curr_inside).contains(old) {
-                        break 'take_oldest_neigh *old;
-                    }
-                }
-                unreachable!(); //last_inside is guaranteed to break the for loop.
-            },
-            (_, _) => 'take_one_sharing_side: {
-                for &next in potential_next.iter() {
-                    //choose the vertex wich shares neighbors with curr that are outside the hull.
-                    //(only guaranteed to happen in triangulations)
-                    //note: this is not a sufficient condition in some edgecases, where we only connect two cops
-                    //in a random triangulation. this path may have multiple disjoint sections of width 1
-                    //and it is not considered here, which side is taken on exit of such a section.
-                    //i dont't care though. that case is uninteresting anyway.
-                    let is_neigh_of_curr_and_outside_hull = |v| {
-                        edges.neighbors_of(curr_inside).filter(|&n| hull[n].outside()).contains(&v)
-                    };
-                    if edges.neighbors_of(next).any(is_neigh_of_curr_and_outside_hull) {
-                        break 'take_one_sharing_side next;
-                    }
-                }
-                break 'find_next;
-            },
+            &boundary[range_start..]
         };
         potential_next.clear();
+        potential_next.extend(edges.neighbors_of(curr_inside).filter(|&n| {
+            // to be completely correct, boundary_end should instead by all of boundary.
+            // that full test is however expensive and thus done below and only if nessecairy.
+            n != last_inside && hull[n].on_boundary() && !boundary_end.contains(&n)
+        }));
+        if potential_next.len() > 1 {
+            // this is a possible expensive query, because boundary might get large
+            // -> only test if nessecairy
+            potential_next.retain(|v| !boundary.contains(v));
+        }
+
+        let next_inside = match potential_next.len() {
+            1 => potential_next[0], //common case
+            0 => {
+                // take the option visited the longest time ago (note: we assume to
+                // hit this case for only very few hulls (those of thickness 1),
+                // thus don't care about the O(boundary.len()) search.)
+                boundary
+                    .iter()
+                    .copied()
+                    .find(|old| edges.neighbors_of(curr_inside).contains(old))
+                    .unwrap_or_else(|| {
+                        //case where hull consists of only a single vertex
+                        debug_assert_eq!(boundary[..], [fst_inside]);
+                        fst_inside
+                    })
+            },
+            _ => {
+                // if there are multiple options not yet visited,
+                // we take the one leading further away from the search start.
+                let max_dist = potential_next
+                    .iter()
+                    .fold(0, |max, &v| isize::max(max, dist_to_boundary_start[v]));
+                potential_next.retain(|&v| dist_to_boundary_start[v] == max_dist);
+                // if boundary has len 1, we are free to chose in which diraction to walk.
+                // else we try to find a vertex which shares neighbors outside the hull with us.
+                // this is a shortcut that only works in triangulations, as the actual property to test for
+                // should be, which vertex borders the same face outside the hull as curr_inside.
+                // however we don't have easy access to faces.
+                let has_shared_outside_neigs = |&v: &usize| {
+                    edges.neighbors_of(v).any(|v| {
+                        edges.neighbors_of(curr_inside).filter(|&n| hull[n].outside()).contains(&v)
+                    })
+                };
+                potential_next
+                    .iter()
+                    .copied()
+                    .find(has_shared_outside_neigs)
+                    .unwrap_or(potential_next[0])
+            },
+        };
         last_inside = curr_inside;
         curr_inside = next_inside;
         boundary.push(next_inside);
         if next_inside == fst_inside {
-            //happy exit :)
-            *queue = potential_next;
-            return;
+            break 'find_boundary; //happy case :)
+        }
+        if boundary.len() > edges.nr_vertices() {
+            //emergency exit. something went wrong and we failed to find the boundary :(
+            boundary.clear();
+            break 'find_boundary;
         }
     }
-    boundary.clear(); //sad exit :(
     potential_next.clear();
     *queue = potential_next;
 }
@@ -222,11 +219,12 @@ impl ConvexHullData {
         }
     }
 
-    fn find_fist_boundary_point(&self, cops: &[Character]) -> Option<usize> {
+    /// returns a point on the boundary (if there are any) and the distances to that point
+    fn find_fist_boundary_point<'a>(&self, cops: &'a [Character]) -> Option<(usize, &'a [isize])> {
         for cop in cops.iter().filter(|c| c.on_node) {
             let v = cop.nearest_node;
             if self.hull[v].on_boundary() {
-                return Some(v);
+                return Some((v, &cop.distances));
             }
         }
         None
@@ -240,12 +238,12 @@ impl ConvexHullData {
         queue: &mut VecDeque<usize>,
     ) {
         self.boundary.clear();
-        let Some(fst_inside) = self.find_fist_boundary_point(cops) else {
+        let Some((fst_inside, dist_to_fst)) = self.find_fist_boundary_point(cops) else {
             return;
         };
         self.boundary.push(fst_inside);
 
-        update_convex_hull_boundary(&mut self.boundary, &self.hull, edges, queue);
+        update_convex_hull_boundary(&mut self.boundary, dist_to_fst, &self.hull, edges, queue);
     }
 
     fn update_segments(&mut self, min_cop_dist: &[isize]) {
@@ -825,7 +823,13 @@ impl CopPairHullData {
         self.boundary.clear();
         self.boundary.push(cop_1.nearest_node);
 
-        update_convex_hull_boundary(&mut self.boundary, &self.hull, edges, queue);
+        update_convex_hull_boundary(
+            &mut self.boundary,
+            &cop_1.distances,
+            &self.hull,
+            edges,
+            queue,
+        );
         if self.boundary.is_empty() {
             return;
         }
