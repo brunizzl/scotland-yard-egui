@@ -35,7 +35,7 @@ fn update_convex_hull_boundary(
             for v in boundary.iter().rev() {
                 if potential_next.contains(v) {
                     potential_next.retain(|next| next != v);
-                    debug_assert!(potential_next.len() > 0);
+                    debug_assert!(!potential_next.is_empty());
                     if potential_next.len() == 1 {
                         break;
                     }
