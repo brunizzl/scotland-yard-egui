@@ -69,15 +69,15 @@ fn update_convex_hull_boundary(
                 // this is a shortcut that only works in triangulations, as the actual property to test for
                 // should be, which vertex borders the same face outside the hull as curr_inside.
                 // however we don't have easy access to faces.
-                let has_shared_outside_neigs = |&v: &usize| {
-                    edges.neighbors_of(v).any(|v| {
-                        edges.neighbors_of(curr_inside).filter(|&n| hull[n].outside()).contains(&v)
-                    })
+                let curr_outside_neighs =
+                    edges.neighbors_of(curr_inside).filter(|&n| hull[n].outside());
+                let shares_outside_neigs = |&v: &usize| {
+                    edges.neighbors_of(v).any(|n| curr_outside_neighs.clone().contains(&n))
                 };
                 potential_next
                     .iter()
                     .copied()
-                    .find(has_shared_outside_neigs)
+                    .find(shares_outside_neigs)
                     .unwrap_or(potential_next[0])
             },
         };
