@@ -258,18 +258,9 @@ mod storage_keys {
 
 impl Info {
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        //idea: only store settings, not state that is recomputable.
-        let all_dists = self
-            .characters
-            .all_mut()
-            .iter_mut()
-            .map(|c| std::mem::take(&mut c.distances))
-            .collect_vec();
         use storage_keys::*;
+        eframe::set_value(storage, OPTIONS, &self.options);
         eframe::set_value(storage, CHARACTERS, &self.characters);
-        for (ch, dists) in izip!(self.characters.all_mut(), all_dists.into_iter()) {
-            ch.distances = dists;
-        }
 
         if self.marked_manually.iter().any(|&x| x != 0) {
             eframe::set_value(storage, MARKED_MANUALLY, &self.marked_manually);
@@ -277,7 +268,6 @@ impl Info {
             let empty = Vec::<u8>::new();
             eframe::set_value(storage, MARKED_MANUALLY, &empty);
         }
-        eframe::set_value(storage, OPTIONS, &self.options);
     }
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {

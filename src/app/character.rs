@@ -51,12 +51,16 @@ pub const STYLES: [Style; 1 + NR_COP_STYLES] = [
 pub struct Character {
     style_index: usize,
 
+    /// past values of [`Self::nearest_node`] where Character was not only dragged over
     pub last_positions: Vec<usize>,
+
+    /// distance of every vertex in graph to [`Self::nearest_node`]
+    #[serde(skip)]
     pub distances: Vec<isize>,
     pub nearest_node: usize,
 
     /// position to where is is currently held while dragging,
-    /// only updated while dragging (coordinates are the middle ones of ToScreen)
+    /// only updated while dragging (coordinates are in the intermediate system of ToScreen)
     pos2: Pos2,
 
     /// position of nearest_node.
