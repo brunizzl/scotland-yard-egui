@@ -14,9 +14,9 @@ use super::{color, *};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
 pub enum VertexColorInfo {
     None,
-    RobberAdvantage,
+    Escape1,
     BruteForceRes,
-    EscapeableNodes,
+    Escape2,
     NearNodes,
     RobberDist,
     CopDist,
@@ -109,12 +109,12 @@ impl Options {
                 "für Räuber nähere Knoten")
                 .on_hover_text("alle Knoten näher am Räuber als am nächsten Cop");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::RobberAdvantage,
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::Escape1,
                 "Punkte mit direkter Fluchtoption 1")
                 .on_hover_text("alle Punkte in der Konvexen Hülle, \
                 die näher an einem Punkt ausserhalb der Hülle sind, als der nächste Cop an diesem Punkt ist");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::EscapeableNodes,
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::Escape2,
                 "Punkte mit direkter Fluchtoption 2")
                 .on_hover_text("Jedes Paar von benauchbarten Cops am Hüllenrand kontrolliert einen Randbereich. \
                 Will der Räuber durch diesen Bereich fliehen, dürfen die Cops in der Zeit, \
@@ -234,8 +234,13 @@ pub struct Info {
     //state kept for each node in map
     cop_hull_data: ConvexHullData,
     escapable: EscapeableNodes,
-    min_cop_dist: Vec<isize>, //elementwise minimum of .distance of active cops in self.characters
+    /// elementwise minimum of `.distance` of active cops in `self.characters`
+    min_cop_dist: Vec<isize>,
+    /// outside hull interieur == -min_cop_dist, then expanded into interieur via [`EdgeList::calc_distances_to`]
+    /// the robber can escape lazy cops on a continuous hull, if cop_advantage on robber's position is <= -2
+    /// as a cop's position has value 0 and a cops neighbors value >= -1.
     cop_advantage: Vec<isize>,
+    /// each bit represents one marker color -> there are 8 distinct manual markers
     pub marked_manually: Vec<u8>,
 
     /// this is only used as intermediary variable during computations.
@@ -336,13 +341,16 @@ impl Info {
             cop_hull.iter(),
             advantage.iter_mut(),
             self.min_cop_dist.iter(),
-            edges.neighbors()
         );
-        for (node, &hull, adv, &cop_dist, mut neighs) in zipped {
-            if !hull.inside() && neighs.any(|n| cop_hull[n].inside()) {
+        for (node, &hull, adv, &cop_dist) in zipped {
+            if hull.on_boundary() {
                 queue.push_back(node);
             }
-            *adv = if hull.inside() { isize::MAX } else { -cop_dist };
+            *adv = if hull.in_interieur() {
+                isize::MAX
+            } else {
+                -cop_dist
+            };
         }
         edges.calc_distances_to(&mut queue, &mut advantage);
         self.cop_advantage = advantage;
@@ -401,13 +409,12 @@ impl Info {
         let robber_moved = self.characters.robber_updated();
         let cop_moved = self.characters.active_cop_updated();
 
-        let update_cop_advantage = self.options.vertex_color_info
-            == VertexColorInfo::RobberAdvantage
+        let update_cop_advantage = self.options.vertex_color_info == VertexColorInfo::Escape1
             || self.options.vertex_color_info == VertexColorInfo::Debugging
             || self.options.vertex_number_info == VertexNumberInfo::RobberAdvantage
             || self.options.vertex_number_info == VertexNumberInfo::Debugging;
 
-        let update_escapable = self.options.vertex_color_info == VertexColorInfo::EscapeableNodes
+        let update_escapable = self.options.vertex_color_info == VertexColorInfo::Escape2
             || self.options.vertex_color_info == VertexColorInfo::Debugging
             || self.options.vertex_number_info == VertexNumberInfo::EscapeableNodes
             || self.options.vertex_number_info == VertexNumberInfo::Debugging;
@@ -485,7 +492,7 @@ impl Info {
             for (&in_hull, &pos, &vis) in
                 izip!(self.cop_hull_data.hull(), con.positions, con.visible)
             {
-                if vis && in_hull.inside() {
+                if vis && in_hull.in_set() {
                     let draw_pos = con.cam().transform(pos);
                     let marker_circle =
                         Shape::circle_filled(draw_pos, con.scale * 9.0, color::LIGHT_BLUE);
@@ -524,44 +531,48 @@ impl Info {
             let marker_circle = Shape::circle_filled(draw_pos, con.scale * 6.0, color);
             con.painter.add(marker_circle);
         };
-        match (self.options.vertex_color_info, self.characters.robber()) {
-            (VertexColorInfo::NearNodes, Some(r)) => {
-                for (r_dist, c_dist, &pos, &vis) in
-                    izip!(&r.distances, &self.min_cop_dist, con.positions, con.visible)
-                {
-                    if vis && r_dist < c_dist {
-                        draw_circle_at(pos, self.options.automatic_marker_color);
+        match self.options.vertex_color_info {
+            VertexColorInfo::NearNodes => {
+                if let Some(r) = self.characters.robber() {
+                    for (r_dist, c_dist, &pos, &vis) in
+                        izip!(&r.distances, &self.min_cop_dist, con.positions, con.visible)
+                    {
+                        if vis && r_dist < c_dist {
+                            draw_circle_at(pos, self.options.automatic_marker_color);
+                        }
                     }
                 }
             },
-            (VertexColorInfo::RobberAdvantage, _) => {
+            VertexColorInfo::Escape1 => {
                 for (&adv, &pos, &vis, &hull) in izip!(
                     &self.cop_advantage,
                     con.positions,
                     con.visible,
                     self.cop_hull_data.hull()
                 ) {
-                    if vis && hull.inside() && adv < -1 {
+                    if vis && hull.in_set() && adv < -1 {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 }
             },
-            (VertexColorInfo::RobberDist, Some(r)) => {
-                let bnd = self.options.marked_robber_dist;
-                for (&dist, &pos, &vis) in izip!(&r.distances, con.positions, con.visible) {
-                    if vis && dist == bnd {
-                        draw_circle_at(pos, self.options.automatic_marker_color);
+            VertexColorInfo::RobberDist => {
+                if let Some(r) = self.characters.robber() {
+                    let bnd = self.options.marked_robber_dist;
+                    for (&dist, &pos, &vis) in izip!(&r.distances, con.positions, con.visible) {
+                        if vis && dist == bnd {
+                            draw_circle_at(pos, self.options.automatic_marker_color);
+                        }
                     }
                 }
             },
-            (VertexColorInfo::CopDist, _) => {
+            VertexColorInfo::CopDist => {
                 for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, con.positions, con.visible) {
                     if vis && dist == self.options.marked_cop_dist {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 }
             },
-            (VertexColorInfo::EscapeableNodes, _) => {
+            VertexColorInfo::Escape2 => {
                 for (&esc, &pos, &vis) in
                     izip!(self.escapable.escapable(), con.positions, con.visible)
                 {
@@ -573,7 +584,7 @@ impl Info {
                     }
                 }
             },
-            (VertexColorInfo::BruteForceRes, _) => {
+            VertexColorInfo::BruteForceRes => {
                 if let BruteForceResult::RobberWins(data) = &self.worker.result() {
                     let same_map = con.shape() == data.shape()
                         && con.edges.nr_vertices() == data.safe.nr_map_vertices();
@@ -598,7 +609,7 @@ impl Info {
                     }
                 }
             },
-            (VertexColorInfo::VertexEquivalenceClasses, _) => {
+            VertexColorInfo::VertexEquivalenceClasses => {
                 if let SymGroup::Explicit(equiv) = con.sym_group() {
                     for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
                         if vis {
@@ -608,7 +619,7 @@ impl Info {
                     }
                 }
             },
-            (VertexColorInfo::RobberVertexClass, _) => {
+            VertexColorInfo::RobberVertexClass => {
                 if let Some(r) = self.characters.robber() {
                     let sym_group = con.sym_group().to_dyn();
                     let v0 = r.nearest_node;
@@ -622,7 +633,7 @@ impl Info {
                     sym_group.for_each_transform(&mut f as &mut dyn FnMut(&dyn DynAutomorphism));
                 }
             },
-            (VertexColorInfo::CopsRotatedToEquivalence, _) => {
+            VertexColorInfo::CopsRotatedToEquivalence => {
                 let sym_group = con.sym_group().to_dyn();
                 let mut active_cops =
                     self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
@@ -643,7 +654,7 @@ impl Info {
                     }
                 }
             },
-            (VertexColorInfo::Debugging, _) => {
+            VertexColorInfo::Debugging => {
                 for &v in self.escapable.inner_connecting_line() {
                     if con.visible[v] {
                         let pos = con.positions[v];
@@ -651,7 +662,7 @@ impl Info {
                     }
                 }
             },
-            _ => {},
+            VertexColorInfo::None => {},
         }
     }
 
@@ -680,7 +691,7 @@ impl Info {
                     VertexNumberInfo::Indices => v.to_string(),
                     VertexNumberInfo::MinCopDist => self.min_cop_dist[v].to_string(),
                     VertexNumberInfo::None => panic!(),
-                    VertexNumberInfo::RobberAdvantage => (-1 - self.cop_advantage[v]).to_string(),
+                    VertexNumberInfo::RobberAdvantage => self.cop_advantage[v].to_string(),
                     VertexNumberInfo::EscapeableNodes => true_bits(self.escapable.escapable()[v]),
                     VertexNumberInfo::VertexEquivalenceClass => {
                         if let SymGroup::Explicit(e) = con.sym_group() {

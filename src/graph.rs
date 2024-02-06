@@ -23,20 +23,20 @@ pub mod bool_csr;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InSet {
     No = 0,
-    Yes = 1,
+    Interieur = 1,
     OnBoundary = 2,
-    Perhaps = 4,
+    Unknown = 4,
     NewlyAdded = 8,
 }
 const _: () = assert!(std::mem::size_of::<InSet>() == 1);
 
 impl InSet {
     const fn finished_construction(self) -> bool {
-        matches!(self, InSet::No | InSet::Yes | InSet::OnBoundary)
+        matches!(self, InSet::No | InSet::Interieur | InSet::OnBoundary)
     }
 
     #[inline(always)]
-    pub const fn inside(self) -> bool {
+    pub const fn in_set(self) -> bool {
         debug_assert!(self.finished_construction());
         !self.outside()
     }
@@ -45,6 +45,12 @@ impl InSet {
     pub const fn on_boundary(self) -> bool {
         debug_assert!(self.finished_construction());
         matches!(self, InSet::OnBoundary)
+    }
+
+    #[inline(always)]
+    pub const fn in_interieur(self) -> bool {
+        debug_assert!(self.finished_construction());
+        matches!(self, InSet::Interieur)
     }
 
     #[inline(always)]

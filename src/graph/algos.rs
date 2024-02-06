@@ -31,7 +31,7 @@ fn update_convex_hull_boundary(
         );
         if potential_next.len() > 1 {
             // if we have choice,
-            // only keep the option visited the longest time ago / not at all
+            // only keep the options visited the longest time ago / not at all
             for v in boundary.iter().rev() {
                 if potential_next.contains(v) {
                     potential_next.retain(|next| next != v);
@@ -162,7 +162,7 @@ impl ConvexHullData {
         queue.clear();
 
         self.hull.clear();
-        self.hull.resize(edges.nr_vertices(), InSet::Perhaps);
+        self.hull.resize(edges.nr_vertices(), InSet::Unknown);
         let hull = &mut self.hull[..];
         for i in 0..cops.len() {
             let cop_i = &cops[i];
@@ -187,29 +187,29 @@ impl ConvexHullData {
                 //change these paths from InSet::NewlyAdded to InSet::Yes
                 //(to allow new paths to go through the current one)
                 queue.push_back(cop_i.nearest_node);
-                hull[cop_i.nearest_node] = InSet::Yes;
-                edges.recolor_region((InSet::NewlyAdded, InSet::Yes), hull, queue);
+                hull[cop_i.nearest_node] = InSet::Interieur;
+                edges.recolor_region((InSet::NewlyAdded, InSet::Interieur), hull, queue);
             }
         }
         //color outside as InSet::No (note: this might miss some edge cases; best to not place cops at rim)
         for &p in vertices_outside_hull {
-            if hull[p] == InSet::Perhaps {
+            if hull[p] == InSet::Unknown {
                 hull[p] = InSet::No;
                 queue.push_back(p);
             }
         }
-        edges.recolor_region((InSet::Perhaps, InSet::No), hull, queue);
+        edges.recolor_region((InSet::Unknown, InSet::No), hull, queue);
 
-        //color remaining InSet::Perhaps as InSet::Yes
+        //color remaining InSet::Perhaps as InSet::Interieur
         for x in hull {
-            if *x == InSet::Perhaps {
-                *x = InSet::Yes;
+            if *x == InSet::Unknown {
+                *x = InSet::Interieur;
             }
         }
         //mark boundary as such
         let hull = &mut self.hull[..];
         for (v, mut neighs) in izip!(0.., edges.neighbors()) {
-            if hull[v].inside() && neighs.any(|n| hull[n].outside()) {
+            if hull[v].in_set() && neighs.any(|n| hull[n].outside()) {
                 hull[v] = InSet::OnBoundary;
             }
         }
@@ -386,7 +386,7 @@ impl EscapeableNodes {
         edges.recolor_region_with(
             isize::MAX,
             &mut self.boundary_segment_dist,
-            |_, n, _| hull[n].inside(),
+            |_, n, _| hull[n].in_set(),
             queue,
         );
 
@@ -396,7 +396,7 @@ impl EscapeableNodes {
         }
         edges.calc_distances_to_with(
             &mut self.boundary_segment_dist,
-            |v, _| hull[v].inside(),
+            |v, _| hull[v].in_set(),
             queue,
         );
     }
@@ -568,7 +568,7 @@ impl EscapeableNodes {
                             for n in edges.neighbors_of(v) {
                                 //build "firewall" below path, such that recoloring of keep_in_escapable inside this loop
                                 //will only go up into deeper parts and not below to the boundary.
-                                if hull_data.hull[n].inside()
+                                if hull_data.hull[n].in_set()
                                     && self.boundary_segment_dist[n] < self.boundary_segment_dist[v]
                                 {
                                     self.keep_in_escapable[n] = KeepVertex::Yes;
@@ -589,7 +589,7 @@ impl EscapeableNodes {
                             self.some_boundary_dist[v] = 0;
                             self.last_write_by[v] = owner;
                             //this is mostly a waste: somehow it is insufficient to only walk inside our marked region
-                            let in_hull = |n: usize| hull_data.hull[n].inside();
+                            let in_hull = |n: usize| hull_data.hull[n].in_set();
                             self.calc_small_dists(
                                 in_hull,
                                 edges,
@@ -633,7 +633,7 @@ impl EscapeableNodes {
                     edges.recolor_region_with(
                         KeepVertex::Yes,
                         &mut self.keep_in_escapable,
-                        |_, n, _| hull_data.hull[n].inside(),
+                        |_, n, _| hull_data.hull[n].in_set(),
                         queue,
                     );
 
@@ -717,7 +717,7 @@ impl EscapeableNodes {
                 queue.push_back(v);
                 self.some_boundary_dist[v] = 0;
                 self.last_write_by[v] = owner;
-                let in_hull = |x: usize| hull_data.hull[x].inside();
+                let in_hull = |x: usize| hull_data.hull[x].in_set();
                 self.calc_small_dists(in_hull, edges, queue, max_escapable_dist, last_owner, owner);
                 last_owner = Some(owner);
                 last_v = v;
@@ -781,14 +781,14 @@ impl CopPairHullData {
         let mut all_entries = std::mem::take(&mut self.boundary);
         all_entries.clear();
 
-        self.hull[cop_1.nearest_node] = InSet::Yes;
+        self.hull[cop_1.nearest_node] = InSet::Interieur;
         queue.push_back(cop_1.nearest_node);
         all_entries.push(cop_1.nearest_node);
         while let Some(v) = queue.pop_front() {
             let curr_dist_to_2 = cop_2.distances[v];
             for n in edges.neighbors_of(v) {
                 if cop_2.distances[n] < curr_dist_to_2 && self.hull[n] == InSet::No {
-                    self.hull[n] = InSet::Yes;
+                    self.hull[n] = InSet::Interieur;
                     queue.push_back(n);
                     all_entries.push(n);
                 }
