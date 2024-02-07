@@ -14,7 +14,6 @@ pub use planar3d::*;
 
 /// bruteforce algrotithms to compute the lazy-cop number of a graph
 pub mod bruteforce;
-pub use bruteforce::*;
 
 #[allow(dead_code)]
 pub mod bool_csr;

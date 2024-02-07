@@ -5,9 +5,9 @@ use itertools::{izip, Itertools};
 use egui::*;
 
 use crate::app::character::CharacterState;
-use crate::graph::*;
+use crate::graph::{bruteforce as bf, *};
 
-use self::bruteforce_state::BruteforceWorker;
+use self::bruteforce_state::{BruteforceWorker, GameType};
 
 use super::{color, *};
 
@@ -585,19 +585,20 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
-                if let BruteForceResult::RobberWins(data) = &self.worker.result() {
-                    let same_map = con.shape() == data.shape()
-                        && con.edges.nr_vertices() == data.safe.nr_map_vertices();
-
-                    let same_nr_cops = self.characters.active_cops().count() == data.nr_cops;
-
-                    if same_map && same_nr_cops {
+                if let Some((game_type, bf::Outcome::RobberWins(data))) = &self.worker.result() {
+                    let curr_game_type = GameType {
+                        nr_cops: self.characters.active_cops().count(),
+                        nr_vertices: con.edges.nr_vertices(),
+                        shape: con.shape(),
+                    };
+                    if curr_game_type == *game_type {
                         let mut active_cops =
                             self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
 
-                        let (_, cop_positions) = data.cop_moves.pack(active_cops.iter().copied());
+                        let sym_group = data.symmetry.to_dyn();
+                        let (_, cop_positions) =
+                            data.cop_moves.pack_dyn(sym_group, active_cops.iter().copied());
                         let safe_vertices = data.safe.robber_safe_when(cop_positions);
-                        let sym_group = con.sym_group().to_dyn();
                         let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
                         for (v, safe) in izip!(0.., safe_vertices) {
                             let v_rot = transform.dyn_apply_backward(v);

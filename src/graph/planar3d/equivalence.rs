@@ -30,7 +30,7 @@ pub trait Automorphism {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Identity {
     nr_vertices: usize,
 }
@@ -78,9 +78,11 @@ pub trait SymmetryGroup {
     fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto>;
 
     const HAS_SYMMETRY: bool = true;
+
+    fn into_enum(self) -> SymGroup;
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct NoSymmetry {
     identity: Identity,
 }
@@ -108,6 +110,10 @@ impl SymmetryGroup for NoSymmetry {
 
     fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto> {
         std::iter::once(&self.identity)
+    }
+
+    fn into_enum(self) -> SymGroup {
+        SymGroup::None(self)
     }
 
     const HAS_SYMMETRY: bool = false;
@@ -153,13 +159,6 @@ impl<T: Automorphism> From<&T> for ExplicitAutomorphism {
 }
 
 impl ExplicitAutomorphism {
-    pub fn identity(n: usize) -> Self {
-        Self {
-            forward: (0..n).collect_vec(),
-            backward: (0..n).collect_vec(),
-        }
-    }
-
     pub fn new(edges: &EdgeList, positions: &[Pos3], matrix: Matrix3x3) -> Self {
         let mut forward = vec![usize::MAX; edges.nr_vertices()];
         let mut backward = vec![usize::MAX; edges.nr_vertices()];
@@ -245,21 +244,6 @@ impl ExplicitClasses {
         debug_assert_eq!(len, self.vertex_representative.len());
         debug_assert_eq!(len, self.to_representative.nr_rows());
         len
-    }
-
-    pub fn new_no_symmetry(nr_vertices: usize) -> Self {
-        let mut to_representative = BoolCSR::new(nr_vertices);
-        for _ in 0..nr_vertices {
-            to_representative.add_row();
-            to_representative.add_entry_in_last_row(0);
-        }
-        Self {
-            class: (0..(nr_vertices as u16)).collect_vec(),
-            vertex_representative: (0..nr_vertices).collect_vec(),
-            class_representative: (0..nr_vertices).collect_vec(),
-            symmetry_transforms: vec![ExplicitAutomorphism::identity(nr_vertices)],
-            to_representative,
-        }
     }
 
     //only works for those platonic solids with threeangles as base shape
@@ -653,6 +637,10 @@ impl SymmetryGroup for ExplicitClasses {
     fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto> {
         self.symmetry_transforms.iter()
     }
+
+    fn into_enum(self) -> SymGroup {
+        SymGroup::Explicit(self)
+    }
 }
 
 pub trait DynAutomorphism {
@@ -704,6 +692,7 @@ impl<T: SymmetryGroup> DynSymmetryGroup for T {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum SymGroup {
     Explicit(ExplicitClasses),
     None(NoSymmetry),
