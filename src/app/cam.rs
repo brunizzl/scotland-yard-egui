@@ -86,7 +86,7 @@ impl Camera3D {
                 if info.pointer.button_down(PointerButton::Secondary) {
                     self.position += info.pointer.delta();
                 }
-                self.position += info.scroll_delta;
+                self.position += info.raw_scroll_delta;
                 if let Some(drag) = info.multi_touch() {
                     self.position += drag.translation_delta;
                     self.rotate_z(drag.rotation_delta);
@@ -117,7 +117,7 @@ impl Camera3D {
                 if info.pointer.button_down(PointerButton::Secondary) {
                     drag_dist -= info.pointer.delta();
                 }
-                drag_dist -= info.scroll_delta;
+                drag_dist -= info.raw_scroll_delta;
                 if let Some(drag) = info.multi_touch() {
                     drag_dist -= drag.translation_delta;
                     self.rotate_z(drag.rotation_delta);

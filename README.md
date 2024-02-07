@@ -34,9 +34,10 @@ On Fedora Rawhide you need to run:
 
 #### Functionality
 * make computation of hull boundary more robust (use faces?)
-* think about how to extend the esapable regions concept to identify more vertices
+* think about how to extend the escapable regions concept to identify more vertices
 * extend convex hull to prevent jumps
 * Doughnut graph + symmetry
+* choose for which cops convex hull is computed + option to define the outside region yourself
 
 #### Nice To Have
 * pick colors for excapable regions depending on boundary cops (fewer color swaps)
