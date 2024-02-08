@@ -2,7 +2,7 @@ use super::geo;
 
 /// purpose build data structure for very regular neighbor relations.
 /// the same space is kept for each node's neighbors. this is only efficient if most nodes have
-/// close to the maximum graph degree. even a single outliar 
+/// close to the maximum graph degree. even a single outliar
 /// with larger degree will greatly diminish the efficiency of this approach.
 pub mod edgelist;
 pub use edgelist::*;

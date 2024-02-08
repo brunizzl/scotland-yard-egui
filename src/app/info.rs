@@ -7,7 +7,7 @@ use egui::*;
 use crate::app::character::CharacterState;
 use crate::graph::{bruteforce as bf, *};
 
-use self::bruteforce_state::{BruteforceWorker, GameType};
+use self::bruteforce_state::{BruteforceComputationState, GameType};
 
 use super::{color, *};
 
@@ -252,7 +252,7 @@ pub struct Info {
     options: Options,
     menu_change: bool,
 
-    worker: BruteforceWorker,
+    worker: BruteforceComputationState,
 }
 
 mod storage_keys {
@@ -294,7 +294,7 @@ impl Info {
             options,
             menu_change: false,
 
-            worker: BruteforceWorker::new(),
+            worker: BruteforceComputationState::new(),
         }
     }
 

@@ -380,13 +380,17 @@ pub enum Outcome {
 ///
 /// the hole thing is somewhat more complicated by the fact, that neighboring cop states `c` and `c'` may not both be stored in the same
 /// rotation. therefore one needs to constantly rotate between the two.
+use std::sync::mpsc;
 pub fn compute_safe_robber_positions<S>(
     nr_cops: usize,
     map: SymmetricMap<S>,
+    log: Option<mpsc::Sender<&'static str>>,
 ) -> Result<Outcome, String>
 where
     S: SymmetryGroup + Serialize,
 {
+    let update_status = |msg| log.as_ref().map(|s| s.send(msg));
+
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
     }
@@ -395,13 +399,18 @@ where
             "Rechnung kann für höchstens {MAX_COPS} Cops durchgeführt werden."
         ));
     }
+
+    update_status("liste Polizeipositionen");
     let Some(cop_moves) = CopConfigurations::new(&map, nr_cops) else {
         return Err("Zu wenig Speicherplatz (Cops passen nicht in Int)".to_owned());
     };
+
+    update_status("initialisiere Räubergewinnfunktion");
     let Some(mut f) = SafeRobberPositions::new(map.nr_vertices(), &cop_moves) else {
         return Err("Zu wenig Speicherplatz (Räuber-Gewinnfunktion zu groß)".to_owned());
     };
 
+    update_status("initialisiere Queue");
     let mut queue = VecDeque::new();
     if queue.try_reserve(cop_moves.nr_configurations()).is_err() {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
@@ -441,6 +450,7 @@ where
     //intersection of `safe_should_cops_move_to_curr` and the vertices previously marked as safe for gamestate bevor curr
     let mut f_temp = vec![false; nr_map_vertices];
 
+    update_status("berechne Räubergewinnfunktion");
     //lines 4 + 5
     while let Some(curr_cop_positions) = queue.pop_back() {
         //line 6

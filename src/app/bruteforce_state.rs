@@ -79,14 +79,25 @@ impl From<Result<bf::Outcome, String>> for WorkResult {
     }
 }
 
+use std::sync::mpsc;
+type RcvStr = mpsc::Receiver<&'static str>;
+struct Worker {
+    game_type: GameType,
+    task: WorkTask,
+    handle: thread::JoinHandle<WorkResult>,
+
+    reciever: Option<RcvStr>,
+    status: Option<&'static str>,
+}
+
 use std::collections::BTreeMap;
-pub struct BruteforceWorker {
-    workers: Vec<(GameType, thread::JoinHandle<WorkResult>, WorkTask)>,
+pub struct BruteforceComputationState {
+    workers: Vec<Worker>,
     results: BTreeMap<GameType, bf::Outcome>,
     error: Option<(GameType, String)>,
 }
 
-impl BruteforceWorker {
+impl BruteforceComputationState {
     pub fn new() -> Self {
         Self {
             workers: Vec::new(),
@@ -111,13 +122,24 @@ impl BruteforceWorker {
         }
     }
 
-    fn employ_worker<F>(&mut self, game_type: GameType, work: F, job_description: WorkTask)
-    where
+    fn employ_worker<F>(
+        &mut self,
+        game_type: GameType,
+        work: F,
+        reciever: Option<RcvStr>,
+        task: WorkTask,
+    ) where
         F: FnOnce() -> WorkResult + Send + 'static,
     {
         if NATIVE {
             //use threads natively
-            self.workers.push((game_type, thread::spawn(work), job_description));
+            self.workers.push(Worker {
+                game_type,
+                task,
+                handle: thread::spawn(work),
+                reciever,
+                status: None,
+            });
         } else {
             //wasm doesn't like threads -> just block gui
             self.process_result(game_type, work());
@@ -126,13 +148,31 @@ impl BruteforceWorker {
 
     fn check_on_workers(&mut self) {
         let mut temp_workers = Vec::with_capacity(self.workers.len());
-        for (game_type, handle, task) in std::mem::take(&mut self.workers) {
+        for worker in std::mem::take(&mut self.workers) {
+            let Worker {
+                game_type,
+                task,
+                handle,
+                reciever: mut status_reciever,
+                mut status,
+            } = worker;
             if handle.is_finished() {
                 if let Ok(ok) = handle.join() {
                     self.process_result(game_type, ok);
                 }
             } else {
-                temp_workers.push((game_type, handle, task));
+                if let Some(rcv) = &mut status_reciever {
+                    if let Ok(msg) = rcv.try_recv() {
+                        status = Some(msg);
+                    }
+                }
+                temp_workers.push(Worker {
+                    game_type,
+                    task,
+                    handle,
+                    reciever: status_reciever,
+                    status,
+                });
             }
         }
         self.workers = temp_workers;
@@ -150,16 +190,20 @@ impl BruteforceWorker {
                     edges: map.edges().clone(),
                     symmetry: equiv.clone(),
                 };
-                let work = move || bf::compute_safe_robber_positions(nr_cops, sym).into();
-                self.employ_worker(game_type, work, WorkTask::Compute);
+                let (send, recieve) = mpsc::channel();
+                let work =
+                    move || bf::compute_safe_robber_positions(nr_cops, sym, Some(send)).into();
+                self.employ_worker(game_type, work, Some(recieve), WorkTask::Compute);
             },
             SymGroup::None(none) => {
                 let sym = bf::SymmetricMap {
                     edges: map.edges().clone(),
                     symmetry: *none,
                 };
-                let work = move || bf::compute_safe_robber_positions(nr_cops, sym).into();
-                self.employ_worker(game_type, work, WorkTask::Compute);
+                let (send, recieve) = mpsc::channel();
+                let work =
+                    move || bf::compute_safe_robber_positions(nr_cops, sym, Some(send)).into();
+                self.employ_worker(game_type, work, Some(recieve), WorkTask::Compute);
             },
         }
     }
@@ -180,7 +224,7 @@ impl BruteforceWorker {
             }
             WorkResult::new_success(outcome)
         };
-        self.employ_worker(game_type, work, WorkTask::Store);
+        self.employ_worker(game_type, work, None, WorkTask::Store);
     }
 
     fn load_result_from(&mut self, game_type: GameType) {
@@ -196,7 +240,7 @@ impl BruteforceWorker {
                 Err(err) => WorkResult::new_err(err),
             }
         };
-        self.employ_worker(game_type, work, WorkTask::Load);
+        self.employ_worker(game_type, work, None, WorkTask::Load);
     }
 
     fn draw_result(ui: &mut Ui, game_type: &GameType, outcome: &bf::Outcome) {
@@ -246,13 +290,13 @@ impl BruteforceWorker {
                 shape: map.shape(),
             };
             let mut computing_curr = false;
-            for (worker_game_type, _, task) in &self.workers {
-                if *worker_game_type == game_type && *task == WorkTask::Compute {
+            for worker in &self.workers {
+                if worker.game_type == game_type && worker.task == WorkTask::Compute {
                     computing_curr = true;
                 }
                 ui.horizontal(|ui| {
                     ui.add(egui::widgets::Spinner::new());
-                    let task_str = match task {
+                    let task_str = match worker.task {
                         WorkTask::Compute => "rechne ",
                         WorkTask::Load => "lade ",
                         WorkTask::Store => "speichere ",
@@ -260,9 +304,13 @@ impl BruteforceWorker {
                     ui.label(format!(
                         "{} {}",
                         task_str,
-                        worker_game_type.as_tuple_string()
+                        worker.game_type.as_tuple_string()
                     ));
                 });
+                if let Some(msg) = worker.status {
+                    ui.label(msg);
+                }
+                ui.add_space(5.0);
             }
             if !computing_curr
                 && ui
