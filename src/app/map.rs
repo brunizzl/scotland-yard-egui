@@ -12,8 +12,8 @@ pub enum Shape {
     Tetrahedron,
     Octahedron,
     Icosahedron,
-    DividedIcosahedron, //Map::nr_ico_divisions belongs to this
-    RegularPolygon2D,   //Map::nr_polygon_sides belongs to this
+    DividedIcosahedron(isize),
+    RegularPolygon2D(isize),
     Cube,
     Football,
     FabianHamann,
@@ -22,19 +22,45 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub fn to_str(self) -> &'static str {
+    pub fn to_sting(self) -> String {
         match self {
-            Self::Cube => "Wuerfel",
-            Self::DividedIcosahedron => "Ikosaeder-unterteilt",
-            Self::Dodecahedron => "Dodekaeder",
-            Self::FabianHamann => "Fabian-Hamann",
-            Self::Football => "Fussball",
-            Self::Octahedron => "Oktaeder",
-            Self::Random2D => "Zufaellig",
-            Self::RegularPolygon2D => "2d-Polygon",
-            Self::Tetrahedron => "Tetraeder",
-            Self::Icosahedron => "Ikosaeder",
+            Self::Cube => "Wuerfel".to_string(),
+            Self::DividedIcosahedron(pressure) => format!("Ikosaeder-{pressure}x-aufgepustet"),
+            Self::Dodecahedron => "Dodekaeder".to_string(),
+            Self::FabianHamann => "Fabian-Hamann".to_string(),
+            Self::Football => "Fussball".to_string(),
+            Self::Octahedron => "Oktaeder".to_string(),
+            Self::Random2D => "Zufaellig".to_string(),
+            Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
+            Self::Tetrahedron => "Tetraeder".to_string(),
+            Self::Icosahedron => "Ikosaeder".to_string(),
         }
+    }
+}
+
+pub fn new_map_from(shape: Shape, res: usize) -> Embedding3D {
+    match shape {
+        Shape::Icosahedron => Embedding3D::new_subdivided_icosahedron(res),
+        Shape::Octahedron => Embedding3D::new_subdivided_octahedron(res),
+        Shape::Tetrahedron => Embedding3D::new_subdivided_tetrahedron(res),
+        Shape::DividedIcosahedron(pressure) => {
+            let res1 = usize::min(res, pressure as usize);
+            let res2 = if res1 == 0 {
+                res
+            } else {
+                (usize::max(res, 1) - 1) / (res1 + 1)
+            };
+            Embedding3D::new_subdivided_subdivided_icosahedron(res1, res2)
+        },
+        Shape::RegularPolygon2D(nr_sides) => {
+            let sides = nr_sides as usize;
+            Embedding3D::from_2d(graph::triangulated_regular_polygon(sides, res))
+        },
+        Shape::Cube => Embedding3D::new_subdivided_cube(res),
+        Shape::Dodecahedron => Embedding3D::new_subdivided_dodecahedron(res, false, false),
+        Shape::Football => Embedding3D::new_subdivided_football(res, false),
+        Shape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
+        Shape::Random2D => Embedding3D::from_2d(graph::random_triangulated(res, 8)),
     }
 }
 
@@ -45,16 +71,12 @@ pub struct Map {
 
     shape: Shape,
     resolution: isize,
-    nr_polygon_sides: isize, //not stored as part of enum to remember when switching shape back and forth
-    ico_pressure: isize, //not stored as part of enum to remember when switching shape back and forth
     camera: Camera3D,
 }
 
 mod storage_keys {
     pub const SHAPE: &str = "app::map::shape";
     pub const RESOLUTION: &str = "app::map::resolution";
-    pub const NR_POLY_SIDES: &str = "app::map::poly_sides";
-    pub const NR_ICO_DIVISIONS: &str = "app::map::nr_ico_divisions";
     pub const CAMERA: &str = "app::map::camera";
 }
 
@@ -65,6 +87,10 @@ impl Map {
 
     pub fn data(&self) -> &Embedding3D {
         &self.data
+    }
+
+    pub fn resolution(&self) -> usize {
+        self.resolution as usize
     }
 
     pub fn new(info: &mut Info, cc: &eframe::CreationContext<'_>) -> Self {
@@ -79,8 +105,6 @@ impl Map {
                 (last_res, false)
             }
         };
-        let nr_polygon_sides = load_or(cc.storage, NR_POLY_SIDES, || 6);
-        let nr_ico_divisions = load_or(cc.storage, NR_ICO_DIVISIONS, || 3);
         let camera = load_or(cc.storage, CAMERA, Camera3D::new);
 
         let mut result = Self {
@@ -90,8 +114,6 @@ impl Map {
 
             shape,
             resolution,
-            nr_polygon_sides,
-            ico_pressure: nr_ico_divisions,
             camera,
         };
         result.recompute();
@@ -109,8 +131,6 @@ impl Map {
         use storage_keys::*;
         eframe::set_value(storage, SHAPE, &self.shape);
         eframe::set_value(storage, RESOLUTION, &self.resolution);
-        eframe::set_value(storage, NR_POLY_SIDES, &self.nr_polygon_sides);
-        eframe::set_value(storage, NR_ICO_DIVISIONS, &self.ico_pressure);
         eframe::set_value(storage, CAMERA, &self.camera);
     }
 
@@ -170,30 +190,7 @@ impl Map {
     }
 
     fn recompute(&mut self) {
-        let res = self.resolution as usize;
-        self.data = match self.shape {
-            Shape::Icosahedron => Embedding3D::new_subdivided_icosahedron(res),
-            Shape::Octahedron => Embedding3D::new_subdivided_octahedron(res),
-            Shape::Tetrahedron => Embedding3D::new_subdivided_tetrahedron(res),
-            Shape::DividedIcosahedron => {
-                let res1 = usize::min(res, self.ico_pressure as usize);
-                let res2 = if res1 == 0 {
-                    res
-                } else {
-                    (usize::max(res, 1) - 1) / (res1 + 1)
-                };
-                Embedding3D::new_subdivided_subdivided_icosahedron(res1, res2)
-            },
-            Shape::RegularPolygon2D => {
-                let sides = self.nr_polygon_sides as usize;
-                Embedding3D::from_2d(graph::triangulated_regular_polygon(sides, res))
-            },
-            Shape::Cube => Embedding3D::new_subdivided_cube(res),
-            Shape::Dodecahedron => Embedding3D::new_subdivided_dodecahedron(res, false, false),
-            Shape::Football => Embedding3D::new_subdivided_football(res, false),
-            Shape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
-            Shape::Random2D => Embedding3D::from_2d(graph::random_triangulated(res, 8)),
-        };
+        self.data = new_map_from(self.shape, self.resolution as usize);
         if self.is_3d() {
             self.extreme_vertices.clear();
             self.camera.reset_position();
@@ -237,25 +234,33 @@ impl Map {
             ui.radio_value(&mut self.shape, Shape::Tetrahedron, "Tetraeder");
             ui.radio_value(&mut self.shape, Shape::Octahedron, "Oktaeder");
             ui.radio_value(&mut self.shape, Shape::Icosahedron, "Ikosaeder");
-            ui.radio_value(
-                &mut self.shape,
-                Shape::DividedIcosahedron,
-                "aufgepusteter Ikosaeder",
-            );
-            if self.shape == Shape::DividedIcosahedron {
-                change |= add_drag_value(ui, &mut self.ico_pressure, "Druck: ", 0, self.resolution);
+            if ui
+                .add(RadioButton::new(
+                    matches!(self.shape, Shape::DividedIcosahedron(_)),
+                    "aufgepusteter Ikosaeder",
+                ))
+                .clicked()
+            {
+                self.shape = Shape::DividedIcosahedron(0);
+            }
+            if let Shape::DividedIcosahedron(pressure) = &mut self.shape {
+                change |= add_drag_value(ui, pressure, "Druck: ", 0, self.resolution);
             }
             ui.radio_value(&mut self.shape, Shape::Dodecahedron, "Dodekaeder");
             ui.radio_value(&mut self.shape, Shape::Cube, "Würfel");
             ui.radio_value(&mut self.shape, Shape::Football, "Fußball");
             ui.radio_value(&mut self.shape, Shape::FabianHamann, "Fabian Hamanns Graph");
-            ui.radio_value(
-                &mut self.shape,
-                Shape::RegularPolygon2D,
-                "2D Polygon trianguliert",
-            );
-            if self.shape == Shape::RegularPolygon2D {
-                change |= add_drag_value(ui, &mut self.nr_polygon_sides, "Seiten: ", 3, 10);
+            if ui
+                .add(RadioButton::new(
+                    matches!(self.shape, Shape::RegularPolygon2D(_)),
+                    "aufgepusteter Ikosaeder",
+                ))
+                .clicked()
+            {
+                self.shape = Shape::RegularPolygon2D(6);
+            }
+            if let Shape::RegularPolygon2D(nr_sides) = &mut self.shape {
+                change |= add_drag_value(ui, nr_sides, "Seiten: ", 3, 10);
             }
             ui.radio_value(
                 &mut self.shape,

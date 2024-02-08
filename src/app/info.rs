@@ -587,16 +587,15 @@ impl Info {
             VertexColorInfo::BruteForceRes => {
                 let game_type = GameType {
                     nr_cops: self.characters.active_cops().count(),
-                    nr_vertices: con.edges.nr_vertices(),
-                    shape: con.shape(),
+                    resolution: con.map.resolution(),
+                    shape: con.map.shape(),
                 };
                 if let Some(bf::Outcome::RobberWins(data)) = &self.worker.result_for(&game_type) {
                     let mut active_cops =
                         self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
 
                     let sym_group = data.symmetry.to_dyn();
-                    let (_, cop_positions) =
-                        data.cop_moves.pack_dyn(sym_group, active_cops.iter().copied());
+                    let (_, cop_positions) = data.pack(active_cops.iter().copied());
                     let safe_vertices = data.safe.robber_safe_when(cop_positions);
                     let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
                     for (v, safe) in izip!(0.., safe_vertices) {

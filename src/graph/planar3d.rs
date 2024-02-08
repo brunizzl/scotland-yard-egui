@@ -368,6 +368,10 @@ impl Embedding3D {
         &self.edges
     }
 
+    pub fn into_edges(self) -> EdgeList {
+        self.edges
+    }
+
     pub fn nr_vertices(&self) -> usize {
         self.vertices.len()
     }

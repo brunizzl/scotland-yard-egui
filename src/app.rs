@@ -30,10 +30,6 @@ impl<'a> DrawContext<'a> {
         self.map.camera()
     }
 
-    pub fn shape(&self) -> map::Shape {
-        self.map.shape()
-    }
-
     pub fn sym_group(&self) -> &SymGroup {
         self.map.data().sym_group()
     }
