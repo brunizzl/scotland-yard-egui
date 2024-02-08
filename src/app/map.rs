@@ -7,7 +7,7 @@ use crate::graph::{self, EdgeList, Embedding3D};
 
 use super::{color::*, *};
 
-#[derive(Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize, serde::Serialize)]
 pub enum Shape {
     Tetrahedron,
     Octahedron,

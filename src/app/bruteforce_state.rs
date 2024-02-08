@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::*;
 use crate::graph::bruteforce as bf;
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GameType {
     pub nr_cops: usize,
     pub nr_vertices: usize,
@@ -79,34 +79,27 @@ impl From<Result<bf::Outcome, String>> for WorkResult {
     }
 }
 
+use std::collections::BTreeMap;
 pub struct BruteforceWorker {
-    worker: Option<(GameType, thread::JoinHandle<WorkResult>, WorkTask)>,
-    result: Option<(GameType, bf::Outcome)>,
+    workers: Vec<(GameType, thread::JoinHandle<WorkResult>, WorkTask)>,
+    results: BTreeMap<GameType, bf::Outcome>,
     error: Option<(GameType, String)>,
 }
 
 impl BruteforceWorker {
     pub fn new() -> Self {
         Self {
-            worker: None,
-            result: None,
+            workers: Vec::new(),
+            results: BTreeMap::new(),
             error: None,
         }
     }
 
-    fn current_worker_task(&self) -> Option<WorkTask> {
-        self.worker.as_ref().map(|w| w.2)
+    pub fn result_for(&self, game_type: &GameType) -> Option<&bf::Outcome> {
+        self.results.get(game_type)
     }
 
-    pub fn result(&self) -> Option<&(GameType, bf::Outcome)> {
-        self.result.as_ref()
-    }
-
-    fn process_result(
-        &mut self,
-        game_type: GameType,
-        res: WorkResult,
-    ) -> Option<(GameType, bf::Outcome)> {
+    fn process_result(&mut self, game_type: GameType, res: WorkResult) {
         if let Some(err) = res.error {
             self.error = Some((game_type, err));
         } else if res.result.is_some() {
@@ -114,9 +107,7 @@ impl BruteforceWorker {
         }
 
         if let Some(outcome) = res.result {
-            std::mem::replace(&mut self.result, Some((game_type, outcome)))
-        } else {
-            None
+            self.results.insert(game_type, outcome);
         }
     }
 
@@ -124,35 +115,30 @@ impl BruteforceWorker {
     where
         F: FnOnce() -> WorkResult + Send + 'static,
     {
-        assert!(self.current_worker_task().is_none());
-
         if NATIVE {
             //use threads natively
-            self.worker = Some((game_type, thread::spawn(work), job_description));
+            self.workers.push((game_type, thread::spawn(work), job_description));
         } else {
             //wasm doesn't like threads -> just block gui
-            let _ = self.process_result(game_type, work());
+            self.process_result(game_type, work());
         }
     }
 
-    fn check_on_worker(&mut self) {
-        if let Some((game_type, handle, task)) = std::mem::take(&mut self.worker) {
+    fn check_on_workers(&mut self) {
+        let mut temp_workers = Vec::with_capacity(self.workers.len());
+        for (game_type, handle, task) in std::mem::take(&mut self.workers) {
             if handle.is_finished() {
                 if let Ok(ok) = handle.join() {
                     self.process_result(game_type, ok);
-                } else {
-                    self.worker = None;
                 }
             } else {
-                self.worker = Some((game_type, handle, task));
+                temp_workers.push((game_type, handle, task));
             }
         }
+        self.workers = temp_workers;
     }
 
     fn start_computation(&mut self, nr_cops: usize, map: &map::Map) {
-        if self.current_worker_task().is_some() {
-            return;
-        }
         let game_type = GameType {
             nr_cops,
             nr_vertices: map.edges().nr_vertices(),
@@ -178,34 +164,26 @@ impl BruteforceWorker {
         }
     }
 
-    fn save_result(&mut self) {
-        if self.current_worker_task().is_some() {
-            return;
-        }
-        if let Some((game_type, outcome)) = std::mem::take(&mut self.result) {
-            let work = move || {
-                let path = game_type.file_name();
-                let file = match fs::File::create(path) {
-                    Ok(file) => file,
-                    Err(err) => return WorkResult::new_both(outcome, err),
-                };
-                let mut file_buffer = std::io::BufWriter::new(file);
-                if let Err(err) = rmp_serde::encode::write(&mut file_buffer, &outcome) {
-                    return WorkResult::new_both(outcome, err);
-                }
-                if let Err(err) = file_buffer.flush() {
-                    return WorkResult::new_both(outcome, err);
-                }
-                WorkResult::new_success(outcome)
+    fn save_result(&mut self, game_type: GameType, outcome: bf::Outcome) {
+        let work = move || {
+            let path = game_type.file_name();
+            let file = match fs::File::create(path) {
+                Ok(file) => file,
+                Err(err) => return WorkResult::new_both(outcome, err),
             };
-            self.employ_worker(game_type, work, WorkTask::Store);
-        }
+            let mut file_buffer = std::io::BufWriter::new(file);
+            if let Err(err) = rmp_serde::encode::write(&mut file_buffer, &outcome) {
+                return WorkResult::new_both(outcome, err);
+            }
+            if let Err(err) = file_buffer.flush() {
+                return WorkResult::new_both(outcome, err);
+            }
+            WorkResult::new_success(outcome)
+        };
+        self.employ_worker(game_type, work, WorkTask::Store);
     }
 
     fn load_result_from(&mut self, game_type: GameType) {
-        if self.current_worker_task().is_some() {
-            return;
-        }
         let work = move || {
             let path = game_type.file_name();
             let file = match fs::File::open(path) {
@@ -221,74 +199,99 @@ impl BruteforceWorker {
         self.employ_worker(game_type, work, WorkTask::Load);
     }
 
-    fn draw_result(&self, ui: &mut Ui) {
-        if let Some((game_type, outcome)) = &self.result {
-            let outcome_str = match outcome {
-                bf::Outcome::CopsWin => "verliert",
-                bf::Outcome::RobberWins(_) => "gewinnt",
-            };
+    fn draw_result(ui: &mut Ui, game_type: &GameType, outcome: &bf::Outcome) {
+        let outcome_str = match outcome {
+            bf::Outcome::CopsWin => "verliert",
+            bf::Outcome::RobberWins(_) => "gewinnt",
+        };
 
-            let cops_str = if game_type.nr_cops == 1 {
-                "einen Cop".to_owned()
-            } else {
-                game_type.nr_cops.to_string() + " Cops"
-            };
-
-            ui.label(format!(
-                "Räuber {} gegen {} auf {} mit {} Knoten",
-                outcome_str,
-                cops_str,
-                game_type.shape.to_str(),
-                game_type.nr_vertices
-            ));
+        let cops_str = if game_type.nr_cops == 1 {
+            "einen Cop".to_owned()
         } else {
-            ui.label("noch keine beendete Rechnung");
-        }
+            game_type.nr_cops.to_string() + " Cops"
+        };
 
-        if let Some((game_type, err)) = &self.error {
-            ui.label(format!(
-                "Fehler für {}:\n{}",
-                game_type.as_tuple_string(),
-                err
-            ));
+        ui.label(format!(
+            "Räuber {} gegen {} auf {} mit {} Knoten",
+            outcome_str,
+            cops_str,
+            game_type.shape.to_str(),
+            game_type.nr_vertices
+        ));
+    }
+
+    fn draw_results(&mut self, ui: &mut Ui) {
+        ui.add_space(5.0);
+        let mut temp_results = BTreeMap::new();
+        for (game_type, outcome) in std::mem::take(&mut self.results) {
+            Self::draw_result(ui, &game_type, &outcome);
+            ui.horizontal(|ui| {
+                if NATIVE && ui.button("speichern").clicked() {
+                    self.save_result(game_type, outcome);
+                } else if !ui.button("löschen").clicked() {
+                    temp_results.insert(game_type, outcome);
+                }
+            });
+            ui.add_space(5.0);
         }
+        self.results = temp_results;
     }
 
     pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map) {
         ui.collapsing("Bruteforce", |ui| {
-            if let Some((_, _, curr_task)) = &self.worker {
+            self.check_on_workers();
+            let game_type = GameType {
+                nr_cops,
+                nr_vertices: map.data().nr_vertices(),
+                shape: map.shape(),
+            };
+            let mut computing_curr = false;
+            for (worker_game_type, _, task) in &self.workers {
+                if *worker_game_type == game_type && *task == WorkTask::Compute {
+                    computing_curr = true;
+                }
                 ui.horizontal(|ui| {
-                    ui.label(match curr_task {
+                    ui.add(egui::widgets::Spinner::new());
+                    let task_str = match task {
                         WorkTask::Compute => "rechne ",
                         WorkTask::Load => "lade ",
                         WorkTask::Store => "speichere ",
-                    });
-                    ui.add(egui::widgets::Spinner::new());
+                    };
+                    ui.label(format!(
+                        "{} {}",
+                        task_str,
+                        worker_game_type.as_tuple_string()
+                    ));
                 });
-                self.check_on_worker();
-            } else if ui
-                .button("Starte Rechnung")
-                .on_hover_text(
-                    "WARNUNG: weil WASM keine Threads mag, blockt \
+            }
+            if !computing_curr
+                && ui
+                    .button("Starte Rechnung")
+                    .on_hover_text(
+                        "WARNUNG: weil WASM keine Threads mag, blockt \
                 die Websiteversion bei dieser Rechnung die GUI.\n\
                 Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
                 Bruteforceberechnungen nicht in RAM möglich macht.",
-                )
-                .clicked()
+                    )
+                    .clicked()
             {
                 self.start_computation(nr_cops, map);
-            } else if NATIVE && self.result.is_some() && ui.button("speichere Daten").clicked() {
-                self.save_result();
-            } else if NATIVE && ui.button("lade Daten").clicked() {
-                let game_type = GameType {
-                    nr_cops,
-                    nr_vertices: map.data().nr_vertices(),
-                    shape: map.shape(),
-                };
+            } else if NATIVE
+                && !self.results.contains_key(&game_type)
+                && ui.button("laden 🖴").clicked()
+            {
                 self.load_result_from(game_type);
             }
 
-            self.draw_result(ui);
+            self.draw_results(ui);
+
+            if let Some((game_type, err)) = &self.error {
+                ui.label(format!(
+                    "Fehler für {}:\n{}",
+                    game_type.as_tuple_string(),
+                    err
+                ));
+            }
         });
     }
 }
