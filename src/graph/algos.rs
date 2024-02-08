@@ -18,6 +18,7 @@ fn update_convex_hull_boundary(
     debug_assert_eq!(boundary.len(), 1);
     let fst_inside = boundary[0];
     debug_assert_eq!(dist_to_boundary_start[fst_inside], 0);
+    debug_assert!(hull[fst_inside].on_boundary());
 
     let mut potential_next = std::mem::take(queue);
     let mut curr_inside = fst_inside;
@@ -288,7 +289,7 @@ impl ConvexHullData {
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum KeepVertex {
+enum KeepVertex {
     No,
     Yes,
     YesButAlreadyVisited,
@@ -348,11 +349,6 @@ impl EscapeableNodes {
     #[allow(dead_code)]
     pub fn owners(&self) -> &[usize] {
         &self.last_write_by
-    }
-
-    #[allow(dead_code)]
-    pub fn keep_in_escapable(&self) -> &[KeepVertex] {
-        &self.keep_in_escapable
     }
 
     pub fn new() -> Self {
@@ -760,7 +756,7 @@ impl EscapeableNodes {
 }
 
 /// very similar to ConvexHullData, only this time for just a pair of cops.
-/// as this is computed up to many times in a single frame, it tries to never iterate over all vertices.
+/// as this is computed (potentially) many times in a single frame, it tries to never iterate over all vertices.
 struct CopPairHullData {
     hull: Vec<InSet>,     //one entry per vertex
     boundary: Vec<usize>, //indices of boundary vertices

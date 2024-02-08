@@ -33,6 +33,7 @@ On Fedora Rawhide you need to run:
 ### TODO
 
 #### Functionality
+* screenshots to tikz
 * make computation of hull boundary more robust (use faces?)
 * think about how to extend the escapable regions concept to identify more vertices
 * extend convex hull to prevent jumps
@@ -43,3 +44,7 @@ On Fedora Rawhide you need to run:
 * pick colors for excapable regions depending on boundary cops (fewer color swaps)
 * ability to delete any cop (not just the one added last)
 * platonic symmetry (way faster to compute than explicit...)
+
+#### Lowest priority
+* Only compute explicit automorphisms for platonic solids when starting bruteforce (because they are large)
+
