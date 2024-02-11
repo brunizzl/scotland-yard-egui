@@ -38,8 +38,6 @@ impl GameType {
     }
 }
 
-const NATIVE: bool = cfg!(not(target_arch = "wasm32"));
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WorkTask {
     Compute,
@@ -352,7 +350,7 @@ impl BruteforceComputationState {
         };
 
         ui.label(format!(
-            "Räuber {} gegen {} auf {} mit {} Knoten",
+            "Räuber {} gegen {} auf {} mit Auflösung {}",
             outcome_str,
             cops_str,
             game_type.shape.to_sting(),

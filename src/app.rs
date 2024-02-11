@@ -14,6 +14,8 @@ mod tikz;
 
 mod bruteforce_state;
 
+const NATIVE: bool = cfg!(not(target_arch = "wasm32"));
+
 pub struct DrawContext<'a> {
     pub map: &'a map::Map,
     pub extreme_vertices: &'a [usize],

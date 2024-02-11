@@ -469,7 +469,7 @@ impl Info {
     }
 
     fn screenshot_as_tikz(&self, con: &DrawContext<'_>) {
-        if !self.take_screenshot {
+        if !self.take_screenshot || !NATIVE {
             return;
         }
         use chrono::{Datelike, Local, Timelike};

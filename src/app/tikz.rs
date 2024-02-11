@@ -60,10 +60,15 @@ impl TikzPicture {
         Scope { pic: self }
     }
 
-    fn scale(&self) -> f32 {
+    fn coord_scale(&self) -> f32 {
         let scale = self.to_tikz.scale();
         debug_assert!((scale.x - scale.y).abs() / scale.x < 1e-4);
         scale.x
+    }
+
+    fn width_scale(&self) -> f32 {
+        let coord_scale = self.coord_scale();
+        coord_scale * 30.0
     }
 
     /// `clip_rect` is assumed to be in egui's screen coordinates.
@@ -96,7 +101,8 @@ impl TikzPicture {
         match shape {
             Shape::Circle(c) => {
                 let mid = self.to_tikz.transform_pos(c.center);
-                let r = c.radius * self.scale();
+                let r = c.radius * self.coord_scale();
+                let thickness = c.stroke.width * self.width_scale();
 
                 let has_fill = c.fill.a() != 0;
                 let has_stroke = c.stroke.color.a() != 0 && c.stroke.width != 0.0;
@@ -104,8 +110,8 @@ impl TikzPicture {
                     let stroke_color = self.color_name(c.stroke.color);
                     let fill_color = self.color_name(c.fill);
                     self.add_command(&format!(
-                        "\\filldraw[color={stroke_color}, fill={fill_color}] ({},{}) circle ({});",
-                        mid.x, mid.y, r
+                        "\\filldraw[color={stroke_color}, fill={fill_color}, line width={}] ({},{}) circle ({});",
+                        thickness, mid.x, mid.y, r
                     ));
                 } else if has_fill {
                     let fill_color = self.color_name(c.fill);
@@ -116,8 +122,8 @@ impl TikzPicture {
                 } else if has_stroke {
                     let stroke_color = self.color_name(c.stroke.color);
                     self.add_command(&format!(
-                        "\\draw[{stroke_color}] ({},{}) circle ({});",
-                        mid.x, mid.y, r
+                        "\\draw[{stroke_color}, line width={}] ({},{}) circle ({});",
+                        thickness, mid.x, mid.y, r
                     ));
                 }
             },
@@ -127,8 +133,8 @@ impl TikzPicture {
 
                 let color = self.color_name(stroke.color);
                 self.add_command(&format!(
-                    "\\draw[color={color}] ({},{}) -- ({},{});",
-                    a.x, a.y, b.x, b.y
+                    "\\draw[color={color}, line width={}] ({},{}) -- ({},{});",
+                    stroke.width * self.width_scale(), a.x, a.y, b.x, b.y
                 ))
             },
             Shape::Text(_) => {
@@ -151,7 +157,7 @@ impl Drop for TikzPicture {
         }
         write(&format!(
             "  \\begin{{scope}}[yscale=-1,yshift={}]\n",
-            self.to_tikz.from().height() * self.scale()
+            self.to_tikz.from().height() * self.coord_scale()
         ));
         write(&self.content);
         write("  \\end{scope}\n");
