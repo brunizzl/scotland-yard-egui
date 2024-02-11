@@ -251,6 +251,7 @@ pub struct Info {
 
     options: Options,
     menu_change: bool,
+    take_screenshot: bool,
 
     worker: BruteforceComputationState,
 }
@@ -293,6 +294,7 @@ impl Info {
             characters,
             options,
             menu_change: false,
+            take_screenshot: false,
 
             worker: BruteforceComputationState::new(),
         }
@@ -466,8 +468,25 @@ impl Info {
         self.change_marker_at(screen_pos, con, false)
     }
 
+    fn screenshot_as_tikz(&self, con: &DrawContext<'_>) {
+        if !self.take_screenshot {
+            return;
+        }
+        use chrono::{Datelike, Local, Timelike};
+        let now = Local::now();
+        let date = now.date_naive();
+        let date_str = format!("{}-{}-{}", date.year(), date.month(), date.day());
+        let time = now.time();
+        let time_str = format!("{}-{}-{}", time.hour(), time.minute(), time.second());
+        let file_name =
+            std::path::PathBuf::from(format!("screenshots/{}--{}.txt", date_str, time_str));
+        super::tikz::draw_to_file(file_name, &con.painter, *con.screen());
+    }
+
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         ui.input(|info| {
+            self.take_screenshot = info.key_pressed(Key::F2);
+
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
                 self.characters.reverse_move(con.edges, con.positions, &mut self.queue);
             }
@@ -795,5 +814,6 @@ impl Info {
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con);
         self.characters.frame_is_finished();
+        self.screenshot_as_tikz(con);
     }
 }

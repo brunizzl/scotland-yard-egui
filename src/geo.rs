@@ -1,4 +1,4 @@
-use egui::{emath::RectTransform, pos2, Pos2, Vec2};
+use egui::{emath::RectTransform, pos2, Pos2, Rect, Vec2};
 
 pub mod vec3;
 pub use vec3::*;
@@ -116,6 +116,10 @@ impl ToScreen {
             move_rect,
             screen_boundaries: [b1, b2, b3, b4],
         }
+    }
+
+    pub fn screen(&self) -> &Rect {
+        self.move_rect.to()
     }
 
     pub fn apply(&self, pos: Pos3) -> Pos2 {

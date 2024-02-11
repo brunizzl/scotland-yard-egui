@@ -10,6 +10,7 @@ pub mod character;
 mod color;
 mod info;
 pub mod map;
+mod tikz;
 
 mod bruteforce_state;
 
@@ -28,6 +29,10 @@ pub struct DrawContext<'a> {
 impl<'a> DrawContext<'a> {
     pub fn cam(&self) -> &Camera3D {
         self.map.camera()
+    }
+
+    pub fn screen(&self) -> &Rect {
+        self.cam().to_screen().screen()
     }
 
     pub fn sym_group(&self) -> &SymGroup {
