@@ -251,9 +251,11 @@ pub struct Info {
 
     options: Options,
     menu_change: bool,
-    take_screenshot: bool,
 
     worker: BruteforceComputationState,
+
+    take_screenshot: bool,
+    screenshot_name: String,
 }
 
 mod storage_keys {
@@ -294,9 +296,11 @@ impl Info {
             characters,
             options,
             menu_change: false,
-            take_screenshot: false,
 
             worker: BruteforceComputationState::new(),
+
+            take_screenshot: false,
+            screenshot_name: String::new(),
         }
     }
 
@@ -308,6 +312,16 @@ impl Info {
         //-> no need to log wether something changed
         let nr_cops = self.characters.active_cops().count();
         self.worker.draw_menu(nr_cops, ui, map);
+        if NATIVE {
+            ui.collapsing("📷 Screenshots", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Name: ");
+                    ui.text_edit_singleline(&mut self.screenshot_name);
+                });
+                self.take_screenshot = ui.button("Aufnehmen").clicked();
+                ui.add_space(5.0);
+            });
+        }
 
         self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
     }
@@ -468,7 +482,7 @@ impl Info {
         self.change_marker_at(screen_pos, con, false)
     }
 
-    fn screenshot_as_tikz(&self, con: &DrawContext<'_>) {
+    fn screenshot_as_tikz(&self, name: &str, con: &DrawContext<'_>) {
         if !self.take_screenshot || !NATIVE {
             return;
         }
@@ -479,7 +493,7 @@ impl Info {
         let time = now.time();
         let time_str = format!("{}-{}-{}", time.hour(), time.minute(), time.second());
         let file_name =
-            std::path::PathBuf::from(format!("screenshots/{}--{}.txt", date_str, time_str));
+            std::path::PathBuf::from(format!("screenshots/{}--{}{}.txt", date_str, time_str, name));
         super::tikz::draw_to_file(
             file_name,
             &con.painter,
@@ -490,7 +504,7 @@ impl Info {
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         ui.input(|info| {
-            self.take_screenshot = info.key_pressed(Key::F2);
+            self.take_screenshot |= info.key_pressed(Key::F2);
 
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
                 self.characters.reverse_move(con.edges, con.positions, &mut self.queue);
@@ -819,6 +833,6 @@ impl Info {
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con);
         self.characters.frame_is_finished();
-        self.screenshot_as_tikz(con);
+        self.screenshot_as_tikz(&self.screenshot_name, con);
     }
 }
