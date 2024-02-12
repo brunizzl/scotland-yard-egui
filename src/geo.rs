@@ -9,29 +9,36 @@ pub use pos3::*;
 pub mod mat;
 pub use mat::*;
 
-type Line2 = (Pos2, Vec2);
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub struct Line2(pub Pos2, pub Vec2);
 
-pub fn line_from_to(from: Pos2, to: Pos2) -> Line2 {
-    (from, to - from)
+impl From<Line2> for [Pos2; 2] {
+    fn from(Line2(a, da): Line2) -> Self {
+        [a, a + da]
+    }
 }
 
-pub fn left_of_line((a, dir): Line2, p: Pos2) -> bool {
-    signed_dist((a, dir), p) < 0.0
+pub fn line_from_to(from: Pos2, to: Pos2) -> Line2 {
+    Line2(from, to - from)
+}
+
+pub fn left_of_line(line: Line2, p: Pos2) -> bool {
+    signed_dist(line, p) < 0.0
 }
 
 /// assumes dir to be normalized.
-pub fn signed_dist((a, dir): Line2, p: Pos2) -> f32 {
+pub fn signed_dist(Line2(a, dir): Line2, p: Pos2) -> f32 {
     dir.x * (a.y - p.y) - dir.y * (a.x - p.x)
 }
 
 #[allow(dead_code)]
-pub fn project_to_line((a, dir): Line2, p: Pos2) -> Pos2 {
+pub fn project_to_line(Line2(a, dir): Line2, p: Pos2) -> Pos2 {
     //dividing by length squared normalized both occurences of dir at once.
     a + Vec2::dot(p - a, dir) / dir.length_sq() * dir
 }
 
 /// returns [`t`] in [`a + t * da = b + s * db`]
-pub fn intersection_step((a, da): Line2, (b, db): Line2) -> f32 {
+pub fn intersection_step(Line2(a, da): Line2, Line2(b, db): Line2) -> f32 {
     //a, da == p, r
     //b, db == q, s
     let numerator = (a.y - b.y) * db.x - (a.x - b.x) * db.y;
@@ -97,24 +104,61 @@ impl Project3To2 {
 }
 
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub struct BoundedRect {
+    pub rect: Rect,
+    pub boundary: [Line2; 4],
+}
+
+impl BoundedRect {
+    pub fn from_rect(rect: Rect) -> Self {
+        let b1 = line_from_to(rect.left_bottom(), rect.left_top());
+        let b2 = line_from_to(rect.left_top(), rect.right_top());
+        let b3 = line_from_to(rect.right_top(), rect.right_bottom());
+        let b4 = line_from_to(rect.right_bottom(), rect.left_bottom());
+        Self {
+            rect,
+            boundary: [b1, b2, b3, b4],
+        }
+    }
+
+    pub fn crosses_boundary(&self, line: Line2) -> bool {
+        self.boundary.iter().any(|&b| lines_intersect(b, line))
+    }
+
+    pub fn trim(&self, mut line: Line2) -> Line2 {
+        for &b in &self.boundary {
+            let step = intersection_step(line, b);
+            if (0.0..1.0).contains(&step) && (0.0..1.0).contains(&intersection_step(b, line)) {
+                let Line2(a, da) = line;
+                let fst_dir = da * step;
+                if self.rect.contains(a + 0.9999 * fst_dir) {
+                    line = Line2(a, fst_dir);
+                } else {
+                    debug_assert!(self.rect.contains(a + 1.0001 * fst_dir));
+                    let snd_dir = da * (1.0 - step);
+                    line = Line2(a + fst_dir, snd_dir);
+                }
+            }
+        }
+        line
+    }
+}
+
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct ToScreen {
     pub to_plane: Project3To2,
     pub move_rect: RectTransform,
 
-    screen_boundaries: [Line2; 4],
+    screen: BoundedRect,
 }
 
 impl ToScreen {
     pub fn new(project: Project3To2, move_rect: RectTransform) -> Self {
-        let screen = move_rect.to();
-        let b1 = line_from_to(screen.left_bottom(), screen.left_top());
-        let b2 = line_from_to(screen.left_top(), screen.right_top());
-        let b3 = line_from_to(screen.right_top(), screen.right_bottom());
-        let b4 = line_from_to(screen.right_bottom(), screen.left_bottom());
+        let screen = BoundedRect::from_rect(*move_rect.to());
         Self {
             to_plane: project,
             move_rect,
-            screen_boundaries: [b1, b2, b3, b4],
+            screen,
         }
     }
 
@@ -132,7 +176,7 @@ impl ToScreen {
     }
 
     fn crosses_screen_boundary(&self, line: Line2) -> bool {
-        self.screen_boundaries.iter().any(|&b| lines_intersect(b, line))
+        self.screen.crosses_boundary(line)
     }
 
     /// assumes a, b, c to be ordered counterclockwise

@@ -519,7 +519,7 @@ impl Info {
                 if vis && in_hull.in_set() {
                     let draw_pos = con.cam().transform(pos);
                     let marker_circle =
-                        Shape::circle_filled(draw_pos, con.scale * 9.0, color::LIGHT_BLUE);
+                        Shape::circle_filled(draw_pos, con.scale * 8.0, color::LIGHT_BLUE);
                     con.painter.add(marker_circle);
                 }
             }

@@ -2,6 +2,8 @@ use std::{collections::HashMap, fs::File, io::Write};
 
 use egui::{emath::RectTransform, *};
 
+use crate::geo;
+
 fn to_unique_str(mut nr: usize) -> String {
     const ALPHABET_LEN: usize = 26;
     const ALPHABET: [char; ALPHABET_LEN] = [
@@ -25,6 +27,7 @@ struct TikzPicture {
     color_names: HashMap<[u8; 4], String>,
     text_replacements: StrMap,
     to_tikz: RectTransform,
+    border: geo::BoundedRect,
 }
 
 impl TikzPicture {
@@ -66,12 +69,14 @@ impl TikzPicture {
             let y_range = Rangef::new(0.0, 10.0);
             Rect::from_x_y_ranges(x_range, y_range)
         };
+        let border = geo::BoundedRect::from_rect(clip_rect);
         Self {
             file_name,
             content: String::new(),
             color_names: HashMap::new(),
             to_tikz: RectTransform::from_to(clip_rect, tikz_rect),
             text_replacements,
+            border,
         }
     }
 
@@ -83,6 +88,23 @@ impl TikzPicture {
                     let mid = self.to_tikz.transform_pos(c.center);
                     let r = c.radius * self.coord_scale();
                     let thickness = c.stroke.width * self.width_scale();
+                    //terrible special case treatment: we know how characters where added and draw character circles
+                    //as node with the character symbol in the center.
+                    let node_text = 'character_symbol: {
+                        if let Some(Shape::Text(t)) = iter.peek() {
+                            if t.pos.x == c.center.x {
+                                let original_text: &str = &t.galley.job.text;
+                                let color = self.color_name(t.fallback_color);
+                                if let Some(text) = self.text_replacements.get(original_text) {
+                                    let _ = iter.next(); //destroy peeked value as we already use it here
+                                    break 'character_symbol format!(
+                                        " node[color={color}] {{{text}}}"
+                                    );
+                                }
+                            }
+                        }
+                        String::new()
+                    };
 
                     let has_fill = c.fill.a() != 0;
                     let has_stroke = c.stroke.color.a() != 0 && c.stroke.width != 0.0;
@@ -90,33 +112,16 @@ impl TikzPicture {
                         let stroke_color = self.color_name(c.stroke.color);
                         let fill_color = self.color_name(c.fill);
                         self.add_command(&format!(
-                            "\\filldraw[color={stroke_color}, fill={fill_color}, line width={}] ({},{}) circle ({});",
-                            thickness, mid.x, mid.y, r
+                            "\\filldraw[color={stroke_color}, fill={fill_color}, line width={}] ({},{}) circle ({}){};",
+                            thickness, mid.x, mid.y, r, node_text
                         ));
                     } else if has_fill {
                         let fill_color = self.color_name(c.fill);
                         self.add_command(&format!(
-                            "\\fill[{fill_color}] ({},{}) circle ({});",
-                            mid.x, mid.y, r
+                            "\\fill[{fill_color}] ({},{}) circle ({}){};",
+                            mid.x, mid.y, r, node_text
                         ));
                     } else if has_stroke {
-                        //terrible special case treatment: we know how characters where added and draw character circles
-                        //as node with the character symbol in the center.
-                        let node_text = 'character_symbol: {
-                            if let Some(Shape::Text(t)) = iter.peek() {
-                                if t.pos.x == c.center.x {
-                                    let original_text: &str = &t.galley.job.text;
-                                    let color = self.color_name(t.fallback_color);
-                                    if let Some(text) = self.text_replacements.get(original_text) {
-                                        let _ = iter.next(); //destroy peeked value as we already use it here
-                                        break 'character_symbol format!(
-                                            " node[color={color}] {{{text}}}"
-                                        );
-                                    }
-                                }
-                            }
-                            String::new()
-                        };
                         let stroke_color = self.color_name(c.stroke.color);
                         self.add_command(&format!(
                             "\\draw[{stroke_color}, line width={}] ({},{}) circle ({}){};",
@@ -125,6 +130,8 @@ impl TikzPicture {
                     }
                 },
                 Shape::LineSegment { points, stroke } => {
+                    let points = geo::line_from_to(points[0], points[1]);
+                    let points: [_; 2] = self.border.trim(points).into();
                     let a = self.to_tikz.transform_pos(points[0]);
                     let b = self.to_tikz.transform_pos(points[1]);
 
