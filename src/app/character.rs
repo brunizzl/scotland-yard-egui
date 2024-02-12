@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use egui::*;
 use itertools::izip;
@@ -44,6 +44,19 @@ pub const STYLES: [Style; 1 + NR_COP_STYLES] = [
     new_cop("🛂"),
     new_cop("🛃"),
 ];
+
+pub fn emojis_as_latex_commands() -> HashMap<&'static str, &'static str> {
+    HashMap::from([
+        ("🏃", "\\emoji{runner}"),
+        ("👮", "\\emoji{police-officer}"),
+        ("🍩", "\\emoji{doughnut}"),
+        ("🚔", "\\emoji{oncoming-police-car}"),
+        ("🐂", "\\emoji{ox}"),
+        ("🔫", "TODO"),
+        ("🛂", "TODO"),
+        ("🛃", "TODO"),
+    ])
+}
 
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates

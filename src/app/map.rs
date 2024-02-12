@@ -253,7 +253,7 @@ impl Map {
             if ui
                 .add(RadioButton::new(
                     matches!(self.shape, Shape::RegularPolygon2D(_)),
-                    "aufgepusteter Ikosaeder",
+                    "2D Polygon trianguliert",
                 ))
                 .clicked()
             {

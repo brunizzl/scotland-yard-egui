@@ -480,7 +480,12 @@ impl Info {
         let time_str = format!("{}-{}-{}", time.hour(), time.minute(), time.second());
         let file_name =
             std::path::PathBuf::from(format!("screenshots/{}--{}.txt", date_str, time_str));
-        super::tikz::draw_to_file(file_name, &con.painter, *con.screen());
+        super::tikz::draw_to_file(
+            file_name,
+            &con.painter,
+            *con.screen(),
+            character::emojis_as_latex_commands(),
+        );
     }
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
