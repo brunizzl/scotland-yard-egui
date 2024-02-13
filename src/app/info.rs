@@ -425,15 +425,21 @@ impl Info {
         let robber_moved = self.characters.robber_updated();
         let cop_moved = self.characters.cop_updated();
 
-        let update_cop_advantage = self.options.vertex_color_info == VertexColorInfo::Escape1
-            || self.options.vertex_color_info == VertexColorInfo::Debugging
-            || self.options.vertex_number_info == VertexNumberInfo::RobberAdvantage
-            || self.options.vertex_number_info == VertexNumberInfo::Debugging;
+        let update_cop_advantage = matches!(
+            self.options.vertex_color_info,
+            VertexColorInfo::Escape1 | VertexColorInfo::Debugging
+        ) || matches!(
+            self.options.vertex_number_info,
+            VertexNumberInfo::RobberAdvantage | VertexNumberInfo::Debugging
+        );
 
-        let update_escapable = self.options.vertex_color_info == VertexColorInfo::Escape2
-            || self.options.vertex_color_info == VertexColorInfo::Debugging
-            || self.options.vertex_number_info == VertexNumberInfo::EscapeableNodes
-            || self.options.vertex_number_info == VertexNumberInfo::Debugging;
+        let update_escapable = matches!(
+            self.options.vertex_color_info,
+            VertexColorInfo::Escape2 | VertexColorInfo::Debugging
+        ) || matches!(
+            self.options.vertex_number_info,
+            VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
+        );
 
         let update_hull = update_cop_advantage
             || update_escapable
@@ -441,8 +447,10 @@ impl Info {
             || self.options.show_hull_boundary;
 
         let update_min_cop_dist = update_hull
-            || self.options.vertex_color_info == VertexColorInfo::CopDist
-            || self.options.vertex_color_info == VertexColorInfo::NearNodes
+            || matches!(
+                self.options.vertex_color_info,
+                VertexColorInfo::CopDist | VertexColorInfo::NearNodes
+            )
             || self.options.vertex_number_info == VertexNumberInfo::MinCopDist;
 
         let nr_vertices = con.edges.nr_vertices();

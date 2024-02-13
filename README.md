@@ -33,18 +33,17 @@ On Fedora Rawhide you need to run:
 ### TODO
 
 #### Functionality
-* screenshots to tikz
-* make computation of hull boundary more robust (use faces?)
+* fix bug where sometimes a cop in lazy-safe region is not regarded as such
 * think about how to extend the escapable regions concept to identify more vertices
 * extend convex hull to prevent jumps
 * Doughnut graph + symmetry
 * choose for which cops convex hull is computed + option to define the outside region yourself
 
 #### Nice To Have
-* pick colors for excapable regions depending on boundary cops (fewer color swaps)
+* pick colors for escapable regions depending on boundary cops (fewer color swaps)
 * ability to delete any cop (not just the one added last)
-* platonic symmetry (way faster to compute than explicit...)
+* make computation of hull boundary more robust (use faces?) (unimportant, because it can only fail if there are faces with > 3 edges)
 
 #### Lowest priority
-* Only compute explicit automorphisms for platonic solids when starting bruteforce (because they are large)
+* platonic symmetry as own type (way faster to compute than explicit, only switch to explicit in bruteforce)
 
