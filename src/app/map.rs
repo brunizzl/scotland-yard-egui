@@ -5,7 +5,7 @@ use crate::app::{cam::Camera3D, info::Info};
 use crate::geo::Pos3;
 use crate::graph::{self, EdgeList, Embedding3D};
 
-use super::{color::*, *};
+use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize, serde::Serialize)]
 pub enum Shape {
@@ -320,7 +320,13 @@ impl Map {
         }
 
         let scale = self.scale();
-        let grey_stroke = Stroke::new(scale, GREY);
+        let color = if ui.ctx().style().visuals.dark_mode {
+            color::DARK_GREY
+        } else {
+            color::LIGHT_GREY
+        };
+        let grey_stroke = Stroke::new(scale, color);
+
         if self.is_3d() {
             self.data.draw_visible_edges_3d(
                 self.camera.to_screen(),

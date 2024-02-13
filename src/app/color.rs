@@ -5,7 +5,8 @@ use egui::Color32;
 #[allow(dead_code)]
 mod names {
     use egui::Color32;
-    pub const GREY: Color32 = Color32::from_rgb(185, 185, 205); //prev: 130, 130, 150
+    pub const LIGHT_GREY: Color32 = Color32::from_rgb(190, 190, 205);
+    pub const DARK_GREY: Color32 = Color32::from_rgb(130, 130, 150);
     pub const LIGHT_BLUE: Color32 = Color32::from_rgb(100, 100, 230);
     pub const GREEN: Color32 = Color32::from_rgb(120, 210, 80);
     pub const WHITE: Color32 = Color32::from_rgb(255, 255, 255);

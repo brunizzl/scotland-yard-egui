@@ -56,7 +56,7 @@ impl TikzPicture {
 
     fn width_scale(&self) -> f32 {
         let coord_scale = self.coord_scale();
-        coord_scale * 25.0
+        coord_scale * 20.0
     }
 
     /// `clip_rect` is assumed to be in egui's screen coordinates.
@@ -84,7 +84,7 @@ impl TikzPicture {
         let coord_scale = self.coord_scale();
         let text_scale = |t: &TextShape| {
             let font_size = t.galley.job.sections[0].format.font_id.size;
-            font_size * coord_scale * 2.2
+            font_size * coord_scale * 2.0
         };
         let mut iter = shapes.iter().peekable();
         while let Some(shape) = iter.next() {
