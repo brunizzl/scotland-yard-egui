@@ -302,7 +302,7 @@ impl Map {
     }
 
     pub fn tolerance(&self) -> f32 {
-        f32::min(0.25, 0.75 / self.resolution as f32)
+        f32::min(0.25, 1.25 / self.resolution as f32)
     }
 
     fn identity(&self) -> &Self {

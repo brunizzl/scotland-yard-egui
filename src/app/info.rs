@@ -423,7 +423,7 @@ impl Info {
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
         self.characters.update(con, &mut self.queue);
         let robber_moved = self.characters.robber_updated();
-        let cop_moved = self.characters.active_cop_updated();
+        let cop_moved = self.characters.cop_updated();
 
         let update_cop_advantage = self.options.vertex_color_info == VertexColorInfo::Escape1
             || self.options.vertex_color_info == VertexColorInfo::Debugging

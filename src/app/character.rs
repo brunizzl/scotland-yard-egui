@@ -206,7 +206,7 @@ impl Character {
         }
         self.on_node = best_dist_sq <= con.tolerance * con.tolerance;
 
-        let change = self.on_node && best_vertex != self.nearest_node;
+        let change = best_vertex != self.nearest_node;
         self.nearest_node = best_vertex;
         if change || self.distances.len() != con.positions.len() {
             self.update_distances(con.edges, queue);
@@ -315,8 +315,8 @@ impl CharacterState {
         self.robber().map_or(false, |r| r.updated)
     }
 
-    pub fn active_cop_updated(&self) -> bool {
-        self.active_cops().any(|c| c.updated)
+    pub fn cop_updated(&self) -> bool {
+        self.cops().iter().any(|c| c.updated)
     }
 
     pub fn frame_is_finished(&mut self) {
