@@ -92,7 +92,7 @@ impl Camera3D {
                     self.rotate_z(drag.rotation_delta);
                 }
 
-                let zoom_delta = info.zoom_delta();
+                let zoom_delta = info.zoom_delta().sqrt(); //half the zoom speed
                 self.zoom *= zoom_delta;
                 if zoom_delta != 1.0 {
                     if let Some(ptr_pos) = info.pointer.latest_pos() {
@@ -127,7 +127,7 @@ impl Camera3D {
                 self.rotate_y(drag_rot.x);
                 geo::gram_schmidt_3d(&mut self.direction);
 
-                let zoom_delta = info.zoom_delta();
+                let zoom_delta = info.zoom_delta().sqrt(); //half the zoom speed
                 self.zoom *= zoom_delta;
             });
         }

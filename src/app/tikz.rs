@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs::File, io::Write};
 
-use egui::{emath::RectTransform, *};
+use egui::{emath::RectTransform, epaint::TextShape, *};
 
 use crate::geo;
 
@@ -65,8 +65,8 @@ impl TikzPicture {
     /// we use `clip_rect` to find the transformation to get us from egui to tikz coordinates.
     fn new(file_name: std::path::PathBuf, clip_rect: Rect, text_replacements: StrMap) -> Self {
         let tikz_rect = {
-            let x_range = Rangef::new(0.0, 10.0 * clip_rect.aspect_ratio());
-            let y_range = Rangef::new(0.0, 10.0);
+            let x_range = Rangef::new(0.0, 8.0);
+            let y_range = Rangef::new(0.0, 8.0 / clip_rect.aspect_ratio());
             Rect::from_x_y_ranges(x_range, y_range)
         };
         let border = geo::BoundedRect::from_rect(clip_rect);
@@ -81,12 +81,17 @@ impl TikzPicture {
     }
 
     fn add_shapes(&mut self, shapes: &[Shape]) {
+        let coord_scale = self.coord_scale();
+        let text_scale = |t: &TextShape| {
+            let font_size = t.galley.job.sections[0].format.font_id.size;
+            font_size * coord_scale * 2.2
+        };
         let mut iter = shapes.iter().peekable();
         while let Some(shape) = iter.next() {
             match shape {
                 Shape::Circle(c) => {
                     let mid = self.to_tikz.transform_pos(c.center);
-                    let r = c.radius * self.coord_scale();
+                    let r = c.radius * coord_scale;
                     let thickness = c.stroke.width * self.width_scale();
                     //terrible special case treatment: we know how characters where added and draw character circles
                     //as node with the character symbol in the center.
@@ -95,10 +100,11 @@ impl TikzPicture {
                             if t.pos.x == c.center.x {
                                 let original_text: &str = &t.galley.job.text;
                                 let color = self.color_name(t.fallback_color);
+                                let scale = text_scale(t);
                                 if let Some(text) = self.text_replacements.get(original_text) {
                                     let _ = iter.next(); //destroy peeked value as we already use it here
                                     break 'character_symbol format!(
-                                        " node[color={color}] {{{text}}}"
+                                        " node[color={color}, scale={scale}] {{{text}}}"
                                     );
                                 }
                             }
@@ -131,19 +137,21 @@ impl TikzPicture {
                 },
                 Shape::LineSegment { points, stroke } => {
                     let points = geo::line_from_to(points[0], points[1]);
-                    let points: [_; 2] = self.border.trim(points).into();
-                    let a = self.to_tikz.transform_pos(points[0]);
-                    let b = self.to_tikz.transform_pos(points[1]);
+                    if let Some(points) = self.border.trim(points) {
+                        let points: [_; 2] = points.into();
+                        let a = self.to_tikz.transform_pos(points[0]);
+                        let b = self.to_tikz.transform_pos(points[1]);
 
-                    let color = self.color_name(stroke.color);
-                    self.add_command(&format!(
-                        "\\draw[color={color}, line width={}] ({},{}) -- ({},{});",
-                        stroke.width * self.width_scale(),
-                        a.x,
-                        a.y,
-                        b.x,
-                        b.y
-                    ))
+                        let color = self.color_name(stroke.color);
+                        self.add_command(&format!(
+                            "\\draw[color={color}, line width={}] ({},{}) -- ({},{});",
+                            stroke.width * self.width_scale(),
+                            a.x,
+                            a.y,
+                            b.x,
+                            b.y
+                        ))
+                    }
                 },
                 Shape::Text(t) => {
                     let original_text: &str = &t.galley.job.text;
@@ -152,8 +160,11 @@ impl TikzPicture {
                     } else {
                         original_text
                     };
-                    let pos = self.to_tikz.transform_pos(t.pos);
-                    self.add_command(&format!("\\node at ({},{}) {{{}}};", pos.x, pos.y, content));
+                    let Pos2 { x, y } = self.to_tikz.transform_pos(t.pos);
+                    let scale = text_scale(t);
+                    self.add_command(&format!(
+                        "\\node[scale={scale}] at ({x},{y}) {{{content}}};"
+                    ));
                 },
                 _ => {},
             }

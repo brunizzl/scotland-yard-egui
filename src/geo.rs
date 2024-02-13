@@ -125,22 +125,30 @@ impl BoundedRect {
         self.boundary.iter().any(|&b| lines_intersect(b, line))
     }
 
-    pub fn trim(&self, mut line: Line2) -> Line2 {
-        for &b in &self.boundary {
-            let step = intersection_step(line, b);
-            if (0.0..1.0).contains(&step) && (0.0..1.0).contains(&intersection_step(b, line)) {
-                let Line2(a, da) = line;
-                let fst_dir = da * step;
-                if self.rect.contains(a + 0.9999 * fst_dir) {
-                    line = Line2(a, fst_dir);
-                } else {
-                    debug_assert!(self.rect.contains(a + 1.0001 * fst_dir));
-                    let snd_dir = da * (1.0 - step);
-                    line = Line2(a + fst_dir, snd_dir);
+    /// if line intersects self, returns part of line that intersects,
+    /// else returns None.
+    pub fn trim(&self, mut line: Line2) -> Option<Line2> {
+        if self.crosses_boundary(line) {
+            for &b in &self.boundary {
+                let step = intersection_step(line, b);
+                if (0.0..1.0).contains(&step) && (0.0..1.0).contains(&intersection_step(b, line)) {
+                    let Line2(a, da) = line;
+                    let fst_dir = da * step;
+                    if self.rect.contains(a + 0.9999 * fst_dir) {
+                        line = Line2(a, fst_dir);
+                    } else {
+                        debug_assert!(self.rect.contains(a + 1.0001 * fst_dir));
+                        let snd_dir = da * (1.0 - step);
+                        line = Line2(a + fst_dir, snd_dir);
+                    }
                 }
             }
+            Some(line)
+        } else if self.rect.contains(line.0) {
+            Some(line)
+        } else {
+            None
         }
-        line
     }
 }
 

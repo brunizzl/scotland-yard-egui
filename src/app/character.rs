@@ -144,7 +144,7 @@ impl Character {
     ) -> bool {
         let to_plane = con.cam().to_screen().to_plane;
         let move_rect = con.cam().to_screen().move_rect;
-        let character_size = f32::max(6.0, con.scale * 12.0);
+        let character_size = f32::max(6.0, con.scale * 15.0);
 
         let node_pos = to_plane.project_pos(con.positions[self.nearest_node]);
         let draw_at_node = self.on_node && !self.dragging;

@@ -482,18 +482,22 @@ impl Info {
         self.change_marker_at(screen_pos, con, false)
     }
 
-    fn screenshot_as_tikz(&self, name: &str, con: &DrawContext<'_>) {
+    fn screenshot_as_tikz(&mut self, con: &DrawContext<'_>) {
         if !self.take_screenshot || !NATIVE {
             return;
         }
-        use chrono::{Datelike, Local, Timelike};
-        let now = Local::now();
-        let date = now.date_naive();
-        let date_str = format!("{}-{}-{}", date.year(), date.month(), date.day());
-        let time = now.time();
-        let time_str = format!("{}-{}-{}", time.hour(), time.minute(), time.second());
-        let file_name =
-            std::path::PathBuf::from(format!("screenshots/{}--{}{}.txt", date_str, time_str, name));
+        let name = std::mem::take(&mut self.screenshot_name);
+        let file_name = if name.is_empty() {
+            use chrono::{Datelike, Local, Timelike};
+            let now = Local::now();
+            let date = now.date_naive();
+            let date_str = format!("{}-{}-{}", date.year(), date.month(), date.day());
+            let time = now.time();
+            let time_str = format!("{}-{}-{}", time.hour(), time.minute(), time.second());
+            std::path::PathBuf::from(format!("screenshots/{date_str}--{time_str}.txt"))
+        } else {
+            std::path::PathBuf::from(format!("screenshots/{name}.txt",))
+        };
         super::tikz::draw_to_file(
             file_name,
             &con.painter,
@@ -833,6 +837,6 @@ impl Info {
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con);
         self.characters.frame_is_finished();
-        self.screenshot_as_tikz(&self.screenshot_name, con);
+        self.screenshot_as_tikz(con);
     }
 }
