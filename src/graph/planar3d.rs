@@ -42,12 +42,8 @@ fn edges_from_uniform_positions(vertex_positions: &[Pos3]) -> EdgeList {
 }
 
 fn normalize_positions(positions: &mut [Pos3]) {
-    //makes only sense if graph is centered around origin and all vertices having the same length
+    //makes only sense if graph is centered around origin
     debug_assert!(Pos3::average_ref(positions.iter()).to_vec3().length() < 1e-4);
-    debug_assert!({
-        let len = positions[0].to_vec3().length();
-        positions.iter().all(|p| is_small(p.to_vec3().length() - len))
-    });
     for p in positions {
         *p = p.to_vec3().normalized().to_pos3();
     }
@@ -138,31 +134,28 @@ impl Embedding3D {
         let mut inner_vertices = Vec::new();
 
         let scaled_dir = |p1, p2| (p2 - p1) / ((divisions + 1) as f32);
-        for boundary in surface.triangles.iter() {
-            for (&v1, &v2) in boundary.iter().circular_tuple_windows() {
-                let fw_edge = surface.edges.directed_index(v1, v2);
-                let bw_edge = surface.edges.directed_index(v2, v1);
-                if !edge_dividing_vertices[fw_edge].is_uninitialized() {
-                    assert!(!edge_dividing_vertices[bw_edge].is_uninitialized());
-                    continue;
-                }
-                let p1 = vertices[v1];
-                let p2 = vertices[v2];
-                let dir = scaled_dir(p1, p2);
-                let fst_inner_edge_vertex = vertices.len();
-                for steps in 1..=divisions {
-                    let p = p1 + (steps as f32) * dir;
-                    let v = edges.push();
-                    debug_assert_eq!(v, vertices.len());
-                    vertices.push(p);
-                }
-                let inner = BidirectionalRange::new_forward(fst_inner_edge_vertex, vertices.len());
-                edge_dividing_vertices[fw_edge] = inner;
-                edge_dividing_vertices[bw_edge] = inner.reversed();
-                use std::iter::once;
-                edges.add_path_edges(once(v1).chain(inner).chain(once(v2)));
+        surface.edges.for_each_edge(|v1, v2| {
+            debug_assert!(v2 < v1); //every edge is only iterated over in one direction
+            let fw_edge = surface.edges.directed_index(v1, v2);
+            let bw_edge = surface.edges.directed_index(v2, v1);
+            debug_assert!(edge_dividing_vertices[fw_edge].is_uninitialized());
+            debug_assert!(edge_dividing_vertices[bw_edge].is_uninitialized());
+            let p1 = vertices[v1];
+            let p2 = vertices[v2];
+            let dir = scaled_dir(p1, p2);
+            let fst_inner_edge_vertex = vertices.len();
+            for steps in 1..=divisions {
+                let p = p1 + (steps as f32) * dir;
+                let v = edges.push();
+                debug_assert_eq!(v, vertices.len());
+                vertices.push(p);
             }
-        }
+            let inner = BidirectionalRange::new_forward(fst_inner_edge_vertex, vertices.len());
+            edge_dividing_vertices[fw_edge] = inner;
+            edge_dividing_vertices[bw_edge] = inner.reversed();
+            use std::iter::once;
+            edges.add_path_edges(once(v1).chain(inner).chain(once(v2)));
+        });
         assert_eq!(vertices.len(), edges.nr_vertices());
 
         for &[v1, v2, v3] in &surface.triangles {

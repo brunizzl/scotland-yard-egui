@@ -32,17 +32,21 @@ On Fedora Rawhide you need to run:
 
 ### TODO
 
-#### Functionality
-* fix bug where sometimes a cop in lazy-safe region is not regarded as such
-* think about how to extend the escapable regions concept to identify more vertices
+#### Theory
 * extend convex hull to prevent jumps
-* Doughnut graph + symmetry
+* think about how to extend the escapable regions concept to identify more vertices
+* formulate robber strategy when outside hull
+
+#### Functionality
+* torus symmetry
+* adapt hull boundary to respect torus (allow multiple disjoined boundary segements)
+* fix bug where sometimes a cop in lazy-safe region is not regarded as such
 * choose for which cops convex hull is computed + option to define the outside region yourself
 
 #### Nice To Have
 * pick colors for escapable regions depending on boundary cops (fewer color swaps) disadvantage: we only have 32 and want to avoid collisions at all cost (look up perfect hashing maybe?). 
 * ability to delete any cop (not just the one added last)
-* make computation of hull boundary more robust (use faces?) (unimportant, because it can only fail if there are faces with > 3 edges)
+* extract base functionality of EdgeList to own thing
 
 #### Lowest priority
 * platonic symmetry as own type (way faster to compute than explicit, only switch to explicit in bruteforce)
