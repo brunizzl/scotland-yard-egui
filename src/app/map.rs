@@ -13,11 +13,12 @@ pub enum Shape {
     Octahedron,
     Icosahedron,
     DividedIcosahedron(isize),
-    RegularPolygon2D(isize),
     Cube,
     Football,
     FabianHamann,
     Dodecahedron,
+    TriangTorus,
+    RegularPolygon2D(isize),
     Random2D,
 }
 
@@ -31,6 +32,7 @@ impl Shape {
             Self::Football => "Fussball".to_string(),
             Self::Octahedron => "Oktaeder".to_string(),
             Self::Random2D => "Zufaellig".to_string(),
+            Self::TriangTorus => "Torus-Dreiecke".to_string(),
             Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
             Self::Tetrahedron => "Tetraeder".to_string(),
             Self::Icosahedron => "Ikosaeder".to_string(),
@@ -61,6 +63,7 @@ pub fn new_map_from(shape: Shape, res: usize) -> Embedding3D {
         Shape::Football => Embedding3D::new_subdivided_football(res, false),
         Shape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
         Shape::Random2D => Embedding3D::from_2d(graph::random_triangulated(res, 8)),
+        Shape::TriangTorus => Embedding3D::new_subdivided_triangle_torus(res),
     }
 }
 
@@ -174,7 +177,7 @@ impl Map {
     }
 
     pub fn is_3d(&self) -> bool {
-        self.data.is_3d()
+        !self.data.is_flat()
     }
 
     pub fn camera(&self) -> &Camera3D {
@@ -250,6 +253,7 @@ impl Map {
             ui.radio_value(&mut self.shape, Shape::Cube, "Würfel");
             ui.radio_value(&mut self.shape, Shape::Football, "Fußball");
             ui.radio_value(&mut self.shape, Shape::FabianHamann, "Fabian Hamanns Graph");
+            ui.radio_value(&mut self.shape, Shape::TriangTorus, "Torus (Dreiecke)");
             if ui
                 .add(RadioButton::new(
                     matches!(self.shape, Shape::RegularPolygon2D(_)),
@@ -327,17 +331,12 @@ impl Map {
         };
         let grey_stroke = Stroke::new(scale, color);
 
-        if self.is_3d() {
-            self.data.draw_visible_edges_3d(
-                self.camera.to_screen(),
-                &painter,
-                grey_stroke,
-                &mut self.visible,
-            );
-        } else {
-            self.update_vertex_visibility();
-            self.data.draw_all_edges(self.camera.to_screen(), &painter, grey_stroke);
-        }
+        self.data.draw_edges_and_update_visibility(
+            self.camera.to_screen(),
+            &painter,
+            grey_stroke,
+            &mut self.visible,
+        );
 
         DrawContext {
             map: self.identity(),

@@ -40,7 +40,7 @@ On Fedora Rawhide you need to run:
 * choose for which cops convex hull is computed + option to define the outside region yourself
 
 #### Nice To Have
-* pick colors for escapable regions depending on boundary cops (fewer color swaps)
+* pick colors for escapable regions depending on boundary cops (fewer color swaps) disadvantage: we only have 32 and want to avoid collisions at all cost (look up perfect hashing maybe?). 
 * ability to delete any cop (not just the one added last)
 * make computation of hull boundary more robust (use faces?) (unimportant, because it can only fail if there are faces with > 3 edges)
 
