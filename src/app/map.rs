@@ -56,7 +56,7 @@ pub fn new_map_from(shape: Shape, res: usize) -> Embedding3D {
         },
         Shape::RegularPolygon2D(nr_sides) => {
             let sides = nr_sides as usize;
-            Embedding3D::from_2d(graph::triangulated_regular_polygon(sides, res))
+            Embedding3D::new_2d_triangulated_regular_polygon(sides, res)
         },
         Shape::Cube => Embedding3D::new_subdivided_cube(res),
         Shape::Dodecahedron => Embedding3D::new_subdivided_dodecahedron(res, false, false),

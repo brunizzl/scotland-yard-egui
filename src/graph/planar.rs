@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use egui::{pos2, vec2, Pos2, Vec2};
+use egui::{pos2, Pos2, Vec2};
 use itertools::Itertools;
 
 use super::*;
@@ -60,11 +60,6 @@ impl Embedding2D {
     #[inline(always)]
     fn remove_edge(&mut self, v1: usize, v2: usize) {
         self.edges.remove_edge(v1, v2)
-    }
-
-    #[inline(always)]
-    fn add_path_edges<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
-        self.edges.add_path_edges_ref(path)
     }
 
     #[inline(always)]
@@ -157,87 +152,6 @@ impl Embedding2D {
             curr_line = next_line;
         }
     }
-
-    /// turns each edge into a path of length `nr_subdivisions + 1`,
-    /// e.g. `graph.subdivide_all_edges(0)` does nothing
-    #[allow(dead_code)]
-    pub fn subdivide_all_edges(&mut self, nr_subdivisions: usize) {
-        if nr_subdivisions == 0 {
-            return;
-        }
-        let nr_og_vertices = self.nr_vertices();
-
-        let mut v1_neighbors = Vec::new();
-        for v1 in 0..nr_og_vertices {
-            v1_neighbors.clear();
-            v1_neighbors.extend(self.edges.neighbors_of(v1));
-            for &v2 in &v1_neighbors {
-                if v2 < nr_og_vertices {
-                    let pos1 = self.positions[v1];
-                    let pos2 = self.positions[v2];
-                    let step = (pos2 - pos1) / (nr_subdivisions as f32 + 1.0);
-                    self.edges.remove_edge(v1, v2);
-                    let mut curr = v1;
-                    for i in 1..=nr_subdivisions {
-                        let next = self.add_vertex(pos1 + (i as f32) * step);
-                        self.add_edge(curr, next);
-                        curr = next;
-                    }
-                    self.add_edge(curr, v2);
-                }
-            }
-        }
-    }
-}
-
-/// centered at zero, contained in -1.0..1.0 x -1.0..1.0
-pub fn triangulated_regular_polygon(sides: usize, levels: usize) -> Embedding2D {
-    let mut graph = Embedding2D::empty();
-    graph.add_vertex(Pos2::ZERO);
-    if levels < 1 {
-        return graph;
-    }
-    //idea: build sector by sector, first the nodes on the sector borders
-    let edge_length = 1.0 / std::cmp::max(1, levels) as f32;
-    let mut sector_borders = Vec::new();
-    for border_nr in 0..sides {
-        let next_free_index = graph.nr_vertices();
-        let border = std::iter::once(0)
-            .chain(next_free_index..(next_free_index + levels))
-            .collect::<Vec<_>>();
-        let angle = std::f32::consts::TAU * ((border_nr as f32 + 0.5) / (sides as f32) + 0.25);
-        let unit_dir = vec2(angle.cos(), angle.sin()) * edge_length;
-        sector_borders.push((border, unit_dir));
-        for dist_to_origin in 1..(levels + 1) {
-            graph.add_vertex(Pos2::ZERO + (dist_to_origin as f32) * unit_dir);
-        }
-    }
-    for ((b1, u1), (b2, u2)) in sector_borders.iter().circular_tuple_windows() {
-        let unit_diff = *u2 - *u1;
-        let mut last_levels_nodes = vec![0]; //lowest level contains only origin
-        for level in 1..=levels {
-            let level_start_pos = Pos2::ZERO + (level as f32) * *u1;
-            let mut this_levels_nodes = vec![b1[level]];
-            let nr_inner_nodes = level - 1;
-            for node in 1..=nr_inner_nodes {
-                let node_pos = level_start_pos + (node as f32) * unit_diff;
-                let node_index = graph.add_vertex(node_pos);
-                this_levels_nodes.push(node_index);
-            }
-            this_levels_nodes.push(b2[level]);
-            //connect level to itself
-            graph.add_path_edges(this_levels_nodes.iter());
-            //connect level to previous level
-            //note: the last added edge connects b2's nodes
-            //e.g. for upper sector we see the following paths added (all drawn right to left):
-            //level 1: \      2: \/\     3: \/\/\     4: \/\/\/\       ...
-            graph
-                .add_path_edges(last_levels_nodes.iter().interleave(this_levels_nodes[1..].iter()));
-
-            last_levels_nodes = this_levels_nodes;
-        }
-    }
-    graph
 }
 
 struct Triangualtion {

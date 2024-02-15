@@ -287,12 +287,6 @@ impl EdgeList {
         self.neighbors_mut_of(v2).sort();
     }
 
-    pub fn add_path_edges_ref<'a>(&mut self, path: impl Iterator<Item = &'a usize>) {
-        for (&v1, &v2) in path.tuple_windows() {
-            self.add_edge(v1, v2);
-        }
-    }
-
     pub fn add_path_edges(&mut self, path: impl Iterator<Item = usize>) {
         for (v1, v2) in path.tuple_windows() {
             self.add_edge(v1, v2);

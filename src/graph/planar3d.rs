@@ -49,7 +49,8 @@ fn edges_from_uniform_positions(vertex_positions: &[Pos3]) -> EdgeList {
             is_small((p1 - p2).length() - neighbor_vertex_dist).then_some(i)
         })
     });
-    EdgeList::from_iter(related, 6)
+    let max_neighbors = related.clone().fold(0, |acc, neighs| acc.max(neighs.count()));
+    EdgeList::from_iter(related, max_neighbors)
 }
 
 fn normalize_positions(positions: &mut [Pos3]) {
@@ -149,7 +150,12 @@ impl ConvexTriangleHull {
             normals.push(geo::plane_normal(v1_pos, v2_pos, v3_pos));
             triangles.push([v1, v2, v3]);
         }
-        assert!(!unused_edges.into_iter().any(|e| e));
+
+        //an actual 3d surface is assumed to be closed, e.g. there are no "outher" triangles,
+        //meaning that every triangle is also surrounded by 3 other triangles.
+        assert!(
+            vertices.iter().all(|p| p.z == Z_OFFSET_2D) || !unused_edges.into_iter().any(|e| e)
+        );
 
         (triangles, normals)
     }
@@ -172,13 +178,7 @@ impl ConvexTriangleHull {
         res
     }
 
-    /// connects the closest vertices to have edges,
-    /// positions are assumed to lie centered around the origin
-    /// assumes all edges to have same length.
-    fn new_uniform_from_positions(vertex_positions: Vec<Pos3>) -> Self {
-        let mut vertex_neighbors = edges_from_uniform_positions(&vertex_positions);
-        vertex_neighbors.maybe_shrink_capacity(0);
-
+    fn new_from_graph(vertex_positions: Vec<Pos3>, vertex_neighbors: EdgeList) -> Self {
         let (triangles, face_normals) = Self::discover_faces(&vertex_positions, &vertex_neighbors);
 
         let dual_edges = Self::discover_dual(&triangles);
@@ -190,6 +190,14 @@ impl ConvexTriangleHull {
             face_normals,
             dual_edges,
         }
+    }
+
+    /// connects the closest vertices to have edges,
+    /// positions are assumed to lie centered around the origin
+    /// assumes all edges to have same length.
+    fn new_uniform_from_positions(vertex_positions: Vec<Pos3>) -> Self {
+        let vertex_neighbors = edges_from_uniform_positions(&vertex_positions);
+        Self::new_from_graph(vertex_positions, vertex_neighbors)
     }
 
     pub fn new_tetrahedron() -> Self {
@@ -467,7 +475,6 @@ impl Embedding3D {
             let p3 = vertices[v3];
             let dir_1_2 = scaled_dir(p1, p2);
             let dir_2_3 = scaled_dir(p2, p3);
-            //taken more or less directly from GraphDrawing::triangulated_regular_polygon
             if divisions > 0 {
                 for (bd_1_2, bd_2_3, level) in itertools::izip!(edge_1_2, edge_1_3, 1..) {
                     let level_start_pos = p1 + (level as f32) * dir_1_2;
@@ -482,7 +489,7 @@ impl Embedding3D {
                     }
                     this_levels_nodes.push(bd_2_3);
                     //connect level to itself
-                    edges.add_path_edges_ref(this_levels_nodes.iter());
+                    edges.add_path_edges(this_levels_nodes.iter().copied());
                     //connect level to previous level
                     //note: this differs from GraphDrawing::triangulated_regular_polygon, because we
                     //  dont know how often we see an ico-edge as one of edge_1_2 and edge_2_3.
@@ -490,7 +497,9 @@ impl Embedding3D {
                     //  they where constructed.
                     //level 1: none      2: /\     3: /\/\     4: /\/\/\       ...
                     let window = &this_levels_nodes[1..(this_levels_nodes.len() - 1)];
-                    edges.add_path_edges_ref(last_levels_nodes.iter().interleave(window.iter()));
+                    edges.add_path_edges(
+                        last_levels_nodes.iter().interleave(window.iter()).copied(),
+                    );
 
                     last_levels_nodes = this_levels_nodes;
                 }
@@ -637,7 +646,8 @@ impl Embedding3D {
         let hull_dual_edges = ConvexTriangleHull::discover_dual(&hull.triangles);
         hull.dual_edges = hull_dual_edges;
 
-        let edge_dividing_vertices = vec![BidirectionalRange::uninitialized(); hull.edges.used_space()];
+        let edge_dividing_vertices =
+            vec![BidirectionalRange::uninitialized(); hull.edges.used_space()];
         let inner_vertices = vec![0..0; hull.face_normals.len()];
         let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
         let res = Self {
@@ -862,33 +872,14 @@ impl Embedding3D {
         let surface = {
             const Z: f32 = Z_OFFSET_2D;
             let sqt = f32::sqrt(3.0) / 4.0;
-            let vertices = vec![
+            let vertex_positions = vec![
                 pos3(-0.25, -sqt, Z), //(visually) upper left corner
                 pos3(0.75, -sqt, Z),  //(visually) upper right corner
                 pos3(0.25, sqt, Z),   //(visually) lower right corner
                 pos3(-0.75, sqt, Z),  //(visually) lower left corner
             ];
 
-            let face_normals = vec![Vec3::Z; 2];
-
-            let mut edges = EdgeList::new(3, 4);
-            edges.add_edge(0, 1);
-            edges.add_edge(1, 2);
-            edges.add_edge(2, 3);
-            edges.add_edge(3, 0);
-            edges.add_edge(0, 2);
-
-            let mut dual_edges = EdgeList::new(1, 2);
-            dual_edges.add_edge(0, 1);
-
-            let triangles = vec![[0, 1, 2], [0, 2, 3]];
-            ConvexTriangleHull {
-                vertices,
-                face_normals,
-                edges,
-                triangles,
-                dual_edges,
-            }
+            ConvexTriangleHull::new_uniform_from_positions(vertex_positions)
         };
         let divs = divisions.max(1); //else special treatment for wrapping edges below required
         let mut res = Self::subdivide_surface_with_triangles(surface, divs, false, true);
@@ -909,6 +900,24 @@ impl Embedding3D {
         res.edges.add_edge(0, 2);
 
         res
+    }
+
+    pub fn new_2d_triangulated_regular_polygon(sides: usize, divisions: usize) -> Self {
+        let mut surface_positions = Vec::with_capacity(sides + 1);
+        surface_positions.push(pos3(0.0, 0.0, Z_OFFSET_2D));
+        surface_positions.extend((0..sides).map(|i| {
+            let angle = std::f32::consts::TAU * ((i as f32 + 0.5) / (sides as f32) + 0.25);
+            pos3(angle.cos(), angle.sin(), Z_OFFSET_2D)
+        }));
+
+        let mut surface_edges = EdgeList::new(sides, sides + 1);
+        for (v1, v2) in (1..(sides + 1)).circular_tuple_windows() {
+            surface_edges.add_edge(0, v1);
+            surface_edges.add_edge(v1, v2);
+        }
+
+        let surface = ConvexTriangleHull::new_from_graph(surface_positions, surface_edges);
+        Self::subdivide_surface_with_triangles(surface, divisions, false, true)
     }
 
     /// draws all visible edges, updates visible while doing it
@@ -963,6 +972,9 @@ impl Embedding3D {
                 //draw inner edges
                 //this dosn't draw each actual tiny edge, but instead all edges lying in
                 //  one line at once.
+                //note: updating the vertex visibility below results in this function overall
+                //  still having the same O complexity, but combining edges
+                //  this way yields smaller screenshots.
                 for (v1, v2) in edge_1_2.zip(edge_1_3) {
                     draw_line(&self.vertices, v1, v2);
                 }
