@@ -134,8 +134,8 @@ impl Embedding3D {
         let mut inner_vertices = Vec::new();
 
         let scaled_dir = |p1, p2| (p2 - p1) / ((divisions + 1) as f32);
-        surface.edges.for_each_edge(|v1, v2| {
-            debug_assert!(v2 < v1); //every edge is only iterated over in one direction
+        surface.edges.for_each_edge(|v2, v1| {
+            debug_assert!(v1 < v2); //every edge is only iterated over in one direction
             let fw_edge = surface.edges.directed_index(v1, v2);
             let bw_edge = surface.edges.directed_index(v2, v1);
             debug_assert!(edge_dividing_vertices[fw_edge].is_uninitialized());
@@ -579,23 +579,29 @@ impl Embedding3D {
 
             ConvexTriangleHull::new_uniform_from_positions(vertex_positions)
         };
-        let divs = divisions.max(1); //else special treatment for wrapping edges below required
-        let mut res = Self::subdivide_surface_with_triangles(surface, divs, false, true);
+        let mut res = Self::subdivide_surface_with_triangles(surface, divisions, false, true);
 
-        //add wrapping edges
-        let edge_iter = |v1: usize, v2: usize| {
-            let edge_index = res.surface.edges.directed_index(v1, v2);
-            let inner = res.edge_dividing_vertices[edge_index];
-            use std::iter::once;
-            once(v1).chain(inner).chain(once(v2))
-        };
-        for (edge_a, edge_b) in [
-            (edge_iter(0, 1), edge_iter(3, 2)),
-            (edge_iter(0, 3), edge_iter(1, 2)),
-        ] {
-            res.edges.add_path_edges(edge_a.interleave(edge_b));
+        if divisions != 0 {
+            //add wrapping edges
+            let edge_iter = |v1: usize, v2: usize| {
+                let edge_index = res.surface.edges.directed_index(v1, v2);
+                let inner = res.edge_dividing_vertices[edge_index];
+                use std::iter::once;
+                once(v1).chain(inner).chain(once(v2))
+            };
+            for (edge_a, edge_b) in [
+                (edge_iter(0, 1), edge_iter(3, 2)),
+                (edge_iter(0, 3), edge_iter(1, 2)),
+            ] {
+                res.edges.add_path_edges(edge_a.interleave(edge_b));
+            }
+            res.edges.add_edge(0, 2);
+        } else {
+            //torus with no subdivisions is complete graph K_4.
+            //uninteresting from a cops vs. robber perspective,
+            //but we have it for completeness' sake
+            res.edges.add_edge(1, 3);
         }
-        res.edges.add_edge(0, 2);
 
         res
     }
