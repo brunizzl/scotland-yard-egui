@@ -602,6 +602,12 @@ impl Embedding3D {
             //but we have it for completeness' sake
             res.edges.add_edge(1, 3);
         }
+        debug_assert!({
+            let deg = if divisions != 0 { 6 } else { 3 };
+            let min = res.edges.min_degree();
+            let max = res.edges.max_degree();
+            deg == min && deg == max
+        });
 
         res
     }
