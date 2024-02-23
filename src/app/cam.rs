@@ -10,8 +10,12 @@ pub struct Camera3D {
     /// < 1.0  -> zoomed out
     /// > 1.0  -> zoomed in
     zoom: f32,
+
     direction: [Vec3; 3],
+
     /// offset of center independent of zoom + direction (e.g. in draw plane)
+    /// note: this is in neighter coordinate system of `self.to_screen`, because
+    /// it is used to add drag offset, which is a zoom-dependent translation.
     position: Pos2,
 
     to_screen: ToScreen,
@@ -20,6 +24,12 @@ pub struct Camera3D {
 impl Camera3D {
     pub fn zoom(&self) -> f32 {
         self.zoom
+    }
+
+    /// position centered in front of camera in intermediate coordinates _NOT SCREEN COORDINATES_
+    pub fn in_front_of_cam(&self) -> Pos2 {
+        let screen_mid = self.to_screen.move_rect.to().center();
+        self.to_screen.move_rect.inverse().transform_pos(screen_mid)
     }
 
     pub fn new() -> Self {

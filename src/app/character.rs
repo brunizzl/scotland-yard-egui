@@ -354,7 +354,8 @@ impl CharacterState {
                 change = true;
             }
             if ui.button(plus_text).clicked() {
-                let mut new_ch = Character::new(next_index, Pos2::ZERO);
+                let pos = map.camera().in_front_of_cam();
+                let mut new_ch = Character::new(next_index, pos);
                 let find_screen_facing = |v: usize| {
                     -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal())
                 };
