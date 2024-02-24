@@ -141,3 +141,64 @@ mod test {
         assert_eq!(&mat * vec, vec3(2130.0, 5460.0, 8970.0));
     }
 }
+
+use egui::vec2;
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct Matrix2x2 {
+    x_row: Vec2,
+    y_row: Vec2,
+}
+
+impl Matrix2x2 {
+    pub const fn from_array(a: [f32; 4]) -> Self {
+        Self::from_rows(vec2(a[0], a[1]), vec2(a[2], a[3]))
+    }
+
+    pub const fn from_rows(x_row: Vec2, y_row: Vec2) -> Self {
+        Self { x_row, y_row }
+    }
+
+    pub const fn from_cols(col_1: Vec2, col_2: Vec2) -> Self {
+        let x_row = vec2(col_1.x, col_2.x);
+        let y_row = vec2(col_1.y, col_2.y);
+        Self { x_row, y_row }
+    }
+
+    pub const fn to_array(self) -> [f32; 4] {
+        [self.x_row.x, self.x_row.y, self.y_row.x, self.y_row.y]
+    }
+
+    pub fn determinant(&self) -> f32 {
+        let [a, b, c, d] = self.to_array();
+        a * d - b * c
+    }
+
+    pub fn inverse(self) -> Self {
+        let [a, b, c, d] = self.to_array();
+        let det = self.determinant();
+        (1.0 / det) * Self::from_array([d, -b, -c, a])
+    }
+}
+
+impl std::ops::Mul<Vec2> for Matrix2x2 {
+    type Output = Vec2;
+    #[must_use]
+    #[inline(always)]
+    fn mul(self, rhs: Vec2) -> Self::Output {
+        Vec2 {
+            x: self.x_row.dot(rhs),
+            y: self.y_row.dot(rhs),
+        }
+    }
+}
+
+impl std::ops::Mul<Matrix2x2> for f32 {
+    type Output = Matrix2x2;
+    #[must_use]
+    #[inline(always)]
+    fn mul(self, rhs: Matrix2x2) -> Self::Output {
+        let [a, b, c, d] = rhs.to_array();
+        Matrix2x2::from_array([self * a, self * b, self * c, self * d])
+    }
+}

@@ -106,8 +106,13 @@ impl Pos3 {
         Pos3::ZERO + acc / len
     }
 
-    pub fn average_ref<'a>(positions: impl ExactSizeIterator<Item = &'a Self>) -> Pos3 {
-        Self::average(positions.copied())
+    pub const fn xy(self) -> Pos2 {
+        Pos2::new(self.x, self.y)
+    }
+
+    pub const fn from_xy_z(p2: Pos2, z: f32) -> Self {
+        let Pos2 { x, y } = p2;
+        Self { x, y, z }
     }
 }
 

@@ -9,13 +9,11 @@ pub struct ExplicitAutomorphism {
 }
 
 impl Automorphism for ExplicitAutomorphism {
-    type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, usize>>;
-
-    fn forward(&self) -> Self::Iter<'_> {
+    fn forward(&self) -> std::iter::Copied<std::slice::Iter<'_, usize>> {
         self.forward.iter().copied()
     }
 
-    fn backward(&self) -> Self::Iter<'_> {
+    fn backward(&self) -> std::iter::Copied<std::slice::Iter<'_, usize>> {
         self.backward.iter().copied()
     }
 
@@ -128,7 +126,7 @@ impl ExplicitClasses {
         //indicator for platonic, not guarantee
         let degree = plat.edges.max_degree();
         debug_assert_eq!(degree, plat.edges.min_degree());
-        debug_assert!(Pos3::average_ref(plat.vertices.iter()).to_vec3().length() < 1e-4);
+        debug_assert!(Pos3::average(plat.vertices.iter().copied()).to_vec3().length() < 1e-4);
 
         let reflect = {
             let fst_tri_normal = plat.face_normals[0];
@@ -507,7 +505,7 @@ impl SymmetryGroup for ExplicitClasses {
         self.transform_all(vertices)
     }
 
-    fn class_representatives(&self) -> <Self::Auto as Automorphism>::Iter<'_> {
+    fn class_representatives(&self) -> std::iter::Copied<std::slice::Iter<'_, usize>> {
         self.class_representative.iter().copied()
     }
 

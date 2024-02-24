@@ -43,7 +43,7 @@ fn edges_from_uniform_positions(vertex_positions: &[Pos3]) -> EdgeList {
 
 fn normalize_positions(positions: &mut [Pos3]) {
     //makes only sense if graph is centered around origin
-    debug_assert!(Pos3::average_ref(positions.iter()).to_vec3().length() < 1e-4);
+    debug_assert!(Pos3::average(positions.iter().copied()).to_vec3().length() < 1e-4);
     for p in positions {
         *p = p.to_vec3().normalized().to_pos3();
     }
@@ -257,7 +257,7 @@ impl Embedding3D {
         face_info: &[(usize, bool)],
     ) -> (Self, Vec<Vec<usize>>) {
         //vertices should be centered around origin (among other things...)
-        debug_assert!(Pos3::average_ref(vertices.iter()).to_vec3().length() < 1e-4);
+        debug_assert!(Pos3::average(vertices.iter().copied()).to_vec3().length() < 1e-4);
         //all visible face inner thingies must be at the start, because of how the data structure works
         debug_assert!(face_info.iter().tuple_windows().all(|((_, a), (_, b))| a >= b));
 
@@ -557,28 +557,32 @@ impl Embedding3D {
         res
     }
 
+    /// although an extreme point is kind of the antithesis of a regular toroidal graph,
+    /// the 2d embedding of one has such points.
+    pub const TRIANGLE_TORUS_EXTREMES: [Pos3; 4] = {
+        let z = Z_OFFSET_2D;
+        let sqt = 0.43301270189; //f32::sqrt(3.0) / 4.0;
+
+        // rough shape:
+        //        0 - 1
+        //       / \ /      <- origin centered on "\"
+        //      3 - 2
+        [
+            pos3(-0.25, -sqt, z), //(visually) upper left corner
+            pos3(0.75, -sqt, z),  //(visually) upper right corner
+            pos3(0.25, sqt, z),   //(visually) lower right corner
+            pos3(-0.75, sqt, z),  //(visually) lower left corner
+        ]
+    };
+
     /// rendered flat as two subdivided equilateral triangles.
     /// imagine taking a square and  connecting the left and right sides and the top and bottom sides.
     /// this is topologically a torus.
     /// now slant the shape to the right until the upper left corner sits centered above the bottom side.
     /// connecting the upper left and lower right corners yields the two equilateral triangles.
     pub fn new_subdivided_triangle_torus(divisions: usize) -> Self {
-        // rough shape:
-        //        0 - 1
-        //       / \ /      <- origin centered on "\"
-        //      3 - 2
-        let surface = {
-            const Z: f32 = Z_OFFSET_2D;
-            let sqt = f32::sqrt(3.0) / 4.0;
-            let vertex_positions = vec![
-                pos3(-0.25, -sqt, Z), //(visually) upper left corner
-                pos3(0.75, -sqt, Z),  //(visually) upper right corner
-                pos3(0.25, sqt, Z),   //(visually) lower right corner
-                pos3(-0.75, sqt, Z),  //(visually) lower left corner
-            ];
-
-            ConvexTriangleHull::new_uniform_from_positions(vertex_positions)
-        };
+        let extremes = Self::TRIANGLE_TORUS_EXTREMES.into();
+        let surface = ConvexTriangleHull::new_uniform_from_positions(extremes);
         let mut res = Self::subdivide_surface_with_triangles(surface, divisions, false, true);
 
         if divisions != 0 {

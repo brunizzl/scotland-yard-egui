@@ -18,12 +18,8 @@ pub mod torus;
 ///
 /// -> for any vertex `v` holds that `v == self.forward[self.backward[v]]`
 pub trait Automorphism {
-    type Iter<'a>: ExactSizeIterator<Item = usize> + 'a + Clone
-    where
-        Self: 'a;
-
-    fn forward(&self) -> Self::Iter<'_>;
-    fn backward(&self) -> Self::Iter<'_>;
+    fn forward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone;
+    fn backward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone;
 
     fn nr_vertices(&self) -> usize;
 
@@ -50,13 +46,11 @@ impl Identity {
 }
 
 impl Automorphism for Identity {
-    type Iter<'a> = std::ops::Range<usize>;
-
-    fn forward(&self) -> Self::Iter<'_> {
+    fn forward(&self) -> std::ops::Range<usize> {
         0..self.nr_vertices()
     }
 
-    fn backward(&self) -> Self::Iter<'_> {
+    fn backward(&self) -> std::ops::Range<usize> {
         0..self.nr_vertices()
     }
 
@@ -82,7 +76,7 @@ pub trait SymmetryGroup {
 
     /// enumerates one vertex of each vertex class. this vertex will be result of [`Self::to_representative`]
     /// if a vertex of it's class is passed as only vertex.
-    fn class_representatives(&self) -> <Self::Auto as Automorphism>::Iter<'_>;
+    fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone;
 
     fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto>;
 
@@ -113,7 +107,7 @@ impl SymmetryGroup for NoSymmetry {
         std::iter::once(&self.identity)
     }
 
-    fn class_representatives(&self) -> <Self::Auto as Automorphism>::Iter<'_> {
+    fn class_representatives(&self) -> std::ops::Range<usize> {
         self.identity.forward()
     }
 
