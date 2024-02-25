@@ -56,10 +56,10 @@ mod order_colwise {
 
     /// vertex index but ordered row-wise when torus embedding is mapped to unit square
     #[repr(transparent)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct InSquare(usize);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    struct InSquare(usize);
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct SquareCoords {
         x: isize,
         y: isize,
@@ -78,6 +78,7 @@ mod order_colwise {
     /// their positions transformed to [`PosInSquare`] coordinates are ordered
     /// first by `.x`, then by `.y` value.
     /// for fast 2d iteration thus choose `x` in outher loop, `y` in inner loop.
+    #[derive(Serialize, Deserialize, Clone)]
     pub struct OrderColWise {
         /// square root of number of vertices, nr of vertices per row / column in unit square
         len: usize,
@@ -100,7 +101,7 @@ mod order_colwise {
             for x in 0..self.side_len() {
                 for y in 0..self.side_len() {
                     let coords = SquareCoords { x, y };
-                    let original_i = self.from_ordered_coorinates(coords);
+                    let original_i = self.from_ordered_coordinates(coords);
                     neighs_from_pos.extend(
                         [
                             (x - 1, y),
@@ -113,7 +114,7 @@ mod order_colwise {
                         .into_iter()
                         .map(|(neigh_x, neigh_y)| {
                             let neigh_coords = self.pack_coordinates(neigh_x, neigh_y);
-                            self.from_ordered_coorinates(neigh_coords)
+                            self.from_ordered_coordinates(neigh_coords)
                         }),
                     );
                     neighs_from_edges.extend(torus_edges.neighbors_of(original_i));
@@ -168,40 +169,29 @@ mod order_colwise {
             SquareCoords { x, y }
         }
 
-        pub fn to_ordered_coordinates(&self, v: InSquare) -> SquareCoords {
-            let x = (v.0 / self.len) as isize;
-            let y = (v.0 % self.len) as isize;
+        pub fn to_ordered_coordinates(&self, v: usize) -> SquareCoords {
+            let InSquare(ord) = self.to_ordered[v];
+            let x = (ord / self.len) as isize;
+            let y = (ord % self.len) as isize;
             SquareCoords { x, y }
         }
 
-        pub fn ordered_from_coordinates(&self, coords: SquareCoords) -> InSquare {
+        pub fn from_ordered_coordinates(&self, coords: SquareCoords) -> usize {
             let index = coords.x * (self.len as isize) + coords.y;
-            InSquare(index as usize)
-        }
-
-        pub fn to_ordered(&self, v: usize) -> InSquare {
-            self.to_ordered[v]
-        }
-
-        pub fn from_ordered(&self, v: InSquare) -> usize {
-            self.from_ordered[v.0]
-        }
-
-        pub fn from_ordered_coorinates(&self, coords: SquareCoords) -> usize {
-            let ordered = self.ordered_from_coordinates(coords);
-            self.from_ordered(ordered)
+            self.from_ordered[index as usize]
         }
     }
 }
 use order_colwise::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 struct AutoData {
     new_origin: SquareCoords,
     flip1: bool,
     flip2: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TorusAutomorphism {
     colwise: OrderColWise,
     data: std::cell::Cell<AutoData>,
@@ -222,17 +212,15 @@ impl TorusAutomorphism {
         self.data.set(new_data);
     }
 
-    fn change_to(&self, origin: usize, flip1: bool, flip2: bool) {
-        let ordered = self.colwise.to_ordered(origin);
-        let new_origin = self.colwise.to_ordered_coordinates(ordered);
+    fn change_to(&self, new_origin: usize, flip1: bool, flip2: bool) {
+        let new_origin = self.colwise.to_ordered_coordinates(new_origin);
         self.data.set(AutoData { new_origin, flip1, flip2 });
     }
 }
 
 impl Automorphism for TorusAutomorphism {
     fn apply_forward(&self, v: usize) -> usize {
-        let ordered = self.colwise.to_ordered(v);
-        let old_coords = self.colwise.to_ordered_coordinates(ordered);
+        let old_coords = self.colwise.to_ordered_coordinates(v);
         let mut new_x = old_coords.x();
         let mut new_y = old_coords.y();
         let data = self.data.get();
@@ -246,7 +234,7 @@ impl Automorphism for TorusAutomorphism {
         new_x -= data.new_origin.x();
         new_y -= data.new_origin.y();
         let new_coords = self.colwise.pack_coordinates(new_x, new_y);
-        self.colwise.from_ordered_coorinates(new_coords)
+        self.colwise.from_ordered_coordinates(new_coords)
     }
 
     fn forward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
@@ -254,8 +242,7 @@ impl Automorphism for TorusAutomorphism {
     }
 
     fn apply_backward(&self, v: usize) -> usize {
-        let ordered = self.colwise.to_ordered(v);
-        let old_coords = self.colwise.to_ordered_coordinates(ordered);
+        let old_coords = self.colwise.to_ordered_coordinates(v);
         let mut new_x = old_coords.x();
         let mut new_y = old_coords.y();
         let data = self.data.get();
@@ -269,7 +256,7 @@ impl Automorphism for TorusAutomorphism {
         new_x += data.new_origin.x();
         new_y += data.new_origin.y();
         let new_coords = self.colwise.pack_coordinates(new_x, new_y);
-        self.colwise.from_ordered_coorinates(new_coords)
+        self.colwise.from_ordered_coordinates(new_coords)
     }
 
     fn backward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
@@ -281,6 +268,7 @@ impl Automorphism for TorusAutomorphism {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TorusSymmetry {
     auto: TorusAutomorphism,
 }
@@ -331,12 +319,58 @@ impl SymmetryGroup for TorusSymmetry {
         std::iter::once(0)
     }
 
-    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'_> {
-        todo!()
+    fn to_representative<'a>(&'a self, cops: &mut [usize]) -> Self::AutoIter<'_> {
+        //each configuration gets a value. the only important thing is that
+        //config_hash_value is injective, because we choose the configuration with lowest value.
+        //if multiple transformations yield the same (best) configuration, 
+        //we have to return all these best transformations at once.
+        let nr_vertices = self.auto.nr_vertices();
+        let config_hash_value = |rotated: &[_]| {
+            let mut acc = 0;
+            for &c in rotated.iter().rev() {
+                debug_assert!(c < nr_vertices);
+                acc += c;
+                acc *= nr_vertices;
+            }
+            acc
+        };
+        let mut best_autos = SmallVec::<[AutoData; 4]>::new();
+        let mut best_val = usize::MAX;
+        let flips = [false, true];
+        for (&cop, flip1, flip2) in itertools::iproduct!(cops.iter(), flips, flips) {
+            self.auto.change_to(cop, flip1, flip2);                
+            let mut rotated = [0usize; bruteforce::MAX_COPS];
+            let rotated = &mut rotated[..cops.len()];
+            for (rc, &c) in izip!(rotated.iter_mut(), cops.iter()) {
+                *rc = self.auto.apply_forward(c);
+            }
+            rotated.sort();                
+            let new_val = config_hash_value(rotated);
+            if new_val == best_val {
+                best_autos.push(self.auto.data.get());
+            }
+            if new_val < best_val {
+                best_val = new_val;
+                best_autos.clear();
+                best_autos.push(self.auto.data.get());
+            }
+        }
+        assert!(!best_autos.is_empty());
+        self.auto.change_data_to(best_autos[0]);
+        for c in cops.iter_mut() {
+            *c = self.auto.apply_forward(*c);
+        }
+        cops.sort();
+        
+        TorusSymmetryIter {
+            data: best_autos,
+            auto: &self.auto,
+            i: 0,
+        }
     }
 
     fn into_enum(self) -> SymGroup {
-        todo!()
+        SymGroup::Torus(self)
     }
 }
 

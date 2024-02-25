@@ -612,7 +612,8 @@ impl Embedding3D {
             let max = res.edges.max_degree();
             deg == min && deg == max
         });
-
+        let sym = torus::TorusSymmetry::new(res.edges(), res.positions());
+        res.sym_group = SymGroup::Torus(sym);
         res
     }
 

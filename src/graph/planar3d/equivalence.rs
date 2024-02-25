@@ -174,6 +174,7 @@ impl<T: SymmetryGroup> DynSymmetryGroup for T {
 #[derive(Serialize, Deserialize)]
 pub enum SymGroup {
     Explicit(ExplicitClasses),
+    Torus(torus::TorusSymmetry),
     None(NoSymmetry),
 }
 
@@ -181,6 +182,7 @@ impl SymGroup {
     pub fn to_dyn(&self) -> &dyn DynSymmetryGroup {
         match self {
             Self::Explicit(e) => e as &dyn DynSymmetryGroup,
+            Self::Torus(t) => t as &dyn DynSymmetryGroup,
             Self::None(n) => n as &dyn DynSymmetryGroup,
         }
     }

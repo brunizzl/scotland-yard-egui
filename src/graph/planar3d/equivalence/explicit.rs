@@ -411,21 +411,21 @@ impl ExplicitClasses {
 
         cops.sort_by_key(|&c| self.class[c]);
         let rotate_class = self.class[cops[0]];
-        let mut rotations = cops
+        let mut all_autos = cops
             .iter()
             .take_while(|&&c| self.class[c] == rotate_class)
             .flat_map(|&c| self.transforms_of(c));
 
         if cops.len() == 1 {
-            let rot = rotations.next().unwrap();
+            let rot = all_autos.next().unwrap();
             cops[0] = rot.forward[cops[0]];
             return smallvec::smallvec![rot];
         }
 
         //each configuration gets a value. the only important thing is that
         //config_hash_value is injective, because we choose the configuration with lowest value.
-        //if two transforations of the same configuration can be chosen, the bruteforce algorithm will fail.
-        //(because only one of those will be put in the update queue when they need to be updated)
+        //if multiple transformations yield the same (best) configuration, 
+        //we have to return all these best transformations at once.
         let config_hash_value = |rotated: &[_]| {
             let mut acc = 0;
             for &c in rotated.iter().rev() {
@@ -435,13 +435,13 @@ impl ExplicitClasses {
             }
             acc
         };
-        let mut best_is = SmallVec::<[usize; 4]>::new();
+        let mut best_autos = SmallVec::<[&ExplicitAutomorphism; 4]>::new();
         let mut best_val = usize::MAX;
-        for (i, rotation) in rotations.clone().enumerate() {
+        for auto in all_autos {
             let mut rotated = [0usize; bruteforce::MAX_COPS];
             let rotated = &mut rotated[..cops.len()];
-            for (rotated, &c) in izip!(rotated.iter_mut(), cops.iter()) {
-                *rotated = rotation.forward[c];
+            for (rc, &c) in izip!(rotated.iter_mut(), cops.iter()) {
+                *rc = auto.forward[c];
             }
             rotated.sort();
             //this relies on the classes beeing sorted by what the smallest vertex appearing in one is.
@@ -452,7 +452,7 @@ impl ExplicitClasses {
                 debug_assert!({
                     //two transformations yielding the same function value is only expected to
                     //happen, if both also yield the same configuration.
-                    let prev_best_rot = rotations.clone().nth(best_is[0]).unwrap();
+                    let prev_best_rot = best_autos[0];
                     let mut hit = [false; bruteforce::MAX_COPS];
                     for &c in cops.iter() {
                         let prev_rotated = prev_best_rot.forward[c];
@@ -468,32 +468,21 @@ impl ExplicitClasses {
                     }
                     hit[..rotated.len()].iter().all(|&x| x)
                 });
-                best_is.push(i);
+                best_autos.push(auto);
             }
             if new_val < best_val {
                 best_val = new_val;
-                best_is.clear();
-                best_is.push(i);
+                best_autos.clear();
+                best_autos.push(auto);
             }
         }
 
-        assert!(!best_is.is_empty());
-        let mut best_rotations = SmallVec::<[&ExplicitAutomorphism; 4]>::new();
-        let mut indexted_rotations = rotations.enumerate();
-        for best_i in best_is {
-            loop {
-                let (i, rotation) = indexted_rotations.next().unwrap();
-                if i == best_i {
-                    best_rotations.push(rotation);
-                    break;
-                }
-            }
-        }
+        assert!(!best_autos.is_empty());
         for c in cops.iter_mut() {
-            *c = best_rotations[0].forward[*c];
+            *c = best_autos[0].forward[*c];
         }
         cops.sort();
-        best_rotations
+        best_autos
     }
 }
 

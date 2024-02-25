@@ -226,6 +226,14 @@ impl BruteforceComputationState {
                 };
                 self.employ_worker(game_type, work, recieve, WorkTask::Compute);
             },
+            SymGroup::Torus(torus) => {
+                let sym = torus.clone();
+                let work = move || {
+                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, send);
+                    (res, Confidence::SymmetryOnly).into()
+                };
+                self.employ_worker(game_type, work, recieve, WorkTask::Compute);
+            },
             SymGroup::None(none) => {
                 let sym = *none;
                 let work = move || {
