@@ -51,29 +51,6 @@ impl From<PosInSquare> for Pos2 {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use itertools::Itertools;
-
-    use super::*;
-
-    #[test]
-    fn map_extremes() {
-        let orig = &TORUS_EXTREMES_2D;
-        let unit_square: Vec<PosInSquare> = orig.iter().copied().map_into().collect_vec();
-        assert!((unit_square[0].0 - vec2(0.0, 0.0)).length() < 1e-4);
-        assert!((unit_square[1].0 - vec2(1.0, 0.0)).length() < 1e-4);
-        assert!((unit_square[2].0 - vec2(1.0, 1.0)).length() < 1e-4);
-        assert!((unit_square[3].0 - vec2(0.0, 1.0)).length() < 1e-4);
-
-        let undone: Vec<Pos2> = unit_square.iter().copied().map_into().collect_vec();
-        assert!((undone[0] - orig[0]).length() < 1e-4);
-        assert!((undone[1] - orig[1]).length() < 1e-4);
-        assert!((undone[2] - orig[2]).length() < 1e-4);
-        assert!((undone[3] - orig[3]).length() < 1e-4);
-    }
-}
-
 mod order_colwise {
     use super::*;
 
@@ -117,7 +94,7 @@ mod order_colwise {
             self.len * self.len
         }
 
-        fn test_edges(&self, torus_edges: &EdgeList) -> bool {
+        pub fn test_edges(&self, torus_edges: &EdgeList) -> bool {
             let mut neighs_from_pos = Vec::new();
             let mut neighs_from_edges = Vec::new();
             for x in 0..self.side_len() {
@@ -142,9 +119,12 @@ mod order_colwise {
                     neighs_from_edges.extend(torus_edges.neighbors_of(original_i));
 
                     neighs_from_pos.sort();
+                    neighs_from_pos.dedup();
                     neighs_from_edges.sort();
 
                     assert_eq!(neighs_from_pos, neighs_from_edges);
+                    neighs_from_pos.clear();
+                    neighs_from_edges.clear();
                 }
             }
             true
@@ -158,14 +138,15 @@ mod order_colwise {
             let mut from_ordered = vec![usize::MAX; nr_vertices];
 
             let f_len = (nr_vertices as f32).sqrt();
-            let len = f_len as usize;
+            let len = f_len.round() as usize; //counts how many vertices are in one row / col
             debug_assert_eq!(len * len, nr_vertices);
+            let max_coord = f_len - 1.0; //min coord == 0 -> n-1 later is max coord (for both x and y)
 
             for (original_i, pos) in izip!(0.., torus_positions) {
                 debug_assert_eq!(pos.z, Z_OFFSET_2D);
                 let square_pos: PosInSquare = pos.xy().into();
-                let x_index = (square_pos.0.x * f_len).round() as usize;
-                let y_index = (square_pos.0.y * f_len).round() as usize;
+                let x_index = (square_pos.0.x * max_coord).round() as usize;
+                let y_index = (square_pos.0.y * max_coord).round() as usize;
                 let ordered_i = x_index * len + y_index;
 
                 debug_assert_eq!(to_ordered[original_i], InSquare(usize::MAX));
@@ -232,11 +213,9 @@ impl TorusAutomorphism {
             new_origin: colwise.pack_coordinates(0, 0).into(),
             flip1: false,
             flip2: false,
-        }.into();
-        Self {
-            colwise,
-            data,
         }
+        .into();
+        Self { colwise, data }
     }
 
     fn change_data_to(&self, new_data: AutoData) {
@@ -327,9 +306,8 @@ impl<'a> Iterator for TorusSymmetryIter<'a> {
         if self.i < self.data.len() {
             self.auto.change_data_to(self.data[self.i]);
             self.i += 1;
-            Some(& self.auto)
-        }
-        else {
+            Some(&self.auto)
+        } else {
             None
         }
     }
@@ -359,5 +337,37 @@ impl SymmetryGroup for TorusSymmetry {
 
     fn into_enum(self) -> SymGroup {
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use itertools::Itertools;
+
+    use super::*;
+
+    #[test]
+    fn map_extremes() {
+        let orig = &TORUS_EXTREMES_2D;
+        let unit_square: Vec<PosInSquare> = orig.iter().copied().map_into().collect_vec();
+        assert!((unit_square[0].0 - vec2(0.0, 0.0)).length() < 1e-4);
+        assert!((unit_square[1].0 - vec2(1.0, 0.0)).length() < 1e-4);
+        assert!((unit_square[2].0 - vec2(1.0, 1.0)).length() < 1e-4);
+        assert!((unit_square[3].0 - vec2(0.0, 1.0)).length() < 1e-4);
+
+        let undone: Vec<Pos2> = unit_square.iter().copied().map_into().collect_vec();
+        assert!((undone[0] - orig[0]).length() < 1e-4);
+        assert!((undone[1] - orig[1]).length() < 1e-4);
+        assert!((undone[2] - orig[2]).length() < 1e-4);
+        assert!((undone[3] - orig[3]).length() < 1e-4);
+    }
+
+    #[test]
+    fn build_colwise() {
+        for resolution in [0, 2, 10, 30, 64, 101] {
+            let torus = Embedding3D::new_subdivided_triangle_torus(resolution);
+            let colwise = OrderColWise::new(torus.edges(), torus.positions());
+            colwise.test_edges(torus.edges());
+        }
     }
 }
