@@ -424,7 +424,7 @@ impl ExplicitClasses {
 
         //each configuration gets a value. the only important thing is that
         //config_hash_value is injective, because we choose the configuration with lowest value.
-        //if multiple transformations yield the same (best) configuration, 
+        //if multiple transformations yield the same (best) configuration,
         //we have to return all these best transformations at once.
         let config_hash_value = |rotated: &[_]| {
             let mut acc = 0;

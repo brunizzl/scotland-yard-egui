@@ -1,6 +1,6 @@
 use egui::*;
 
-use itertools::izip;
+use itertools::{iproduct, izip};
 use smallvec::SmallVec;
 
 use crate::geo::{Matrix2x2, Pos3};
@@ -87,6 +87,7 @@ mod order_colwise {
     }
 
     impl OrderColWise {
+        #[allow(dead_code)]
         pub fn side_len(&self) -> isize {
             self.len as isize
         }
@@ -95,6 +96,7 @@ mod order_colwise {
             self.len * self.len
         }
 
+        #[cfg(test)]
         pub fn test_edges(&self, torus_edges: &EdgeList) -> bool {
             let mut neighs_from_pos = Vec::new();
             let mut neighs_from_edges = Vec::new();
@@ -155,17 +157,17 @@ mod order_colwise {
                 to_ordered[original_i] = InSquare(ordered_i);
                 from_ordered[ordered_i] = original_i;
             }
-            let res = Self { len, to_ordered, from_ordered };
-            debug_assert!(res.test_edges(torus_edges));
-            res
+
+            Self { len, to_ordered, from_ordered }
         }
 
         pub fn pack_coordinates(&self, x: isize, y: isize) -> SquareCoords {
             let ilen = self.len as isize;
-            debug_assert!(x >= -ilen);
-            debug_assert!(y >= -ilen);
-            let x = (x + ilen) % ilen;
-            let y = (y + ilen) % ilen;
+            let quad_ilen = 4 * ilen;
+            debug_assert!(x >= -quad_ilen);
+            debug_assert!(y >= -quad_ilen);
+            let x = (x + quad_ilen) % ilen;
+            let y = (y + quad_ilen) % ilen;
             SquareCoords { x, y }
         }
 
@@ -184,10 +186,44 @@ mod order_colwise {
 }
 use order_colwise::*;
 
+/// there are 6 possible turns of triangulated torus embedded in [0, 1]^2.
+/// some of them are a bit weird, because the embedding is not ideal for triangle symmetry.
+#[derive(Clone, Copy, Serialize, Deserialize)]
+enum Turn3 {
+    None,
+    /// not actually just a turn when embedded in [0, 1]^2:
+    /// for the continuous torus, turning any angle is an automorphism.
+    /// this one maps the x-axis of the embedding to x = y (stretched by sqrt 2)
+    /// while x = y is mapped to the y-axis (shrunk by sqrt 2)
+    ///
+    /// we call this transformation S. as stated, S maps (1, 0) to (1, 1) and (1, 1) to (0, 1).
+    /// -> S is matrix [1, -1; 1, 0] (written row-wise)
+    /// note: inverse of S is [0, 1; -1, 1].
+    Skewed60,
+    /// apply Skewed60 twice
+    Skewed120,
+    /// apply Skewed60 three times
+    Half,
+    /// apply Skewed60 four times
+    Skewed240,
+    /// apply Skewed60 five times
+    Skewed300,
+}
+
+const TURN: [Turn3; 6] = [
+    Turn3::None,
+    Turn3::Skewed60,
+    Turn3::Skewed120,
+    Turn3::Half,
+    Turn3::Skewed240,
+    Turn3::Skewed300,
+];
+const BOOL: [bool; 2] = [false, true];
+
 #[derive(Clone, Copy, Serialize, Deserialize)]
 struct AutoData {
     new_origin: SquareCoords,
-    turn: bool,
+    turn: Turn3,
     flip: bool,
 }
 
@@ -201,7 +237,7 @@ impl TorusAutomorphism {
     fn new(colwise: OrderColWise) -> Self {
         let data = AutoData {
             new_origin: colwise.pack_coordinates(0, 0).into(),
-            turn: false,
+            turn: Turn3::None,
             flip: false,
         }
         .into();
@@ -212,7 +248,7 @@ impl TorusAutomorphism {
         self.data.set(new_data);
     }
 
-    fn change_to(&self, new_origin: usize, turn: bool, flip: bool) {
+    fn change_to(&self, new_origin: usize, turn: Turn3, flip: bool) {
         let new_origin = self.colwise.to_ordered_coordinates(new_origin);
         self.data.set(AutoData { new_origin, turn, flip });
     }
@@ -221,19 +257,25 @@ impl TorusAutomorphism {
 impl Automorphism for TorusAutomorphism {
     fn apply_forward(&self, v: usize) -> usize {
         let old_coords = self.colwise.to_ordered_coordinates(v);
-        let mut new_x = old_coords.x();
-        let mut new_y = old_coords.y();
         let data = self.data.get();
-        if data.turn {
-            new_x = self.colwise.side_len() - new_x;
-            new_y = self.colwise.side_len() - new_y;
-        }
+        let mut x = old_coords.x();
+        let mut y = old_coords.y();
+
+        (x, y) = match data.turn {
+            Turn3::None => (x, y),            // apply S^0
+            Turn3::Skewed60 => (x - y, x),    // apply S^1
+            Turn3::Skewed120 => (-y, x - y),  // apply S^2
+            Turn3::Half => (-x, -y),          // apply S^3
+            Turn3::Skewed240 => (-x + y, -x), // apply S^4
+            Turn3::Skewed300 => (y, -x + y),  // apply S^5
+        };
         if data.flip {
-            std::mem::swap(&mut new_x, &mut new_y);
+            std::mem::swap(&mut x, &mut y);
         }
-        new_x -= data.new_origin.x();
-        new_y -= data.new_origin.y();
-        let new_coords = self.colwise.pack_coordinates(new_x, new_y);
+        x -= data.new_origin.x();
+        y -= data.new_origin.y();
+
+        let new_coords = self.colwise.pack_coordinates(x, y);
         self.colwise.from_ordered_coordinates(new_coords)
     }
 
@@ -243,19 +285,26 @@ impl Automorphism for TorusAutomorphism {
 
     fn apply_backward(&self, v: usize) -> usize {
         let old_coords = self.colwise.to_ordered_coordinates(v);
-        let mut new_x = old_coords.x();
-        let mut new_y = old_coords.y();
         let data = self.data.get();
-        if data.turn {
-            new_x = self.colwise.side_len() - new_x;
-            new_y = self.colwise.side_len() - new_y;
-        }
+        let mut x = old_coords.x();
+        let mut y = old_coords.y();
+
+        // reversed order of apply_forward
+        x += data.new_origin.x();
+        y += data.new_origin.y();
         if data.flip {
-            std::mem::swap(&mut new_x, &mut new_y);
+            std::mem::swap(&mut x, &mut y);
         }
-        new_x += data.new_origin.x();
-        new_y += data.new_origin.y();
-        let new_coords = self.colwise.pack_coordinates(new_x, new_y);
+        (x, y) = match data.turn {
+            Turn3::None => (x, y),            // apply S^-0 = S^0
+            Turn3::Skewed60 => (y, -x + y),   // apply S^-1 = S^5
+            Turn3::Skewed120 => (-x + y, -x), // apply S^-2 = S^4
+            Turn3::Half => (-x, -y),          // apply S^-3 = S^3
+            Turn3::Skewed240 => (-y, x - y),  // apply S^-4 = S^2
+            Turn3::Skewed300 => (x - y, x),   // apply S^-5 = S^1
+        };
+
+        let new_coords = self.colwise.pack_coordinates(x, y);
         self.colwise.from_ordered_coordinates(new_coords)
     }
 
@@ -306,11 +355,9 @@ impl SymmetryGroup for TorusSymmetry {
     type AutoIter<'a> = TorusSymmetryIter<'a>;
 
     fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto> {
-        (0..(4 * self.auto.nr_vertices())).map(|i| {
-            let v = i / 4;
-            let flip1 = matches!(i % 4, 2 | 3);
-            let flip2 = matches!(i % 4, 1 | 2);
-            self.auto.change_to(v, flip1, flip2);
+        let vertices = 0..self.auto.nr_vertices();
+        iproduct!(vertices, TURN, BOOL).map(|(v, turn3, flip)| {
+            self.auto.change_to(v, turn3, flip);
             &self.auto
         })
     }
@@ -322,7 +369,7 @@ impl SymmetryGroup for TorusSymmetry {
     fn to_representative<'a>(&'a self, cops: &mut [usize]) -> Self::AutoIter<'_> {
         //each configuration gets a value. the only important thing is that
         //config_hash_value is injective, because we choose the configuration with lowest value.
-        //if multiple transformations yield the same (best) configuration, 
+        //if multiple transformations yield the same (best) configuration,
         //we have to return all these best transformations at once.
         let nr_vertices = self.auto.nr_vertices();
         let config_hash_value = |rotated: &[_]| {
@@ -336,15 +383,14 @@ impl SymmetryGroup for TorusSymmetry {
         };
         let mut best_autos = SmallVec::<[AutoData; 4]>::new();
         let mut best_val = usize::MAX;
-        const BOOL: [bool; 2] = [false, true];
-        for (&cop, turn, flip) in itertools::iproduct!(cops.iter(), BOOL, BOOL) {
-            self.auto.change_to(cop, turn, flip);                
+        for (&cop, turn, flip) in iproduct!(cops.iter(), TURN, BOOL) {
+            self.auto.change_to(cop, turn, flip);
             let mut rotated = [0usize; bruteforce::MAX_COPS];
             let rotated = &mut rotated[..cops.len()];
             for (rc, &c) in izip!(rotated.iter_mut(), cops.iter()) {
                 *rc = self.auto.apply_forward(c);
             }
-            rotated.sort();                
+            rotated.sort();
             let new_val = config_hash_value(rotated);
             if new_val == best_val {
                 best_autos.push(self.auto.data.get());
@@ -361,7 +407,7 @@ impl SymmetryGroup for TorusSymmetry {
             *c = self.auto.apply_forward(*c);
         }
         cops.sort();
-        
+
         TorusSymmetryIter {
             data: best_autos,
             auto: &self.auto,
@@ -402,6 +448,33 @@ mod test {
             let torus = Embedding3D::new_subdivided_triangle_torus(resolution);
             let colwise = OrderColWise::new(torus.edges(), torus.positions());
             colwise.test_edges(torus.edges());
+        }
+    }
+
+    #[test]
+    fn autos() {
+        let res = 8; //8 divisions -> original edge now has len 10 -> 100 vertices
+        let torus = Embedding3D::new_subdivided_triangle_torus(res);
+        assert_eq!(torus.nr_vertices(), 100);
+        let sym = TorusSymmetry::new(torus.edges(), torus.positions());
+        let mut mapped_neighs = Vec::new();
+        let mut neighs_mapped = Vec::new();
+        for auto in sym.all_automorphisms() {
+            let fw = |v| auto.apply_forward(v);
+            let bw = |v| auto.apply_backward(v);
+            for v in 0..torus.nr_vertices() {
+                let mapped = fw(v);
+                mapped_neighs.clear();
+                mapped_neighs.extend(torus.edges().neighbors_of(mapped));
+                mapped_neighs.sort();
+
+                neighs_mapped.clear();
+                neighs_mapped.extend(torus.edges().neighbors_of(v).map(fw));
+                neighs_mapped.sort();
+
+                assert_eq!(mapped_neighs, neighs_mapped);
+                assert_eq!(bw(mapped), v);
+            }
         }
     }
 }
