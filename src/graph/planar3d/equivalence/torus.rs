@@ -187,8 +187,8 @@ use order_colwise::*;
 #[derive(Clone, Copy, Serialize, Deserialize)]
 struct AutoData {
     new_origin: SquareCoords,
-    flip1: bool,
-    flip2: bool,
+    turn: bool,
+    flip: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -201,8 +201,8 @@ impl TorusAutomorphism {
     fn new(colwise: OrderColWise) -> Self {
         let data = AutoData {
             new_origin: colwise.pack_coordinates(0, 0).into(),
-            flip1: false,
-            flip2: false,
+            turn: false,
+            flip: false,
         }
         .into();
         Self { colwise, data }
@@ -212,9 +212,9 @@ impl TorusAutomorphism {
         self.data.set(new_data);
     }
 
-    fn change_to(&self, new_origin: usize, flip1: bool, flip2: bool) {
+    fn change_to(&self, new_origin: usize, turn: bool, flip: bool) {
         let new_origin = self.colwise.to_ordered_coordinates(new_origin);
-        self.data.set(AutoData { new_origin, flip1, flip2 });
+        self.data.set(AutoData { new_origin, turn, flip });
     }
 }
 
@@ -224,11 +224,11 @@ impl Automorphism for TorusAutomorphism {
         let mut new_x = old_coords.x();
         let mut new_y = old_coords.y();
         let data = self.data.get();
-        if data.flip1 {
+        if data.turn {
             new_x = self.colwise.side_len() - new_x;
             new_y = self.colwise.side_len() - new_y;
         }
-        if data.flip2 {
+        if data.flip {
             std::mem::swap(&mut new_x, &mut new_y);
         }
         new_x -= data.new_origin.x();
@@ -246,11 +246,11 @@ impl Automorphism for TorusAutomorphism {
         let mut new_x = old_coords.x();
         let mut new_y = old_coords.y();
         let data = self.data.get();
-        if data.flip1 {
+        if data.turn {
             new_x = self.colwise.side_len() - new_x;
             new_y = self.colwise.side_len() - new_y;
         }
-        if data.flip2 {
+        if data.flip {
             std::mem::swap(&mut new_x, &mut new_y);
         }
         new_x += data.new_origin.x();
@@ -327,7 +327,7 @@ impl SymmetryGroup for TorusSymmetry {
         let nr_vertices = self.auto.nr_vertices();
         let config_hash_value = |rotated: &[_]| {
             let mut acc = 0;
-            for &c in rotated.iter().rev() {
+            for &c in rotated.iter() {
                 debug_assert!(c < nr_vertices);
                 acc += c;
                 acc *= nr_vertices;
@@ -336,9 +336,9 @@ impl SymmetryGroup for TorusSymmetry {
         };
         let mut best_autos = SmallVec::<[AutoData; 4]>::new();
         let mut best_val = usize::MAX;
-        let flips = [false, true];
-        for (&cop, flip1, flip2) in itertools::iproduct!(cops.iter(), flips, flips) {
-            self.auto.change_to(cop, flip1, flip2);                
+        const BOOL: [bool; 2] = [false, true];
+        for (&cop, turn, flip) in itertools::iproduct!(cops.iter(), BOOL, BOOL) {
+            self.auto.change_to(cop, turn, flip);                
             let mut rotated = [0usize; bruteforce::MAX_COPS];
             let rotated = &mut rotated[..cops.len()];
             for (rc, &c) in izip!(rotated.iter_mut(), cops.iter()) {
