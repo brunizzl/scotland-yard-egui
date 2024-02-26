@@ -64,6 +64,9 @@ pub struct Embedding3D {
     /// 2d rendering (no camera turns allowed)
     is_flat: bool,
 
+    /// only used when `self.is_flat`. edges longer than this are not shown.
+    max_shown_edge_length: f32,
+
     /// maps edges of surface to the sequence of vertex indices of self.vertices dividing that edge
     /// (beginning and end vertices have the same index in self.vertices and self.surface.vertex_positions)
     /// Vec is indexed by surface.vertex_neighbors.edge_direction_index
@@ -216,6 +219,7 @@ impl Embedding3D {
             nr_visible_surface_vertices,
             is_regular_triangulation: true,
             is_flat,
+            max_shown_edge_length: 1e10,
             edge_dividing_vertices,
             inner_vertices,
             vertices,
@@ -353,6 +357,7 @@ impl Embedding3D {
             nr_visible_surface_vertices: vertices.len(),
             is_regular_triangulation: false,
             is_flat: false,
+            max_shown_edge_length: 1e10,
             edge_dividing_vertices,
             inner_vertices,
             vertices,
@@ -613,6 +618,7 @@ impl Embedding3D {
             nr_visible_surface_vertices: usize::MAX,
             is_regular_triangulation: false,
             is_flat: true,
+            max_shown_edge_length: if divisions > 0 { 0.55 } else { 1.1 },
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
@@ -725,14 +731,15 @@ impl Embedding3D {
         }
     }
 
-    fn draw_all_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) {
+    fn draw_all_short_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) {
+        let max_len_squared = self.max_shown_edge_length * self.max_shown_edge_length;
         self.edges.for_each_edge(|v1, v2| {
-            let edge = [
-                to_screen.apply(self.vertices[v1]),
-                to_screen.apply(self.vertices[v2]),
-            ];
-            let line = Shape::LineSegment { points: edge, stroke };
-            painter.add(line);
+            let p1 = self.vertices[v1];
+            let p2 = self.vertices[v2];
+            if (p1 - p2).length_sq() < max_len_squared {
+                let points = [to_screen.apply(p1), to_screen.apply(p2)];
+                painter.add(Shape::LineSegment { points, stroke });
+            }
         });
     }
 
@@ -750,7 +757,7 @@ impl Embedding3D {
             for (vis, &pos) in izip!(visible, self.positions()) {
                 *vis = to_screen.pos_visible(pos);
             }
-            self.draw_all_edges(to_screen, painter, stroke);
+            self.draw_all_short_edges(to_screen, painter, stroke);
         }
     }
 
@@ -769,6 +776,7 @@ impl Embedding3D {
             nr_visible_surface_vertices: usize::MAX,
             is_regular_triangulation: false,
             is_flat: false,
+            max_shown_edge_length: 1e10,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices: Vec::new(),
@@ -787,6 +795,7 @@ impl Embedding3D {
             nr_visible_surface_vertices: usize::MAX,
             is_regular_triangulation: false,
             is_flat: true,
+            max_shown_edge_length: 1e10,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,

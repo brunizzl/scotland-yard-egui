@@ -1,4 +1,3 @@
-
 use itertools::{iproduct, izip};
 use smallvec::SmallVec;
 
@@ -105,10 +104,12 @@ pub struct TorusAutomorphism {
 
 impl Automorphism for TorusAutomorphism {
     fn apply_forward(&self, v: usize) -> usize {
-        let old_coords = self.colwise.to_ordered_coordinates(v);        
+        let old_coords = self.colwise.to_ordered_coordinates(v);
         let mut x = old_coords.x();
         let mut y = old_coords.y();
 
+        x -= self.new_origin.x();
+        y -= self.new_origin.y();
         (x, y) = match self.turn {
             Turn3::None => (x, y),            // apply S^0
             Turn3::Skewed60 => (x - y, x),    // apply S^1
@@ -120,8 +121,6 @@ impl Automorphism for TorusAutomorphism {
         if self.flip {
             std::mem::swap(&mut x, &mut y);
         }
-        x -= self.new_origin.x();
-        y -= self.new_origin.y();
 
         let new_coords = self.colwise.pack_coordinates(x, y);
         self.colwise.from_ordered_coordinates(new_coords)
@@ -137,8 +136,6 @@ impl Automorphism for TorusAutomorphism {
         let mut y = old_coords.y();
 
         // reversed order of apply_forward
-        x += self.new_origin.x();
-        y += self.new_origin.y();
         if self.flip {
             std::mem::swap(&mut x, &mut y);
         }
@@ -150,6 +147,8 @@ impl Automorphism for TorusAutomorphism {
             Turn3::Skewed240 => (-y, x - y),  // apply S^-4 = S^2
             Turn3::Skewed300 => (x - y, x),   // apply S^-5 = S^1
         };
+        x += self.new_origin.x();
+        y += self.new_origin.y();
 
         let new_coords = self.colwise.pack_coordinates(x, y);
         self.colwise.from_ordered_coordinates(new_coords)
@@ -173,19 +172,21 @@ pub struct TorusSymmetry {
 impl TorusSymmetry {
     pub fn new(nr_vertices: usize) -> Self {
         //counts how many vertices are in one row / col
-        let len = (nr_vertices as f32).sqrt().round() as usize; 
+        let len = (nr_vertices as f32).sqrt().round() as usize;
         debug_assert_eq!(len * len, nr_vertices);
 
         let colwise = OrderedColWise::new(len);
-        let autos = iproduct!(0..nr_vertices, TURN, BOOL).map(|(v, turn, flip)| {
-            let new_origin = colwise.to_ordered_coordinates(v);
-            TorusAutomorphism{
-                colwise,
-                new_origin,
-                turn,
-                flip,
-            }
-        }).collect_vec();
+        let autos = iproduct!(0..nr_vertices, TURN, BOOL)
+            .map(|(v, turn, flip)| {
+                let new_origin = colwise.to_ordered_coordinates(v);
+                TorusAutomorphism {
+                    colwise,
+                    new_origin,
+                    turn,
+                    flip,
+                }
+            })
+            .collect_vec();
         Self { nr_vertices, autos }
     }
 
@@ -210,6 +211,15 @@ impl SymmetryGroup for TorusSymmetry {
     }
 
     fn to_representative<'a>(&'a self, cops: &mut [usize]) -> Self::AutoIter<'_> {
+        if cops.is_empty() {
+            //the first entry in self.autos is always the identity
+            debug_assert!(self.autos[0]
+                .forward()
+                .enumerate()
+                .take(20)
+                .all(|(i, j)| i == j));
+            return smallvec![&self.autos[0]];
+        }
         //each configuration gets a value. the only important thing is that
         //config_hash_value is injective, because we choose the configuration with lowest value.
         //if multiple transformations yield the same (best) configuration,
@@ -233,6 +243,7 @@ impl SymmetryGroup for TorusSymmetry {
                     *rc = auto.apply_forward(c);
                 }
                 rotated.sort();
+                debug_assert_eq!(rotated[0], 0);
                 let new_val = config_hash_value(rotated);
                 if new_val == best_val {
                     best_autos.push(auto);
