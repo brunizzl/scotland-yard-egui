@@ -6,15 +6,106 @@ use itertools::{izip, Itertools};
 use super::*;
 use crate::app::character::Character;
 
-/// assumes boundary has first vertex already inserted as starting point
-/// and that hull is up-to date, including having all boundary vertices marked
-fn update_convex_hull_boundary(
+/// tries to find the boundary of `set` as if `edges` belong to a triangulation.
+/// returns wether the process was successful.
+/// on failure the boundary may be partially constructed.
+fn find_hull_boundary_in_triangulation(
+    boundary: &mut Vec<usize>,
+    hull: &[InSet],
+    edges: &EdgeList,
+) -> bool {
+    debug_assert_eq!(boundary.len(), 1);
+    let fst_inside = boundary[0];
+    debug_assert!(hull[fst_inside].on_boundary());
+    let mut curr_inside = fst_inside;
+    let mut last_inside = fst_inside;
+    // similar deal to snd_last_outside below
+    let mut snd_last_inside = fst_inside;
+
+    let neighbors_of = |v: usize| edges.neighbors_of(v);
+
+    // snd_last_outside is almost not needed: all vertices inside the hull
+    // neighboring any given vertex outside must be a clique,
+    // else the path connecting them through the outside vertex is a shortest path
+    // and thus the vertex not outside the hull.
+    // if our (assumed to be locally planar) graph somehow contains a four-clique or
+    // or the hull is not actually a convex hull, this variable can safe us.
+    let mut snd_last_outside = usize::MAX;
+    let fst_outside = neighbors_of(fst_inside).find(|&n| hull[n].outside()).unwrap();
+    let mut last_outside = fst_outside;
+    let Some(mut curr_outside) = neighbors_of(fst_inside)
+        .find(|&n| hull[n].outside() && neighbors_of(n).contains(&fst_outside))
+    else {
+        return false;
+    };
+
+    // idea: curr_outside must neighbor curr_inside at all time. this way we are guaranteed
+    // to not switch sides on a hull with local thickness <= 2.
+    // if neighter of curr_outside and curr_inside can be advanced, while keeping
+    // the neighbor relation, we have something other than a triangulation and exit.
+    let mut change = true;
+    while change && curr_outside != fst_outside {
+        change = false;
+
+        // step outside the hull but keep curr_inside as neighbor
+        let outside_step = neighbors_of(curr_outside).find(|&n| {
+            ![last_outside, snd_last_outside].contains(&n)
+                && hull[n].outside()
+                && neighbors_of(curr_inside).contains(&n)
+        });
+        if let Some(next_outside) = outside_step {
+            snd_last_outside = last_outside;
+            last_outside = curr_outside;
+            curr_outside = next_outside;
+            change = true;
+        }
+
+        // step on hull boundary but keep curr_outside as neighbor
+        let inside_step = neighbors_of(curr_inside).find(|&n| {
+            ![last_inside, snd_last_inside].contains(&n)
+                && hull[n].on_boundary()
+                && neighbors_of(curr_outside).contains(&n)
+        });
+        if let Some(next_inside) = inside_step.or_else(|| {
+            // special case if hull has thickness 1 and curr_inside is an extreme point
+            (!change
+                && neighbors_of(curr_outside).contains(&last_inside)
+                && neighbors_of(last_outside).contains(&curr_inside))
+            .then_some(last_inside)
+        }) {
+            boundary.push(next_inside);
+            snd_last_inside = last_inside;
+            last_inside = curr_inside;
+            curr_inside = next_inside;
+            change = true;
+        }
+
+        debug_assert!(edges.has_edge(curr_inside, curr_outside));
+        if boundary.len() == edges.nr_vertices() {
+            boundary.clear();
+            return false;
+        }
+    }
+    // we always try to take a step in the hull after we step outside.
+    // if we reach the outside start with an outside step, we are guaranteed to find the
+    // inside start with the following step inside.
+    // the only special case is where the boundary has length 2, because then fst_inside will
+    // not be readded, as it is also last_inside.
+    debug_assert!(!change || Some(&fst_inside) == boundary.last() || boundary.len() == 2);
+    change
+}
+
+/// build to return something often resembling a hull boundary if the graph in question is
+/// not a triangulation.
+/// if the function returns "success", it is however not guaranteed that the result is actually correct.
+#[allow(dead_code)]
+fn find_hull_boundary_fallback(
     boundary: &mut Vec<usize>,
     dist_to_boundary_start: &[isize],
     hull: &[InSet],
     edges: &EdgeList,
     queue: &mut VecDeque<usize>,
-) {
+) -> bool {
     debug_assert_eq!(boundary.len(), 1);
     let fst_inside = boundary[0];
     debug_assert_eq!(dist_to_boundary_start[fst_inside], 0);
@@ -57,25 +148,16 @@ fn update_convex_hull_boundary(
             _ => {
                 // if there are multiple options not yet visited,
                 // we take the one leading further away from the search start.
+                // this is no exact science but should at least be somewhat
+                // reliable at the start of construction.
                 let max_dist = potential_next
                     .iter()
                     .fold(0, |max, &v| isize::max(max, dist_to_boundary_start[v]));
-                potential_next.retain(|&v| dist_to_boundary_start[v] == max_dist);
-                // if boundary has len 1, we are free to chose in which direction to walk.
-                // else we try to find a vertex which shares neighbors outside the hull with us.
-                // this is a shortcut that only works in triangulations, as the actual property to test for
-                // should be, which vertex borders the same face outside the hull as curr_inside.
-                // however we don't have easy access to faces, so this must suffice.
-                let curr_outside_neighs =
-                    edges.neighbors_of(curr_inside).filter(|&n| hull[n].outside());
-                let shares_outside_neigs = |&v: &usize| {
-                    edges.neighbors_of(v).any(|n| curr_outside_neighs.clone().contains(&n))
-                };
                 potential_next
                     .iter()
                     .copied()
-                    .find(shares_outside_neigs)
-                    .unwrap_or(potential_next[0])
+                    .find(|&v| dist_to_boundary_start[v] == max_dist)
+                    .unwrap()
             },
         };
         last_inside = curr_inside;
@@ -92,12 +174,29 @@ fn update_convex_hull_boundary(
     }
     potential_next.clear();
     *queue = potential_next;
+
+    boundary.last() == Some(&fst_inside)
+}
+
+/// assumes boundary has first vertex already inserted as starting point
+/// and that hull is up-to date, including having all boundary vertices marked
+fn update_convex_hull_boundary(
+    boundary: &mut Vec<usize>,
+    _dist_to_boundary_start: &[isize],
+    hull: &[InSet],
+    edges: &EdgeList,
+    _queue: &mut VecDeque<usize>,
+) {
+    // currently all graphs with continuous boundary are triangulations.
+    // the fallback is thus not of any advantage for now.
+    find_hull_boundary_in_triangulation(boundary, hull, edges);
 }
 
 /// geodesic convex hull over some vertices with respect to some graph
 pub struct ConvexHullData {
     /// one entry per vertex in graph
     hull: Vec<InSet>,
+
     /// enumerates vertices which are on boundary
     /// beginning == end == some cop's position
     boundary: Vec<usize>,
@@ -210,7 +309,7 @@ impl ConvexHullData {
         //mark boundary as such
         let hull = &mut self.hull[..];
         for (v, mut neighs) in izip!(0.., edges.neighbors()) {
-            if hull[v].in_set() && neighs.any(|n| hull[n].outside()) {
+            if hull[v].contained() && neighs.any(|n| hull[n].outside()) {
                 hull[v] = InSet::OnBoundary;
             }
         }
@@ -359,6 +458,7 @@ impl EscapeableNodes {
             escapable: Vec::new(),
             cop_pair_hull: CopPairHullData {
                 hull: Vec::new(),
+                boundary_size: 0,
                 boundary: Vec::new(),
             },
             keep_in_escapable: Vec::new(),
@@ -382,7 +482,7 @@ impl EscapeableNodes {
         edges.recolor_region_with(
             isize::MAX,
             &mut self.boundary_segment_dist,
-            |_, n, _| hull[n].in_set(),
+            |_, n, _| hull[n].contained(),
             queue,
         );
 
@@ -392,7 +492,7 @@ impl EscapeableNodes {
         }
         edges.calc_distances_to_with(
             &mut self.boundary_segment_dist,
-            |v, _| hull[v].in_set(),
+            |v, _| hull[v].contained(),
             queue,
         );
     }
@@ -564,7 +664,7 @@ impl EscapeableNodes {
                             for n in edges.neighbors_of(v) {
                                 //build "firewall" below path, such that recoloring of keep_in_escapable inside this loop
                                 //will only go up into deeper parts and not below to the boundary.
-                                if hull_data.hull[n].in_set()
+                                if hull_data.hull[n].contained()
                                     && self.boundary_segment_dist[n] < self.boundary_segment_dist[v]
                                 {
                                     self.keep_in_escapable[n] = KeepVertex::Yes;
@@ -585,7 +685,7 @@ impl EscapeableNodes {
                             self.some_boundary_dist[v] = 0;
                             self.last_write_by[v] = owner;
                             //this is mostly a waste: somehow it is insufficient to only walk inside our marked region
-                            let in_hull = |n: usize| hull_data.hull[n].in_set();
+                            let in_hull = |n: usize| hull_data.hull[n].contained();
                             self.calc_small_dists(
                                 in_hull,
                                 edges,
@@ -629,7 +729,7 @@ impl EscapeableNodes {
                     edges.recolor_region_with(
                         KeepVertex::Yes,
                         &mut self.keep_in_escapable,
-                        |_, n, _| hull_data.hull[n].in_set(),
+                        |_, n, _| hull_data.hull[n].contained(),
                         queue,
                     );
 
@@ -713,7 +813,7 @@ impl EscapeableNodes {
                 queue.push_back(v);
                 self.some_boundary_dist[v] = 0;
                 self.last_write_by[v] = owner;
-                let in_hull = |x: usize| hull_data.hull[x].in_set();
+                let in_hull = |x: usize| hull_data.hull[x].contained();
                 self.calc_small_dists(in_hull, edges, queue, max_escapable_dist, last_owner, owner);
                 last_owner = Some(owner);
                 last_v = v;
@@ -758,7 +858,8 @@ impl EscapeableNodes {
 /// very similar to ConvexHullData, only this time for just a pair of cops.
 /// as this is computed (potentially) many times in a single frame, it tries to never iterate over all vertices.
 struct CopPairHullData {
-    hull: Vec<InSet>,     //one entry per vertex
+    hull: Vec<InSet>, //one entry per vertex
+    boundary_size: usize,
     boundary: Vec<usize>, //indices of boundary vertices
 }
 
@@ -793,11 +894,14 @@ impl CopPairHullData {
         debug_assert!(all_entries.contains(&cop_1.nearest_node));
         debug_assert!(all_entries.contains(&cop_2.nearest_node));
 
+        let mut boundary_size = 0;
         for &v in &all_entries {
             if edges.neighbors_of(v).any(|n| self.hull[n].outside()) {
                 self.hull[v] = InSet::OnBoundary;
+                boundary_size += 1;
             }
         }
+        self.boundary_size = boundary_size;
         all_entries.clear();
         self.boundary = all_entries;
     }

@@ -542,7 +542,7 @@ impl Info {
             for (&in_hull, &pos, &vis) in
                 izip!(self.cop_hull_data.hull(), con.positions, con.visible)
             {
-                if vis && in_hull.in_set() {
+                if vis && in_hull.contained() {
                     let draw_pos = con.cam().transform(pos);
                     let marker_circle =
                         Shape::circle_filled(draw_pos, con.scale * 8.0, color::LIGHT_BLUE);
@@ -600,7 +600,7 @@ impl Info {
                     con.visible,
                     self.cop_hull_data.hull()
                 ) {
-                    if vis && hull.in_set() && adv < -1 {
+                    if vis && hull.contained() && adv < -1 {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 }
@@ -682,9 +682,12 @@ impl Info {
                 }
             },
             VertexColorInfo::CopsRotatedToEquivalence => {
-                let sym_group = con.sym_group().to_dyn();
                 let mut active_cops =
                     self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
+                if active_cops.len() > bruteforce::MAX_COPS {
+                    return;
+                }
+                let sym_group = con.sym_group().to_dyn();
                 sym_group.dyn_to_representative(&mut active_cops);
                 for v in active_cops {
                     let pos = con.positions[v];

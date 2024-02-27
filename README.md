@@ -38,7 +38,6 @@ On Fedora Rawhide you need to run:
 * formulate robber strategy when outside hull
 
 #### Functionality
-* torus symmetry
 * adapt hull boundary to respect torus (allow multiple disjoined boundary segements)
 * fix bug where sometimes a cop in lazy-safe region is not regarded as such
 * choose for which cops convex hull is computed + option to define the outside region yourself

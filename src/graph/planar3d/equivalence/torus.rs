@@ -46,13 +46,13 @@ mod ordered_colwise {
             SquareCoords { x, y }
         }
 
-        pub fn as_coordinates(&self, v: usize) -> SquareCoords {
+        pub fn coordinates_of(&self, v: usize) -> SquareCoords {
             let x = (v / self.len) as isize;
             let y = (v % self.len) as isize;
             SquareCoords { x, y }
         }
 
-        pub fn as_index(&self, coords: SquareCoords) -> usize {
+        pub fn index_of(&self, coords: SquareCoords) -> usize {
             let v = coords.x * (self.len as isize) + coords.y;
             v as usize
         }
@@ -104,7 +104,7 @@ pub struct TorusAutomorphism {
 
 impl Automorphism for TorusAutomorphism {
     fn apply_forward(&self, v: usize) -> usize {
-        let old_coords = self.colwise.as_coordinates(v);
+        let old_coords = self.colwise.coordinates_of(v);
         let mut x = old_coords.x();
         let mut y = old_coords.y();
 
@@ -123,7 +123,7 @@ impl Automorphism for TorusAutomorphism {
         }
 
         let new_coords = self.colwise.pack_coordinates(x, y);
-        self.colwise.as_index(new_coords)
+        self.colwise.index_of(new_coords)
     }
 
     fn forward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
@@ -131,7 +131,7 @@ impl Automorphism for TorusAutomorphism {
     }
 
     fn apply_backward(&self, v: usize) -> usize {
-        let old_coords = self.colwise.as_coordinates(v);
+        let old_coords = self.colwise.coordinates_of(v);
         let mut x = old_coords.x();
         let mut y = old_coords.y();
 
@@ -151,7 +151,7 @@ impl Automorphism for TorusAutomorphism {
         y += self.new_origin.y();
 
         let new_coords = self.colwise.pack_coordinates(x, y);
-        self.colwise.as_index(new_coords)
+        self.colwise.index_of(new_coords)
     }
 
     fn backward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
@@ -178,7 +178,7 @@ impl TorusSymmetry {
         let colwise = OrderedColWise::new(len);
         let autos = iproduct!(0..nr_vertices, TURN, BOOL)
             .map(|(v, turn, flip)| {
-                let new_origin = colwise.as_coordinates(v);
+                let new_origin = colwise.coordinates_of(v);
                 TorusAutomorphism {
                     colwise,
                     new_origin,
@@ -213,11 +213,7 @@ impl SymmetryGroup for TorusSymmetry {
     fn to_representative(&self, cops: &mut [usize]) -> Self::AutoIter<'_> {
         if cops.is_empty() {
             //the first entry in self.autos is always the identity
-            debug_assert!(self.autos[0]
-                .forward()
-                .enumerate()
-                .take(20)
-                .all(|(i, j)| i == j));
+            debug_assert!(self.autos[0].forward().enumerate().take(20).all(|(i, j)| i == j));
             return smallvec![&self.autos[0]];
         }
         //each configuration gets a value. the only important thing is that

@@ -43,7 +43,7 @@ impl InSet {
     }
 
     #[inline(always)]
-    pub const fn in_set(self) -> bool {
+    pub const fn contained(self) -> bool {
         debug_assert!(self.finished_construction());
         !self.outside()
     }
