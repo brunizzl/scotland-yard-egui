@@ -720,10 +720,10 @@ impl Embedding3D {
             mark_visible_at(v1);
             mark_visible_at(v2);
             mark_visible_at(v3);
-            inner.clone().fold((), |(), v| visible[v] = true);
-            edge_1_2.fold((), |(), v| visible[v] = true);
-            edge_1_3.fold((), |(), v| visible[v] = true);
-            edge_2_3.fold((), |(), v| visible[v] = true);
+            inner.clone().for_each(|v| visible[v] = true);
+            edge_1_2.for_each(|v| visible[v] = true);
+            edge_1_3.for_each(|v| visible[v] = true);
+            edge_2_3.for_each(|v| visible[v] = true);
         }
 
         if !self.is_regular_triangulation {
