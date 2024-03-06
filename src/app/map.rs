@@ -99,10 +99,11 @@ impl Map {
     pub fn new(info: &mut Info, cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
         let shape = load_or(cc.storage, SHAPE, || Shape::Icosahedron);
-        //to not accidentally lag on restart, we limit maximal initial resolution
         let (resolution, shrunk) = {
             let last_res = load_or(cc.storage, RESOLUTION, || 12);
-            if last_res > 25 {
+            //to not accidentally lag on restart, we limit maximal initial resolution for
+            //graphs that are slow to build. currently this is only Random2D.
+            if last_res > 25 && matches!(shape, Shape::Random2D) {
                 (25, true)
             } else {
                 (last_res, false)
@@ -121,9 +122,10 @@ impl Map {
         };
         result.recompute();
         result.adjust_info(info);
-        if shrunk {
-            //graph is not exactly the same -> vertex indices are now wothless
-            //(and in worst case larger than curr number of vertices)
+        
+        //graph is not exactly the same -> vertex indices are now worthless
+        //(and in worst case larger than curr number of vertices)
+        if shrunk || matches!(shape, Shape::Random2D) {
             info.characters.forget_move_history();
         }
 
