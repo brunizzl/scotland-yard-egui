@@ -24,6 +24,8 @@ pub enum VertexColorInfo {
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
     Debugging,
+    SafeOutside,
+    SafeBoundary,
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -108,6 +110,14 @@ impl Options {
             ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::NearNodes,
                 "für Räuber nähere Knoten")
                 .on_hover_text("alle Knoten näher am Räuber als am nächsten Cop");
+
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::SafeOutside,
+                "Sicherer Außenbereich")
+                .on_hover_text("Alle Knoten nicht in konvexer Hülle und mit Mindestabstand >= 2 zu nächstem Cop");
+
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::SafeBoundary,
+                "Sicherere Grenze")
+                .on_hover_text("Alle Knoten auf Rand von konvexer Hülle mit Mindestabstand >= 2 zu nächstem Cop");
 
             ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::Escape1,
                 "Punkte mit direkter Fluchtoption 1")
@@ -709,6 +719,24 @@ impl Info {
                 for &v in self.escapable.inner_connecting_line() {
                     if con.visible[v] {
                         let pos = con.positions[v];
+                        draw_circle_at(pos, self.options.automatic_marker_color);
+                    }
+                }
+            },
+            VertexColorInfo::SafeOutside => {
+                for (&in_hull, &dist, &pos, &vis) in
+                    izip!(self.cop_hull_data.hull(), &self.min_cop_dist, con.positions, con.visible)
+                {
+                    if vis && in_hull.outside() && dist >= 2 {
+                        draw_circle_at(pos, self.options.automatic_marker_color);
+                    }
+                }
+            },
+            VertexColorInfo::SafeBoundary => {
+                for (&in_hull, &dist, &pos, &vis) in
+                    izip!(self.cop_hull_data.hull(), &self.min_cop_dist, con.positions, con.visible)
+                {
+                    if vis && in_hull.on_boundary() && dist >= 2 {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 }
