@@ -122,7 +122,7 @@ impl Map {
         };
         result.recompute();
         result.adjust_info(info);
-        
+
         //graph is not exactly the same -> vertex indices are now worthless
         //(and in worst case larger than curr number of vertices)
         if shrunk || matches!(shape, Shape::Random2D) {

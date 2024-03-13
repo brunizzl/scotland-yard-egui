@@ -93,22 +93,16 @@ impl State {
 fn draw_usage_info(ui: &mut Ui) {
     ui.collapsing("Bedienung", |ui| {
         ui.label(
-            "Spielfeld rotieren / verschieben: 
+            "\
+Spielfeld rotieren / verschieben: 
 ziehen mit rechter Maustaste oder scrollen, 
-horizontal shift + scrollen
+horizontal: shift + scrollen
 
 zoom: 
 strg + scrollen
 
 verschieben einer Figur:
-ziehen mit linker Maustaste
-
-manuell Marker an Mausposition:
-setzen: m-Taste
-entfernen: n-Taste
-
-Zug rückgängig: strg + z
-Zug wiederholen: strg + y",
+ziehen mit linker Maustaste",
         );
     });
 }

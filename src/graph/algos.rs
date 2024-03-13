@@ -89,9 +89,11 @@ fn find_hull_boundary_in_triangulation(
     // we always try to take a step in the hull after we step outside.
     // if we reach the outside start with an outside step, we are guaranteed to find the
     // inside start with the following step inside.
-    // the only special case is where the boundary has length 2, because then fst_inside will
-    // not be readded, as it is also last_inside.
-    debug_assert!(!change || Some(&fst_inside) == boundary.last() || boundary.len() == 2);
+    // the only special case is where the boundary has length 2 or 3, because then fst_inside will
+    // not be readded, as it is also last_inside or snd_last_inside.
+    debug_assert!(
+        !change || Some(&fst_inside) == boundary.last() || matches!(boundary.len(), 2 | 3)
+    );
     change
 }
 

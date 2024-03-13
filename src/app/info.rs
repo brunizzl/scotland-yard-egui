@@ -80,25 +80,28 @@ impl Options {
         ui.collapsing("Knoteninfo", |ui|{
             //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
             ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
-            ui.add_space(5.0);
+            ui.add_space(8.0);
 
             menu_change |=
-                ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige Konvexe Hülle um Cops"))
-                .on_hover_text("Berechnung des Randes kann aus Effizienzgründen für sehr kleine / \
-                sehr dünne Hüllen fehlerhaft sein. \n\
-                Wenn die Cops im 3D Fall den gesamten Graphen durch die Hülle abdecken, wird trotzdem ein Rand gezeigt, da\
-                der Punkt am weitesten entfernt von jedem Cop vom Algorithmus hier immer als außerhalb der Hülle angenommen wird.")
+                ui.add(Checkbox::new(&mut self.show_convex_hull, "zeige konvexe Hülle um Cops"))
+                .on_hover_text("Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
+                wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
+                hier immer als außerhalb der Hülle angenommen wird.")
                 .changed();
-            menu_change |= ui.add(Checkbox::new(&mut self.show_hull_boundary, "zeige Grenze"))
+            menu_change |= ui.add(Checkbox::new(&mut self.show_hull_boundary, "zeige Grenze konvexer Hülle"))
+                .on_hover_text("Punkte in Hülle, die mindestens einen Nachbarn ausserhalb Hülle haben. \
+                Weil diese Punkte nicht in Isolation interessant sind, sondern als Kreis um die Hülle, \
+                wird ein Punkt nur als Randpunkt makiert, wenn er erfolgreich in den Kreis um die Hülle \
+                aufgenommen werden konnte.")
                 .changed();
 
 
-            ui.add_space(5.0);
+            ui.add_space(8.0);
             ui.label("Marker:");
             ui.horizontal(|ui| {
                 ui.label("Farbe: ");
                 ui.color_edit_button_srgba(&mut self.automatic_marker_color);
-                if ui.button("Reset").clicked() {
+                if ui.button("Reset").on_hover_text("Setze Farbe zurück").clicked() {
                     self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
                 }
             });
@@ -181,14 +184,14 @@ impl Options {
                 ui.horizontal(|ui| {
                     ui.radio_value(&mut self.active_manual_marker, i, "");
                     ui.color_edit_button_srgba(color);
-                    if ui.button("Reset").clicked() {
+                    if ui.button("Reset").on_hover_text("setze Farbe zurück").clicked() {
                         *color = color::HAND_PICKED_MARKER_COLORS[i];
                     }
 
                     let bit_i = 1u8 << i;
                     let curr_shown = self.shown_manual_markers & bit_i != 0;
                     let mut show = curr_shown;
-                    ui.add(Checkbox::new(&mut show, ""));
+                    ui.add(Checkbox::new(&mut show, "")).on_hover_text("Anzeigen");
                     if show {
                         self.shown_manual_markers |= bit_i;
                     } else if curr_shown {
@@ -724,18 +727,24 @@ impl Info {
                 }
             },
             VertexColorInfo::SafeOutside => {
-                for (&in_hull, &dist, &pos, &vis) in
-                    izip!(self.cop_hull_data.hull(), &self.min_cop_dist, con.positions, con.visible)
-                {
+                for (&in_hull, &dist, &pos, &vis) in izip!(
+                    self.cop_hull_data.hull(),
+                    &self.min_cop_dist,
+                    con.positions,
+                    con.visible
+                ) {
                     if vis && in_hull.outside() && dist >= 2 {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 }
             },
             VertexColorInfo::SafeBoundary => {
-                for (&in_hull, &dist, &pos, &vis) in
-                    izip!(self.cop_hull_data.hull(), &self.min_cop_dist, con.positions, con.visible)
-                {
+                for (&in_hull, &dist, &pos, &vis) in izip!(
+                    self.cop_hull_data.hull(),
+                    &self.min_cop_dist,
+                    con.positions,
+                    con.visible
+                ) {
                     if vis && in_hull.on_boundary() && dist >= 2 {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }

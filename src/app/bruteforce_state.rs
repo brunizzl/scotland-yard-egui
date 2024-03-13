@@ -403,7 +403,9 @@ impl BruteforceComputationState {
             };
             let mut computing_curr = false;
             for worker in &self.workers {
-                if worker.game_type == game_type && worker.task == WorkTask::Compute {
+                if worker.game_type == game_type
+                    && matches!(worker.task, WorkTask::Compute | WorkTask::Load)
+                {
                     computing_curr = true;
                 }
                 ui.horizontal(|ui| {
@@ -426,20 +428,22 @@ impl BruteforceComputationState {
                 ui.add_space(5.0);
             }
             let already_know_curr = self.results.contains_key(&game_type);
-            if !computing_curr
-                && !already_know_curr
-                && ui
-                    .button("Starte Rechnung")
-                    .on_hover_text(
-                        "WARNUNG: weil WASM keine Threads mag, blockt \
-                die Websiteversion bei dieser Rechnung die GUI.\n\
-                Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
-                Bruteforceberechnungen nicht in RAM möglich macht.",
-                    )
-                    .clicked()
+            if ui
+                .add_enabled(
+                    !computing_curr && !already_know_curr,
+                    Button::new("Starte Rechnung"),
+                )
+                .on_hover_text(
+                    "WARNUNG: weil WASM keine Threads mag, blockt \
+                    die Websiteversion bei dieser Rechnung die GUI.\n\
+                    Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
+                    Bruteforceberechnungen nicht möglich macht.",
+                )
+                .clicked()
             {
                 self.start_computation(nr_cops, map);
-            } else if NATIVE && !already_know_curr && ui.button("laden 🖴").clicked() {
+            }
+            if NATIVE && ui.add_enabled(!already_know_curr, Button::new("laden 🖴")).clicked() {
                 self.load_result_from(game_type);
             }
 
