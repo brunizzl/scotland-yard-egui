@@ -81,12 +81,17 @@ pub struct Character {
     /// closest to where he was before.
     pub pos3: Pos3,
 
-    pub on_node: bool,
+    on_node: bool,
+    enabled: bool,  //manual choice to not consider this instance in computations
     dragging: bool, //currently beeing dragged by mouse cursor
     updated: bool,  //nearest_node or distances changed this frame
 }
 
 impl Character {
+    pub fn is_active(&self) -> bool {
+        self.enabled && self.on_node
+    }
+
     pub fn style(&self) -> &'static Style {
         &STYLES[self.style_index]
     }
@@ -103,6 +108,7 @@ impl Character {
             pos2,
             pos3: Pos3::ZERO,
             on_node: false,
+            enabled: true,
             dragging: true, //causes snap to node next update (as dragging will change to false)
             updated: true,
         }
@@ -308,7 +314,7 @@ impl CharacterState {
     }
 
     pub fn active_cops(&self) -> impl Iterator<Item = &Character> {
-        self.cops().iter().filter(|&c| c.on_node)
+        self.cops().iter().filter(|c| c.is_active())
     }
 
     pub fn robber_updated(&self) -> bool {
@@ -336,69 +342,93 @@ impl CharacterState {
     /// returns a menu change (e.g. a new character was added, one removed...)
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, queue: &mut VecDeque<usize>) -> bool {
         let mut change = false;
-        ui.horizontal(|ui| {
-            let nr_characters = self.characters.len();
-            let minus_emoji = self.characters.last().map_or("🚫", |c| c.style().emoji);
-            let next_index = if nr_characters == 0 {
-                0 //indexes to ROBBER
-            } else {
-                let nr_cops = nr_characters - 1;
-                let next_cop = nr_cops % NR_COP_STYLES;
-                next_cop + 1 //+ 1 as robber is at beginning
-            };
-            let minus_text = format!("- Figur ({})", minus_emoji);
-            let plus_text = format!("+ Figur ({})", STYLES[next_index].emoji);
-            if ui.button(minus_text).clicked() {
-                self.characters.pop();
-                self.forget_move_history();
-                change = true;
-            }
-            if ui.button(plus_text).clicked() {
-                let pos = map.camera().in_front_of_cam();
-                let mut new_ch = Character::new(next_index, pos);
-                let find_screen_facing = |v: usize| {
-                    -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal())
+        ui.collapsing("Figuren", |ui| {
+            ui.horizontal(|ui| {
+                let nr_characters = self.characters.len();
+                let minus_emoji = self.characters.last().map_or("🚫", |c| c.style().emoji);
+                let next_index = if nr_characters == 0 {
+                    0 //indexes to ROBBER
+                } else {
+                    let nr_cops = nr_characters - 1;
+                    let next_cop = nr_cops % NR_COP_STYLES;
+                    next_cop + 1 //+ 1 as robber is at beginning
                 };
-                let (v, _) = map.edges().find_local_minimum(find_screen_facing, 0);
-                new_ch.nearest_node = v;
-                self.characters.push(new_ch);
-                change = true;
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.add(Checkbox::new(&mut self.show_steps, "zeige Schritte"));
-            if ui.button("Reset").clicked() {
-                self.forget_move_history();
-                change = true;
-            }
-        });
-        ui.horizontal(|ui| {
-            if ui.button(" ⟲ ").on_hover_text("strg + z").clicked() {
-                self.reverse_move(map.edges(), map.positions(), queue);
-                change = true;
-            }
-            if ui.button(" ⟳ ").on_hover_text("strg + y").clicked() {
-                self.redo_move(map.edges(), map.positions(), queue);
-                change = true;
-            }
-        });
+                let minus_text = format!("- Figur ({})", minus_emoji);
+                let plus_text = format!("+ Figur ({})", STYLES[next_index].emoji);
+                if ui.button(minus_text).clicked() {
+                    self.characters.pop();
+                    self.forget_move_history();
+                    change = true;
+                }
+                if ui.button(plus_text).clicked() {
+                    let pos = map.camera().in_front_of_cam();
+                    let mut new_ch = Character::new(next_index, pos);
+                    let find_screen_facing = |v: usize| {
+                        -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal())
+                    };
+                    let (v, _) = map.edges().find_local_minimum(find_screen_facing, 0);
+                    new_ch.nearest_node = v;
+                    self.characters.push(new_ch);
+                    change = true;
+                }
+            });
+            ui.collapsing("Aktiv", |ui| {
+                if self.characters.len() > 1 {
+                    let mut delete = None;
+                    for (i, cop) in izip!(1.., &mut self.characters[1..]) {
+                        ui.horizontal(|ui| {
+                            ui.label(cop.style().emoji);
+                            let was_enabled = cop.enabled;
+                            ui.checkbox(&mut cop.enabled, "")
+                                .on_hover_text("Berücksichte Cop bei Berechnungen");
+                            change |= was_enabled != cop.enabled;
+                            if ui.button("Löschen").clicked() {
+                                delete = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = delete {
+                        self.characters.remove(i);
+                        self.forget_move_history();
+                        change = true;
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add(Checkbox::new(&mut self.show_steps, "zeige Schritte"));
+                if ui.button("Reset").clicked() {
+                    self.forget_move_history();
+                    change = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button(" ⟲ ").on_hover_text("strg + z").clicked() {
+                    self.reverse_move(map.edges(), map.positions(), queue);
+                    change = true;
+                }
+                if ui.button(" ⟳ ").on_hover_text("strg + y").clicked() {
+                    self.redo_move(map.edges(), map.positions(), queue);
+                    change = true;
+                }
+            });
 
-        let print_style = |ch: Option<&Character>| {
-            if let Some(style) = ch.map(Character::style) {
-                format!("{} ({})", style.job, style.emoji)
-            } else {
-                " 🚫   ".to_string()
-            }
-        };
+            let print_style = |ch: Option<&Character>| {
+                if let Some(style) = ch.map(Character::style) {
+                    format!("{} ({})", style.job, style.emoji)
+                } else {
+                    " 🚫   ".to_string()
+                }
+            };
 
-        ui.label(format!(
-            "letzter Schritt: {}",
-            print_style(self.last_moved())
-        ));
-        ui.label(format!(
-            "nächster Schritt: {}",
-            print_style(self.next_moved())
-        ));
+            ui.label(format!(
+                "letzter Schritt: {}",
+                print_style(self.last_moved())
+            ));
+            ui.label(format!(
+                "nächster Schritt: {}",
+                print_style(self.next_moved())
+            ));
+        });
 
         change
     }

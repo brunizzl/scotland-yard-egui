@@ -268,10 +268,10 @@ impl ConvexHullData {
         let hull = &mut self.hull[..];
         for i in 0..cops.len() {
             let cop_i = &cops[i];
-            if !cop_i.on_node {
+            if !cop_i.is_active() {
                 continue;
             }
-            for cop_j in cops[(i + 1)..].iter().filter(|c| c.on_node) {
+            for cop_j in cops[(i + 1)..].iter().filter(|c| c.is_active()) {
                 //walk from cop i to cop j on all shortest paths
                 hull[cop_i.nearest_node] = InSet::NewlyAdded;
                 queue.push_back(cop_i.nearest_node);
@@ -319,7 +319,7 @@ impl ConvexHullData {
 
     /// returns a point on the boundary (if there are any) and the distances to that point
     fn find_fist_boundary_point<'a>(&self, cops: &'a [Character]) -> Option<(usize, &'a [isize])> {
-        for cop in cops.iter().filter(|c| c.on_node) {
+        for cop in cops.iter().filter(|c| c.is_active()) {
             let v = cop.nearest_node;
             if self.hull[v].on_boundary() {
                 return Some((v, &cop.distances));
@@ -606,7 +606,7 @@ impl EscapeableNodes {
 
             let endangers = |escapable: &[u32], c: &Character| {
                 let v = c.nearest_node;
-                let active = c.on_node;
+                let active = c.is_active();
                 let distinct = v != v_left && v != v_right;
                 //if cop is not at least next to region, then there must be some point on the region boundary
                 //that can be reached faster by a robber starting in the region than by that outside cop.
@@ -779,7 +779,7 @@ impl EscapeableNodes {
 
         //because of EdgeList::recolor_region_with reasons, we always included the vertices reset here as safe robber
         //positions. this is obv. wrong
-        for cop in cops.iter().filter(|c| c.on_node) {
+        for cop in cops.iter().filter(|c| c.is_active()) {
             self.escapable[cop.nearest_node] = 0;
             for n in edges.neighbors_of(cop.nearest_node) {
                 self.escapable[n] = 0;
@@ -985,8 +985,8 @@ impl CopPairHullData {
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
-        debug_assert!(cop_1.on_node);
-        debug_assert!(cop_2.on_node);
+        debug_assert!(cop_1.is_active());
+        debug_assert!(cop_2.is_active());
 
         self.compute_hull(cop_1, cop_2, edges, queue);
         self.compute_boundary(cop_1, cop_2, potential, edges, queue);

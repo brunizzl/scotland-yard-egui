@@ -38,14 +38,13 @@ On Fedora Rawhide you need to run:
 * formulate robber strategy when outside hull
 
 #### Functionality
-* adapt hull boundary to respect torus (allow multiple disjoined boundary segements)
+* adapt hull boundary to respect torus (allow multiple disjoined boundary segements / perhaps don't care about boundary as circle, but only care about connected components of safe boundary?)
 * fix bug where sometimes a cop in lazy-safe region is not regarded as such
-* choose for which cops convex hull is computed + option to define the outside region yourself
 
 #### Nice To Have
 * pick colors for escapable regions depending on boundary cops (fewer color swaps) disadvantage: we only have 32 and want to avoid collisions at all cost (look up perfect hashing maybe?). 
-* ability to delete any cop (not just the one added last)
 * extract base functionality of EdgeList to own thing
+* choose option to define the outside region yourself
 
 #### Lowest priority
 * platonic symmetry as own type (way faster to compute than explicit, only switch to explicit in bruteforce)

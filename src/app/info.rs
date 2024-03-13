@@ -507,7 +507,7 @@ impl Info {
         if !self.take_screenshot || !NATIVE {
             return;
         }
-        let name = std::mem::take(&mut self.screenshot_name);
+        let name = &self.screenshot_name[..];
         let file_name = if name.is_empty() {
             use chrono::{Datelike, Local, Timelike};
             let now = Local::now();
