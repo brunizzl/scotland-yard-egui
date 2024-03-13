@@ -52,9 +52,9 @@ pub fn emojis_as_latex_commands() -> HashMap<&'static str, &'static str> {
         ("🍩", "\\emoji{doughnut}"),
         ("🚔", "\\emoji{oncoming-police-car}"),
         ("🐂", "\\emoji{ox}"),
-        ("🔫", "TODO"),
-        ("🛂", "TODO"),
-        ("🛃", "TODO"),
+        ("🔫", "\\emoji{water-pistol}"),
+        ("🛂", "\\emoji{passport-control}"),
+        ("🛃", "\\emoji{customs}"),
     ])
 }
 
