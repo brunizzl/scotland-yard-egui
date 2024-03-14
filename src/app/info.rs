@@ -277,8 +277,34 @@ mod storage_keys {
     pub const MARKED_MANUALLY: &str = "app::info::manually_marked";
 }
 
+impl Default for Info {
+    fn default() -> Self {
+        Self {
+            cop_hull_data: ConvexHullData::new(),
+            escapable: EscapeableNodes::new(),
+            min_cop_dist: Vec::new(),
+            cop_advantage: Vec::new(),
+            marked_manually: Vec::new(),
+
+            queue: VecDeque::new(),
+
+            characters: CharacterState::new(),
+            options: DEFAULT_OPTIONS,
+            menu_change: false,
+
+            worker: BruteforceComputationState::new(),
+
+            take_screenshot: false,
+            screenshot_name: String::new(),
+        }
+    }
+}
+
 impl Info {
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if true {
+            return;
+        }
         use storage_keys::*;
         eframe::set_value(storage, OPTIONS, &self.options);
         eframe::set_value(storage, CHARACTERS, &self.characters);
@@ -291,6 +317,7 @@ impl Info {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
         let characters = load_or(cc.storage, CHARACTERS, CharacterState::new);
