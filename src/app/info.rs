@@ -302,9 +302,6 @@ impl Default for Info {
 
 impl Info {
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        if true {
-            return;
-        }
         use storage_keys::*;
         eframe::set_value(storage, OPTIONS, &self.options);
         eframe::set_value(storage, CHARACTERS, &self.characters);

@@ -84,8 +84,7 @@ pub struct State {
 impl State {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        //let mut info = info::Info::new(cc);
-        let mut info = info::Info::default();
+        let mut info = info::Info::new(cc);
         let map = map::Map::new(&mut info, cc);
         Self { map, info }
     }
