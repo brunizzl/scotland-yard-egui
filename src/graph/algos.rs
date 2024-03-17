@@ -665,7 +665,10 @@ impl EscapeableNodes {
                         let pair_segments = self.cop_pair_hull.boundary_segments.clone();
                         debug_assert_eq!(pair_segments[0].len(), pair_segments[1].len());
                         let max_escapable_dist = pair_segments[0].len() as isize - 5;
-                        debug_assert_eq!(max_escapable_dist.max(0), (c1.distances[c2.nearest_node] - 4).max(0));
+                        debug_assert_eq!(
+                            max_escapable_dist.max(0),
+                            (c1.distances[c2.nearest_node] - 4).max(0)
+                        );
 
                         let mut last_owner = None;
                         debug_assert!(queue.is_empty());
