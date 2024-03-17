@@ -819,18 +819,21 @@ impl Info {
                             String::new()
                         }
                     },
-                    //VertexInfoNumber::Debugging => self.escapable.owners()[i].to_string(),
-                    //VertexInfoNumber::Debugging => {
-                    //    let d = self.escapable.boundary_segment_dist()[v];
-                    //    if d == isize::MAX { String::new() } else { d.to_string() }
-                    //}
+                    //VertexNumberInfo::Debugging => self.escapable.owners()[i].to_string(),
                     VertexNumberInfo::Debugging => {
-                        if let SymGroup::Explicit(equiv) = con.sym_group() {
-                            equiv.vertex_representatives()[v].to_string()
-                        } else {
+                        let d = self.escapable.boundary_segment_dist()[v];
+                        if d == isize::MAX {
                             String::new()
+                        } else {
+                            d.to_string()
                         }
-                    },
+                    }, //VertexNumberInfo::Debugging => {
+                       //    if let SymGroup::Explicit(equiv) = con.sym_group() {
+                       //        equiv.vertex_representatives()[v].to_string()
+                       //    } else {
+                       //        String::new()
+                       //    }
+                       //},
                 };
                 let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
                 layout_job.halign = Align::Center;

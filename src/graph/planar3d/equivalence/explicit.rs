@@ -374,6 +374,7 @@ impl ExplicitClasses {
         &self.class
     }
 
+    #[allow(dead_code)]
     pub fn vertex_representatives(&self) -> &[usize] {
         &self.vertex_representative
     }

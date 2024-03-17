@@ -36,6 +36,7 @@ fn find_hull_boundary_in_triangulation(
     let Some(mut curr_outside) = neighbors_of(fst_inside)
         .find(|&n| hull[n].outside() && neighbors_of(n).contains(&fst_outside))
     else {
+        //can fail if object we want to find the boundary of is not actually a convex hull.
         return false;
     };
 
@@ -188,10 +189,10 @@ fn update_convex_hull_boundary(
     hull: &[InSet],
     edges: &EdgeList,
     _queue: &mut VecDeque<usize>,
-) {
+) -> bool {
     // currently all graphs with continuous boundary are triangulations.
     // the fallback is thus not of any advantage for now.
-    find_hull_boundary_in_triangulation(boundary, hull, edges);
+    find_hull_boundary_in_triangulation(boundary, hull, edges)
 }
 
 /// geodesic convex hull over some vertices with respect to some graph
@@ -460,8 +461,8 @@ impl EscapeableNodes {
             escapable: Vec::new(),
             cop_pair_hull: CopPairHullData {
                 hull: Vec::new(),
-                boundary_size: 0,
                 boundary: Vec::new(),
+                boundary_segments: [0..0, 0..0],
             },
             keep_in_escapable: Vec::new(),
         }
@@ -652,73 +653,79 @@ impl EscapeableNodes {
                     for (&c1, &c2) in
                         [left_cop, left_inner, right_inner, right_cop].iter().tuple_windows()
                     {
-                        self.cop_pair_hull.compute_boundary_from_cops(
-                            c1,
-                            c2,
-                            &self.boundary_segment_dist,
-                            edges,
-                            queue,
-                        );
-                        let mut path = std::mem::take(&mut self.cop_pair_hull.boundary);
+                        self.cop_pair_hull.compute_boundary_from_cops(c1, c2, edges, queue);
+                        let boundary = std::mem::take(&mut self.cop_pair_hull.boundary);
+                        let segments = self.cop_pair_hull.boundary_segments.clone();
+                        for segment in segments {
+                            //for cops closer than this it is enough to shrink the safe region for each cop individually
+                            if segment.len() < 4 {
+                                continue;
+                            }
+                            let safe_segment = (segment.start + 2)..(segment.end - 2);
+                            let max_escapable_dist = safe_segment.len() as isize - 1;
+                            debug_assert_eq!(max_escapable_dist, c1.distances[c2.nearest_node] - 4);
 
-                        for &v in &path {
-                            self.keep_in_escapable[v] = KeepVertex::Yes;
-                            for n in edges.neighbors_of(v) {
-                                //build "firewall" below path, such that recoloring of keep_in_escapable inside this loop
-                                //will only go up into deeper parts and not below to the boundary.
-                                if hull_data.hull[n].contained()
-                                    && self.boundary_segment_dist[n] < self.boundary_segment_dist[v]
-                                {
-                                    self.keep_in_escapable[n] = KeepVertex::Yes;
+                            let path = &boundary[segment];
+                            for &v in path {
+                                self.keep_in_escapable[v] = KeepVertex::Yes;
+                                for n in edges.neighbors_of(v) {
+                                    //build "firewall" below path, such that recoloring of keep_in_escapable inside this loop
+                                    //will only go up into deeper parts and not below to the boundary.
+                                    if hull_data.hull[n].contained()
+                                        && self.boundary_segment_dist[n]
+                                            < self.boundary_segment_dist[v]
+                                    {
+                                        self.keep_in_escapable[n] = KeepVertex::Yes;
+                                    }
                                 }
                             }
-                        }
-                        //keep only escapable parts of path (e.g. not vertices directly next to the guarding cops)
-                        path.retain(|&v| isize::min(c1.distances[v], c2.distances[v]) > 1);
-                        if path.is_empty() {
-                            continue;
-                        }
 
-                        let max_escapable_dist = path.len() as isize - 1;
-                        let mut last_owner = None;
-                        debug_assert!(queue.is_empty());
-                        let mut compute_small_dists_for = |v| {
-                            queue.push_back(v);
-                            self.some_boundary_dist[v] = 0;
-                            self.last_write_by[v] = owner;
-                            //this is mostly a waste: somehow it is insufficient to only walk inside our marked region
-                            let in_hull = |n: usize| hull_data.hull[n].contained();
-                            self.calc_small_dists(
-                                in_hull,
-                                edges,
+                            //keep only escapable parts of path (e.g. not vertices directly next to the guarding cops)
+                            let path = &boundary[safe_segment];
+                            debug_assert!(path
+                                .iter()
+                                .all(|&v| isize::min(c1.distances[v], c2.distances[v]) > 1));
+
+                            let mut last_owner = None;
+                            debug_assert!(queue.is_empty());
+                            let mut compute_small_dists_for = |v| {
+                                queue.push_back(v);
+                                self.some_boundary_dist[v] = 0;
+                                self.last_write_by[v] = owner;
+                                //this is mostly a waste: somehow it is insufficient to only walk inside our marked region
+                                let in_hull = |n: usize| hull_data.hull[n].contained();
+                                self.calc_small_dists(
+                                    in_hull,
+                                    edges,
+                                    queue,
+                                    max_escapable_dist,
+                                    last_owner,
+                                    owner,
+                                );
+                                last_owner = Some(owner);
+                                owner += 1;
+                            };
+                            //same as in consider_boundary_cops: we start with the opposing ends to get some constant speedup
+                            //as we shrink the space of escapable vertices faster
+                            compute_small_dists_for(path[0]);
+                            for &v in path[1..].iter().rev() {
+                                compute_small_dists_for(v);
+                            }
+
+                            let last_owner = last_owner.unwrap();
+                            for &v in path {
+                                debug_assert_eq!(self.last_write_by[v], last_owner);
+                                debug_assert_eq!(self.keep_in_escapable[v], KeepVertex::Yes);
+                                queue.push_back(v);
+                            }
+                            edges.recolor_region_with(
+                                KeepVertex::Yes,
+                                &mut self.keep_in_escapable,
+                                |_, n, _| self.last_write_by[n] == last_owner,
                                 queue,
-                                max_escapable_dist,
-                                last_owner,
-                                owner,
                             );
-                            last_owner = Some(owner);
-                            owner += 1;
-                        };
-                        //same as in consider_boundary_cops: we start with the opposing ends to get some constant speedup
-                        //as we shrink the space of escapable vertices faster
-                        compute_small_dists_for(path[0]);
-                        for &v in path[1..].iter().rev() {
-                            compute_small_dists_for(v);
                         }
-
-                        let last_owner = last_owner.unwrap();
-                        for &v in &path {
-                            debug_assert_eq!(self.last_write_by[v], last_owner);
-                            debug_assert_eq!(self.keep_in_escapable[v], KeepVertex::Yes);
-                            queue.push_back(v);
-                        }
-                        edges.recolor_region_with(
-                            KeepVertex::Yes,
-                            &mut self.keep_in_escapable,
-                            |_, n, _| self.last_write_by[n] == last_owner,
-                            queue,
-                        );
-                        self.cop_pair_hull.boundary = path;
+                        self.cop_pair_hull.boundary = boundary;
                     }
                     debug_assert!(queue.is_empty());
                     for &v in boundary_interior {
@@ -860,9 +867,9 @@ impl EscapeableNodes {
 /// very similar to ConvexHullData, only this time for just a pair of cops.
 /// as this is computed (potentially) many times in a single frame, it tries to never iterate over all vertices.
 struct CopPairHullData {
-    hull: Vec<InSet>, //one entry per vertex
-    boundary_size: usize,
+    hull: Vec<InSet>,     //one entry per vertex
     boundary: Vec<usize>, //indices of boundary vertices
+    boundary_segments: [std::ops::Range<usize>; 2],
 }
 
 impl CopPairHullData {
@@ -896,14 +903,11 @@ impl CopPairHullData {
         debug_assert!(all_entries.contains(&cop_1.nearest_node));
         debug_assert!(all_entries.contains(&cop_2.nearest_node));
 
-        let mut boundary_size = 0;
         for &v in &all_entries {
             if edges.neighbors_of(v).any(|n| self.hull[n].outside()) {
                 self.hull[v] = InSet::OnBoundary;
-                boundary_size += 1;
             }
         }
-        self.boundary_size = boundary_size;
         all_entries.clear();
         self.boundary = all_entries;
     }
@@ -913,56 +917,38 @@ impl CopPairHullData {
         &mut self,
         cop_1: &Character,
         cop_2: &Character,
-        potential: &[isize],
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
-        debug_assert_eq!(potential.len(), edges.nr_vertices());
         self.boundary.clear();
+        self.boundary_segments = [0..0, 0..0];
         self.boundary.push(cop_1.nearest_node);
 
-        update_convex_hull_boundary(
+        let success = update_convex_hull_boundary(
             &mut self.boundary,
             &cop_1.distances,
             &self.hull,
             edges,
             queue,
         );
-        if self.boundary.is_empty() {
-            return;
-        }
-
-        let Some(cop_2_boundary_pos) = self.boundary.iter().position(|&v| v == cop_2.nearest_node)
-        else {
-            self.boundary.clear();
-            return;
-        };
-
-        let fst_segment = &self.boundary[..(cop_2_boundary_pos + 1)];
-        let snd_segment = &self.boundary[cop_2_boundary_pos..];
-        if fst_segment.len() < 5 && snd_segment.len() < 5 {
+        if !success {
+            let _i = 0;
             self.boundary.clear();
             return;
         }
 
-        let take_first = if snd_segment.len() < 5 {
-            true
-        } else {
-            let min_pot = |vs: &[_]| vs.iter().fold(isize::MAX, |acc, &v| acc.min(potential[v]));
-            let fst_inner = &fst_segment[2..(fst_segment.len() - 2)];
-            let snd_inner = &snd_segment[2..(snd_segment.len() - 2)];
-            let fst_min = min_pot(fst_inner);
-            let snd_min = min_pot(snd_inner);
-            fst_min < snd_min
-        };
+        let cop_2_boundary_pos =
+            self.boundary.iter().position(|&v| v == cop_2.nearest_node).unwrap();
 
-        if take_first {
-            self.boundary.truncate(fst_segment.len());
-        } else {
-            let snd_len = snd_segment.len();
-            self.boundary.rotate_left(cop_2_boundary_pos);
-            self.boundary.truncate(snd_len);
+        let fst_segment = 0..(cop_2_boundary_pos + 1);
+        let snd_segment = cop_2_boundary_pos..(self.boundary.len());
+        let segment_len = fst_segment.len();
+        if segment_len < 5 {
+            self.boundary.clear();
+            return;
         }
+        debug_assert_eq!(segment_len, snd_segment.len()); //follows directly from definition of convex hull
+        self.boundary_segments = [fst_segment, snd_segment];
     }
 
     fn reset_hull(&mut self, cop_1: &Character, edges: &EdgeList, queue: &mut VecDeque<usize>) {
@@ -981,7 +967,6 @@ impl CopPairHullData {
         &mut self,
         cop_1: &Character,
         cop_2: &Character,
-        potential: &[isize],
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
@@ -989,7 +974,7 @@ impl CopPairHullData {
         debug_assert!(cop_2.is_active());
 
         self.compute_hull(cop_1, cop_2, edges, queue);
-        self.compute_boundary(cop_1, cop_2, potential, edges, queue);
+        self.compute_boundary(cop_1, cop_2, edges, queue);
         self.reset_hull(cop_1, edges, queue);
     }
 }

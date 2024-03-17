@@ -39,7 +39,7 @@ On Fedora Rawhide you need to run:
 
 #### Functionality
 * adapt hull boundary to respect torus (allow multiple disjoined boundary segements / perhaps don't care about boundary as circle, but only care about connected components of safe boundary?)
-* fix bug where sometimes a cop in lazy-safe region is not regarded as such
+* fix bug where sometimes a hole appears in a lazy-safe region
 
 #### Nice To Have
 * pick colors for escapable regions depending on boundary cops (fewer color swaps) disadvantage: we only have 32 and want to avoid collisions at all cost (look up perfect hashing maybe?). 
