@@ -228,7 +228,7 @@ impl ConvexHullData {
         &self.boundary
     }
 
-    pub fn boundary_interieur_indices(
+    fn safe_boundary_indices(
         &self,
     ) -> impl ExactSizeIterator<Item = Range<usize>> + '_ + Clone {
         self.segments.iter().map(|seg| {
@@ -239,9 +239,9 @@ impl ConvexHullData {
     }
 
     /// each segment consists of vertices on boundary, segments are divided by cops
-    /// iterator contains vertices of the interior of the boundary, e.g. cops and neighboring vertices cut away from begin and end.
-    pub fn boundary_interieurs(&self) -> impl ExactSizeIterator<Item = &'_ [usize]> + '_ + Clone {
-        self.boundary_interieur_indices().map(|interior| &self.boundary[interior])
+    /// iterator contains vertices of safe parts of boundary, e.g. cops and neighboring vertices cut away from begin and end.
+    pub fn safe_boundary_parts(&self) -> impl ExactSizeIterator<Item = &'_ [usize]> + '_ + Clone {
+        self.safe_boundary_indices().map(|interior| &self.boundary[interior])
     }
 
     /// each segment consists of vertices on boundary, segments are divided by cops
@@ -393,6 +393,7 @@ impl ConvexHullData {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum KeepVertex {
     No,
+    Perhaps,
     Yes,
     YesButAlreadyVisited,
 }
@@ -406,9 +407,6 @@ pub struct EscapeableNodes {
     /// which node the distance is in respect to is remembered in `self.last_write_by`
     some_boundary_dist: Vec<isize>, //one entry per vertex
 
-    /// distance of interior points to some unspecified segment on boundary
-    boundary_segment_dist: Vec<isize>, //one entry per vertex
-
     /// intermediary value, kept to save on allocations and for convinience
     /// one entry per vertex, each boundary node has an index in `ConvexHull::boundary`.
     /// if `last_write_by[vertex_i] == j` then vertex_i was visited last, when distances to boundary vertex
@@ -420,7 +418,13 @@ pub struct EscapeableNodes {
     /// if vertex `v` is escapable via segment `i`, the `(i % 32)`'th bit is set in `escapable[v]`
     escapable: Vec<u32>, //one entry per vertex
 
+    /// intermediary value
     cop_pair_hull: CopPairHullData,
+
+    /// intermediary value, kept to reserve allocations etc.
+    /// lists vertices of cop_pair_hull(s) boundaries, but only side torward outher boundary.
+    /// only kept permanently to minimize allocations (and for debugging output)
+    some_inner_boundary: Vec<usize>,
 
     /// with respect to some escapable region, contains information if a vertex
     /// is not only part of the original escapable, but also of the
@@ -439,13 +443,8 @@ impl EscapeableNodes {
     }
 
     #[allow(dead_code)]
-    pub fn boundary_segment_dist(&self) -> &[isize] {
-        &self.boundary_segment_dist
-    }
-
-    #[allow(dead_code)]
     pub fn inner_connecting_line(&self) -> &[usize] {
-        &self.cop_pair_hull.boundary
+        &self.some_inner_boundary
     }
 
     #[allow(dead_code)]
@@ -456,48 +455,12 @@ impl EscapeableNodes {
     pub fn new() -> Self {
         Self {
             some_boundary_dist: Vec::new(),
-            boundary_segment_dist: Vec::new(),
             last_write_by: Vec::new(),
             escapable: Vec::new(),
-            cop_pair_hull: CopPairHullData {
-                hull: Vec::new(),
-                boundary: Vec::new(),
-                boundary_segments: [0..0, 0..0],
-            },
+            cop_pair_hull: CopPairHullData::default(),
+            some_inner_boundary: Vec::new(),
             keep_in_escapable: Vec::new(),
         }
-    }
-
-    /// stores dist to closest boundary vertex of region owned by owner in `self.some_boundary_dist`.
-    fn calc_dist_to_boundary_segement(
-        &mut self,
-        boundary: &[usize],
-        hull: &[InSet],
-        edges: &EdgeList,
-        queue: &mut VecDeque<usize>,
-    ) {
-        debug_assert_eq!(self.some_boundary_dist.len(), edges.nr_vertices());
-
-        queue.clear();
-        let v0 = boundary[0];
-        self.boundary_segment_dist[v0] = isize::MAX;
-        queue.push_back(v0);
-        edges.recolor_region_with(
-            isize::MAX,
-            &mut self.boundary_segment_dist,
-            |_, n, _| hull[n].contained(),
-            queue,
-        );
-
-        for &v in boundary {
-            self.boundary_segment_dist[v] = 0;
-            queue.push_back(v);
-        }
-        edges.calc_distances_to_with(
-            &mut self.boundary_segment_dist,
-            |v, _| hull[v].contained(),
-            queue,
-        );
     }
 
     /// weird hybrid of region coloring and distance calculation:
@@ -582,8 +545,6 @@ impl EscapeableNodes {
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
-        self.boundary_segment_dist.clear();
-        self.boundary_segment_dist.resize(edges.nr_vertices(), 0);
         self.keep_in_escapable.clear();
         self.keep_in_escapable.resize(edges.nr_vertices(), KeepVertex::No);
 
@@ -592,15 +553,11 @@ impl EscapeableNodes {
         let mut owner = hull_data.boundary.len();
         queue.clear();
         let iter = izip!(
-            hull_data.boundary_interieur_indices(),
             hull_data.boundary_cop_vertices(),
-            hull_data.boundary_interieurs(),
+            hull_data.safe_boundary_parts(),
             0..
         );
-        for (indices, (v_left, v_right), boundary_interior, seg_nr) in iter {
-            debug_assert_eq!(indices.len(), boundary_interior.len());
-            self.calc_dist_to_boundary_segement(boundary_interior, hull_data.hull(), edges, queue);
-
+        'outher_loop: for ((v_left, v_right), safe_outher_boundary, seg_nr) in iter {
             let left_cop = cops.iter().find(|c| c.nearest_node == v_left).unwrap();
             let right_cop = cops.iter().find(|c| c.nearest_node == v_right).unwrap();
             let marker = 1u32 << (seg_nr % 32);
@@ -643,40 +600,113 @@ impl EscapeableNodes {
                         (cop_j, cop_i)
                     };
 
-                    //TODO:
-                    //consider multi step process:
-                    //1. fill each hull of pair with KeepVertex::Yes (don't need hull boundary for that)
+                    //idea
+                    //1. fill each hull of pair with KeepVertex::Perhaps
                     //2. fill region from outher boundary to newly created borders of pair hulls with KeepVertex::Yes
-                    //3. fill each region admitting escape through one cop pair with KeepVertex::Yes
-                    //4. remove markers where not KeepVertex::Yes
+                    //3. sort and separate inner boundary to segments
+                    //4. fill each region admitting escape through one cop pair with KeepVertex::Yes
+                    //5. remove markers where not KeepVertex::Yes
+                    //6. reset self.keep_in_escapable
 
-                    //idea: connect the four cops by paths. these paths will split the current region of self.escapable
-                    //into two parts: one is in front of the inner cops. if the robber is in that part, he can just
-                    //escape straight to the boundary as if the inner cops where not present at all.
-                    //if the robber is in the other part, he is yet to cross the just constructed line. along this line,
-                    //every section is now guarded by the two cops c1 and c2 and can be crossed if the same conditions hold
-                    //as for crossing the boundary between left_cop and right_cop.
+                    //step 1: paint in the hull between each cop pair with KeepVertex::Perhaps
+                    debug_assert!(self.keep_in_escapable.iter().all(|&k| k == KeepVertex::No));
+                    let cops_line = [left_cop, left_inner, right_inner, right_cop];
+                    for (&c1, &c2) in cops_line.iter().tuple_windows() {
+                        self.cop_pair_hull.compute_hull([c1, c2], edges, queue);
+                        for &v in &self.cop_pair_hull.all_vertices {
+                            self.keep_in_escapable[v] = KeepVertex::Perhaps;
+                        }
+                        self.cop_pair_hull.reset_hull(c1, edges, queue);
+                    }
+
+                    //step 2: paint region between outher boundary and pair hulls with KeepVertex::Yes
+                    debug_assert!(queue.is_empty());
+                    let mut inner_boundary = std::mem::take(&mut self.some_inner_boundary);
+                    inner_boundary.clear();
+                    for &v in safe_outher_boundary {
+                        if self.keep_in_escapable[v] == KeepVertex::Perhaps {
+                            inner_boundary.push(v);
+                        } else {
+                            debug_assert_eq!(self.keep_in_escapable[v], KeepVertex::No);
+                            self.keep_in_escapable[v] = KeepVertex::Yes;
+                            queue.push_back(v);
+                        }
+                    }
+                    edges.recolor_region_with(
+                        KeepVertex::Yes,
+                        &mut self.keep_in_escapable,
+                        |_, n, keep| {
+                            if keep[n] == KeepVertex::Perhaps {
+                                inner_boundary.push(n);
+                            }
+                            keep[n] == KeepVertex::No && hull_data.hull[n].contained()
+                        },
+                        queue,
+                    );
+
+                    //step 3: sort and separate inner boundary to segments
+                    inner_boundary.sort_by(|&v1, &v2| {
+                        //TODO: perhaps be more clever than sorting, as this needs to produce connected paths
+                        for c in [left_cop, left_inner, right_inner] {
+                            let cmp = isize::cmp(&c.distances[v1], &c.distances[v2]);
+                            if cmp != std::cmp::Ordering::Equal {
+                                return cmp;
+                            }
+                        }
+                        debug_assert_eq!(v1, v2);
+                        std::cmp::Ordering::Equal
+                    });
+                    inner_boundary.dedup();
+                    inner_boundary
+                        .retain(|&v| cops_line.iter().map(|c| c.distances[v]).min().unwrap() > 1);
+                    if inner_boundary.is_empty() {
+                        self.some_inner_boundary = inner_boundary;
+                        continue 'outher_loop;
+                    }
+                    let inner_segments = {
+                        let mut i = 0;
+                        let mut gap_of = |c: &Character| {
+                            let c_dist = |i| c.distances[inner_boundary[i]];
+                            while i + 1 < inner_boundary.len() && c_dist(i) > c_dist(i + 1) {
+                                i += 1;
+                            }
+                            i + 1
+                        };
+                        let c1_gap = gap_of(left_inner);
+                        let c2_gap = gap_of(right_inner);
+                        [
+                            &inner_boundary[..c1_gap],
+                            &inner_boundary[c1_gap..c2_gap],
+                            &inner_boundary[c2_gap..],
+                        ]
+                    };
+
+                    //step 4: find escapable region for each cop pair and paint it with KeepVertex::Yes
                     let mut escapable = std::mem::take(&mut self.escapable);
-                    for (&c1, &c2) in
-                        [left_cop, left_inner, right_inner, right_cop].iter().tuple_windows()
+                    for ((&c1, &c2), safe_segment) in
+                        izip!(cops_line.iter().tuple_windows(), inner_segments)
                     {
-                        self.cop_pair_hull.compute_boundary_from_cops(c1, c2, edges, queue);
-                        let pair_boundary = std::mem::take(&mut self.cop_pair_hull.boundary);
-                        let pair_segments = self.cop_pair_hull.boundary_segments.clone();
-                        debug_assert_eq!(pair_segments[0].len(), pair_segments[1].len());
-                        let max_escapable_dist = pair_segments[0].len() as isize - 5;
-                        debug_assert_eq!(
-                            max_escapable_dist.max(0),
-                            (c1.distances[c2.nearest_node] - 4).max(0)
+                        let max_escapable_dist = safe_segment.len() as isize - 1;
+                        //safe_segment never contains vertices too close to cops_line, even if closest cop is
+                        //not from this line section. this however can only create segments of wrong length if
+                        //one cop delimiting the segment is outside the marked region.
+                        debug_assert!(
+                            max_escapable_dist.max(0) == (c1.distances[c2.nearest_node] - 4).max(0)
+                                || escapable[c1.nearest_node] & marker == 0
+                                || escapable[c2.nearest_node] & marker == 0
                         );
-
                         let mut last_owner = None;
-                        debug_assert!(queue.is_empty());
-                        let mut compute_small_dists_for = |v| {
+                        for &v in safe_segment {
+                            if last_owner.is_some() {
+                                //algorithm is only correct if all vertices in
+                                //safe_segment turn out to be actually safe.
+                                debug_assert_eq!(Some(self.last_write_by[v]), last_owner);
+                            }
+                            debug_assert!(queue.is_empty());
                             queue.push_back(v);
                             self.some_boundary_dist[v] = 0;
                             self.last_write_by[v] = owner;
-                            let in_hull = |n: usize| escapable[n] & marker != 0;
+                            let in_hull = |n: usize| hull_data.hull[n].contained();
                             self.calc_small_dists(
                                 in_hull,
                                 edges,
@@ -687,91 +717,48 @@ impl EscapeableNodes {
                             );
                             last_owner = Some(owner);
                             owner += 1;
-                        };
-                        if max_escapable_dist >= 0 {
-                            for segment in pair_segments.clone() {
-                                let safe_segment = (segment.start + 2)..(segment.end - 2);
-                                let path = &pair_boundary[safe_segment];
-                                debug_assert!(path
-                                    .iter()
-                                    .all(|&v| isize::min(c1.distances[v], c2.distances[v]) > 1));
+                        }
 
-                                //same as in consider_boundary_cops: we start with the opposing ends to get some constant speedup
-                                //as we shrink the space of escapable vertices faster
-                                compute_small_dists_for(path[0]);
-                                for &v in path[1..].iter().rev() {
-                                    compute_small_dists_for(v);
+                        debug_assert!(queue.is_empty());
+                        if let Some(last_owner) = last_owner {
+                            for &v in safe_segment {
+                                if self.last_write_by[v] == last_owner {
+                                    self.keep_in_escapable[v] = KeepVertex::Yes;
+                                    queue.push_back(v);
                                 }
                             }
-
-                            let last_owner = last_owner.unwrap();
-                            for segment in pair_segments.clone() {
-                                let safe_segment = (segment.start + 2)..(segment.end - 2);
-                                let path = &pair_boundary[safe_segment];
-
-                                for &v in path {
-                                    if self.last_write_by[v] == last_owner {
-                                        self.keep_in_escapable[v] = KeepVertex::Yes;
-                                        queue.push_back(v);
-                                    }
-                                }
-                                edges.recolor_region_with(
-                                    KeepVertex::Yes,
-                                    &mut self.keep_in_escapable,
-                                    |_, n, _| self.last_write_by[n] == last_owner,
-                                    queue,
-                                );
-                            }
-                        }
-                        self.cop_pair_hull.boundary = pair_boundary;
-                    }
-                    //plug holes s.t. recoloring below can't recolor everything
-                    for c in [left_cop, left_inner, right_inner, right_cop] {
-                        for n in edges.neighbors_of(c.nearest_node) {
-                            self.keep_in_escapable[n] = KeepVertex::Yes;
+                            edges.recolor_region_with(
+                                KeepVertex::Yes,
+                                &mut self.keep_in_escapable,
+                                |_, n, _| self.last_write_by[n] == last_owner,
+                                queue,
+                            );
                         }
                     }
-                    debug_assert!(queue.is_empty());
-                    for &v in boundary_interior {
-                        if self.keep_in_escapable[v] != KeepVertex::Yes {
-                            queue.push_back(v);
-                            self.keep_in_escapable[v] = KeepVertex::Yes;
-                        }
-                    }
-                    //ascent from old boundary up to regions found safe just now
-                    edges.recolor_region_with(
-                        KeepVertex::Yes,
-                        &mut self.keep_in_escapable,
-                        |_, n, _| escapable[n] & marker != 0,
-                        queue,
-                    );
 
-                    //we now want to keep the intersection of self.keep_in_escapable and the old region marked by marker
-                    //in self.escapable.
-                    //at first, we shrink the region in escapable, then we delete the entries ins self.keep_in_escapable.
-                    for &v in boundary_interior {
+                    //step 5: only keep markers with KeepVertex::Yes
+                    for &v in safe_outher_boundary {
                         queue.push_back(v);
                         self.keep_in_escapable[v] = KeepVertex::YesButAlreadyVisited;
                     }
                     while let Some(v) = queue.pop_front() {
-                        debug_assert!(matches!(
-                            self.keep_in_escapable[v],
-                            KeepVertex::No | KeepVertex::YesButAlreadyVisited
-                        ));
+                        use KeepVertex::*;
+                        debug_assert_ne!(self.keep_in_escapable[v], Yes);
                         for n in edges.neighbors_of(v) {
                             let keep = self.keep_in_escapable[n];
-                            if keep == KeepVertex::Yes {
-                                self.keep_in_escapable[n] = KeepVertex::YesButAlreadyVisited;
+                            if keep == Yes {
+                                self.keep_in_escapable[n] = YesButAlreadyVisited;
                                 queue.push_back(n);
                             }
-                            if keep == KeepVertex::No && escapable[n] & marker != 0 {
+                            if matches!(keep, No | Perhaps) && escapable[n] & marker != 0 {
                                 escapable[n] -= marker;
                                 queue.push_back(n);
                             }
                         }
                     }
-                    //reset for next shrinkage
-                    for &v in boundary_interior {
+
+                    //step 6: reset self.keep_in_escapable (use recolor to not iterate over whole array)
+                    for &v in safe_outher_boundary {
                         queue.push_back(v);
                         self.keep_in_escapable[v] = KeepVertex::No;
                     }
@@ -784,6 +771,7 @@ impl EscapeableNodes {
                     debug_assert!(self.keep_in_escapable.iter().all(|&k| k == KeepVertex::No));
 
                     self.escapable = escapable;
+                    self.some_inner_boundary = inner_boundary;
                 }
             }
         }
@@ -807,8 +795,8 @@ impl EscapeableNodes {
     ) {
         queue.clear();
         let iter = izip!(
-            hull_data.boundary_interieur_indices(),
-            hull_data.boundary_interieurs(),
+            hull_data.safe_boundary_indices(),
+            hull_data.safe_boundary_parts(),
             0..
         );
         for (indices, vertices, seg_nr) in iter {
@@ -870,17 +858,16 @@ impl EscapeableNodes {
 
 /// very similar to ConvexHullData, only this time for just a pair of cops.
 /// as this is computed (potentially) many times in a single frame, it tries to never iterate over all vertices.
+#[derive(Default)]
 struct CopPairHullData {
-    hull: Vec<InSet>,     //one entry per vertex
-    boundary: Vec<usize>, //indices of boundary vertices
-    boundary_segments: [std::ops::Range<usize>; 2],
+    hull: Vec<InSet>,         //one entry per vertex
+    all_vertices: Vec<usize>, //indices of all vertices
 }
 
 impl CopPairHullData {
     fn compute_hull(
         &mut self,
-        cop_1: &Character,
-        cop_2: &Character,
+        [cop_1, cop_2]: [&Character; 2],
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
@@ -888,7 +875,7 @@ impl CopPairHullData {
         debug_assert!(self.hull.iter().all(|&x| x == InSet::No));
         debug_assert!(queue.is_empty());
 
-        let mut all_entries = std::mem::take(&mut self.boundary);
+        let mut all_entries = std::mem::take(&mut self.all_vertices);
         all_entries.clear();
 
         self.hull[cop_1.nearest_node] = InSet::Interieur;
@@ -906,78 +893,18 @@ impl CopPairHullData {
         }
         debug_assert!(all_entries.contains(&cop_1.nearest_node));
         debug_assert!(all_entries.contains(&cop_2.nearest_node));
-
-        for &v in &all_entries {
-            if edges.neighbors_of(v).any(|n| self.hull[n].outside()) {
-                self.hull[v] = InSet::OnBoundary;
-            }
-        }
-        all_entries.clear();
-        self.boundary = all_entries;
-    }
-
-    /// computes the all-around boundary, only keeps half that has a lower min potential in its interior
-    fn compute_boundary(
-        &mut self,
-        cop_1: &Character,
-        cop_2: &Character,
-        edges: &EdgeList,
-        queue: &mut VecDeque<usize>,
-    ) {
-        self.boundary.clear();
-        self.boundary.push(cop_1.nearest_node);
-        self.boundary_segments = [0..0, 0..0];
-
-        let success = update_convex_hull_boundary(
-            &mut self.boundary,
-            &cop_1.distances,
-            &self.hull,
-            edges,
-            queue,
-        );
-        if !success {
-            self.boundary.clear();
-            return;
-        }
-
-        let cop_2_boundary_pos =
-            self.boundary.iter().position(|&v| v == cop_2.nearest_node).unwrap();
-
-        let fst_segment = 0..(cop_2_boundary_pos + 1);
-        let snd_segment = cop_2_boundary_pos..(self.boundary.len());
-        let segment_len = fst_segment.len();
-        if segment_len < 4 {
-            self.boundary.clear();
-            return;
-        }
-        debug_assert_eq!(segment_len, snd_segment.len()); //follows directly from definition of convex hull
-        self.boundary_segments = [fst_segment, snd_segment];
+        self.all_vertices = all_entries;
     }
 
     fn reset_hull(&mut self, cop_1: &Character, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         debug_assert_eq!(self.hull.len(), edges.nr_vertices());
         debug_assert!(queue.is_empty());
 
+        //should be faster than iterating over whole array most of the time (by far)
         self.hull[cop_1.nearest_node] = InSet::No;
         queue.push_back(cop_1.nearest_node);
         edges.recolor_region_with(InSet::No, &mut self.hull, |_, _, _| true, queue);
 
         debug_assert!(self.hull.iter().all(|&x| x == InSet::No));
-    }
-
-    /// computes hull, computes boundary, resets hull
-    fn compute_boundary_from_cops(
-        &mut self,
-        cop_1: &Character,
-        cop_2: &Character,
-        edges: &EdgeList,
-        queue: &mut VecDeque<usize>,
-    ) {
-        debug_assert!(cop_1.is_active());
-        debug_assert!(cop_2.is_active());
-
-        self.compute_hull(cop_1, cop_2, edges, queue);
-        self.compute_boundary(cop_1, cop_2, edges, queue);
-        self.reset_hull(cop_1, edges, queue);
     }
 }
