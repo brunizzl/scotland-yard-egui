@@ -346,7 +346,7 @@ impl EdgeList {
     ) -> usize
     where
         Color: Eq + Clone + std::fmt::Debug,
-        F: FnMut(usize, usize, &[Color]) -> bool,
+        F: FnMut(usize, &[Color]) -> bool,
     {
         debug_assert_eq!(self.nr_vertices(), colors.len());
         let mut nr_colored = 0;
@@ -359,7 +359,7 @@ impl EdgeList {
                 if colors[n] == new {
                     continue;
                 }
-                if is_old(v, n, colors) {
+                if is_old(n, colors) {
                     nr_colored += 1;
                     colors[n] = new.clone();
                     local_queue.push_back(n);
@@ -381,7 +381,7 @@ impl EdgeList {
         Color: Eq + Clone + std::fmt::Debug,
     {
         debug_assert_ne!(old, new); //technically not needed, but why would anyone want that?
-        self.recolor_region_with(new, colors, |_, n, cs| cs[n] == old, queue)
+        self.recolor_region_with(new, colors, |n, cs| cs[n] == old, queue)
     }
 
     pub fn find_local_minimum(

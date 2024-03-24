@@ -389,7 +389,7 @@ impl ConvexHullData {
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum KeepVertex {
+enum Keep {
     No,
     Perhaps,
     Yes,
@@ -427,7 +427,7 @@ pub struct EscapeableNodes {
     /// with respect to some escapable region, contains information if a vertex
     /// is not only part of the original escapable, but also of the
     /// shrunk region, because interior cops could endanger some parts.
-    keep_in_escapable: Vec<KeepVertex>, //one entry per vertex
+    keep_escapable: Vec<Keep>, //one entry per vertex
 }
 
 impl EscapeableNodes {
@@ -457,7 +457,7 @@ impl EscapeableNodes {
             escapable: Vec::new(),
             cop_pair_hull: CopPairHullData::default(),
             some_inner_boundary: Vec::new(),
-            keep_in_escapable: Vec::new(),
+            keep_escapable: Vec::new(),
         }
     }
 
@@ -543,8 +543,8 @@ impl EscapeableNodes {
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
-        self.keep_in_escapable.clear();
-        self.keep_in_escapable.resize(edges.nr_vertices(), KeepVertex::No);
+        self.keep_escapable.clear();
+        self.keep_escapable.resize(edges.nr_vertices(), Keep::No);
 
         //owners of boundary vertices where chosen as what the vertice's index in this vector was
         //  -> new owners can start after all valid vector indices
@@ -607,12 +607,12 @@ impl EscapeableNodes {
                     //6. reset self.keep_in_escapable
 
                     //step 1: paint in the hull between each cop pair with KeepVertex::Perhaps
-                    debug_assert!(self.keep_in_escapable.iter().all(|&k| k == KeepVertex::No));
+                    debug_assert!(self.keep_escapable.iter().all(|&k| k == Keep::No));
                     let cops_line = [left_cop, left_inner, right_inner, right_cop];
                     for (&c1, &c2) in cops_line.iter().tuple_windows() {
                         self.cop_pair_hull.compute_hull([c1, c2], edges, queue);
                         for &v in &self.cop_pair_hull.all_vertices {
-                            self.keep_in_escapable[v] = KeepVertex::Perhaps;
+                            self.keep_escapable[v] = Keep::Perhaps;
                         }
                         self.cop_pair_hull.reset_hull(c1, edges, queue);
                     }
@@ -622,25 +622,21 @@ impl EscapeableNodes {
                     let mut inner_boundary = std::mem::take(&mut self.some_inner_boundary);
                     inner_boundary.clear();
                     for &v in safe_outher_boundary {
-                        if self.keep_in_escapable[v] == KeepVertex::Perhaps {
+                        if self.keep_escapable[v] == Keep::Perhaps {
                             inner_boundary.push(v);
                         } else {
-                            debug_assert_eq!(self.keep_in_escapable[v], KeepVertex::No);
-                            self.keep_in_escapable[v] = KeepVertex::Yes;
+                            debug_assert_eq!(self.keep_escapable[v], Keep::No);
+                            self.keep_escapable[v] = Keep::Yes;
                             queue.push_back(v);
                         }
                     }
-                    edges.recolor_region_with(
-                        KeepVertex::Yes,
-                        &mut self.keep_in_escapable,
-                        |_, n, keep| {
-                            if keep[n] == KeepVertex::Perhaps {
-                                inner_boundary.push(n);
-                            }
-                            keep[n] == KeepVertex::No && hull_data.hull[n].contained()
-                        },
-                        queue,
-                    );
+                    let paint = |n: usize, keep: &[_]| {
+                        if keep[n] == Keep::Perhaps {
+                            inner_boundary.push(n);
+                        }
+                        keep[n] == Keep::No && hull_data.hull[n].contained()
+                    };
+                    edges.recolor_region_with(Keep::Yes, &mut self.keep_escapable, paint, queue);
 
                     //step 3: sort and separate inner boundary to segments
                     inner_boundary.sort_by(|&v1, &v2| {
@@ -719,33 +715,30 @@ impl EscapeableNodes {
 
                         debug_assert!(queue.is_empty());
                         if let Some(last_owner) = last_owner {
+                            let keep = &mut self.keep_escapable[..];
                             for &v in safe_segment {
                                 if self.last_write_by[v] == last_owner {
-                                    self.keep_in_escapable[v] = KeepVertex::Yes;
+                                    keep[v] = Keep::Yes;
                                     queue.push_back(v);
                                 }
                             }
-                            edges.recolor_region_with(
-                                KeepVertex::Yes,
-                                &mut self.keep_in_escapable,
-                                |_, n, _| self.last_write_by[n] == last_owner,
-                                queue,
-                            );
+                            let safe = |n, _: &[_]| self.last_write_by[n] == last_owner;
+                            edges.recolor_region_with(Keep::Yes, keep, safe, queue);
                         }
                     }
 
                     //step 5: only keep markers with KeepVertex::Yes
                     for &v in safe_outher_boundary {
                         queue.push_back(v);
-                        self.keep_in_escapable[v] = KeepVertex::YesButAlreadyVisited;
+                        self.keep_escapable[v] = Keep::YesButAlreadyVisited;
                     }
                     while let Some(v) = queue.pop_front() {
-                        use KeepVertex::*;
-                        debug_assert_ne!(self.keep_in_escapable[v], Yes);
+                        use Keep::*;
+                        debug_assert_ne!(self.keep_escapable[v], Yes);
                         for n in edges.neighbors_of(v) {
-                            let keep = self.keep_in_escapable[n];
+                            let keep = self.keep_escapable[n];
                             if keep == Yes {
-                                self.keep_in_escapable[n] = YesButAlreadyVisited;
+                                self.keep_escapable[n] = YesButAlreadyVisited;
                                 queue.push_back(n);
                             }
                             if matches!(keep, No | Perhaps) && escapable[n] & marker != 0 {
@@ -758,15 +751,11 @@ impl EscapeableNodes {
                     //step 6: reset self.keep_in_escapable (use recolor to not iterate over whole array)
                     for &v in safe_outher_boundary {
                         queue.push_back(v);
-                        self.keep_in_escapable[v] = KeepVertex::No;
+                        self.keep_escapable[v] = Keep::No;
                     }
-                    edges.recolor_region_with(
-                        KeepVertex::No,
-                        &mut self.keep_in_escapable,
-                        |_, _, _| true,
-                        queue,
-                    );
-                    debug_assert!(self.keep_in_escapable.iter().all(|&k| k == KeepVertex::No));
+                    let keep = &mut self.keep_escapable[..];
+                    edges.recolor_region_with(Keep::No, keep, |_, _| true, queue);
+                    debug_assert!(keep.iter().all(|&k| k == Keep::No));
 
                     self.escapable = escapable;
                     self.some_inner_boundary = inner_boundary;
@@ -901,7 +890,7 @@ impl CopPairHullData {
         //should be faster than iterating over whole array most of the time (by far)
         self.hull[cop_1.nearest_node] = InSet::No;
         queue.push_back(cop_1.nearest_node);
-        edges.recolor_region_with(InSet::No, &mut self.hull, |_, _, _| true, queue);
+        edges.recolor_region_with(InSet::No, &mut self.hull, |_, _| true, queue);
 
         debug_assert!(self.hull.iter().all(|&x| x == InSet::No));
     }
