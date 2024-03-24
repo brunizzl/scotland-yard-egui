@@ -668,17 +668,18 @@ impl EscapeableNodes {
                         &mut self.some_inner_boundaries
                     ) {
                         boundary.retain(|&v| isize::min(c1.distances[v], c2.distances[v]) > 1);
-                        //the actually correct way to do this would be to look at pairs of vertices with
-                        //equal distance to c1 (and thus also to c2) and only keep the vertex that fullfills the
-                        //condition below. if a vertex has no partner of equal distance, it must always be kept.
-                        //as this problem can only occur at a random triangulation where a hull can have multiple
-                        //disconnected interior components, i am not terribly concerned to fix this.
-                        boundary.retain(|&v| {
-                            let keep = &self.keep_escapable[..];
-                            keep[v] == Keep::YesOnBoundary
-                                || edges.neighbors_of(v).any(|n| keep[n] == Keep::Yes)
-                                || edges.neighbors_of(v).all(|n| keep[n] == Keep::Perhaps)
-                        });
+                        retain_safe_inner_boundary(
+                            &c1.distances,
+                            boundary,
+                            &self.keep_escapable,
+                            edges,
+                        );
+                        debug_assert!(boundary.first().map_or(true, |&v| c1.distances[v] == 2));
+                        debug_assert!(boundary.last().map_or(true, |&v| c2.distances[v] == 2));
+                        debug_assert!(boundary
+                            .iter()
+                            .tuple_windows()
+                            .all(|(&v1, v2)| edges.neighbors_of(v1).contains(v2)));
                     }
 
                     //step 4: find escapable region for each cop pair and paint it with KeepVertex::Yes
@@ -909,4 +910,71 @@ impl CopPairHullData {
 
         debug_assert!(self.hull.iter().all(|&x| x == InSet::No));
     }
+}
+
+/// keep one vertex of every distance to cop, choose that vertex to lie close as possible to outwards boundary.
+/// result is assumed to be connected path from cop to
+/// his colleague (minus first and last two steps, cause minumim distance)
+fn retain_safe_inner_boundary(
+    cop_dist: &[isize],
+    boundary: &mut Vec<usize>,
+    keep: &[Keep],
+    edges: &EdgeList,
+) {
+    debug_assert_eq!(edges.nr_vertices(), cop_dist.len());
+    debug_assert_eq!(edges.nr_vertices(), keep.len());
+    debug_assert!(boundary.first().map_or(true, |&v| cop_dist[v] == 2));
+
+    boundary.sort_by_key(|&v| cop_dist[v]);
+    debug_assert!(boundary
+        .iter()
+        .tuple_windows()
+        .all(|(&v1, &v2)| cop_dist[v2] - cop_dist[v1] <= 1));
+    let mut retain_end = 0;
+    let mut check_front = 0;
+    {
+        let boundary = &mut boundary[..];
+        while check_front < boundary.len() {
+            let dist_at = |i| cop_dist[boundary[i]];
+            let check_dist = dist_at(check_front);
+            let mut check_end = check_front + 1;
+            while check_end < boundary.len() && dist_at(check_end) == check_dist {
+                check_end += 1;
+            }
+
+            if retain_end < check_front {
+                debug_assert_eq!(dist_at(check_front - 1), dist_at(check_front) - 1);
+            }
+            if check_end < boundary.len() {
+                debug_assert_eq!(dist_at(check_end - 1), dist_at(check_end) - 1);
+            }
+
+            let check_range = &boundary[check_front..check_end];
+            let check_len = check_range.len();
+            let correct_side = |v| {
+                keep[v] == Keep::YesOnBoundary
+                    || edges.neighbors_of(v).any(|n| keep[n] == Keep::Yes)
+                    || edges.neighbors_of(v).all(|n| keep[n] == Keep::Perhaps)
+            };
+            debug_assert!(check_range.iter().filter(|&&v| correct_side(v)).count() <= 1);
+
+            boundary[retain_end] = if let &[v] = check_range {
+                v
+            } else if let Some(&v) = check_range.iter().find(|&&v| correct_side(v)) {
+                v
+            } else {
+                //something went wrong so we try still continue on a best effort basis
+                (retain_end > 0)
+                    .then(|| {
+                        let last_v = boundary[retain_end - 1];
+                        check_range.iter().copied().find(|&v| edges.has_edge(v, last_v))
+                    })
+                    .flatten()
+                    .unwrap_or_else(|| boundary[check_front])
+            };
+            retain_end += 1;
+            check_front += check_len;
+        }
+    }
+    boundary.truncate(retain_end);
 }
