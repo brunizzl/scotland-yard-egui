@@ -228,6 +228,11 @@ impl EdgeList {
         res
     }
 
+    #[allow(dead_code)]
+    pub fn has_path(&self, path: &[usize]) -> bool {
+        path.iter().tuple_windows().all(|(&v1, &v2)| self.has_edge(v1, v2))
+    }
+
     /// depends on self.max_neighbors
     pub fn directed_index(&self, v1: usize, v2: usize) -> usize {
         self.neighbors_of(v1)
