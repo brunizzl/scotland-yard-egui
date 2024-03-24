@@ -228,9 +228,7 @@ impl ConvexHullData {
         &self.boundary
     }
 
-    fn safe_boundary_indices(
-        &self,
-    ) -> impl ExactSizeIterator<Item = Range<usize>> + '_ + Clone {
+    fn safe_boundary_indices(&self) -> impl ExactSizeIterator<Item = Range<usize>> + '_ + Clone {
         self.segments.iter().map(|seg| {
             let interior = (seg.start + 2)..(seg.end - 2);
             debug_assert!(!interior.is_empty());
