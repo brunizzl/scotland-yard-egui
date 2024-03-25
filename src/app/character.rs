@@ -25,7 +25,7 @@ const fn new_cop(emoji: &'static str) -> Style {
     }
 }
 
-pub const NR_COP_STYLES: usize = 7;
+pub const NR_COP_STYLES: usize = 11;
 
 /// fst is robber, rest are cops
 pub const STYLES: [Style; 1 + NR_COP_STYLES] = [
@@ -43,6 +43,10 @@ pub const STYLES: [Style; 1 + NR_COP_STYLES] = [
     new_cop("🔫"),
     new_cop("🛂"),
     new_cop("🛃"),
+    new_cop("🚓"),
+    new_cop("🚁"),
+    new_cop("💂"),
+    new_cop("🏇"),
 ];
 
 pub fn emojis_as_latex_commands() -> HashMap<&'static str, &'static str> {
@@ -55,6 +59,10 @@ pub fn emojis_as_latex_commands() -> HashMap<&'static str, &'static str> {
         ("🔫", "\\emoji{water-pistol}"),
         ("🛂", "\\emoji{passport-control}"),
         ("🛃", "\\emoji{customs}"),
+        ("🚓", "\\emoji{police-car}"),
+        ("🚁", "\\emoji{helicopter}"),
+        ("💂", "\\emoji{guard}"),
+        ("🏇", "\\emoji{horse-racing}"),
     ])
 }
 
@@ -346,12 +354,16 @@ impl CharacterState {
             ui.horizontal(|ui| {
                 let nr_characters = self.characters.len();
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.style().emoji);
-                let next_index = if nr_characters == 0 {
-                    0 //indexes to ROBBER
-                } else {
-                    let nr_cops = nr_characters - 1;
-                    let next_cop = nr_cops % NR_COP_STYLES;
-                    next_cop + 1 //+ 1 as robber is at beginning
+                let next_index = {
+                    let mut style_used = [false; STYLES.len()];
+                    for c in &self.characters {
+                        style_used[c.style_index] = true;
+                    }
+                    style_used.iter().position(|&used| !used).unwrap_or_else(|| {
+                        let nr_cops = nr_characters - 1;
+                        let next_cop = nr_cops % NR_COP_STYLES;
+                        next_cop + 1 //+ 1 as robber is at beginning
+                    })
                 };
                 let minus_text = format!("- Figur ({})", minus_emoji);
                 let plus_text = format!("+ Figur ({})", STYLES[next_index].emoji);
