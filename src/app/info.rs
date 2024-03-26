@@ -497,6 +497,10 @@ impl Info {
 
         let update_hull = update_cop_advantage
             || update_escapable
+            || matches!(
+                self.options.vertex_color_info,
+                VertexColorInfo::SafeOutside | VertexColorInfo::SafeBoundary
+            )
             || self.options.show_convex_hull
             || self.options.show_hull_boundary;
 
