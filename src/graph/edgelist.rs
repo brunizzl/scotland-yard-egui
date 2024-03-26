@@ -176,7 +176,8 @@ impl EdgeList {
     }
 
     fn potential_neighbors(&self) -> Chunks<'_, Index> {
-        self.entries.chunks(self.max_neighbors)
+        debug_assert!(self.max_neighbors > 0 || self.entries.is_empty());
+        self.entries.chunks(self.max_neighbors.max(1))
     }
 
     pub fn neighbors(
@@ -192,7 +193,8 @@ impl EdgeList {
     }
 
     pub fn potential_neighbors_mut(&mut self) -> std::slice::ChunksMut<'_, Index> {
-        self.entries.chunks_mut(self.max_neighbors)
+        debug_assert!(self.max_neighbors > 0 || self.entries.is_empty());
+        self.entries.chunks_mut(self.max_neighbors.max(1))
     }
 
     #[allow(dead_code)]

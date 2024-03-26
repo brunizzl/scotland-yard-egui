@@ -289,16 +289,27 @@ impl Map {
     pub fn scale(&self) -> f32 {
         let zoom = self.camera.zoom();
 
-        let detail = (self.data.nr_vertices() > 1)
-            .then(|| self.data.positions()[0])
-            .and_then(|v0_pos| {
-                self.data
-                    .edges()
-                    .neighbors_of(0)
-                    .next()
-                    .map(|n| (v0_pos - self.data.positions()[n]).length() * 10.0)
-            })
-            .unwrap_or(12.0 / self.resolution as f32);
+        let detail = {
+            let max_shown_len = self.data.max_shown_edge_length();
+            let mut cum_len = 0.0;
+            let mut nr_counted = 0;
+            let samples = izip!(self.data.edges().neighbors(), self.data.positions());
+            for (neighs, &p1) in samples.take(10) {
+                for p2 in neighs.map(|n| self.data.positions()[n]) {
+                    let len = (p1 - p2).length();
+                    if len <= max_shown_len {
+                        cum_len += len;
+                        nr_counted += 1;
+                    }
+                }
+            }
+            if nr_counted > 0 {
+                //estimate average shown edge length
+                cum_len / (nr_counted as f32) * 10.0
+            } else {
+                12.0 / self.resolution as f32
+            }
+        };
         let detail_factor = f32::min(detail, 4.0);
 
         let screen_size = self.camera.to_screen().move_rect.to().size();

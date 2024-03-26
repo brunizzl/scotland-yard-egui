@@ -43,17 +43,22 @@ pub enum VertexNumberInfo {
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
     manual_marker_colors: [Color32; 8],
+    automatic_marker_color: Color32,
+
     active_manual_marker: usize, //expected in 0..8
     shown_manual_markers: u8,    //bitmask
 
-    automatic_marker_color: Color32,
     vertex_color_info: VertexColorInfo,
+    vertex_number_info: VertexNumberInfo,
 
     //both are only used, when the respective RobberInfo is active
     marked_cop_dist: isize, //determines cop dist marked in RobberInfo::CopDist
     marked_robber_dist: isize, //determines max dist marked in RobberInfo::SmallRobberDist
 
-    vertex_number_info: VertexNumberInfo,
+    number_scale: isize,
+    manual_marker_scale: isize,
+    automatic_marker_scale: isize,
+
     show_convex_hull: bool,
     show_hull_boundary: bool,
     draw_vertices: bool,
@@ -61,14 +66,21 @@ struct Options {
 
 const DEFAULT_OPTIONS: Options = Options {
     manual_marker_colors: color::HAND_PICKED_MARKER_COLORS,
+    automatic_marker_color: color::GREEN,
+
     active_manual_marker: 0,
     shown_manual_markers: u8::MAX,
 
-    automatic_marker_color: color::GREEN,
-    vertex_color_info: VertexColorInfo::None,
     marked_cop_dist: 10,
     marked_robber_dist: 10,
+
+    vertex_color_info: VertexColorInfo::None,
     vertex_number_info: VertexNumberInfo::None,
+
+    number_scale: 10,
+    manual_marker_scale: 10,
+    automatic_marker_scale: 10,
+
     show_convex_hull: false,
     show_hull_boundary: false,
     draw_vertices: false,
@@ -105,6 +117,8 @@ impl Options {
                     self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
                 }
             });
+            add_drag_value(ui, &mut self.automatic_marker_scale, "Größe: ", 1, 100);
+
             let old = self.vertex_color_info;
             //settings to draw extra information
             ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::None,
@@ -179,6 +193,7 @@ impl Options {
                 mit Taste [m] hinzugefügt und [n] entfernt werden.\n\
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
             );
+            add_drag_value(ui, &mut self.manual_marker_scale, "Größe: ", 1, 100);
 
             for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
                 ui.horizontal(|ui| {
@@ -201,6 +216,8 @@ impl Options {
             }
         });
         ui.collapsing("Zahlen", |ui|{
+            add_drag_value(ui, &mut self.number_scale, "Größe: ", 1, 100);
+
             let old = self.vertex_number_info;
             ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::None,
                 "Keine");
@@ -613,9 +630,10 @@ impl Info {
     }
 
     fn draw_green_circles(&self, con: &DrawContext<'_>) {
+        let size = 0.6 * (self.options.automatic_marker_scale as f32) * con.scale;
         let draw_circle_at = |pos, color| {
             let draw_pos = con.cam().transform(pos);
-            let marker_circle = Shape::circle_filled(draw_pos, con.scale * 6.0, color);
+            let marker_circle = Shape::circle_filled(draw_pos, size, color);
             con.painter.add(marker_circle);
         };
         match self.options.vertex_color_info {
@@ -791,7 +809,7 @@ impl Info {
                 .filter_map(|(name, i)| ((1u32 << i) & x != 0).then_some(name))
                 .collect()
         };
-        let font = FontId::proportional(con.scale * 8.0);
+        let font = FontId::proportional(0.8 * (self.options.number_scale as f32) * con.scale);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::WHITE
         } else {
@@ -828,7 +846,7 @@ impl Info {
                     //    }
                     //},
                 };
-                let mut layout_job = LayoutJob::simple(txt, font.clone(), color, 100.0 * con.scale);
+                let mut layout_job = LayoutJob::simple_singleline(txt, font.clone(), color);
                 layout_job.halign = Align::Center;
                 let galley = ui.fonts(|f| f.layout_job(layout_job));
                 let screen_pos = con.cam().transform(pos);
@@ -873,6 +891,7 @@ impl Info {
     }
 
     fn draw_manual_markers(&self, con: &DrawContext<'_>) {
+        let size = 0.45 * (self.options.manual_marker_scale as f32) * con.scale;
         let mut f32_colors = [color::F32Color::default(); 8];
         let mask = self.options.shown_manual_markers;
         color::zip_to_f32(
@@ -884,7 +903,7 @@ impl Info {
             if vis && masked != 0 {
                 let draw_pos = con.cam().transform(pos);
                 let color = color::u8_marker_color(masked, &f32_colors);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.5, color);
+                let marker_circle = Shape::circle_filled(draw_pos, size, color);
                 con.painter.add(marker_circle);
             }
         }

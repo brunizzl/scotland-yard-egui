@@ -111,6 +111,10 @@ impl Embedding3D {
         &self.sym_group
     }
 
+    pub fn max_shown_edge_length(&self) -> f32 {
+        self.max_shown_edge_length
+    }
+
     #[allow(dead_code)]
     pub fn surface(&self) -> &ConvexTriangleHull {
         &self.surface
