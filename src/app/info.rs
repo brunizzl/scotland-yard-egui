@@ -35,6 +35,7 @@ pub enum VertexNumberInfo {
     RobberAdvantage,
     EscapeableNodes,
     MinCopDist,
+    MaxCopDist,
     RobberDist,
     VertexEquivalenceClass,
     Debugging,
@@ -239,6 +240,10 @@ impl Options {
                 "minimaler Cop Abstand")
                 .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
 
+            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::MaxCopDist,
+                "maximaler Cop Abstand")
+                .on_hover_text("punktweises Maximum aus den Abständen aller Cops");
+
             ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::RobberDist,
                 "Räuberabstand")
                 .on_hover_text("Abstand von Räuberposition zu jedem Knoten");
@@ -266,6 +271,8 @@ pub struct Info {
     escapable: EscapeableNodes,
     /// elementwise minimum of `.distance` of active cops in `self.characters`
     min_cop_dist: Vec<isize>,
+    /// elementwise maximum of `.distance` of active cops in `self.characters`
+    max_cop_dist: Vec<isize>,
     /// outside hull interieur == -min_cop_dist, then expanded into interieur via [`EdgeList::calc_distances_to`]
     /// the robber can escape lazy cops on a continuous hull, if cop_advantage on robber's position is <= -2
     /// as a cop's position has value 0 and a cops neighbors value >= -1.
@@ -300,6 +307,7 @@ impl Default for Info {
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
             min_cop_dist: Vec::new(),
+            max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
             marked_manually: Vec::new(),
 
@@ -342,6 +350,7 @@ impl Info {
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
             min_cop_dist: Vec::new(),
+            max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
             marked_manually,
 
@@ -397,6 +406,25 @@ impl Info {
             }
         }
         self.min_cop_dist = min_cop_dist;
+    }
+
+    fn update_max_cop_dist(&mut self, edges: &EdgeList) {
+        let mut max_cop_dist = std::mem::take(&mut self.max_cop_dist);
+        max_cop_dist.clear();
+        let mut active_cops = self.characters.active_cops();
+        if let Some(cop) = active_cops.next() {
+            max_cop_dist.clone_from(&cop.distances);
+        } else {
+            max_cop_dist.resize(edges.nr_vertices(), isize::MIN);
+        }
+        for cop in active_cops {
+            for (this, curr_max) in izip!(&cop.distances, &mut max_cop_dist) {
+                if this > curr_max {
+                    *curr_max = *this;
+                }
+            }
+        }
+        self.max_cop_dist = max_cop_dist;
     }
 
     fn update_cop_advantage(&mut self, edges: &EdgeList) {
@@ -467,6 +495,7 @@ impl Info {
     fn definitely_update(&mut self, con: &DrawContext<'_>) {
         self.characters.update(con, &mut self.queue);
         self.update_min_cop_dist(con.edges);
+        self.update_max_cop_dist(con.edges);
         self.update_convex_cop_hull(con);
         self.update_escapable(con);
         self.update_cop_advantage(con.edges);
@@ -511,7 +540,12 @@ impl Info {
             )
             || self.options.vertex_number_info == VertexNumberInfo::MinCopDist;
 
+        let update_max_cop_dist = self.options.vertex_number_info == VertexNumberInfo::MaxCopDist;
+        
         let nr_vertices = con.edges.nr_vertices();
+        if (cop_moved || self.max_cop_dist.len() != nr_vertices) && update_max_cop_dist {
+            self.update_max_cop_dist(con.edges);
+        }
         if (cop_moved || self.min_cop_dist.len() != nr_vertices) && update_min_cop_dist {
             self.update_min_cop_dist(con.edges);
         }
@@ -824,6 +858,7 @@ impl Info {
                 let txt = match self.options.vertex_number_info {
                     VertexNumberInfo::Indices => v.to_string(),
                     VertexNumberInfo::MinCopDist => self.min_cop_dist[v].to_string(),
+                    VertexNumberInfo::MaxCopDist => self.max_cop_dist[v].to_string(),
                     VertexNumberInfo::None => panic!(),
                     VertexNumberInfo::RobberAdvantage => self.cop_advantage[v].to_string(),
                     VertexNumberInfo::EscapeableNodes => true_bits(self.escapable.escapable()[v]),

@@ -33,13 +33,11 @@ fn find_hull_boundary_in_triangulation(
     let mut snd_last_outside = usize::MAX;
     let fst_outside = neighbors_of(fst_inside).find(|&n| hull[n].outside()).unwrap();
     let mut last_outside = fst_outside;
-    let Some(mut curr_outside) =
-        neighbors_of(fst_inside).find(|&n| hull[n].outside() && edges.has_edge(n, fst_outside))
-    else {
-        //can fail if object we want to find the boundary of is not actually a convex hull.
-        //or if the graph in question is not (locally) planar
-        return Err(());
-    };
+    //can fail if object we want to find the boundary of is not actually a convex hull.
+    //or if the graph in question is not (locally) planar
+    let mut curr_outside = neighbors_of(fst_inside)
+        .find(|&n| hull[n].outside() && edges.has_edge(n, fst_outside))
+        .ok_or(())?;
 
     // idea: curr_outside must neighbor curr_inside at all time. this way we are guaranteed
     // to not switch sides on a hull with local thickness <= 2.
