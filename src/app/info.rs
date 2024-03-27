@@ -19,7 +19,8 @@ pub enum VertexColorInfo {
     Escape2,
     NearNodes,
     RobberDist,
-    CopDist,
+    MinCopDist,
+    MaxCopDist,
     VertexEquivalenceClasses,
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
@@ -156,10 +157,17 @@ impl Options {
                 aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
                 die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.");
 
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::CopDist,
-                "Punkte mit Abstand zu Cops")
-                .on_hover_text("Abstand einstellbar bei ausgewählter Option");
-            if self.vertex_color_info == VertexColorInfo::CopDist {
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::MinCopDist,
+                "minimaler Cop Abstand")
+                .on_hover_text("Punktweise, Abstand einstellbar bei ausgewählter Option");
+            if self.vertex_color_info == VertexColorInfo::MinCopDist {
+                add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
+            }
+
+            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::MaxCopDist,
+                "maximaler Cop Abstand")
+                .on_hover_text("Punktweise, Abstand einstellbar bei ausgewählter Option");
+            if self.vertex_color_info == VertexColorInfo::MaxCopDist {
                 add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
             }
 
@@ -536,12 +544,13 @@ impl Info {
         let update_min_cop_dist = update_hull
             || matches!(
                 self.options.vertex_color_info,
-                VertexColorInfo::CopDist | VertexColorInfo::NearNodes
+                VertexColorInfo::MinCopDist | VertexColorInfo::NearNodes
             )
             || self.options.vertex_number_info == VertexNumberInfo::MinCopDist;
 
-        let update_max_cop_dist = self.options.vertex_number_info == VertexNumberInfo::MaxCopDist;
-        
+        let update_max_cop_dist = self.options.vertex_number_info == VertexNumberInfo::MaxCopDist
+            || self.options.vertex_color_info == VertexColorInfo::MaxCopDist;
+
         let nr_vertices = con.edges.nr_vertices();
         if (cop_moved || self.max_cop_dist.len() != nr_vertices) && update_max_cop_dist {
             self.update_max_cop_dist(con.edges);
@@ -708,8 +717,15 @@ impl Info {
                     }
                 }
             },
-            VertexColorInfo::CopDist => {
+            VertexColorInfo::MinCopDist => {
                 for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, con.positions, con.visible) {
+                    if vis && dist == self.options.marked_cop_dist {
+                        draw_circle_at(pos, self.options.automatic_marker_color);
+                    }
+                }
+            },
+            VertexColorInfo::MaxCopDist => {
+                for (&dist, &pos, &vis) in izip!(&self.max_cop_dist, con.positions, con.visible) {
                     if vis && dist == self.options.marked_cop_dist {
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
