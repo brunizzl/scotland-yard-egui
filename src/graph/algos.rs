@@ -13,7 +13,7 @@ fn find_hull_boundary_in_triangulation(
     boundary: &mut Vec<usize>,
     hull: &[InSet],
     edges: &EdgeList,
-) -> bool {
+) -> Result<(), ()> {
     debug_assert_eq!(boundary.len(), 1);
     let fst_inside = boundary[0];
     debug_assert!(hull[fst_inside].on_boundary());
@@ -38,7 +38,7 @@ fn find_hull_boundary_in_triangulation(
     else {
         //can fail if object we want to find the boundary of is not actually a convex hull.
         //or if the graph in question is not (locally) planar
-        return false;
+        return Err(());
     };
 
     // idea: curr_outside must neighbor curr_inside at all time. this way we are guaranteed
@@ -85,7 +85,7 @@ fn find_hull_boundary_in_triangulation(
         debug_assert!(edges.has_edge(curr_inside, curr_outside));
         if boundary.len() == edges.nr_vertices() {
             boundary.clear();
-            return false;
+            return Err(());
         }
     }
     // we always try to take a step in the hull after we step outside.
@@ -96,7 +96,8 @@ fn find_hull_boundary_in_triangulation(
     debug_assert!(
         !change || Some(&fst_inside) == boundary.last() || matches!(boundary.len(), 2 | 3)
     );
-    change
+
+    change.then_some(()).ok_or(())
 }
 
 /// build to return something often resembling a hull boundary if the graph in question is
@@ -184,13 +185,11 @@ fn find_hull_boundary_fallback(
 
 /// assumes boundary has first vertex already inserted as starting point
 /// and that hull is up-to date, including having all boundary vertices marked
-fn update_convex_hull_boundary(
+fn find_convex_hull_boundary(
     boundary: &mut Vec<usize>,
-    _dist_to_boundary_start: &[isize],
     hull: &[InSet],
     edges: &EdgeList,
-    _queue: &mut VecDeque<usize>,
-) -> bool {
+) -> Result<(), ()> {
     // currently all graphs with continuous boundary are triangulations.
     // the fallback is thus not of any advantage for now.
     find_hull_boundary_in_triangulation(boundary, hull, edges)
@@ -336,31 +335,19 @@ impl ConvexHullData {
         }
     }
 
-    /// returns a point on the boundary (if there are any) and the distances to that point
-    fn find_fist_boundary_point<'a>(&self, cops: &'a [Character]) -> Option<(usize, &'a [isize])> {
-        for cop in cops.iter().filter(|c| c.is_active()) {
+    /// assumes that self.hull is already up to date
+    fn update_boundary(&mut self, cops: &[Character], edges: &EdgeList) {
+        self.boundary.clear();
+        for cop in cops {
             let v = cop.nearest_node;
-            if self.hull[v].on_boundary() {
-                return Some((v, &cop.distances));
+            if cop.is_active() && self.hull[v].on_boundary() {
+                self.boundary.push(v);
+                if find_convex_hull_boundary(&mut self.boundary, &self.hull, edges).is_ok() {
+                    return;
+                }
+                self.boundary.clear();
             }
         }
-        None
-    }
-
-    /// assumes that self.hull is already up to date
-    fn update_boundary(
-        &mut self,
-        cops: &[Character],
-        edges: &EdgeList,
-        queue: &mut VecDeque<usize>,
-    ) {
-        self.boundary.clear();
-        let Some((fst_inside, dist_to_fst)) = self.find_fist_boundary_point(cops) else {
-            return;
-        };
-        self.boundary.push(fst_inside);
-
-        update_convex_hull_boundary(&mut self.boundary, dist_to_fst, &self.hull, edges, queue);
     }
 
     fn update_segments(&mut self, min_cop_dist: &[isize]) {
@@ -402,7 +389,7 @@ impl ConvexHullData {
         vertices_outside_hull: &[usize],
     ) {
         self.update_inside(cops, edges, queue, vertices_outside_hull);
-        self.update_boundary(cops, edges, queue);
+        self.update_boundary(cops, edges);
         self.update_segments(min_cop_dist);
     }
 }
@@ -449,6 +436,15 @@ pub struct EscapeableNodes {
     /// is not only part of the original escapable, but also of the
     /// shrunk region, because interior cops could endanger some parts.
     keep_escapable: Vec<Keep>, //one entry per vertex
+}
+
+/// determines which bit is set in [`EscapeableNodes::escapable`]
+fn compute_marker(cop_pair: (usize, usize), cops: &[Character]) -> u32 {
+    let cop1 = cop_pair.0;
+    let cop1_index = cops.iter().position(|c| c.nearest_node == cop1).unwrap();
+    // on planar graphs taking the first index should always be sufficient.
+    // (as each cop starts only up to one boundary segment)
+    1u32 << (cop1_index % 32)
 }
 
 impl EscapeableNodes {
@@ -573,13 +569,12 @@ impl EscapeableNodes {
         queue.clear();
         let iter = izip!(
             hull_data.boundary_cop_vertices(),
-            hull_data.safe_boundary_parts(),
-            0..
+            hull_data.safe_boundary_parts()
         );
-        for ((v_left, v_right), safe_outher_boundary, seg_nr) in iter {
+        for ((v_left, v_right), safe_outher_boundary) in iter {
+            let marker = compute_marker((v_left, v_right), cops);
             let left_cop = cops.iter().find(|c| c.nearest_node == v_left).unwrap();
             let right_cop = cops.iter().find(|c| c.nearest_node == v_right).unwrap();
-            let marker = 1u32 << (seg_nr % 32);
 
             let endangers = |escapable: &[u32], c: &Character| {
                 let v = c.nearest_node;
@@ -678,7 +673,7 @@ impl EscapeableNodes {
                         );
                         debug_assert!(boundary.first().map_or(true, |&v| c1.distances[v] == 2));
                         debug_assert!(boundary.last().map_or(true, |&v| c2.distances[v] == 2));
-                        debug_assert!(edges.has_path(boundary));
+                        debug_assert!(edges.has_path(boundary)); //somehow we can't assert this in tori :(
                     }
 
                     //step 4: find escapable region for each cop pair and paint it with KeepVertex::Yes
@@ -761,6 +756,10 @@ impl EscapeableNodes {
                     edges.recolor_region_with(Keep::No, keep, |_, _| true, queue);
                     debug_assert!(keep.iter().all(|&k| k == Keep::No));
 
+                    //finally: guarantee inner cops are still endangering curr region
+                    escapable[left_inner.nearest_node] |= marker;
+                    escapable[right_inner.nearest_node] |= marker;
+
                     self.escapable = escapable;
                     self.some_inner_boundaries = inner_boundaries;
                 }
@@ -780,17 +779,18 @@ impl EscapeableNodes {
     /// ignores cops in interior of hull, computes safe regions only with respect to boundary cops
     fn consider_boundary_cops(
         &mut self,
+        cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
         queue.clear();
         let iter = izip!(
+            hull_data.boundary_cop_vertices(),
             hull_data.safe_boundary_indices(),
-            hull_data.safe_boundary_parts(),
-            0..
+            hull_data.safe_boundary_parts()
         );
-        for (indices, vertices, seg_nr) in iter {
+        for (cop_pair, indices, vertices) in iter {
             let max_escapable_dist = indices.len() as isize - 1;
             debug_assert_eq!(indices.len(), vertices.len());
 
@@ -821,7 +821,7 @@ impl EscapeableNodes {
             let owner = last_owner.unwrap();
             debug_assert!(queue.is_empty());
             queue.push_back(last_v);
-            let marker = 1u32 << (seg_nr % 32);
+            let marker = compute_marker(cop_pair, cops);
             self.escapable[last_v] |= marker;
             self.add_region_to_escapable(owner, marker, edges, queue);
         }
@@ -842,7 +842,7 @@ impl EscapeableNodes {
         self.last_write_by.resize(nr_vertices, 0); //no owner is 0 (as a cop stands at pos 0 of hull boundary)
         self.some_boundary_dist.resize(nr_vertices, isize::MAX);
 
-        self.consider_boundary_cops(hull_data, edges, queue);
+        self.consider_boundary_cops(cops, hull_data, edges, queue);
         self.consider_interior_cops(cops, hull_data, edges, queue);
     }
 }
@@ -934,13 +934,6 @@ fn retain_safe_inner_boundary(
                 check_end += 1;
             }
 
-            if retain_end < check_front {
-                debug_assert_eq!(dist_at(check_front - 1), dist_at(check_front) - 1);
-            }
-            if check_end < boundary.len() {
-                debug_assert_eq!(dist_at(check_end - 1), dist_at(check_end) - 1);
-            }
-
             let check_range = &boundary[check_front..check_end];
             let check_len = check_range.len();
 
@@ -956,14 +949,14 @@ fn retain_safe_inner_boundary(
                 if let &[v] = check_range {
                     break 'next_vertex v;
                 }
-                take_if_unique!(|&&v| keep[v] == Keep::YesOnBoundary);
-                take_if_unique!(|&&v| edges.neighbors_of(v).any(|n| keep[n] == Keep::Yes));
-                take_if_unique!(|&&v| edges.neighbors_of(v).all(|n| keep[n] == Keep::Perhaps));
-                //at this point something went wrong and we try to continue on a best effort basis
                 if retain_end > 0 {
                     let last_v = boundary[retain_end - 1];
                     take_if_unique!(|&&v| edges.has_edge(v, last_v));
                 }
+                take_if_unique!(|&&v| keep[v] == Keep::YesOnBoundary);
+                take_if_unique!(|&&v| edges.neighbors_of(v).any(|n| keep[n] == Keep::Yes));
+                take_if_unique!(|&&v| edges.neighbors_of(v).all(|n| keep[n] == Keep::Perhaps));
+                //at this point something went wrong and we try to continue on a best effort basis
                 boundary[check_front]
             };
             retain_end += 1;

@@ -41,7 +41,6 @@ On Fedora Rawhide you need to run:
 * adapt hull boundary to respect torus (allow multiple disjoined boundary segements / perhaps don't care about boundary as circle, but only care about connected components of safe boundary?)
 
 #### Nice To Have
-* pick colors for escapable regions depending on boundary cops (fewer color swaps) disadvantage: we only have 32 and want to avoid collisions at all cost (look up perfect hashing maybe?). 
 * extract base functionality of EdgeList to own thing
 * choose option to define the outside region yourself
 * fix bug where sometimes lazy-safe regions have floating parts left that should have been removed.
