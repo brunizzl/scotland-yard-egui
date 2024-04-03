@@ -325,6 +325,12 @@ impl CharacterState {
         self.cops().iter().filter(|c| c.is_active())
     }
 
+    pub fn active_cop_vertices(&self) -> smallvec::SmallVec<[usize; 8]> {
+        let mut res = smallvec::SmallVec::new();
+        res.extend(self.active_cops().map(|c| c.nearest_node));
+        res
+    }
+
     pub fn robber_updated(&self) -> bool {
         self.robber().map_or(false, |r| r.updated)
     }

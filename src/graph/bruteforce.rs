@@ -575,3 +575,168 @@ where
         cop_moves,
     }))
 }
+
+pub type UTime = u16;
+
+/// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
+/// how many more moves the police need at most to catch the robber.
+#[derive(Serialize, Deserialize)]
+pub struct TimeToWin {
+    time: std::collections::BTreeMap<usize, Vec<UTime>>,
+    nr_map_vertices: usize,
+}
+
+impl TimeToWin {
+    /// returns [`Self`] if enough memory is available
+    fn new(nr_map_vertices: usize, cop_moves: &CopConfigurations) -> Option<Self> {
+        let mut time = std::collections::BTreeMap::new();
+        for (&fst_index, indices) in &cop_moves.configurations {
+            let nr_entries = indices.len().checked_mul(nr_map_vertices)?;
+
+            let mut data = Vec::new();
+            data.try_reserve(nr_entries).ok()?;
+            data.resize(nr_entries, UTime::MAX);
+            let old = time.insert(fst_index, data);
+            debug_assert!(old.is_none());
+        }
+
+        Some(Self { time, nr_map_vertices })
+    }
+
+    pub fn nr_map_vertices(&self) -> usize {
+        self.nr_map_vertices
+    }
+
+    /// returns current number for each vertex in graph given cops placed like `index`
+    pub fn nr_moves_left(&self, index: CompactCopsIndex) -> &[UTime] {
+        let start = index.rest_index * self.nr_map_vertices();
+        let stop = start + self.nr_map_vertices();
+        &self.time.get(&index.fst_index).unwrap()[start..stop]
+    }
+
+    /// returns current number for each vertex in graph given cops placed like `index`
+    pub fn nr_moves_left_mut(&mut self, index: CompactCopsIndex) -> &mut [UTime] {
+        let start = index.rest_index * self.nr_map_vertices();
+        let stop = start + self.nr_map_vertices();
+        &mut self.time.get_mut(&index.fst_index).unwrap()[start..stop]
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CopStrategy {
+    pub symmetry: SymGroup,
+    pub time_to_win: TimeToWin,
+    pub cop_moves: CopConfigurations,
+}
+
+impl CopStrategy {
+    pub fn pack(
+        &self,
+        cops: impl Iterator<Item = usize>,
+    ) -> (SmallVec<[&dyn DynAutomorphism; 4]>, CompactCopsIndex) {
+        self.cop_moves.pack_dyn(self.symmetry.to_dyn(), cops)
+    }
+}
+
+#[allow(dead_code)]
+pub fn compute_cop_strategy<S>(
+    nr_cops: usize,
+    edges: EdgeList,
+    sym: S,
+    log_sender: Option<mpsc::Sender<&'static str>>,
+) -> Result<CopStrategy, String>
+where
+    S: SymmetryGroup + Serialize,
+{
+    let log = |msg| log_sender.as_ref().map(|s| s.send(msg).ok());
+
+    if nr_cops == 0 {
+        return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
+    }
+    if nr_cops > MAX_COPS {
+        return Err(format!(
+            "Rechnung kann für höchstens {MAX_COPS} Cops durchgeführt werden."
+        ));
+    }
+
+    log("liste Polizeipositionen");
+    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops)?;
+
+    log("initialisiere Cop Startegie");
+    let Some(mut f) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
+        return Err("Zu wenig Speicherplatz (Copstrat zu groß)".to_owned());
+    };
+
+    log("initialisiere Queue");
+    let mut queue = VecDeque::new();
+    if queue.try_reserve(cop_moves.nr_configurations()).is_err() {
+        return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
+    }
+
+    for (&fst_index, sub_configs) in &cop_moves.configurations {
+        for (rest_index, _packed_rest_cops) in izip!(0.., sub_configs) {
+            let index = CompactCopsIndex { fst_index, rest_index };
+
+            let robber_positions = f.nr_moves_left_mut(index);
+            for cop_pos in cop_moves.unpack(index) {
+                robber_positions[cop_pos] = 0;
+                for n in edges.neighbors_of(cop_pos) {
+                    robber_positions[n] = 1;
+                }
+            }
+
+            queue.push_back(index);
+        }
+    }
+
+    let nr_map_vertices = edges.nr_vertices();
+    //if the current game state has cop configuration `curr`, this contains the time for cops to win
+    //for each possible robber position, given that the cops move to `curr`.
+    let mut times_should_cops_move_to_curr = vec![UTime::MAX; nr_map_vertices];
+
+    log("berechne Copstrategie");
+    while let Some(curr_cop_positions) = queue.pop_back() {
+        let curr_times = f.nr_moves_left(curr_cop_positions);
+        for (v, neighs) in izip!(0.., edges.neighbors()) {
+            let new_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
+            const MAX_TIME: UTime = UTime::MAX - 1;
+            if new_time == MAX_TIME {
+                return Err(format!(
+                    "Cops brauchen mehr Züge als in {} passen",
+                    std::any::type_name::<UTime>()
+                ));
+            }
+            times_should_cops_move_to_curr[v] = new_time.saturating_add(1);
+        }
+
+        for (neigh_rotations, rotated_neigh_cop_positions) in
+            cop_moves.lazy_cop_moves_from(&edges, &sym, curr_cop_positions)
+        {
+            let mut f_neighbor_changed = false;
+            for neigh_rotate in neigh_rotations {
+                for (v, neigh_time) in izip!(
+                    neigh_rotate.backward(),
+                    f.nr_moves_left_mut(rotated_neigh_cop_positions)
+                ) {
+                    let this_time = times_should_cops_move_to_curr[v];
+                    if *neigh_time > this_time {
+                        f_neighbor_changed = true;
+                        *neigh_time = this_time;
+                    }
+                }
+            }
+            if f_neighbor_changed {
+                if queue.try_reserve(1).is_err() {
+                    return Err("Zu wenig Speicherplatz (Queue zu lang)".to_owned());
+                }
+                queue.push_back(rotated_neigh_cop_positions);
+            }
+        }
+    }
+
+    Ok(CopStrategy {
+        symmetry: sym.into_enum(),
+        time_to_win: f,
+        cop_moves,
+    })
+}

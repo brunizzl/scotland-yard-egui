@@ -40,6 +40,7 @@ pub enum VertexNumberInfo {
     RobberDist,
     VertexEquivalenceClass,
     Debugging,
+    BruteforceCopMoves,
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -332,6 +333,12 @@ impl Options {
                 Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
                 Das macht Bruteforce etwas weniger speicherintensiv.",
             );
+
+            ui.radio_value(
+                &mut self.vertex_number_info,
+                VertexNumberInfo::BruteforceCopMoves,
+                "Bruteforce Cop Züge",
+            ).on_hover_text("Wenn Cops optimal ziehen, lebt Räuber noch maximal viele Züge");
 
             ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::Debugging, "Debugging")
                 .on_hover_text(
@@ -816,18 +823,16 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
+                let mut active_cops = self.characters.active_cop_vertices();
                 let game_type = GameType {
-                    nr_cops: self.characters.active_cops().count(),
+                    nr_cops: active_cops.len(),
                     resolution: con.map.resolution(),
                     shape: con.map.shape(),
                 };
                 if let Some(bf::Outcome::RobberWins(data)) = &self.worker.result_for(&game_type) {
-                    let mut active_cops =
-                        self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
-
-                    let sym_group = data.symmetry.to_dyn();
                     let (_, cop_positions) = data.pack(active_cops.iter().copied());
                     let safe_vertices = data.safe.robber_safe_when(cop_positions);
+                    let sym_group = data.symmetry.to_dyn();
                     let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
                     for (v, safe) in izip!(0.., safe_vertices) {
                         let v_rot = transform.dyn_apply_backward(v);
@@ -863,8 +868,7 @@ impl Info {
                 }
             },
             VertexColorInfo::CopsRotatedToEquivalence => {
-                let mut active_cops =
-                    self.characters.active_cops().map(|c| c.nearest_node).collect_vec();
+                let mut active_cops = self.characters.active_cop_vertices();
                 if active_cops.len() > bruteforce::MAX_COPS {
                     return;
                 }
@@ -923,56 +927,14 @@ impl Info {
     }
 
     fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) {
-        if self.options.vertex_number_info == VertexNumberInfo::None {
-            return;
-        }
-        let true_bits = |x: u32| -> String {
-            const NAMES: [char; 32] = [
-                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
-                'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
-            ];
-            izip!(NAMES, 0..)
-                .filter_map(|(name, i)| ((1u32 << i) & x != 0).then_some(name))
-                .collect()
-        };
         let font = FontId::proportional(0.8 * (self.options.number_scale as f32) * con.scale);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::WHITE
         } else {
             color::BLACK
         };
-        for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
-            if vis {
-                let txt = match self.options.vertex_number_info {
-                    VertexNumberInfo::Indices => v.to_string(),
-                    VertexNumberInfo::MinCopDist => self.min_cop_dist[v].to_string(),
-                    VertexNumberInfo::MaxCopDist => self.max_cop_dist[v].to_string(),
-                    VertexNumberInfo::None => panic!(),
-                    VertexNumberInfo::RobberAdvantage => self.cop_advantage[v].to_string(),
-                    VertexNumberInfo::EscapeableNodes => true_bits(self.escapable.escapable()[v]),
-                    VertexNumberInfo::VertexEquivalenceClass => {
-                        if let SymGroup::Explicit(e) = con.sym_group() {
-                            e.classes()[v].to_string()
-                        } else {
-                            String::new()
-                        }
-                    },
-                    VertexNumberInfo::RobberDist => {
-                        if let Some(r) = self.characters.robber() {
-                            r.distances[v].to_string()
-                        } else {
-                            String::new()
-                        }
-                    },
-                    VertexNumberInfo::Debugging => self.escapable.owners()[v].to_string(),
-                    //VertexNumberInfo::Debugging => {
-                    //    if let SymGroup::Explicit(equiv) = con.sym_group() {
-                    //        equiv.vertex_representatives()[v].to_string()
-                    //    } else {
-                    //        String::new()
-                    //    }
-                    //},
-                };
+        let draw_text_at = |pos: Pos3, txt: String| {
+            if !txt.is_empty() {
                 let mut layout_job = LayoutJob::simple_singleline(txt, font.clone(), color);
                 layout_job.halign = Align::Center;
                 let galley = ui.fonts(|f| f.layout_job(layout_job));
@@ -980,6 +942,78 @@ impl Info {
                 let text = Shape::Text(TextShape::new(screen_pos, galley, color));
                 con.painter.add(text);
             }
+        };
+        macro_rules! draw {
+            ($iter:expr, $is_shown:expr) => {
+                for (val, &pos, &vis) in izip!($iter, con.positions, con.visible) {
+                    if vis && $is_shown(&val) {
+                        draw_text_at(pos, val.to_string());
+                    }
+                }
+            };
+            ($iter:expr) => {
+                draw!($iter, |_| true);
+            };
+        }
+        let draw_isize_slice = |numbers: &[isize]| {
+            draw!(numbers, |&&num| num != isize::MAX);
+        };
+
+        match self.options.vertex_number_info {
+            VertexNumberInfo::Indices => {
+                draw!(0..);
+            },
+            VertexNumberInfo::BruteforceCopMoves => {
+                let mut active_cops = self.characters.active_cop_vertices();
+                let game_type = GameType {
+                    nr_cops: active_cops.len(),
+                    resolution: con.map.resolution(),
+                    shape: con.map.shape(),
+                };
+                if let Some(strat) = self.worker.strats_for(&game_type) {
+                    let (_, cop_positions) = strat.pack(active_cops.iter().copied());
+                    let nr_moves_left = strat.time_to_win.nr_moves_left(cop_positions);
+                    let sym_group = strat.symmetry.to_dyn();
+                    let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
+                    let transformed_nr = |v| nr_moves_left[transform.dyn_apply_forward(v)];
+                    draw!((0..).map(transformed_nr), |&m| m != bf::UTime::MAX);
+                }
+            },
+            VertexNumberInfo::Debugging => {
+                draw!(self.escapable.owners());
+            },
+            VertexNumberInfo::EscapeableNodes => {
+                draw!(self.escapable.escapable().iter().map(|&x| -> String {
+                    const NAMES: [char; 32] = [
+                        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E',
+                        'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+                        'U', 'V',
+                    ];
+                    izip!(NAMES, 0..)
+                        .filter_map(|(name, i)| ((1u32 << i) & x != 0).then_some(name))
+                        .collect()
+                }));
+            },
+            VertexNumberInfo::MaxCopDist => {
+                draw_isize_slice(&self.max_cop_dist);
+            },
+            VertexNumberInfo::MinCopDist => {
+                draw_isize_slice(&self.min_cop_dist);
+            },
+            VertexNumberInfo::RobberAdvantage => {
+                draw_isize_slice(&self.cop_advantage);
+            },
+            VertexNumberInfo::RobberDist => {
+                if let Some(r) = self.characters.robber() {
+                    draw_isize_slice(&r.distances);
+                }
+            },
+            VertexNumberInfo::VertexEquivalenceClass => {
+                if let SymGroup::Explicit(e) = con.sym_group() {
+                    draw!(e.classes());
+                }
+            },
+            VertexNumberInfo::None => {},
         }
     }
 
