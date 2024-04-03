@@ -515,7 +515,7 @@ impl BruteforceComputationState {
         }
 
         let mut action = None;
-        for (game_type, _) in &self.cop_strats {
+        for game_type in self.cop_strats.keys() {
             Self::draw_strat(ui, game_type);
             ui.horizontal(|ui| {
                 if NATIVE && ui.button("speichern").clicked() {

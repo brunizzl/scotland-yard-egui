@@ -952,11 +952,13 @@ impl Info {
                 }
             };
             ($iter:expr) => {
-                draw!($iter, |_| true);
+                let show = |_: &_| true;
+                draw!($iter, show);
             };
         }
         let draw_isize_slice = |numbers: &[isize]| {
-            draw!(numbers, |&&num| num != isize::MAX);
+            let show = |&&num: &&_| num != isize::MAX;
+            draw!(numbers, show);
         };
 
         match self.options.vertex_number_info {
@@ -976,7 +978,8 @@ impl Info {
                     let sym_group = strat.symmetry.to_dyn();
                     let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
                     let transformed_nr = |v| nr_moves_left[transform.dyn_apply_forward(v)];
-                    draw!((0..).map(transformed_nr), |&m| m != bf::UTime::MAX);
+                    let show = |&m: &_| m != bf::UTime::MAX;
+                    draw!((0..).map(transformed_nr), show);
                 }
             },
             VertexNumberInfo::Debugging => {
