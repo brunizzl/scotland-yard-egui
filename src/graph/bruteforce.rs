@@ -255,14 +255,39 @@ impl CopConfigurations {
         let iter = (0..self.nr_cops).flat_map(move |i| {
             let cop_i_pos = unpacked[i];
             edges.neighbors_of(cop_i_pos).map(move |n| {
-                self.pack(
-                    sym,
-                    (0..self.nr_cops).map(|j| if i == j { n } else { unpacked[j] }),
-                )
+                let swap_i = |j| if j == i { n } else { unpacked[j] };
+                self.pack(sym, (0..self.nr_cops).map(swap_i))
             })
         });
 
         iter
+    }
+
+    pub fn dyn_lazy_cop_moves_from<'a>(
+        &'a self,
+        edges: &'a EdgeList,
+        sym: &'a dyn DynSymmetryGroup,
+        positions: CompactCopsIndex,
+    ) -> impl Iterator<
+        Item = (
+            SmallVec<[&'a dyn DynAutomorphism; 4]>,
+            CompactCopsIndex,
+            [usize; MAX_COPS],
+        ),
+    > {
+        let mut unpacked = self.eager_unpack(positions);
+        unpacked[..self.nr_cops].sort();
+
+        (0..self.nr_cops).flat_map(move |i| {
+            let cop_i_pos = unpacked[i];
+            edges.neighbors_of(cop_i_pos).map(move |n| {
+                let swap_i = |j| if j == i { n } else { unpacked[j] };
+                let (vec, index) = self.pack_dyn(sym, (0..self.nr_cops).map(swap_i));
+                let mut unpacked_neigh = unpacked;
+                unpacked_neigh[i] = n;
+                (vec, index, unpacked_neigh)
+            })
+        })
     }
 
     pub fn all_positions_unpacked(&self) -> impl Iterator<Item = [usize; MAX_COPS]> + '_ {

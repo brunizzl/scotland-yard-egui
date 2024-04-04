@@ -65,6 +65,7 @@ struct Options {
     show_convex_hull: bool,
     show_hull_boundary: bool,
     draw_vertices: bool,
+    show_cop_strat: bool,
 }
 
 const DEFAULT_OPTIONS: Options = Options {
@@ -87,39 +88,13 @@ const DEFAULT_OPTIONS: Options = Options {
     show_convex_hull: false,
     show_hull_boundary: false,
     draw_vertices: false,
+    show_cop_strat: false,
 };
 
 impl Options {
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut menu_change = false;
         ui.collapsing("Knoteninfo", |ui| {
-            //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
-            ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
-            ui.add_space(8.0);
-
-            menu_change |= ui
-                .add(Checkbox::new(&mut self.show_convex_hull, "zeige konvexe Hülle um Cops"))
-                .on_hover_text(
-                    "Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
-                wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
-                hier immer als außerhalb der Hülle angenommen wird.",
-                )
-                .changed();
-            menu_change |= ui
-                .add(Checkbox::new(
-                    &mut self.show_hull_boundary,
-                    "zeige Grenze konvexer Hülle",
-                ))
-                .on_hover_text(
-                    "Punkte in Hülle, die mindestens einen Nachbarn ausserhalb Hülle haben. \
-                Weil diese Punkte nicht in Isolation interessant sind, sondern als Kreis um die Hülle, \
-                wird ein Punkt nur als Randpunkt makiert, wenn er erfolgreich in den Kreis um die Hülle \
-                aufgenommen werden konnte.",
-                )
-                .changed();
-
-            ui.add_space(8.0);
-            ui.label("Marker:");
             ui.horizontal(|ui| {
                 ui.label("Farbe: ");
                 ui.color_edit_button_srgba(&mut self.automatic_marker_color);
@@ -347,6 +322,41 @@ impl Options {
                 );
 
             menu_change |= old != self.vertex_number_info;
+        });
+        ui.collapsing("Sonstiges", |ui| {
+            //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
+            ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
+            ui.add_space(8.0);
+
+            menu_change |= ui
+                .add(Checkbox::new(&mut self.show_convex_hull, "zeige konvexe Hülle um Cops"))
+                .on_hover_text(
+                    "Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
+                wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
+                hier immer als außerhalb der Hülle angenommen wird.",
+                )
+                .changed();
+            menu_change |= ui
+                .add(Checkbox::new(
+                    &mut self.show_hull_boundary,
+                    "zeige Grenze konvexer Hülle",
+                ))
+                .on_hover_text(
+                    "Punkte in Hülle, die mindestens einen Nachbarn ausserhalb Hülle haben. \
+                Weil diese Punkte nicht in Isolation interessant sind, sondern als Kreis um die Hülle, \
+                wird ein Punkt nur als Randpunkt makiert, wenn er erfolgreich in den Kreis um die Hülle \
+                aufgenommen werden konnte.",
+                )
+                .changed();
+
+            ui.add_space(8.0);
+            ui.add(Checkbox::new(&mut self.show_cop_strat, "zeige Polizeistrategie"))
+                .on_hover_text(
+                    "Wenn für aktuelle Anzahl Cops & aktuellen Graphen Bruteforce \
+                Polizeistrategie berechnet wurde und anktueller Spielstate von Cops \
+                gewonnen wird, werden alle idealen Züge angezeigt."
+                );
+
         });
         menu_change
     }
@@ -755,6 +765,16 @@ impl Info {
         }
     }
 
+    fn police_state(&self, con: &DrawContext<'_>) -> (smallvec::SmallVec<[usize; 8]>, GameType) {
+        let active_cops = self.characters.active_cop_vertices();
+        let game_type = GameType {
+            nr_cops: active_cops.len(),
+            resolution: con.map.resolution(),
+            shape: con.map.shape(),
+        };
+        (active_cops, game_type)
+    }
+
     fn draw_green_circles(&self, con: &DrawContext<'_>) {
         let size = 0.6 * (self.options.automatic_marker_scale as f32) * con.scale;
         let draw_circle_at = |pos, color| {
@@ -823,12 +843,7 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
-                let mut active_cops = self.characters.active_cop_vertices();
-                let game_type = GameType {
-                    nr_cops: active_cops.len(),
-                    resolution: con.map.resolution(),
-                    shape: con.map.shape(),
-                };
+                let (mut active_cops, game_type) = self.police_state(con);
                 if let Some(bf::Outcome::RobberWins(data)) = &self.worker.result_for(&game_type) {
                     let (_, cop_positions) = data.pack(active_cops.iter().copied());
                     let safe_vertices = data.safe.robber_safe_when(cop_positions);
@@ -966,12 +981,7 @@ impl Info {
                 draw!(0..);
             },
             VertexNumberInfo::BruteforceCopMoves => {
-                let mut active_cops = self.characters.active_cop_vertices();
-                let game_type = GameType {
-                    nr_cops: active_cops.len(),
-                    resolution: con.map.resolution(),
-                    shape: con.map.shape(),
-                };
+                let (mut active_cops, game_type) = self.police_state(con);
                 if let Some(strat) = self.worker.strats_for(&game_type) {
                     let (_, cop_positions) = strat.pack(active_cops.iter().copied());
                     let nr_moves_left = strat.time_to_win.nr_moves_left(cop_positions);
@@ -979,7 +989,7 @@ impl Info {
                     let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
                     let transformed_nr = |v| nr_moves_left[transform.dyn_apply_forward(v)];
                     let show = |&m: &_| m != bf::UTime::MAX;
-                    draw!((0..).map(transformed_nr), show);
+                    draw!((0..con.positions.len()).map(transformed_nr), show);
                 }
             },
             VertexNumberInfo::Debugging => {
@@ -1017,6 +1027,71 @@ impl Info {
                 }
             },
             VertexNumberInfo::None => {},
+        }
+    }
+
+    fn draw_best_cop_moves(&self, con: &DrawContext<'_>) {
+        if !self.options.show_cop_strat {
+            return;
+        }
+        let Some(robber) = self.characters.robber() else {
+            return;
+        };
+        let robber_v = robber.nearest_node;
+        let (mut active_cops, game_type) = self.police_state(con);
+        let Some(strat) = self.worker.strats_for(&game_type) else {
+            return;
+        };
+
+        let (_, curr_cop_positions) = strat.pack(active_cops.iter().copied());
+        let sym = strat.symmetry.to_dyn();
+        let curr_transforms = sym.dyn_to_representative(&mut active_cops);
+        let to_curr = |v| curr_transforms[0].dyn_apply_forward(v);
+        let from_curr = |v| curr_transforms[0].dyn_apply_backward(v);
+
+        debug_assert!(self
+            .characters
+            .active_cops()
+            .all(|c| active_cops.contains(&to_curr(c.nearest_node))));
+
+        let robber_v_in_curr = to_curr(robber_v);
+        let curr_nr_moves_left =
+            strat.time_to_win.nr_moves_left(curr_cop_positions)[robber_v_in_curr];
+        if matches!(curr_nr_moves_left, 0 | bf::UTime::MAX) {
+            return;
+        }
+
+        let iter = strat.cop_moves.dyn_lazy_cop_moves_from(con.edges, sym, curr_cop_positions);
+        for (neigh_transforms, neigh_index, unpacked_neigh) in iter {
+            let transformed_robber_v = neigh_transforms[0].dyn_apply_forward(robber_v_in_curr);
+            let nr_moves_left = strat.time_to_win.nr_moves_left(neigh_index);
+            let neigh_chances = con
+                .edges
+                .neighbors_of(transformed_robber_v)
+                .map(|v| nr_moves_left[v])
+                .fold(nr_moves_left[transformed_robber_v], bf::UTime::max);
+
+            if neigh_chances == curr_nr_moves_left - 1 {
+                let i = izip!(&active_cops, &unpacked_neigh).position(|(a, b)| a != b).unwrap();
+                let curr_v = from_curr(active_cops[i]);
+                let next_v = from_curr(unpacked_neigh[i]);
+                debug_assert!(con.edges.has_edge(curr_v, next_v));
+                debug_assert!(self.characters.active_cops().any(|c| c.nearest_node == curr_v));
+                if !con.visible[curr_v] || !con.visible[next_v] {
+                    continue;
+                }
+
+                let curr_pos = con.vertex_draw_pos(curr_v);
+                let next_pos = con.vertex_draw_pos(next_v);
+                con.painter.arrow(
+                    curr_pos,
+                    next_pos - curr_pos,
+                    Stroke {
+                        width: con.scale * 1.2,
+                        color: Color32::from_rgb(150, 150, 255),
+                    },
+                );
+            }
         }
     }
 
@@ -1085,6 +1160,7 @@ impl Info {
         self.draw_green_circles(con);
         self.draw_manual_markers(con);
         self.draw_character_tails(con);
+        self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con);
         self.characters.frame_is_finished();
