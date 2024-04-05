@@ -467,18 +467,21 @@ impl BruteforceComputationState {
         });
     }
 
-    fn draw_strat(ui: &mut Ui, game_type: &GameType) {
+    fn draw_strat(ui: &mut Ui, game_type: &GameType, strat: &bf::CopStrategy) {
         let cops_str = if game_type.nr_cops == 1 {
             "einen Cop".to_owned()
         } else {
             game_type.nr_cops.to_string() + " Cops"
         };
+        let outcome = if strat.cops_win { "gewinnen" } else { "verlieren" };
 
         ui.label(format!(
-            "Strategie für {} auf {} mit Auflösung {} berechnet.",
+            "{} {} auf {} mit Auflösung {} (max. {} Züge)",
             cops_str,
+            outcome,
             game_type.shape.to_sting(),
-            game_type.resolution
+            game_type.resolution,
+            strat.max_moves,
         ));
     }
 
@@ -515,8 +518,8 @@ impl BruteforceComputationState {
         }
 
         let mut action = None;
-        for game_type in self.cop_strats.keys() {
-            Self::draw_strat(ui, game_type);
+        for (game_type, strat) in &self.cop_strats {
+            Self::draw_strat(ui, game_type, strat);
             ui.horizontal(|ui| {
                 if NATIVE && ui.button("speichern").clicked() {
                     action = Some((Action::Store, *game_type));
@@ -555,12 +558,12 @@ impl BruteforceComputationState {
                     ui.add(egui::widgets::Spinner::new());
                     let task_str = match worker.task {
                         WorkTask::Compute => "rechne ",
-                        WorkTask::ComputeStrat => "rechne Strategie ",
+                        WorkTask::ComputeStrat => "rechne  ",
                         WorkTask::Verify => "verifiziere ",
                         WorkTask::Load => "lade ",
-                        WorkTask::LoadStrat => "lade Strategie ",
+                        WorkTask::LoadStrat => "lade ",
                         WorkTask::Store => "speichere ",
-                        WorkTask::StoreStrat => "speichere Strategie ",
+                        WorkTask::StoreStrat => "speichere ",
                     };
                     ui.label(format!(
                         "{} {}",

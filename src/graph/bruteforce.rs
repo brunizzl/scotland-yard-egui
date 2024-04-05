@@ -652,6 +652,8 @@ pub struct CopStrategy {
     pub symmetry: SymGroup,
     pub time_to_win: TimeToWin,
     pub cop_moves: CopConfigurations,
+    pub max_moves: usize,
+    pub cops_win: bool,
 }
 
 impl CopStrategy {
@@ -759,9 +761,25 @@ where
         }
     }
 
+    log("berechne Fun Facts");
+    let mut max_moves = 0;
+    let mut cops_win = true;
+    for vals in f.time.values() {
+        for &val in vals {
+            if val == UTime::MAX {
+                cops_win = false;
+            }
+            else if val > max_moves {
+                max_moves = val;
+            }
+        }
+    }
+
     Ok(CopStrategy {
         symmetry: sym.into_enum(),
         time_to_win: f,
         cop_moves,
+        max_moves: max_moves as usize,
+        cops_win,
     })
 }

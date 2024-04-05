@@ -39,11 +39,9 @@ On Fedora Rawhide you need to run:
 
 #### Functionality
 * adapt hull boundary to respect torus (allow multiple disjoined boundary segements / perhaps don't care about boundary as circle, but only care about connected components of safe boundary?)
-* compute fun facts about cop strategy (max nr moves, do they win?)S
 
 #### Nice To Have
 * extract base functionality of EdgeList to own thing
-* choose option to define the outside region yourself
 * fix bug where sometimes lazy-safe regions have floating parts left that should have been removed.
 
 #### Lowest priority
