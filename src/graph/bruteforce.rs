@@ -746,7 +746,7 @@ impl CopStratQueue {
         Some(Self {
             queue,
             status: contained,
-            curr_max_nr_moves: 1,
+            curr_max_nr_moves: 2,
         })
     }
 
