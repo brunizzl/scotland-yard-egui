@@ -122,14 +122,14 @@ impl From<Result<bf::CopStrategy, String>> for WorkResult {
 }
 
 use std::sync::mpsc;
-type RcvStr = mpsc::Receiver<&'static str>;
+type RcvStr = mpsc::Receiver<String>;
 struct Worker {
     game_type: GameType,
     task: WorkTask,
     handle: thread::JoinHandle<WorkResult>,
 
     reciever: Option<RcvStr>,
-    status: Option<&'static str>,
+    status: Option<String>,
 }
 
 /// the bruteforce algorithm is quite large to ensure correctness from just looking at the results
@@ -357,7 +357,7 @@ impl BruteforceComputationState {
                 Ok(ok) => ok,
                 Err(err) => return WorkResult::new_res_err(outcome, err),
             };
-            send.send("vergleiche Ergebnisse").ok();
+            send.send("vergleiche Ergebnisse".into()).ok();
             use bf::Outcome::*;
             outcome.confidence = match (&outcome.outcome, &outcome_without) {
                 (CopsWin, CopsWin) => Confidence::Both,
@@ -473,7 +473,11 @@ impl BruteforceComputationState {
         } else {
             game_type.nr_cops.to_string() + " Cops"
         };
-        let outcome = if strat.cops_win { "gewinnen" } else { "verlieren" };
+        let outcome = if strat.cops_win {
+            "gewinnen"
+        } else {
+            "verlieren"
+        };
 
         ui.label(format!(
             "{} {} auf {} mit Auflösung {} (max. {} Züge)",
@@ -571,7 +575,7 @@ impl BruteforceComputationState {
                         worker.game_type.as_tuple_string()
                     ));
                 });
-                if let Some(msg) = worker.status {
+                if let Some(msg) = &worker.status {
                     ui.label(msg);
                 }
                 ui.add_space(5.0);

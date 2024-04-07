@@ -429,7 +429,7 @@ pub fn compute_safe_robber_positions<S>(
     nr_cops: usize,
     edges: EdgeList,
     sym: S,
-    log_sender: Option<mpsc::Sender<&'static str>>,
+    log_sender: Option<mpsc::Sender<String>>,
 ) -> Result<Outcome, String>
 where
     S: SymmetryGroup + Serialize,
@@ -445,15 +445,15 @@ where
         ));
     }
 
-    log("liste Polizeipositionen");
+    log("liste Polizeipositionen".into());
     let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops)?;
 
-    log("initialisiere Räubergewinnfunktion");
+    log("initialisiere Räubergewinnfunktion".into());
     let Some(mut f) = SafeRobberPositions::new(edges.nr_vertices(), &cop_moves) else {
         return Err("Zu wenig Speicherplatz (Räubergewinnfunktion zu groß)".to_owned());
     };
 
-    log("initialisiere Queue");
+    log("initialisiere Queue".into());
     let mut queue = VecDeque::new();
     if queue.try_reserve(cop_moves.nr_configurations()).is_err() {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
@@ -491,9 +491,19 @@ where
     //intersection of `safe_should_cops_move_to_curr` and the vertices previously marked as safe for gamestate bevor curr
     let mut f_temp = vec![false; nr_map_vertices];
 
-    log("berechne Räubergewinnfunktion");
     //lines 4 + 5
+    let mut time_until_log_refresh: usize = 1;
     while let Some(curr_cop_positions) = queue.pop_back() {
+        time_until_log_refresh -= 1;
+        if time_until_log_refresh == 0 {
+            log(format!(
+                "berechne Räuberstrategie\n({} in Queue, {:.2}%)",
+                queue.len(),
+                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32)
+            ));
+            time_until_log_refresh = 10000;
+        }
+
         //line 6
         for (safe_before, safe_now) in izip!(
             &mut safe_should_cops_move_to_curr,
@@ -665,12 +675,56 @@ impl CopStrategy {
     }
 }
 
+struct Queue {
+    queue: VecDeque<CompactCopsIndex>,
+    contained: std::collections::BTreeMap<usize, Vec<bool>>,
+}
+
+impl Queue {
+    pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
+        let mut contained = std::collections::BTreeMap::new();
+        for (&fst_index, indices) in &cop_moves.configurations {
+            let nr_entries = indices.len();
+
+            let mut data = Vec::new();
+            data.try_reserve(nr_entries).ok()?;
+            data.resize(nr_entries, false);
+            let old = contained.insert(fst_index, data);
+            debug_assert!(old.is_none());
+        }
+
+        let mut queue = VecDeque::new();
+        queue.try_reserve(cop_moves.nr_configurations()).ok()?;
+        Some(Self { queue, contained })
+    }
+
+    pub fn push(&mut self, entry: CompactCopsIndex) {
+        let is_there = &mut self.contained.get_mut(&entry.fst_index).unwrap()[entry.rest_index];
+        if !*is_there {
+            self.queue.push_back(entry);
+            *is_there = true;
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<CompactCopsIndex> {
+        let res = self.queue.pop_front();
+        if let Some(i) = res {
+            self.contained.get_mut(&i.fst_index).unwrap()[i.rest_index] = false;
+        }
+        res
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+}
+
 #[allow(dead_code)]
 pub fn compute_cop_strategy<S>(
     nr_cops: usize,
     edges: EdgeList,
     sym: S,
-    log_sender: Option<mpsc::Sender<&'static str>>,
+    log_sender: Option<mpsc::Sender<String>>,
 ) -> Result<CopStrategy, String>
 where
     S: SymmetryGroup + Serialize,
@@ -686,19 +740,18 @@ where
         ));
     }
 
-    log("liste Polizeipositionen");
+    log("liste Polizeipositionen".into());
     let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops)?;
 
-    log("initialisiere Cop Startegie");
+    log("initialisiere Cop Startegie".into());
     let Some(mut f) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
         return Err("Zu wenig Speicherplatz (Copstrat zu groß)".to_owned());
     };
 
-    log("initialisiere Queue");
-    let mut queue = VecDeque::new();
-    if queue.try_reserve(cop_moves.nr_configurations()).is_err() {
+    log("initialisiere Queue".into());
+    let Some(mut queue) = Queue::new(&cop_moves) else {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
-    }
+    };
 
     for (&fst_index, sub_configs) in &cop_moves.configurations {
         for (rest_index, _packed_rest_cops) in izip!(0.., sub_configs) {
@@ -712,7 +765,7 @@ where
                 }
             }
 
-            queue.push_back(index);
+            queue.push(index);
         }
     }
 
@@ -721,8 +774,18 @@ where
     //for each possible robber position, given that the cops move to `curr`.
     let mut times_should_cops_move_to_curr = vec![UTime::MAX; nr_map_vertices];
 
-    log("berechne Copstrategie");
-    while let Some(curr_cop_positions) = queue.pop_back() {
+    let mut time_until_log_refresh: usize = 1;
+    while let Some(curr_cop_positions) = queue.pop() {
+        time_until_log_refresh -= 1;
+        if time_until_log_refresh == 0 {
+            log(format!(
+                "berechne Copstrategie\n({} in Queue, {:.2}%)",
+                queue.len(),
+                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32)
+            ));
+            time_until_log_refresh = 10000;
+        }
+
         let curr_times = f.nr_moves_left(curr_cop_positions);
         for (v, neighs) in izip!(0.., edges.neighbors()) {
             let new_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
@@ -753,23 +816,19 @@ where
                 }
             }
             if f_neighbor_changed {
-                if queue.try_reserve(1).is_err() {
-                    return Err("Zu wenig Speicherplatz (Queue zu lang)".to_owned());
-                }
-                queue.push_back(rotated_neigh_cop_positions);
+                queue.push(rotated_neigh_cop_positions);
             }
         }
     }
 
-    log("berechne Fun Facts");
+    log("berechne Fun Facts".into());
     let mut max_moves = 0;
     let mut cops_win = true;
     for vals in f.time.values() {
         for &val in vals {
             if val == UTime::MAX {
                 cops_win = false;
-            }
-            else if val > max_moves {
+            } else if val > max_moves {
                 max_moves = val;
             }
         }
