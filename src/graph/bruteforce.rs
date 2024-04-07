@@ -402,6 +402,49 @@ pub enum Outcome {
     CopsWin,
     RobberWins(RobberWinData),
 }
+struct RobberStratQueue {
+    queue: VecDeque<CompactCopsIndex>,
+    contained: std::collections::BTreeMap<usize, Vec<bool>>,
+}
+
+impl RobberStratQueue {
+    pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
+        let mut contained = std::collections::BTreeMap::new();
+        for (&fst_index, indices) in &cop_moves.configurations {
+            let nr_entries = indices.len();
+
+            let mut data = Vec::new();
+            data.try_reserve(nr_entries).ok()?;
+            data.resize(nr_entries, false);
+            let old = contained.insert(fst_index, data);
+            debug_assert!(old.is_none());
+        }
+
+        let mut queue = VecDeque::new();
+        queue.try_reserve(cop_moves.nr_configurations()).ok()?;
+        Some(Self { queue, contained })
+    }
+
+    pub fn push(&mut self, entry: CompactCopsIndex) {
+        let is_there = &mut self.contained.get_mut(&entry.fst_index).unwrap()[entry.rest_index];
+        if !*is_there {
+            self.queue.push_back(entry);
+            *is_there = true;
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<CompactCopsIndex> {
+        let res = self.queue.pop_front();
+        if let Some(i) = res {
+            self.contained.get_mut(&i.fst_index).unwrap()[i.rest_index] = false;
+        }
+        res
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+}
 
 /// algorithm 2.2 of Fabian Hamann's masters thesis.
 ///
@@ -454,10 +497,9 @@ where
     };
 
     log("initialisiere Queue".into());
-    let mut queue = VecDeque::new();
-    if queue.try_reserve(cop_moves.nr_configurations()).is_err() {
+    let Some(mut queue) = RobberStratQueue::new(&cop_moves) else {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
-    }
+    };
 
     for (&fst_index, sub_configs) in &cop_moves.configurations {
         for (rest_index, _packed_rest_cops) in izip!(0.., sub_configs) {
@@ -480,7 +522,7 @@ where
             }
 
             //line 3
-            queue.push_back(index);
+            queue.push(index);
         }
     }
 
@@ -493,15 +535,15 @@ where
 
     //lines 4 + 5
     let mut time_until_log_refresh: usize = 1;
-    while let Some(curr_cop_positions) = queue.pop_back() {
+    while let Some(curr_cop_positions) = queue.pop() {
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
             log(format!(
-                "berechne Räuberstrategie\n({} in Queue, {:.2}%)",
-                queue.len(),
-                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32)
+                "berechne Räuberstrategie:\n{:.2}% in Queue ({})",
+                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
+                queue.len()
             ));
-            time_until_log_refresh = 10000;
+            time_until_log_refresh = 2000;
         }
 
         //line 6
@@ -590,10 +632,7 @@ where
             //we thus only enqueue each neighbor up to once, not up to once per our rotation.
             if f_neighbor_changed_some_rotation {
                 //line 11
-                if queue.try_reserve(1).is_err() {
-                    return Err("Zu wenig Speicherplatz (Queue zu lang)".to_owned());
-                }
-                queue.push_back(rotated_neigh_cop_positions);
+                queue.push(rotated_neigh_cop_positions);
             }
 
             //lines 13 + 14 + 15
@@ -611,7 +650,7 @@ where
     }))
 }
 
-pub type UTime = u16;
+pub type UTime = u8;
 
 /// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
 /// how many more moves the police need at most to catch the robber.
@@ -675,12 +714,21 @@ impl CopStrategy {
     }
 }
 
-struct Queue {
-    queue: VecDeque<CompactCopsIndex>,
-    contained: std::collections::BTreeMap<usize, Vec<bool>>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InQueue {
+    No,
+    Yes,
+    NoAndAtMax,
+    YesAndAtMax,
 }
 
-impl Queue {
+struct CopStratQueue {
+    queue: VecDeque<CompactCopsIndex>,
+    status: std::collections::BTreeMap<usize, Vec<InQueue>>,
+    curr_max_nr_moves: UTime,
+}
+
+impl CopStratQueue {
     pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
         let mut contained = std::collections::BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
@@ -688,34 +736,94 @@ impl Queue {
 
             let mut data = Vec::new();
             data.try_reserve(nr_entries).ok()?;
-            data.resize(nr_entries, false);
+            data.resize(nr_entries, InQueue::No);
             let old = contained.insert(fst_index, data);
             debug_assert!(old.is_none());
         }
 
         let mut queue = VecDeque::new();
         queue.try_reserve(cop_moves.nr_configurations()).ok()?;
-        Some(Self { queue, contained })
+        Some(Self {
+            queue,
+            status: contained,
+            curr_max_nr_moves: 1,
+        })
+    }
+
+    fn status_mut_of(&mut self, entry: CompactCopsIndex) -> &mut InQueue {
+        &mut self.status.get_mut(&entry.fst_index).unwrap()[entry.rest_index]
     }
 
     pub fn push(&mut self, entry: CompactCopsIndex) {
-        let is_there = &mut self.contained.get_mut(&entry.fst_index).unwrap()[entry.rest_index];
-        if !*is_there {
+        let entry_status = self.status_mut_of(entry);
+
+        let enqueue = match *entry_status {
+            InQueue::No => {
+                *entry_status = InQueue::Yes;
+                true
+            },
+            InQueue::NoAndAtMax => {
+                *entry_status = InQueue::YesAndAtMax;
+                true
+            },
+            _ => false,
+        };
+        if enqueue {
             self.queue.push_back(entry);
-            *is_there = true;
         }
     }
 
-    pub fn pop(&mut self) -> Option<CompactCopsIndex> {
+    pub fn mark_as_at_max(&mut self, entry: CompactCopsIndex) {
+        let entry_status = self.status_mut_of(entry);
+        match *entry_status {
+            InQueue::No => {
+                *entry_status = InQueue::NoAndAtMax;
+            },
+            InQueue::Yes => {
+                *entry_status = InQueue::YesAndAtMax;
+            },
+            _ => {},
+        }
+    }
+
+    fn pop_and_mark_popped(&mut self) -> Option<CompactCopsIndex> {
         let res = self.queue.pop_front();
-        if let Some(i) = res {
-            self.contained.get_mut(&i.fst_index).unwrap()[i.rest_index] = false;
+        if let Some(entry) = res {
+            let entry_status = self.status_mut_of(entry);
+            match *entry_status {
+                InQueue::Yes => *entry_status = InQueue::No,
+                InQueue::YesAndAtMax => *entry_status = InQueue::NoAndAtMax,
+                _ => panic!(),
+            }
         }
         res
     }
 
+    pub fn pop(&mut self) -> Option<CompactCopsIndex> {
+        if let Some(entry) = self.pop_and_mark_popped() {
+            return Some(entry);
+        }
+        self.curr_max_nr_moves += 1;
+        for (&fst_index, part) in &mut self.status {
+            for (rest_index, entry_status) in part.iter_mut().enumerate() {
+                if *entry_status == InQueue::NoAndAtMax {
+                    *entry_status = InQueue::Yes;
+                    self.queue.push_back(CompactCopsIndex { fst_index, rest_index });
+                }
+                if *entry_status == InQueue::YesAndAtMax {
+                    *entry_status = InQueue::Yes;
+                }
+            }
+        }
+        self.pop_and_mark_popped()
+    }
+
     pub fn len(&self) -> usize {
         self.queue.len()
+    }
+
+    pub fn curr_max(&self) -> UTime {
+        self.curr_max_nr_moves
     }
 }
 
@@ -749,7 +857,7 @@ where
     };
 
     log("initialisiere Queue".into());
-    let Some(mut queue) = Queue::new(&cop_moves) else {
+    let Some(mut queue) = CopStratQueue::new(&cop_moves) else {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
     };
 
@@ -761,7 +869,7 @@ where
             for cop_pos in cop_moves.unpack(index) {
                 robber_positions[cop_pos] = 0;
                 for n in edges.neighbors_of(cop_pos) {
-                    robber_positions[n] = 1;
+                    robber_positions[n] = 0;
                 }
             }
 
@@ -779,14 +887,16 @@ where
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
             log(format!(
-                "berechne Copstrategie\n({} in Queue, {:.2}%)",
+                "berechne Copstrategie:\n{:.2}% in Queue ({}), max {}",
+                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len(),
-                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32)
+                queue.curr_max()
             ));
-            time_until_log_refresh = 10000;
+            time_until_log_refresh = 2000;
         }
 
         let curr_times = f.nr_moves_left(curr_cop_positions);
+        let mut curr_is_at_max = false;
         for (v, neighs) in izip!(0.., edges.neighbors()) {
             let new_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
             const MAX_TIME: UTime = UTime::MAX - 1;
@@ -796,7 +906,17 @@ where
                     std::any::type_name::<UTime>()
                 ));
             }
-            times_should_cops_move_to_curr[v] = new_time.saturating_add(1);
+            let new_time = new_time.saturating_add(1);
+            times_should_cops_move_to_curr[v] = if new_time == queue.curr_max() {
+                curr_is_at_max = true;
+                UTime::MAX
+            } else {
+                debug_assert!(new_time < queue.curr_max());
+                new_time
+            };
+        }
+        if curr_is_at_max {
+            queue.mark_as_at_max(curr_cop_positions);
         }
 
         for (neigh_rotations, rotated_neigh_cop_positions) in
@@ -810,6 +930,7 @@ where
                 ) {
                     let this_time = times_should_cops_move_to_curr[v];
                     if *neigh_time > this_time {
+                        debug_assert!(this_time < queue.curr_max());
                         f_neighbor_changed = true;
                         *neigh_time = this_time;
                     }

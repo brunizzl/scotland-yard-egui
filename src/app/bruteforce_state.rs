@@ -227,7 +227,7 @@ impl BruteforceComputationState {
                 done = Some(i);
             }
             if let Some(rcv) = &worker.reciever {
-                if let Ok(msg) = rcv.try_recv() {
+                while let Ok(msg) = rcv.try_recv() {
                     worker.status = Some(msg);
                 }
             }
