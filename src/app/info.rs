@@ -254,7 +254,7 @@ impl Options {
                 },
                 _ => add_disabled_drag_value(ui),
             };
-            
+
 
             ui.add_space(8.0);
             ComboBox::from_id_source(&self.shown_manual_markers as *const _)
@@ -266,7 +266,7 @@ impl Options {
                         Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
                     );
                     add_drag_value(ui, &mut self.manual_marker_scale, "Größe", 1, 100);
-        
+
                     for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
                         ui.horizontal(|ui| {
                             ui.radio_value(&mut self.active_manual_marker, i, "");
@@ -274,7 +274,7 @@ impl Options {
                             if ui.button("Reset").on_hover_text("setze Farbe zurück").clicked() {
                                 *color = color::HAND_PICKED_MARKER_COLORS[i];
                             }
-        
+
                             let bit_i = 1u8 << i;
                             let curr_shown = self.shown_manual_markers & bit_i != 0;
                             let mut show = curr_shown;
@@ -288,7 +288,7 @@ impl Options {
                     }
                 });
 
-            
+
             ui.add_space(8.0);
             ComboBox::from_id_source(&self.vertex_number_info as *const _)
                 .selected_text("Zahlen")
