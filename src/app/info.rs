@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use itertools::{izip, Itertools};
 
 use egui::*;
+use strum::IntoEnumIterator;
 
 use crate::app::character::CharacterState;
 use crate::graph::{bruteforce as bf, *};
@@ -11,25 +12,79 @@ use self::bruteforce_state::{BruteforceComputationState, GameType};
 
 use super::{color, *};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize, strum_macros::EnumIter,
+)]
 pub enum VertexColorInfo {
     None,
-    Escape1,
-    BruteForceRes,
-    Escape2,
     NearNodes,
-    RobberDist,
+    SafeOutside,
+    SafeBoundary,
+    Escape1,
+    Escape2,
+    BruteForceRes,
     MinCopDist,
     MaxCopDist,
+    RobberDist,
     VertexEquivalenceClasses,
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
     Debugging,
-    SafeOutside,
-    SafeBoundary,
 }
 
-#[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
+impl VertexColorInfo {
+    const fn description(self) -> &'static str {
+        use VertexColorInfo::*;
+        match self {
+            None => "Es werden keine automatisch berechneten Punkte angezeigt",
+            NearNodes => "alle Knoten näher am Räuber als am nächsten Cop",
+            SafeOutside => "Alle Knoten nicht in konvexer Hülle und mit Mindestabstand >= 2 zu nächstem Cop",
+            SafeBoundary => "Alle Knoten auf Rand von konvexer Hülle mit Mindestabstand >= 2 zu nächstem Cop",
+            Escape1 => "alle Punkte in der Konvexen Hülle, \
+            die näher an einem Punkt ausserhalb der Hülle sind, als der nächste Cop an diesem Punkt ist",
+            Escape2 => "Jedes Paar von benauchbarten Cops am Hüllenrand kontrolliert einen Randbereich. \
+            Will der Räuber durch diesen Bereich fliehen, dürfen die Cops in der Zeit, \
+            die der Räuber zum Rand braucht, diesen nicht auf Länge 0 kürzen können. \n\
+            Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
+            als die Cops diesen Abschnitt dicht machen können.",
+            BruteForceRes => "Wenn Bruteforce Berechnung ergeben hat, \
+            dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
+            aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
+            die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.",
+            MinCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
+            MaxCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
+            RobberDist => "Alle Punkte die eingestellten Abstand zu Räuber haben",
+            VertexEquivalenceClasses => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
+            Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
+            Das macht Bruteforce etwas weniger speicherintensiv.",
+            RobberVertexClass => "Alle Knoten die in selber Symmetrieäquivalenzklasse sitzen \
+            wie die aktuelle Räuberposition",
+            CopsRotatedToEquivalence => "Coppositionen rotiert auf repräsentative Knoten selber Äquivalenzklasse",
+            Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
+        }
+    }
+    const fn name_str(self) -> &'static str {
+        use VertexColorInfo::*;
+        match self {
+            None => "Keine",
+            NearNodes => "für Räuber nähere Knoten",
+            SafeOutside => "Sicherer Außenbereich",
+            SafeBoundary => "Sicherere Grenze",
+            Escape1 => "Punkte mit direkter Fluchtoption 1",
+            Escape2 => "Punkte mit direkter Fluchtoption 2",
+            BruteForceRes => "Bruteforce Ergebnis",
+            MinCopDist => "minimaler Cop Abstand",
+            MaxCopDist => "maximaler Cop Abstand",
+            RobberDist => "Räuberabstand",
+            VertexEquivalenceClasses => "Symmetrieäquivalenzklassen",
+            RobberVertexClass => "Äquivalenzklasse Räuberknoten",
+            CopsRotatedToEquivalence => "Rotierte Coppositionen",
+            Debugging => "Debugging",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize, strum_macros::EnumIter)]
 pub enum VertexNumberInfo {
     None,
     Indices,
@@ -39,8 +94,46 @@ pub enum VertexNumberInfo {
     MaxCopDist,
     RobberDist,
     VertexEquivalenceClass,
-    Debugging,
     BruteforceCopMoves,
+    Debugging,
+}
+
+impl VertexNumberInfo {
+    const fn description(self) -> &'static str {
+        use VertexNumberInfo::*;
+        match self {
+            None => "Es werden keine Zahlen angezeigt",
+            Indices => "nur relevant für Debugging",
+            RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
+            EscapeableNodes => "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
+                Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
+            MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
+            MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",
+            VertexEquivalenceClass => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
+                Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
+                Das macht Bruteforce etwas weniger speicherintensiv.",
+            RobberDist => "Abstand von Räuberposition zu jedem Knoten",
+            BruteforceCopMoves => "Wenn Cops optimal ziehen, lebt Räuber noch maximal so viele Züge",
+            Debugging => "Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
+                gerade spannend zum debuggen war",
+        }
+    }
+
+    const fn name_str(self) -> &'static str {
+        use VertexNumberInfo::*;
+        match self {
+            None => "Keine",
+            Indices => "Knotenindizes",
+            RobberAdvantage => "Marker Fluchtoption 1",
+            EscapeableNodes => "Marker Fluchtoption 2",
+            MinCopDist => "minimaler Cop Abstand",
+            MaxCopDist => "maximaler Cop Abstand",
+            VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
+            RobberDist => "Räuberabstand",
+            BruteforceCopMoves => "Bruteforce Cop Züge",
+            Debugging => "Debugging",
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -95,235 +188,6 @@ impl Options {
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut menu_change = false;
         ui.collapsing("Knoteninfo", |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Farbe: ");
-                ui.color_edit_button_srgba(&mut self.automatic_marker_color);
-                if ui.button("Reset").on_hover_text("Setze Farbe zurück").clicked() {
-                    self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
-                }
-            });
-            add_drag_value(ui, &mut self.automatic_marker_scale, "Größe: ", 1, 100);
-
-            let old = self.vertex_color_info;
-            //settings to draw extra information
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::None, "Keine");
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::NearNodes,
-                "für Räuber nähere Knoten",
-            )
-            .on_hover_text("alle Knoten näher am Räuber als am nächsten Cop");
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::SafeOutside,
-                "Sicherer Außenbereich",
-            )
-            .on_hover_text("Alle Knoten nicht in konvexer Hülle und mit Mindestabstand >= 2 zu nächstem Cop");
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::SafeBoundary,
-                "Sicherere Grenze",
-            )
-            .on_hover_text("Alle Knoten auf Rand von konvexer Hülle mit Mindestabstand >= 2 zu nächstem Cop");
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::Escape1,
-                "Punkte mit direkter Fluchtoption 1",
-            )
-            .on_hover_text(
-                "alle Punkte in der Konvexen Hülle, \
-                die näher an einem Punkt ausserhalb der Hülle sind, als der nächste Cop an diesem Punkt ist",
-            );
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::Escape2,
-                "Punkte mit direkter Fluchtoption 2",
-            )
-            .on_hover_text(
-                "Jedes Paar von benauchbarten Cops am Hüllenrand kontrolliert einen Randbereich. \
-                Will der Räuber durch diesen Bereich fliehen, dürfen die Cops in der Zeit, \
-                die der Räuber zum Rand braucht, diesen nicht auf Länge 0 kürzen können. \n\
-                Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
-                als die Cops diesen Abschnitt dicht machen können.",
-            );
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::BruteForceRes,
-                "Bruteforce Ergebnis",
-            )
-            .on_hover_text(
-                "Wenn Bruteforce Berechnung ergeben hat, \
-                dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
-                aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
-                die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.",
-            );
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::MinCopDist,
-                "minimaler Cop Abstand",
-            )
-            .on_hover_text("Punktweise, Abstand einstellbar bei ausgewählter Option");
-            if self.vertex_color_info == VertexColorInfo::MinCopDist {
-                add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
-            }
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::MaxCopDist,
-                "maximaler Cop Abstand",
-            )
-            .on_hover_text("Punktweise, Abstand einstellbar bei ausgewählter Option");
-            if self.vertex_color_info == VertexColorInfo::MaxCopDist {
-                add_drag_value(ui, &mut self.marked_cop_dist, "Abstand: ", 0, 1000);
-            }
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::RobberDist,
-                "Räuberabstand",
-            )
-            .on_hover_text("Alle Punkte die eingestellten Abstand zu Räuber haben");
-            if self.vertex_color_info == VertexColorInfo::RobberDist {
-                add_drag_value(ui, &mut self.marked_robber_dist, "Abstand: ", 0, 1000);
-            }
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::VertexEquivalenceClasses,
-                "Symmetrieäquivalenzklassen",
-            )
-            .on_hover_text(
-                "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
-                Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
-                Das macht Bruteforce etwas weniger speicherintensiv.",
-            );
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::RobberVertexClass,
-                "Äquivalenzklasse Räuberknoten",
-            );
-
-            ui.radio_value(
-                &mut self.vertex_color_info,
-                VertexColorInfo::CopsRotatedToEquivalence,
-                "Rotierte Coppositionen",
-            )
-            .on_hover_text("Coppositionen rotiert auf repräsentative Knoten selber Äquivalenzklasse");
-
-            ui.radio_value(&mut self.vertex_color_info, VertexColorInfo::Debugging, "Debugging")
-                .on_hover_text("Was auch immer gerade während des letzten mal kompilierens interessant war");
-
-            menu_change |= old != self.vertex_color_info;
-        });
-        ui.collapsing("Manuelle Marker", |ui| {
-            ui.label("[Info]").on_hover_text(
-                "Manuelle Marker können an dem der Mausposition nächsten Knoten \
-                mit Taste [m] hinzugefügt und [n] entfernt werden.\n\
-                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
-            );
-            add_drag_value(ui, &mut self.manual_marker_scale, "Größe: ", 1, 100);
-
-            for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
-                ui.horizontal(|ui| {
-                    ui.radio_value(&mut self.active_manual_marker, i, "");
-                    ui.color_edit_button_srgba(color);
-                    if ui.button("Reset").on_hover_text("setze Farbe zurück").clicked() {
-                        *color = color::HAND_PICKED_MARKER_COLORS[i];
-                    }
-
-                    let bit_i = 1u8 << i;
-                    let curr_shown = self.shown_manual_markers & bit_i != 0;
-                    let mut show = curr_shown;
-                    ui.add(Checkbox::new(&mut show, "")).on_hover_text("Anzeigen");
-                    if show {
-                        self.shown_manual_markers |= bit_i;
-                    } else if curr_shown {
-                        self.shown_manual_markers -= bit_i;
-                    }
-                });
-            }
-        });
-        ui.collapsing("Zahlen", |ui| {
-            add_drag_value(ui, &mut self.number_scale, "Größe: ", 1, 100);
-
-            let old = self.vertex_number_info;
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::None, "Keine");
-
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::Indices, "Knotenindizes")
-                .on_hover_text("nur relevant für Debugging");
-
-            ui.radio_value(
-                &mut self.vertex_number_info,
-                VertexNumberInfo::RobberAdvantage,
-                "Marker Fluchtoption 1",
-            )
-            .on_hover_text("Helfer zur Berechnung von Fluchtoption 1");
-
-            ui.radio_value(
-                &mut self.vertex_number_info,
-                VertexNumberInfo::EscapeableNodes,
-                "Marker Fluchtoption 2",
-            )
-            .on_hover_text(
-                "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
-                Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
-            );
-
-            ui.radio_value(
-                &mut self.vertex_number_info,
-                VertexNumberInfo::MinCopDist,
-                "minimaler Cop Abstand",
-            )
-            .on_hover_text("punktweises Minimum aus den Abständen aller Cops");
-
-            ui.radio_value(
-                &mut self.vertex_number_info,
-                VertexNumberInfo::MaxCopDist,
-                "maximaler Cop Abstand",
-            )
-            .on_hover_text("punktweises Maximum aus den Abständen aller Cops");
-
-            ui.radio_value(
-                &mut self.vertex_number_info,
-                VertexNumberInfo::RobberDist,
-                "Räuberabstand",
-            )
-            .on_hover_text("Abstand von Räuberposition zu jedem Knoten");
-
-            ui.radio_value(
-                &mut self.vertex_number_info,
-                VertexNumberInfo::VertexEquivalenceClass,
-                "Symmetrieäquivalenzklasse",
-            )
-            .on_hover_text(
-                "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
-                Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
-                Das macht Bruteforce etwas weniger speicherintensiv.",
-            );
-
-            ui.radio_value(
-                &mut self.vertex_number_info,
-                VertexNumberInfo::BruteforceCopMoves,
-                "Bruteforce Cop Züge",
-            ).on_hover_text("Wenn Cops optimal ziehen, lebt Räuber noch maximal viele Züge");
-
-            ui.radio_value(&mut self.vertex_number_info, VertexNumberInfo::Debugging, "Debugging")
-                .on_hover_text(
-                    "Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
-                gerade spannend zum debuggen war",
-                );
-
-            menu_change |= old != self.vertex_number_info;
-        });
-        ui.collapsing("Sonstiges", |ui| {
             //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
             ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
             ui.add_space(8.0);
@@ -357,6 +221,87 @@ impl Options {
                 gewonnen wird, werden alle idealen Züge angezeigt."
                 );
 
+
+            ui.add_space(8.0);
+            ComboBox::from_id_source(&self.vertex_color_info as *const _)
+                .selected_text("Marker")
+                .show_ui(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Farbe: ");
+                        ui.color_edit_button_srgba(&mut self.automatic_marker_color);
+                        if ui.button("Reset").on_hover_text("Setze Farbe zurück").clicked() {
+                            self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
+                        }
+                    });
+                    add_drag_value(ui, &mut self.automatic_marker_scale, "Größe", 1, 100);
+
+                    let old = self.vertex_color_info;
+                    for val in VertexColorInfo::iter() {
+                        ui.radio_value(&mut self.vertex_color_info, val, val.name_str())
+                            .on_hover_text(val.description());
+                    }
+                    menu_change |= old != self.vertex_color_info;
+                });
+            match self.vertex_color_info {
+                VertexColorInfo::MinCopDist => {
+                    add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", 0, 1000)
+                },
+                VertexColorInfo::MaxCopDist => {
+                    add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", 0, 1000)
+                },
+                VertexColorInfo::RobberDist => {
+                    add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", 0, 1000)
+                },
+                _ => add_disabled_drag_value(ui),
+            };
+            
+
+            ui.add_space(8.0);
+            ComboBox::from_id_source(&self.shown_manual_markers as *const _)
+                .selected_text("Manuelle Marker")
+                .show_ui(ui, |ui| {
+                    ui.label("[Info]").on_hover_text(
+                        "Manuelle Marker können an dem der Mausposition nächsten Knoten \
+                        mit Taste [m] hinzugefügt und [n] entfernt werden.\
+                        Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
+                    );
+                    add_drag_value(ui, &mut self.manual_marker_scale, "Größe", 1, 100);
+        
+                    for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut self.active_manual_marker, i, "");
+                            ui.color_edit_button_srgba(color);
+                            if ui.button("Reset").on_hover_text("setze Farbe zurück").clicked() {
+                                *color = color::HAND_PICKED_MARKER_COLORS[i];
+                            }
+        
+                            let bit_i = 1u8 << i;
+                            let curr_shown = self.shown_manual_markers & bit_i != 0;
+                            let mut show = curr_shown;
+                            ui.add(Checkbox::new(&mut show, "")).on_hover_text("Anzeigen");
+                            if show {
+                                self.shown_manual_markers |= bit_i;
+                            } else if curr_shown {
+                                self.shown_manual_markers -= bit_i;
+                            }
+                        });
+                    }
+                });
+
+            
+            ui.add_space(8.0);
+            ComboBox::from_id_source(&self.vertex_number_info as *const _)
+                .selected_text("Zahlen")
+                .show_ui(ui, |ui| {
+                    add_drag_value(ui, &mut self.number_scale, "Größe", 1, 100);
+
+                    let old = self.vertex_number_info;
+                    for val in VertexNumberInfo::iter() {
+                        ui.radio_value(&mut self.vertex_number_info, val, val.name_str())
+                            .on_hover_text(val.description());
+                    }
+                    menu_change |= old != self.vertex_number_info;
+                });
         });
         menu_change
     }

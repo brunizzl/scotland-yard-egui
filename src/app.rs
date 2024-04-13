@@ -63,7 +63,6 @@ impl<'a> DrawContext<'a> {
 fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isize) -> bool {
     ui.horizontal(|ui| {
         let prev = *val;
-        ui.label(name);
         if ui.button(" - ").clicked() && prev > min {
             *val -= 1;
         }
@@ -71,7 +70,19 @@ fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isi
         if ui.button(" + ").clicked() && prev < max {
             *val += 1;
         }
+        ui.label(name);
         prev != *val
+    })
+    .inner
+}
+
+fn add_disabled_drag_value(ui: &mut Ui) -> bool {
+    ui.horizontal(|ui| {
+        ui.add_enabled(false, Button::new(" - "));
+        let mut val: isize = 0;
+        ui.add_enabled(false, DragValue::new(&mut val));
+        ui.add_enabled(false, Button::new(" + "));
+        false
     })
     .inner
 }

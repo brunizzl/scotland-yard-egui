@@ -26,6 +26,8 @@ bitvec = { version = "1.0.1", features = ["alloc", "serde"] }
 smallvec = "1.13.0"
 rmp-serde = "1.1.2"
 chrono = "0.4.33"
+strum = "=0.26.2"
+strum_macros = "0.26"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

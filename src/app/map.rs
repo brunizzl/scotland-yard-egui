@@ -23,6 +23,22 @@ pub enum Shape {
 }
 
 impl Shape {
+    const fn name_str(self) -> &'static str {
+        match self {
+            Self::Tetrahedron => "Tetraeder",
+            Self::Octahedron => "Oktaeder",
+            Self::Icosahedron => "Ikosaeder",
+            Self::DividedIcosahedron(_) => "aufgepusteter Ikosaeder",
+            Self::Cube => "Würfel",
+            Self::Football => "Fußball",
+            Self::FabianHamann => "Fabian Hamanns Graph",
+            Self::Dodecahedron => "Dodekaeder",
+            Self::TriangTorus => "Torus (Dreiecke)",
+            Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
+            Self::Random2D => "2D Kreisscheibe zufällig trianguliert",
+        }
+    }
+
     pub fn to_sting(self) -> String {
         match self {
             Self::Cube => "Wuerfel".to_string(),
@@ -233,52 +249,75 @@ impl Map {
         if ui.button("🏠 Position").clicked() {
             self.camera.reset();
         }
-        ui.collapsing("Form", |ui| {
-            let old_shape = self.shape;
+        ui.collapsing("Spielfeld", |ui| {
             let mut change = false;
-            ui.radio_value(&mut self.shape, Shape::Tetrahedron, "Tetraeder");
-            ui.radio_value(&mut self.shape, Shape::Octahedron, "Oktaeder");
-            ui.radio_value(&mut self.shape, Shape::Icosahedron, "Ikosaeder");
-            if ui
-                .add(RadioButton::new(
-                    matches!(self.shape, Shape::DividedIcosahedron(_)),
-                    "aufgepusteter Ikosaeder",
-                ))
-                .clicked()
-            {
-                self.shape = Shape::DividedIcosahedron(0);
-            }
-            if let Shape::DividedIcosahedron(pressure) = &mut self.shape {
-                change |= add_drag_value(ui, pressure, "Druck: ", 0, self.resolution);
-            }
-            ui.radio_value(&mut self.shape, Shape::Dodecahedron, "Dodekaeder");
-            ui.radio_value(&mut self.shape, Shape::Cube, "Würfel");
-            ui.radio_value(&mut self.shape, Shape::Football, "Fußball");
-            ui.radio_value(&mut self.shape, Shape::FabianHamann, "Fabian Hamanns Graph");
-            ui.radio_value(&mut self.shape, Shape::TriangTorus, "Torus (Dreiecke)");
-            if ui
-                .add(RadioButton::new(
-                    matches!(self.shape, Shape::RegularPolygon2D(_)),
-                    "2D Polygon trianguliert",
-                ))
-                .clicked()
-            {
-                self.shape = Shape::RegularPolygon2D(6);
-            }
-            if let Shape::RegularPolygon2D(nr_sides) = &mut self.shape {
-                change |= add_drag_value(ui, nr_sides, "Seiten: ", 3, 10);
-            }
-            ui.radio_value(
-                &mut self.shape,
-                Shape::Random2D,
-                "2D Kreisscheibe zufällig trianguliert",
-            );
-            if self.shape == Shape::Random2D {
-                change |= ui.button("neu berechnen").clicked();
-            }
-            change |= self.shape != old_shape;
-            change |= add_drag_value(ui, &mut self.resolution, "Auflösung: ", 0, 200);
-
+            ComboBox::from_id_source(&self.shape as *const _)
+                .selected_text("Form")
+                .show_ui(ui, |ui| {
+                    let old_shape = self.shape;
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::Tetrahedron,
+                        Shape::Tetrahedron.name_str(),
+                    );
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::Octahedron,
+                        Shape::Octahedron.name_str(),
+                    );
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::Icosahedron,
+                        Shape::Icosahedron.name_str(),
+                    );
+                    if ui
+                        .add(RadioButton::new(
+                            matches!(self.shape, Shape::DividedIcosahedron(_)),
+                            Shape::DividedIcosahedron(0).name_str(),
+                        ))
+                        .clicked()
+                    {
+                        self.shape = Shape::DividedIcosahedron(0);
+                    }
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::Dodecahedron,
+                        Shape::Dodecahedron.name_str(),
+                    );
+                    ui.radio_value(&mut self.shape, Shape::Cube, Shape::Cube.name_str());
+                    ui.radio_value(&mut self.shape, Shape::Football, Shape::Football.name_str());
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::FabianHamann,
+                        Shape::FabianHamann.name_str(),
+                    );
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::TriangTorus,
+                        Shape::TriangTorus.name_str(),
+                    );
+                    if ui
+                        .add(RadioButton::new(
+                            matches!(self.shape, Shape::RegularPolygon2D(_)),
+                            Shape::RegularPolygon2D(0).name_str(),
+                        ))
+                        .clicked()
+                    {
+                        self.shape = Shape::RegularPolygon2D(6);
+                    }
+                    ui.radio_value(&mut self.shape, Shape::Random2D, Shape::Random2D.name_str());
+                    change |= self.shape != old_shape;
+                });
+            change |= match &mut self.shape {
+                Shape::DividedIcosahedron(pressure) => {
+                    add_drag_value(ui, pressure, "Druck", 0, self.resolution)
+                },
+                Shape::RegularPolygon2D(nr_sides) => add_drag_value(ui, nr_sides, "Seiten", 3, 10),
+                Shape::Random2D => ui.button("neu berechnen").clicked(),
+                _ => add_disabled_drag_value(ui),
+            };
+            ui.add_space(8.0);
+            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", 0, 200);
             if change {
                 self.recompute_and_adjust(info);
             }
