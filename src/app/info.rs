@@ -159,6 +159,7 @@ struct Options {
     show_hull_boundary: bool,
     draw_vertices: bool,
     show_cop_strat: bool,
+    show_manual_marker_options: bool,
 }
 
 const DEFAULT_OPTIONS: Options = Options {
@@ -182,6 +183,7 @@ const DEFAULT_OPTIONS: Options = Options {
     show_hull_boundary: false,
     draw_vertices: false,
     show_cop_strat: false,
+    show_manual_marker_options: false,
 };
 
 impl Options {
@@ -223,18 +225,18 @@ impl Options {
 
 
             ui.add_space(8.0);
+            ui.label("Marker:");
+            add_drag_value(ui, &mut self.automatic_marker_scale, "Größe", 1, 100);
+            ui.horizontal(|ui| {
+                ui.color_edit_button_srgba(&mut self.automatic_marker_color);
+                ui.label("Farbe");
+                if ui.button("Reset").on_hover_text("Setze Farbe zurück").clicked() {
+                    self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
+                }
+            });
             ComboBox::from_id_source(&self.vertex_color_info as *const _)
-                .selected_text("Marker")
+                .selected_text(self.vertex_color_info.name_str())
                 .show_ui(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Farbe: ");
-                        ui.color_edit_button_srgba(&mut self.automatic_marker_color);
-                        if ui.button("Reset").on_hover_text("Setze Farbe zurück").clicked() {
-                            self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
-                        }
-                    });
-                    add_drag_value(ui, &mut self.automatic_marker_scale, "Größe", 1, 100);
-
                     let old = self.vertex_color_info;
                     for val in VertexColorInfo::iter() {
                         ui.radio_value(&mut self.vertex_color_info, val, val.name_str())
@@ -257,9 +259,28 @@ impl Options {
 
 
             ui.add_space(8.0);
-            ComboBox::from_id_source(&self.shown_manual_markers as *const _)
-                .selected_text("Manuelle Marker")
+            ui.label("Zahlen:");
+            add_drag_value(ui, &mut self.number_scale, "Größe", 1, 100);
+            ComboBox::from_id_source(&self.vertex_number_info as *const _)
+                .selected_text("Zahlen")
                 .show_ui(ui, |ui| {
+                    let old = self.vertex_number_info;
+                    for val in VertexNumberInfo::iter() {
+                        ui.radio_value(&mut self.vertex_number_info, val, val.name_str())
+                            .on_hover_text(val.description());
+                    }
+                    menu_change |= old != self.vertex_number_info;
+                });
+
+
+            ui.add_space(8.0);
+            if ui.add(Button::new("✏ Manuelle Marker").selected(self.show_manual_marker_options)).clicked() {
+                self.show_manual_marker_options = !self.show_manual_marker_options;
+            }
+            Window::new("✏")
+                .open(&mut self.show_manual_marker_options)
+                .collapsible(false).default_pos(ui.next_widget_position())
+                .show(ui.ctx(), |ui| {
                     ui.label("[Info]").on_hover_text(
                         "Manuelle Marker können an dem der Mausposition nächsten Knoten \
                         mit Taste [m] hinzugefügt und [n] entfernt werden.\
@@ -286,21 +307,6 @@ impl Options {
                             }
                         });
                     }
-                });
-
-
-            ui.add_space(8.0);
-            ComboBox::from_id_source(&self.vertex_number_info as *const _)
-                .selected_text("Zahlen")
-                .show_ui(ui, |ui| {
-                    add_drag_value(ui, &mut self.number_scale, "Größe", 1, 100);
-
-                    let old = self.vertex_number_info;
-                    for val in VertexNumberInfo::iter() {
-                        ui.radio_value(&mut self.vertex_number_info, val, val.name_str())
-                            .on_hover_text(val.description());
-                    }
-                    menu_change |= old != self.vertex_number_info;
                 });
         });
         menu_change
