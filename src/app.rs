@@ -136,12 +136,8 @@ impl eframe::App for State {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        SidePanel::left("left_panel").min_width(0.0).show(ctx, |ui| {
-            if !self.menu_visible {
-                if ui.button("⏵").on_hover_text("Menü ausklappen").clicked() {
-                    self.menu_visible = true;
-                }
-            } else {
+        if self.menu_visible {
+            SidePanel::left("left_panel").min_width(0.0).show(ctx, |ui| {
                 ScrollArea::vertical().show(ui, |ui| {
                     let compile_datetime = compile_time::datetime_str!();
                     ui.horizontal(|ui| {
@@ -158,12 +154,20 @@ impl eframe::App for State {
                     self.info.draw_menu(ui, &self.map);
                     ui.add_space(50.0);
                 });
-            }
-        });
+            });
+        }
 
         CentralPanel::default().show(ctx, |ui| {
             let con = self.map.update_and_draw(ui);
             self.info.update_and_draw(ui, &con);
+
+            if !self.menu_visible {
+                let pos = Rect::from_center_size(pos2(12.0, 2.0), Vec2::ZERO);
+                let open = Button::new("⏵");
+                if ui.put(pos, open).on_hover_text("Menü ausklappen").clicked() {
+                    self.menu_visible = true;
+                }
+            }
         });
     }
 }
