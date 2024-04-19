@@ -18,6 +18,7 @@ pub enum Shape {
     FabianHamann,
     Dodecahedron,
     TriangTorus,
+    SquareTorus,
     RegularPolygon2D(isize),
     Random2D,
 }
@@ -34,6 +35,7 @@ impl Shape {
             Self::FabianHamann => "Fabian Hamanns Graph",
             Self::Dodecahedron => "Dodekaeder",
             Self::TriangTorus => "Torus (Dreiecke)",
+            Self::SquareTorus => "Torus (Vierecke)",
             Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
             Self::Random2D => "2D Kreisscheibe zufällig trianguliert",
         }
@@ -49,6 +51,7 @@ impl Shape {
             Self::Octahedron => "Oktaeder".to_string(),
             Self::Random2D => "Zufaellig".to_string(),
             Self::TriangTorus => "Torus-Dreiecke".to_string(),
+            Self::SquareTorus => "Torus-Vierecke".to_string(),
             Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
             Self::Tetrahedron => "Tetraeder".to_string(),
             Self::Icosahedron => "Ikosaeder".to_string(),
@@ -80,6 +83,7 @@ pub fn new_map_from(shape: Shape, res: usize) -> Embedding3D {
         Shape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
         Shape::Random2D => Embedding3D::from_2d(graph::random_triangulated(res, 8)),
         Shape::TriangTorus => Embedding3D::new_subdivided_triangle_torus(res),
+        Shape::SquareTorus => Embedding3D::new_subdivided_squares_torus(res),
     }
 }
 
@@ -296,6 +300,11 @@ impl Map {
                         &mut self.shape,
                         Shape::TriangTorus,
                         Shape::TriangTorus.name_str(),
+                    );
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::SquareTorus,
+                        Shape::SquareTorus.name_str(),
                     );
                     if ui
                         .add(RadioButton::new(

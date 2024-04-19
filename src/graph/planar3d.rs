@@ -631,6 +631,62 @@ impl Embedding3D {
         }
     }
 
+    /// rendered flat as one large subdivided square.
+    /// imagine taking a square and  connecting the left and right sides and the top and bottom sides.
+    /// this is topologically a torus.
+    #[allow(dead_code)]
+    pub fn new_subdivided_squares_torus(divisions: usize) -> Self {
+        let side_len = (divisions as isize) + 2;
+        let nr_vertices = (side_len * side_len) as usize;
+        let mut vertices = Vec::with_capacity(nr_vertices);
+        let mut edges = EdgeList::new(6, nr_vertices);
+        let index_of = |x, y| (x * side_len + y) as usize;
+
+        let scale = 1.0 / (divisions as f32 + 1.0);
+        let x_step = scale * vec3(1.0, 0.0, 0.0);
+        let y_step = scale * vec3(0.0, 1.0, 0.0);
+        let corner = pos3(-0.5, -0.5, Z_OFFSET_2D);
+        for x in 0..side_len {
+            for y in 0..side_len {
+                let pos = corner + (x as f32) * x_step + (y as f32) * y_step;
+                vertices.push(pos);
+
+                let v = index_of(x, y);
+                debug_assert_eq!(v + 1, vertices.len());
+                if divisions > 0 {
+                    for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                        let nx = (nx + side_len) % side_len;
+                        let ny = (ny + side_len) % side_len;
+                        let nv = index_of(nx, ny);
+                        if nv < v {
+                            edges.add_edge(v, nv);
+                        }
+                    }
+                }
+            }
+        }
+        if divisions == 0 {
+            edges.add_edge(0, 1);
+            edges.add_edge(1, 2);
+            edges.add_edge(2, 3);
+            edges.add_edge(3, 0);
+        }
+        let sym = NoSymmetry::new(nr_vertices);
+
+        Self {
+            surface: ConvexTriangleHull::empty(),
+            nr_visible_surface_vertices: usize::MAX,
+            is_regular_triangulation: false,
+            is_flat: true,
+            max_shown_edge_length: if divisions > 0 { 0.55 } else { 1.1 },
+            edge_dividing_vertices: Vec::new(),
+            inner_vertices: Vec::new(),
+            vertices,
+            edges,
+            sym_group: SymGroup::None(sym),
+        }
+    }
+
     pub fn new_2d_triangulated_regular_polygon(sides: usize, divisions: usize) -> Self {
         let mut surface_positions = Vec::with_capacity(sides + 1);
         surface_positions.push(pos3(0.0, 0.0, Z_OFFSET_2D));
