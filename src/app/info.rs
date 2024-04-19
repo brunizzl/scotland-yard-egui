@@ -70,9 +70,9 @@ impl VertexColorInfo {
             NearNodes => "für Räuber nähere Knoten",
             SafeOutside => "Sicherer Außenbereich",
             SafeBoundary => "Sicherere Grenze",
-            Escape1 => "Punkte mit direkter Fluchtoption 1",
-            Escape2 => "Punkte mit direkter Fluchtoption 2",
-            BruteForceRes => "Bruteforce Ergebnis",
+            Escape1 => "Punkte mit Fluchtoption 1",
+            Escape2 => "Punkte mit Fluchtoption 2",
+            BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
             RobberDist => "Räuberabstand",
@@ -229,10 +229,10 @@ impl Options {
             add_drag_value(ui, &mut self.automatic_marker_scale, "Größe", 1, 100);
             ui.horizontal(|ui| {
                 ui.color_edit_button_srgba(&mut self.automatic_marker_color);
-                ui.label("Farbe");
                 if ui.button("Reset").on_hover_text("Setze Farbe zurück").clicked() {
                     self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
                 }
+                ui.label("Farbe");
             });
             ComboBox::from_id_source(&self.vertex_color_info as *const _)
                 .selected_text(self.vertex_color_info.name_str())
@@ -262,7 +262,7 @@ impl Options {
             ui.label("Zahlen:");
             add_drag_value(ui, &mut self.number_scale, "Größe", 1, 100);
             ComboBox::from_id_source(&self.vertex_number_info as *const _)
-                .selected_text("Zahlen")
+                .selected_text(self.vertex_number_info.name_str())
                 .show_ui(ui, |ui| {
                     let old = self.vertex_number_info;
                     for val in VertexNumberInfo::iter() {

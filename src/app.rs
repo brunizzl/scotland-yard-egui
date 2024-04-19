@@ -90,6 +90,8 @@ fn add_disabled_drag_value(ui: &mut Ui) -> bool {
 pub struct State {
     map: map::Map,
     info: info::Info,
+
+    menu_visible: bool,
 }
 
 impl State {
@@ -97,7 +99,7 @@ impl State {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut info = info::Info::new(cc);
         let map = map::Map::new(&mut info, cc);
-        Self { map, info }
+        Self { map, info, menu_visible: true }
     }
 }
 
@@ -134,16 +136,30 @@ impl eframe::App for State {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        SidePanel::left("left_panel").show(ctx, |ui| {
-            ScrollArea::vertical().show(ui, |ui| {
-                let compile_datetime = compile_time::datetime_str!();
-                ui.label(format!("kompiliert am {compile_datetime}"));
-                widgets::global_dark_light_mode_buttons(ui);
-                draw_usage_info(ui);
-                self.map.draw_menu(ui, &mut self.info);
-                self.info.draw_menu(ui, &self.map);
-                ui.add_space(50.0);
-            });
+        SidePanel::left("left_panel").min_width(0.0).show(ctx, |ui| {
+            if !self.menu_visible {
+                if ui.button("⏵").on_hover_text("Menü ausklappen").clicked() {
+                    self.menu_visible = true;
+                }
+            }
+            else {
+                ScrollArea::vertical().show(ui, |ui| {
+                    let compile_datetime = compile_time::datetime_str!();
+                    ui.horizontal(|ui| {
+                        //add spaces to force minimum width of sidebar
+                        let compile_info = format!("kompiliert am {compile_datetime}  ");
+                        ui.add(Label::new(compile_info).wrap(false));
+                        if ui.button("⏴").on_hover_text("Menü einklappen").clicked() {
+                            self.menu_visible = false;
+                        }
+                    });
+                    widgets::global_dark_light_mode_buttons(ui);
+                    draw_usage_info(ui);
+                    self.map.draw_menu(ui, &mut self.info);
+                    self.info.draw_menu(ui, &self.map);
+                    ui.add_space(50.0);
+                });
+            }
         });
 
         CentralPanel::default().show(ctx, |ui| {

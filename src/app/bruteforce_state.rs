@@ -580,7 +580,7 @@ impl BruteforceComputationState {
                 }
                 ui.add_space(5.0);
             }
-            ui.label("Räubergewinnfunktion:");
+            ui.label("Räuberstrategie:");
             ui.horizontal(|ui| {
                 let curr_known = self.results.contains_key(&game_type);
                 let enable = !computing_curr && !curr_known;

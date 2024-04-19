@@ -251,8 +251,9 @@ impl Map {
         }
         ui.collapsing("Spielfeld", |ui| {
             let mut change = false;
+            ui.label("Form:");
             ComboBox::from_id_source(&self.shape as *const _)
-                .selected_text("Form")
+                .selected_text(self.shape.name_str())
                 .show_ui(ui, |ui| {
                     let old_shape = self.shape;
                     ui.radio_value(
