@@ -666,10 +666,11 @@ impl Embedding3D {
             }
         }
         if divisions == 0 {
+            debug_assert_eq!(edges.nr_vertices(), 4);
             edges.add_edge(0, 1);
-            edges.add_edge(1, 2);
-            edges.add_edge(2, 3);
-            edges.add_edge(3, 0);
+            edges.add_edge(1, 3);
+            edges.add_edge(3, 2);
+            edges.add_edge(2, 0);
         }
         let sym = NoSymmetry::new(nr_vertices);
 
@@ -678,7 +679,7 @@ impl Embedding3D {
             nr_visible_surface_vertices: usize::MAX,
             is_regular_triangulation: false,
             is_flat: true,
-            max_shown_edge_length: if divisions > 0 { 0.55 } else { 1.1 },
+            max_shown_edge_length: if divisions > 0 { 0.55 } else { 1.9 },
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
