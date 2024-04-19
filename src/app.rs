@@ -141,8 +141,7 @@ impl eframe::App for State {
                 if ui.button("⏵").on_hover_text("Menü ausklappen").clicked() {
                     self.menu_visible = true;
                 }
-            }
-            else {
+            } else {
                 ScrollArea::vertical().show(ui, |ui| {
                     let compile_datetime = compile_time::datetime_str!();
                     ui.horizontal(|ui| {
