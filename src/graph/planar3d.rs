@@ -627,7 +627,7 @@ impl Embedding3D {
             inner_vertices: Vec::new(),
             vertices,
             edges,
-            sym_group: SymGroup::Torus(sym),
+            sym_group: SymGroup::Torus6(sym),
         }
     }
 
@@ -672,7 +672,7 @@ impl Embedding3D {
             edges.add_edge(3, 2);
             edges.add_edge(2, 0);
         }
-        let sym = NoSymmetry::new(nr_vertices);
+        let sym = torus::TorusSymmetry::new(nr_vertices);
 
         Self {
             surface: ConvexTriangleHull::empty(),
@@ -684,7 +684,7 @@ impl Embedding3D {
             inner_vertices: Vec::new(),
             vertices,
             edges,
-            sym_group: SymGroup::None(sym),
+            sym_group: SymGroup::Torus4(sym),
         }
     }
 
