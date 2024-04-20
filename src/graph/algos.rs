@@ -108,7 +108,7 @@ fn find_hull_boundary_fallback(
     hull: &[InSet],
     edges: &EdgeList,
     queue: &mut VecDeque<usize>,
-) -> bool {
+) -> Result<(), ()> {
     debug_assert_eq!(boundary.len(), 1);
     let fst_inside = boundary[0];
     debug_assert_eq!(dist_to_boundary_start[fst_inside], 0);
@@ -178,19 +178,23 @@ fn find_hull_boundary_fallback(
     potential_next.clear();
     *queue = potential_next;
 
-    boundary.last() == Some(&fst_inside)
+    (boundary.last() == Some(&fst_inside)).then_some(()).ok_or(())
 }
 
 /// assumes boundary has first vertex already inserted as starting point
 /// and that hull is up-to date, including having all boundary vertices marked
 fn find_convex_hull_boundary(
     boundary: &mut Vec<usize>,
+    dist_to_boundary_start: &[isize],
     hull: &[InSet],
     edges: &EdgeList,
+    queue: &mut VecDeque<usize>,
 ) -> Result<(), ()> {
-    // currently all graphs with continuous boundary are triangulations.
-    // the fallback is thus not of any advantage for now.
-    find_hull_boundary_in_triangulation(boundary, hull, edges)
+    let res = find_hull_boundary_in_triangulation(boundary, hull, edges);
+    if res.is_ok() {
+        return res;
+    }
+    find_hull_boundary_fallback(boundary, dist_to_boundary_start, hull, edges, queue)
 }
 
 /// relies just on [`InSet::No`] and [`InSet::Interieur`], doesn't need [`InSet::OnBoundary`] for `hull` to function.
@@ -334,13 +338,26 @@ impl ConvexHullData {
     }
 
     /// assumes that self.hull is already up to date
-    fn update_boundary(&mut self, cops: &[Character], edges: &EdgeList) {
+    fn update_boundary(
+        &mut self,
+        cops: &[Character],
+        edges: &EdgeList,
+        queue: &mut VecDeque<usize>,
+    ) {
         self.boundary.clear();
         for cop in cops {
             let v = cop.nearest_node;
             if cop.is_active() && self.hull[v].on_boundary() {
                 self.boundary.push(v);
-                if find_convex_hull_boundary(&mut self.boundary, &self.hull, edges).is_ok() {
+                if find_convex_hull_boundary(
+                    &mut self.boundary,
+                    &cop.distances,
+                    &self.hull,
+                    edges,
+                    queue,
+                )
+                .is_ok()
+                {
                     return;
                 }
                 self.boundary.clear();
@@ -387,7 +404,7 @@ impl ConvexHullData {
         vertices_outside_hull: &[usize],
     ) {
         self.update_inside(cops, edges, queue, vertices_outside_hull);
-        self.update_boundary(cops, edges);
+        self.update_boundary(cops, edges, queue);
         self.update_segments(min_cop_dist);
     }
 }
