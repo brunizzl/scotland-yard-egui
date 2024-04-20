@@ -39,6 +39,8 @@ On Fedora Rawhide you need to run:
 
 #### Functionality
 * adapt hull boundary to respect torus (allow multiple disjoined boundary segements / perhaps don't care about boundary as circle, but only care about connected components of safe boundary?)
+* adapt hull boundary to be successfully constructed in non-triangulations
+* add square torus symmetry
 
 #### Nice To Have
 * extract base functionality of EdgeList to own thing
