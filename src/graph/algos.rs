@@ -44,6 +44,10 @@ fn find_hull_boundary_in_triangulation(
     // if neighter of curr_outside and curr_inside can be advanced, while keeping
     // the neighbor relation, we have something other than a triangulation and exit.
     let mut change = true;
+    // in a graph of unknown shape, it can not be ruled out, that an up to unbounded number of
+    // vertices are neighbors of the last boundary vertex. in that case we return if nothing in
+    // the boundary changes after some maximum number of consecutive outside steps.
+    let mut outside_streak = 0;
     while change && curr_outside != fst_outside {
         change = false;
 
@@ -58,6 +62,7 @@ fn find_hull_boundary_in_triangulation(
             last_outside = curr_outside;
             curr_outside = next_outside;
             change = true;
+            outside_streak += 1;
         }
 
         // step on hull boundary but keep curr_outside as neighbor
@@ -78,11 +83,11 @@ fn find_hull_boundary_in_triangulation(
             last_inside = curr_inside;
             curr_inside = next_inside;
             change = true;
+            outside_streak = 0;
         }
 
         debug_assert!(edges.has_edge(curr_inside, curr_outside));
-        if boundary.len() == edges.nr_vertices() {
-            boundary.clear();
+        if boundary.len() == edges.nr_vertices() || outside_streak > 32 {
             return Err(());
         }
     }
@@ -91,8 +96,9 @@ fn find_hull_boundary_in_triangulation(
     // inside start with the following step inside.
     // the only special case is where the boundary has length 2 or 3, because then fst_inside will
     // not be readded, as it is also last_inside or snd_last_inside.
+    // (TODO: how does this hold up in non-planar graphs?)
     debug_assert!(
-        !change || Some(&fst_inside) == boundary.last() || matches!(boundary.len(), 2 | 3)
+        !change || Some(&fst_inside) == boundary.last() || boundary.len() < 10
     );
 
     change.then_some(()).ok_or(())
@@ -190,10 +196,13 @@ fn find_convex_hull_boundary(
     edges: &EdgeList,
     queue: &mut VecDeque<usize>,
 ) -> Result<(), ()> {
+    let start = boundary[0];
     let res = find_hull_boundary_in_triangulation(boundary, hull, edges);
     if res.is_ok() {
         return res;
     }
+    boundary.clear();
+    boundary.push(start);
     find_hull_boundary_fallback(boundary, dist_to_boundary_start, hull, edges, queue)
 }
 
