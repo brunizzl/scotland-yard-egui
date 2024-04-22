@@ -97,9 +97,7 @@ fn find_hull_boundary_in_triangulation(
     // the only special case is where the boundary has length 2 or 3, because then fst_inside will
     // not be readded, as it is also last_inside or snd_last_inside.
     // (TODO: how does this hold up in non-planar graphs?)
-    debug_assert!(
-        !change || Some(&fst_inside) == boundary.last() || boundary.len() < 10
-    );
+    debug_assert!(!change || Some(&fst_inside) == boundary.last() || boundary.len() < 10);
 
     change.then_some(()).ok_or(())
 }
