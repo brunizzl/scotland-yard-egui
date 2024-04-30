@@ -164,7 +164,7 @@ impl Map {
         let mut extreme_nodes = std::mem::take(&mut self.extreme_vertices);
         extreme_nodes.clear();
         extreme_nodes.resize(4, usize::MAX);
-        let mut extreme_vals = [0.0; 4];
+        let mut extreme_vals = [1e10, 1e10, -1e10, -1e10];
         for (i, p) in self.positions().iter().enumerate() {
             if p.x < extreme_vals[0] {
                 extreme_nodes[0] = i;
