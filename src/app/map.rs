@@ -17,7 +17,8 @@ pub enum Shape {
     Football,
     FabianHamann,
     Dodecahedron,
-    TriangTorus,
+    TriangTorusDia,
+    TriangTorusHex,
     SquareTorus,
     RegularPolygon2D(isize),
     Random2D,
@@ -34,7 +35,8 @@ impl Shape {
             Self::Football => "Fußball",
             Self::FabianHamann => "Fabian Hamanns Graph",
             Self::Dodecahedron => "Dodekaeder",
-            Self::TriangTorus => "Torus (Dreiecke)",
+            Self::TriangTorusDia => "Torus (Dreiecke, Dia)",
+            Self::TriangTorusHex => "Torus (Dreiecke, Hex)",
             Self::SquareTorus => "Torus (Vierecke)",
             Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
             Self::Random2D => "2D Kreisscheibe zufällig trianguliert",
@@ -50,7 +52,8 @@ impl Shape {
             Self::Football => "Fussball".to_string(),
             Self::Octahedron => "Oktaeder".to_string(),
             Self::Random2D => "Zufaellig".to_string(),
-            Self::TriangTorus => "Torus-Dreiecke".to_string(),
+            Self::TriangTorusDia => "Torus-Dreiecke".to_string(),
+            Self::TriangTorusHex => "Torus-Dreiecke-Hex".to_string(),
             Self::SquareTorus => "Torus-Vierecke".to_string(),
             Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
             Self::Tetrahedron => "Tetraeder".to_string(),
@@ -82,7 +85,8 @@ pub fn new_map_from(shape: Shape, res: usize) -> Embedding3D {
         Shape::Football => Embedding3D::new_subdivided_football(res, false),
         Shape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
         Shape::Random2D => Embedding3D::from_2d(graph::random_triangulated(res, 8)),
-        Shape::TriangTorus => Embedding3D::new_subdivided_triangle_torus(res),
+        Shape::TriangTorusDia => Embedding3D::new_subdivided_triangle_torus_diamond(res),
+        Shape::TriangTorusHex => Embedding3D::new_subdivided_triangle_torus_hexagon(res),
         Shape::SquareTorus => Embedding3D::new_subdivided_squares_torus(res),
     }
 }
@@ -164,7 +168,7 @@ impl Map {
         let mut extreme_nodes = std::mem::take(&mut self.extreme_vertices);
         extreme_nodes.clear();
         extreme_nodes.resize(4, usize::MAX);
-        let mut extreme_vals = [0.0; 4];
+        let mut extreme_vals = [1e10, 1e10, -1e10, -1e10];
         for (i, p) in self.positions().iter().enumerate() {
             if p.x < extreme_vals[0] {
                 extreme_nodes[0] = i;
@@ -298,8 +302,13 @@ impl Map {
                     );
                     ui.radio_value(
                         &mut self.shape,
-                        Shape::TriangTorus,
-                        Shape::TriangTorus.name_str(),
+                        Shape::TriangTorusDia,
+                        Shape::TriangTorusDia.name_str(),
+                    );
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::TriangTorusHex,
+                        Shape::TriangTorusHex.name_str(),
                     );
                     ui.radio_value(
                         &mut self.shape,

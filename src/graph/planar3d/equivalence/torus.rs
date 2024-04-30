@@ -361,7 +361,7 @@ mod test {
     #[test]
     fn autos_6() {
         let res = 8; //8 divisions -> original edge now has len 10 -> 100 vertices
-        let torus = Embedding3D::new_subdivided_triangle_torus(res);
+        let torus = Embedding3D::new_subdivided_triangle_torus_diamond(res);
         assert_eq!(torus.nr_vertices(), 100);
         let sym = TorusSymmetry6::new(100);
         let mut mapped_neighs = Vec::new();
