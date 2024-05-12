@@ -29,6 +29,7 @@ pub enum VertexColorInfo {
     VertexEquivalenceClasses,
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
+    CopsVoronoi,
     Debugging,
 }
 
@@ -60,6 +61,8 @@ impl VertexColorInfo {
             RobberVertexClass => "Alle Knoten die in selber Symmetrieäquivalenzklasse sitzen \
             wie die aktuelle Räuberposition",
             CopsRotatedToEquivalence => "Coppositionen rotiert auf repräsentative Knoten selber Äquivalenzklasse",
+            CopsVoronoi => "Punkte, mit mehreren nähesten Cops (normale Farbe) \n\
+            und Punkte mit mehreren Cops \"fast\" am nähesten, e.g. diff <= 1 (transparente Farbe)",
             Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
         }
     }
@@ -79,6 +82,7 @@ impl VertexColorInfo {
             VertexEquivalenceClasses => "Symmetrieäquivalenzklassen",
             RobberVertexClass => "Äquivalenzklasse Räuberknoten",
             CopsRotatedToEquivalence => "Rotierte Coppositionen",
+            CopsVoronoi => "Cops Voronoi",
             Debugging => "Debugging",
         }
     }
@@ -584,7 +588,9 @@ impl Info {
         let update_min_cop_dist = update_hull
             || matches!(
                 self.options.vertex_color_info,
-                VertexColorInfo::MinCopDist | VertexColorInfo::NearNodes
+                VertexColorInfo::MinCopDist
+                    | VertexColorInfo::NearNodes
+                    | VertexColorInfo::CopsVoronoi
             )
             || self.options.vertex_number_info == VertexNumberInfo::MinCopDist;
 
@@ -885,6 +891,35 @@ impl Info {
                 ) {
                     if vis && in_hull.on_boundary() && dist >= 2 {
                         draw_circle_at(pos, self.options.automatic_marker_color);
+                    }
+                }
+            },
+            VertexColorInfo::CopsVoronoi => {
+                let active_dists =
+                    self.characters.active_cops().map(|c| &c.distances[..]).collect_vec();
+
+                let color_exact = self.options.automatic_marker_color;
+                let color_about = self.options.automatic_marker_color.gamma_multiply(0.4);
+                let choose_color = |w| if w >= 20 { color_exact } else { color_about };
+
+                for (v, &min_dist, &pos, &vis) in
+                    izip!(0.., &self.min_cop_dist, con.positions, con.visible)
+                {
+                    if vis {
+                        // sometimes the change from region "owned" by one cop to region
+                        // "owned" by the next happens between vertices.
+                        // thus we also look for near misses.
+                        let weight: usize = active_dists
+                            .iter()
+                            .map(|d| match d[v] {
+                                n if n == min_dist => 10,
+                                n if n == min_dist + 1 => 1,
+                                _ => 0,
+                            })
+                            .sum();
+                        if weight > 10 {
+                            draw_circle_at(pos, choose_color(weight));
+                        }
                     }
                 }
             },

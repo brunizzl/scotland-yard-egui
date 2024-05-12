@@ -512,7 +512,7 @@ impl EscapeableNodes {
         last_owner: Option<usize>,
         owner: usize,
     ) {
-        let fst_in_segment = last_owner.is_none();
+        let is_fst = last_owner.is_none();
         let last_owner = last_owner.unwrap_or(usize::MAX);
         let mut local_queue = std::mem::take(queue);
         while let Some(v) = local_queue.pop_front() {
@@ -529,7 +529,7 @@ impl EscapeableNodes {
                 //all further vertices of that same segment can only mark hull vertices which have been reached by
                 //all previous ones.
                 //the vertices counted at the end are only those reached by all boundary vertices.
-                if !fst_in_segment && self.last_write_by[n] != last_owner {
+                if !is_fst && self.last_write_by[n] != last_owner {
                     continue;
                 }
                 //we have been here before -> no need to mark again
@@ -538,6 +538,8 @@ impl EscapeableNodes {
                 }
                 //it is key to never check the distance we overwrite. we don't want the minimum distance to all
                 //boundary nodes, we actually want the distance to the current boundary node.
+                //we still guarantee to compute the correct distance, because we discover vertices via
+                //breadh-first seach.
                 self.some_boundary_dist[n] = dist + 1;
                 local_queue.push_back(n);
                 self.last_write_by[n] = owner;
