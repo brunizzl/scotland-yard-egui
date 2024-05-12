@@ -123,16 +123,11 @@ impl SymmetryGroup for NoSymmetry {
 }
 
 pub trait DynAutomorphism {
-    fn dyn_nr_vertices(&self) -> usize;
     fn dyn_apply_forward(&self, v: usize) -> usize;
     fn dyn_apply_backward(&self, v: usize) -> usize;
 }
 
 impl<T: Automorphism> DynAutomorphism for T {
-    fn dyn_nr_vertices(&self) -> usize {
-        <Self as Automorphism>::nr_vertices(self)
-    }
-
     fn dyn_apply_forward(&self, v: usize) -> usize {
         <Self as Automorphism>::apply_forward(self, v)
     }
