@@ -3,7 +3,10 @@ use std::collections::{HashMap, VecDeque};
 use egui::*;
 use itertools::izip;
 
-use crate::{geo::Pos3, graph::EdgeList};
+use crate::{
+    geo::{Pos3, Vec3},
+    graph::EdgeList,
+};
 
 use super::{color::*, *};
 
@@ -66,6 +69,17 @@ pub fn emojis_as_latex_commands() -> HashMap<&'static str, &'static str> {
     ])
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+enum Pos {
+    /// [`Pos3`] is position of vertex where character was last dropped of.
+    /// this is only relevant, when a new graph is computed: it places the character at the node on the new graph
+    /// closest to where he was before.
+    OnVertex(Pos3),
+    /// position to where is is currently held while dragging,
+    /// only active while dragging (coordinates are in the intermediate system of ToScreen)
+    OnScreen(Pos2),
+}
+
 //denotes eighter a cop or the robber as node on screen
 //Pos2 is in graph coordinates, not in screen coordinates
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -80,22 +94,22 @@ pub struct Character {
     pub distances: Vec<isize>,
     pub nearest_node: usize,
 
-    /// position to where is is currently held while dragging,
-    /// only updated while dragging (coordinates are in the intermediate system of ToScreen)
-    pos2: Pos2,
+    pos: Pos,
 
-    /// position of nearest_node.
-    /// this is only relevant, when a new graph is computed: it places the character at the node on the new graph
-    /// closest to where he was before.
-    pub pos3: Pos3,
-
-    on_node: bool,
-    enabled: bool,  //manual choice to not consider this instance in computations
-    dragging: bool, //currently beeing dragged by mouse cursor
-    updated: bool,  //nearest_node or distances changed this frame
+    on_node: bool, //currently close to node, can also be true while dragging.
+    enabled: bool, //manual choice to not consider this instance in computations
+    updated: bool, //nearest_node or distances changed this frame
 }
 
 impl Character {
+    pub fn dir_3d(&self) -> Vec3 {
+        use crate::graph::planar3d::Z_OFFSET_2D;
+        match self.pos {
+            Pos::OnScreen(p2) => Vec3::new(p2.x, p2.y, Z_OFFSET_2D),
+            Pos::OnVertex(p3) => p3.to_vec3(),
+        }
+    }
+
     pub fn is_active(&self) -> bool {
         self.enabled && self.on_node
     }
@@ -113,11 +127,10 @@ impl Character {
             distances: Vec::new(),
             nearest_node: 0,
 
-            pos2,
-            pos3: Pos3::ZERO,
-            on_node: false,
+            pos: Pos::OnScreen(pos2),
+
+            on_node: true,
             enabled: true,
-            dragging: true, //causes snap to node next update (as dragging will change to false)
             updated: true,
         }
     }
@@ -161,23 +174,25 @@ impl Character {
         let character_size = f32::max(6.0, con.scale * 15.0);
 
         let node_pos = to_plane.project_pos(con.positions[self.nearest_node]);
-        let draw_at_node = self.on_node && !self.dragging;
-        let draw_screen_pos = if draw_at_node {
-            move_rect.transform_pos(node_pos)
-                + (nr_others_at_same_pos as f32) * vec2(0.0, character_size * 0.75)
-        } else {
-            move_rect.transform_pos(self.pos2)
+        let draw_screen_pos = match self.pos {
+            Pos::OnScreen(p2) => move_rect.transform_pos(p2),
+            Pos::OnVertex(_) => {
+                move_rect.transform_pos(node_pos)
+                    + (nr_others_at_same_pos as f32) * vec2(0.0, character_size * 0.75)
+            },
         };
 
         let rect_len = if nr_others_at_same_pos > 0 { 1.0 } else { 3.0 } * character_size;
         let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
         let character_id = con.response.id.with(self as *const Self);
         let point_response = ui.interact(point_rect, character_id, Sense::drag());
-        let dragging = point_response.dragged_by(PointerButton::Primary);
+        let now_dragging = point_response.dragged_by(PointerButton::Primary);
+        let was_dragging = matches!(self.pos, Pos::OnScreen(_));
         //dragging starts -> update actual position to match drawn position
-        if dragging {
+        if now_dragging {
             let new_screen_pos = draw_screen_pos + point_response.drag_delta();
-            self.pos2 = move_rect.inverse().transform_pos(new_screen_pos);
+            let new_pos = move_rect.inverse().transform_pos(new_screen_pos);
+            self.pos = Pos::OnScreen(new_pos);
         }
 
         if self.last_positions.is_empty() && self.on_node {
@@ -186,16 +201,14 @@ impl Character {
         //test if character was just released. doing this ourselfs allows to simulate release whenever we like
         //(e.g. just set dragging to true and we snap to position)
         let mut just_released_on_new_node = false;
-        if !dragging && self.dragging && self.on_node {
-            self.pos2 = node_pos; //snap actual character postion to node where he was dragged
+        if !now_dragging && was_dragging && self.on_node {
+            self.pos = Pos::OnVertex(con.positions[self.nearest_node]);
             if Some(&self.nearest_node) != self.last_positions.last() {
                 //position changed and drag released -> new step
                 self.last_positions.push(self.nearest_node);
-                self.pos3 = con.positions[self.nearest_node];
                 just_released_on_new_node = true;
             }
         }
-        self.dragging = dragging;
         self.draw_large_at(draw_screen_pos, &con.painter, ui, character_size);
 
         just_released_on_new_node
@@ -203,15 +216,15 @@ impl Character {
 
     /// assumes current nearest node to be "good", e.g. not on side of surface facing away from camera
     fn update(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>) {
-        if !self.dragging {
+        let Pos::OnScreen(pos2) = self.pos else {
             return;
-        }
+        };
         let to_plane = con.cam().to_screen().to_plane;
         let mut best_dist_sq = f32::MAX;
         let mut best_vertex = usize::MAX;
         for (v, &vis, &pos) in izip!(0.., con.visible, con.positions) {
             if vis {
-                let new_dist_sq = (to_plane.project_pos(pos) - self.pos2).length_sq();
+                let new_dist_sq = (to_plane.project_pos(pos) - pos2).length_sq();
                 if new_dist_sq < best_dist_sq {
                     best_dist_sq = new_dist_sq;
                     best_vertex = v;
@@ -287,7 +300,7 @@ impl CharacterState {
                 if let Some(&v_last) = ch.last_positions.last() {
                     ch.nearest_node = v_last;
                     ch.update_distances(edges, queue);
-                    ch.pos3 = positions[ch.nearest_node];
+                    ch.pos = Pos::OnVertex(positions[ch.nearest_node]);
                 }
             }
         }
@@ -300,7 +313,7 @@ impl CharacterState {
             ch.last_positions.push(v);
             ch.nearest_node = v;
             ch.update_distances(edges, queue);
-            ch.pos3 = positions[ch.nearest_node];
+            ch.pos = Pos::OnVertex(positions[ch.nearest_node]);
         }
     }
 

@@ -51,7 +51,7 @@ fn normalize_positions(positions: &mut [Pos3]) {
 
 /// to improve positioning of characters when switching to a 2d embedding,
 /// the embedding sits outside the x-y plane.
-const Z_OFFSET_2D: f32 = 0.5;
+pub const Z_OFFSET_2D: f32 = 0.5;
 
 pub struct Embedding3D {
     /// all vertices are expected to lie on this surface.
