@@ -281,39 +281,43 @@ impl Options {
             if ui.add(Button::new("✏ Manuelle Marker").selected(self.show_manual_marker_options)).clicked() {
                 self.show_manual_marker_options = !self.show_manual_marker_options;
             }
-            Window::new("✏")
-                .open(&mut self.show_manual_marker_options)
-                .collapsible(false).default_pos(ui.next_widget_position())
-                .show(ui.ctx(), |ui| {
-                    ui.label("[Info]").on_hover_text(
-                        "Manuelle Marker können an dem der Mausposition nächsten Knoten \
-                        mit Taste [m] hinzugefügt und [n] entfernt werden.\
-                        Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
-                    );
-                    add_drag_value(ui, &mut self.manual_marker_scale, "Größe", 1, 100);
-
-                    for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
-                        ui.horizontal(|ui| {
-                            ui.radio_value(&mut self.active_manual_marker, i, "");
-                            ui.color_edit_button_srgba(color);
-                            if ui.button("Reset").on_hover_text("setze Farbe zurück").clicked() {
-                                *color = color::HAND_PICKED_MARKER_COLORS[i];
-                            }
-
-                            let bit_i = 1u8 << i;
-                            let curr_shown = self.shown_manual_markers & bit_i != 0;
-                            let mut show = curr_shown;
-                            ui.add(Checkbox::new(&mut show, "")).on_hover_text("Anzeigen");
-                            if show {
-                                self.shown_manual_markers |= bit_i;
-                            } else if curr_shown {
-                                self.shown_manual_markers -= bit_i;
-                            }
-                        });
-                    }
-                });
         });
+
         menu_change
+    }
+
+    pub fn draw_windows(&mut self, ctx: &Context) {
+        Window::new("✏")
+            .open(&mut self.show_manual_marker_options)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.label("[Info]").on_hover_text(
+                    "Manuelle Marker können an dem der Mausposition nächsten Knoten \
+                mit Taste [m] hinzugefügt und [n] entfernt werden.\
+                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
+                );
+                add_drag_value(ui, &mut self.manual_marker_scale, "Größe", 1, 100);
+
+                for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut self.active_manual_marker, i, "");
+                        ui.color_edit_button_srgba(color);
+                        if ui.button("Reset").on_hover_text("setze Farbe zurück").clicked() {
+                            *color = color::HAND_PICKED_MARKER_COLORS[i];
+                        }
+
+                        let bit_i = 1u8 << i;
+                        let curr_shown = self.shown_manual_markers & bit_i != 0;
+                        let mut show = curr_shown;
+                        ui.add(Checkbox::new(&mut show, "")).on_hover_text("Anzeigen");
+                        if show {
+                            self.shown_manual_markers |= bit_i;
+                        } else if curr_shown {
+                            self.shown_manual_markers -= bit_i;
+                        }
+                    });
+                }
+            });
     }
 }
 
@@ -441,17 +445,20 @@ impl Info {
         self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
     }
 
+    pub fn draw_windows(&mut self, ctx: &Context) {
+        self.options.draw_windows(ctx);
+    }
+
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
         let mut min_cop_dist = std::mem::take(&mut self.min_cop_dist);
         min_cop_dist.clear();
+        min_cop_dist.resize(edges.nr_vertices(), isize::MAX);
         let mut active_cops = self.characters.active_cops();
         if let Some(cop) = active_cops.next() {
-            min_cop_dist.clone_from(&cop.distances);
-        } else {
-            min_cop_dist.resize(edges.nr_vertices(), isize::MAX);
+            min_cop_dist.clone_from_slice(cop.dists());
         }
         for cop in active_cops {
-            for (this, curr_min) in izip!(&cop.distances, &mut min_cop_dist) {
+            for (this, curr_min) in izip!(cop.dists(), &mut min_cop_dist) {
                 if this < curr_min {
                     *curr_min = *this;
                 }
@@ -463,14 +470,13 @@ impl Info {
     fn update_max_cop_dist(&mut self, edges: &EdgeList) {
         let mut max_cop_dist = std::mem::take(&mut self.max_cop_dist);
         max_cop_dist.clear();
+        max_cop_dist.resize(edges.nr_vertices(), isize::MIN);
         let mut active_cops = self.characters.active_cops();
         if let Some(cop) = active_cops.next() {
-            max_cop_dist.clone_from(&cop.distances);
-        } else {
-            max_cop_dist.resize(edges.nr_vertices(), isize::MIN);
+            max_cop_dist.clone_from_slice(cop.dists());
         }
         for cop in active_cops {
-            for (this, curr_max) in izip!(&cop.distances, &mut max_cop_dist) {
+            for (this, curr_max) in izip!(cop.dists(), &mut max_cop_dist) {
                 if this > curr_max {
                     *curr_max = *this;
                 }
@@ -743,7 +749,7 @@ impl Info {
             VertexColorInfo::NearNodes => {
                 if let Some(r) = self.characters.robber() {
                     for (r_dist, c_dist, &pos, &vis) in
-                        izip!(&r.distances, &self.min_cop_dist, con.positions, con.visible)
+                        izip!(r.dists(), &self.min_cop_dist, con.positions, con.visible)
                     {
                         if vis && r_dist < c_dist {
                             draw_circle_at(pos, self.options.automatic_marker_color);
@@ -766,7 +772,7 @@ impl Info {
             VertexColorInfo::RobberDist => {
                 if let Some(r) = self.characters.robber() {
                     let bnd = self.options.marked_robber_dist;
-                    for (&dist, &pos, &vis) in izip!(&r.distances, con.positions, con.visible) {
+                    for (&dist, &pos, &vis) in izip!(r.dists(), con.positions, con.visible) {
                         if vis && dist == bnd {
                             draw_circle_at(pos, self.options.automatic_marker_color);
                         }
@@ -828,7 +834,7 @@ impl Info {
             VertexColorInfo::RobberVertexClass => {
                 if let Some(r) = self.characters.robber() {
                     let sym_group = con.sym_group().to_dyn();
-                    let v0 = r.nearest_node;
+                    let v0 = r.vertex();
                     let mut f = |transform: &dyn DynAutomorphism| {
                         let sym_v = transform.dyn_apply_forward(v0);
                         if con.visible[sym_v] {
@@ -895,8 +901,7 @@ impl Info {
                 }
             },
             VertexColorInfo::CopsVoronoi => {
-                let active_dists =
-                    self.characters.active_cops().map(|c| &c.distances[..]).collect_vec();
+                let active_dists = self.characters.active_cops().map(|c| c.dists()).collect_vec();
 
                 let color_exact = self.options.automatic_marker_color;
                 let color_about = self.options.automatic_marker_color.gamma_multiply(0.4);
@@ -1004,7 +1009,7 @@ impl Info {
             },
             VertexNumberInfo::RobberDist => {
                 if let Some(r) = self.characters.robber() {
-                    draw_isize_slice(&r.distances);
+                    draw_isize_slice(r.dists());
                 }
             },
             VertexNumberInfo::VertexEquivalenceClass => {
@@ -1023,7 +1028,7 @@ impl Info {
         let Some(robber) = self.characters.robber() else {
             return;
         };
-        let robber_v = robber.nearest_node;
+        let robber_v = robber.vertex();
         let (mut active_cops, game_type) = self.police_state(con);
         let Some(strat) = self.worker.strats_for(&game_type) else {
             return;
@@ -1038,7 +1043,7 @@ impl Info {
         debug_assert!(self
             .characters
             .active_cops()
-            .all(|c| active_cops.contains(&to_curr(c.nearest_node))));
+            .all(|c| active_cops.contains(&to_curr(c.vertex()))));
 
         let robber_v_in_curr = to_curr(robber_v);
         let curr_nr_moves_left =
@@ -1062,7 +1067,7 @@ impl Info {
                 let curr_v = from_curr(active_cops[i]);
                 let next_v = from_curr(unpacked_neigh[i]);
                 debug_assert!(con.edges.has_edge(curr_v, next_v));
-                debug_assert!(self.characters.active_cops().any(|c| c.nearest_node == curr_v));
+                debug_assert!(self.characters.active_cops().any(|c| c.vertex() == curr_v));
                 if !con.visible[curr_v] || !con.visible[next_v] {
                     continue;
                 }
@@ -1086,29 +1091,31 @@ impl Info {
             return;
         }
         for ch in self.characters.all() {
-            let f_len = ch.last_positions.len() as f32;
+            let f_len = ch.past_vertices().len() as f32;
             let draw_size = |i| con.scale * 2.5 * (i + 0.8 * f_len) / f_len;
-            for (i, (&v1, &v2)) in ch.last_positions.iter().tuple_windows().enumerate() {
+
+            let glow = ch.job().glow();
+            for (i, (&v1, &v2)) in ch.past_vertices().iter().tuple_windows().enumerate() {
                 if !con.visible[v1] {
                     continue;
                 }
                 let draw_pos_1 = con.vertex_draw_pos(v1);
                 let size = draw_size(i as f32);
-                let marker_circle = Shape::circle_filled(draw_pos_1, size, ch.style().glow);
+                let marker_circle = Shape::circle_filled(draw_pos_1, size, glow);
                 con.painter.add(marker_circle);
                 if !con.visible[v2] {
                     continue;
                 }
                 let points = [draw_pos_1, con.vertex_draw_pos(v2)];
-                let stroke = Stroke::new(size * 0.75, ch.style().glow);
+                let stroke = Stroke::new(size * 0.75, glow);
                 let line = Shape::LineSegment { points, stroke };
                 con.painter.add(line);
             }
-            if let Some(&v) = ch.last_positions.last() {
+            if let Some(&v) = ch.past_vertices().last() {
                 if con.visible[v] {
                     let draw_pos = con.vertex_draw_pos(v);
                     let size = draw_size(f_len);
-                    let marker_circle = Shape::circle_filled(draw_pos, size, ch.style().glow);
+                    let marker_circle = Shape::circle_filled(draw_pos, size, glow);
                     con.painter.add(marker_circle);
                 }
             }

@@ -169,5 +169,7 @@ impl eframe::App for State {
                 }
             }
         });
+
+        self.info.draw_windows(ctx);
     }
 }
