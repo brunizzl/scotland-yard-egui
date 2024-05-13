@@ -25,6 +25,7 @@ pub enum VertexColorInfo {
     BruteForceRes,
     MinCopDist,
     MaxCopDist,
+    AnyCopDist,
     RobberDist,
     VertexEquivalenceClasses,
     RobberVertexClass, //equivalence class of the robbers vertices
@@ -54,6 +55,7 @@ impl VertexColorInfo {
             die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.",
             MinCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
             MaxCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
+            AnyCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
             RobberDist => "Alle Punkte die eingestellten Abstand zu Räuber haben",
             VertexEquivalenceClasses => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
             Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
@@ -78,6 +80,7 @@ impl VertexColorInfo {
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
+            AnyCopDist => "jeder Cop Abstand",
             RobberDist => "Räuberabstand",
             VertexEquivalenceClasses => "Symmetrieäquivalenzklassen",
             RobberVertexClass => "Äquivalenzklasse Räuberknoten",
@@ -151,9 +154,9 @@ struct Options {
     vertex_color_info: VertexColorInfo,
     vertex_number_info: VertexNumberInfo,
 
-    //both are only used, when the respective RobberInfo is active
-    marked_cop_dist: isize, //determines cop dist marked in RobberInfo::CopDist
-    marked_robber_dist: isize, //determines max dist marked in RobberInfo::SmallRobberDist
+    //both are only used, when the respective VertexColorInfo(s) is/are active
+    marked_cop_dist: isize, //determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
+    marked_robber_dist: isize, //determines max dist marked in VertexColorInfo::RobberDist
 
     number_scale: isize,
     manual_marker_scale: isize,
@@ -249,10 +252,7 @@ impl Options {
                     menu_change |= old != self.vertex_color_info;
                 });
             match self.vertex_color_info {
-                VertexColorInfo::MinCopDist => {
-                    add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", 0, 1000)
-                },
-                VertexColorInfo::MaxCopDist => {
+                VertexColorInfo::MinCopDist | VertexColorInfo::MaxCopDist | VertexColorInfo::AnyCopDist => {
                     add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", 0, 1000)
                 },
                 VertexColorInfo::RobberDist => {
@@ -790,6 +790,19 @@ impl Info {
                 for (&dist, &pos, &vis) in izip!(&self.max_cop_dist, con.positions, con.visible) {
                     if vis && dist == self.options.marked_cop_dist {
                         draw_circle_at(pos, self.options.automatic_marker_color);
+                    }
+                }
+            },
+            VertexColorInfo::AnyCopDist => {
+                let active_dists = self.characters.active_cops().map(|c| c.dists()).collect_vec();
+                for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
+                    if vis {
+                        for (i, &d) in izip!(0.., &active_dists) {
+                            if d[v] == self.options.marked_cop_dist {
+                                const COLORS: &[Color32] = &color::MARKER_COLORS_U8;
+                                draw_circle_at(pos, COLORS[i % COLORS.len()]);
+                            }
+                        }
                     }
                 }
             },
