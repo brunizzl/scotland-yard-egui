@@ -171,7 +171,7 @@ impl eframe::App for State {
                     self.info.draw_menu(ui, &self.map);
                     ui.add_space(50.0);
                 });
-                
+
                 ui.add_space(5.0);
             });
         }
