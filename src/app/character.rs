@@ -1,4 +1,7 @@
-use std::collections::{HashMap, VecDeque};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, VecDeque},
+};
 
 use egui::*;
 use itertools::{izip, Itertools};
@@ -51,8 +54,12 @@ impl Id {
         }
     }
 
+    pub fn is_robber(self) -> bool {
+        matches!(self, Self::Robber)
+    }
+
     pub fn same_job(self, other: Self) -> bool {
-        matches!(self, Self::Robber) == matches!(other, Self::Robber)
+        self.is_robber() == other.is_robber()
     }
 }
 
@@ -273,22 +280,17 @@ impl Character {
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct CharacterState {
     characters: Vec<Character>,
-    past_moves: Vec<usize>,            //present is at end (same below)
-    future_moves: Vec<(usize, usize)>, //fst is character index, snd is vertex index
 
-    show_past_steps: bool,
-    show_allowed_next_steps: bool,
+    /// oldest to newest. for an element fst is character index, snd is vertex index
+    past_moves: Vec<(usize, usize)>,
+    /// newest to oldest. for an element fst is character index, snd is vertex index
+    future_moves: Vec<(usize, usize)>,
+
+    pub show_past_steps: bool,
+    pub show_allowed_next_steps: bool,
 }
 
 impl CharacterState {
-    pub fn show_past_steps(&self) -> bool {
-        self.show_past_steps
-    }
-
-    pub fn show_allowed_next_steps(&self) -> bool {
-        self.show_allowed_next_steps
-    }
-
     pub fn new() -> Self {
         Self {
             characters: vec![
@@ -304,11 +306,11 @@ impl CharacterState {
     }
 
     pub fn last_moved(&self) -> Option<&Character> {
-        self.past_moves.last().map(|&c| &self.characters[c])
+        self.past_moves.last().map(|&(c, _)| &self.characters[c])
     }
 
     pub fn next_moved(&self) -> Option<&Character> {
-        self.future_moves.last().map(|(c, _)| &self.characters[*c])
+        self.future_moves.last().map(|&(c, _)| &self.characters[c])
     }
 
     pub fn reverse_move(
@@ -317,28 +319,50 @@ impl CharacterState {
         positions: &[Pos3],
         queue: &mut VecDeque<usize>,
     ) {
-        if let Some(i) = self.past_moves.pop() {
+        if let Some((i, v)) = self.past_moves.pop() {
+            self.future_moves.push((i, v));
             let ch = &mut self.characters[i];
-            if let Some(v_curr) = ch.past_vertices.pop() {
-                self.future_moves.push((i, v_curr));
-                if let Some(&v_last) = ch.past_vertices.last() {
-                    ch.nearest_vertex = v_last;
-                    ch.update_distances(edges, queue);
-                    ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
-                }
+            ch.on_node = true;
+            ch.past_vertices.pop();
+            if let Some(&v_last) = ch.past_vertices.last() {
+                ch.nearest_vertex = v_last;
+                ch.update_distances(edges, queue);
+                ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
             }
         }
     }
 
     pub fn redo_move(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
         if let Some((i, v)) = self.future_moves.pop() {
-            self.past_moves.push(i);
+            self.past_moves.push((i, v));
             let ch = &mut self.characters[i];
             ch.past_vertices.push(v);
             ch.nearest_vertex = v;
             ch.update_distances(edges, queue);
             ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
+            ch.on_node = true;
         }
+    }
+
+    pub fn forget_move_history(&mut self) {
+        self.past_moves.clear();
+        self.future_moves.clear();
+        for ch in &mut self.characters {
+            ch.past_vertices.clear();
+        }
+    }
+
+    fn forget(&mut self, character_i: usize) {
+        let retain_c = |(c, _): &mut (usize, _)| match (*c).cmp(&character_i) {
+            Ordering::Less => true,
+            Ordering::Equal => false,
+            Ordering::Greater => {
+                *c -= 1;
+                true
+            },
+        };
+        self.past_moves.retain_mut(retain_c);
+        self.future_moves.retain_mut(retain_c);
     }
 
     pub fn all(&self) -> &[Character] {
@@ -382,11 +406,34 @@ impl CharacterState {
         }
     }
 
-    pub fn forget_move_history(&mut self) {
-        self.past_moves.clear();
-        self.future_moves.clear();
-        for ch in &mut self.characters {
-            ch.past_vertices.clear();
+    fn next_id(&self) -> Id {
+        if self.characters.is_empty() {
+            return Id::Robber;
+        }
+        let mut cops_used = [0usize; Id::COP_EMOJIES.len()];
+        for c in &self.characters {
+            if let Id::Cop(i) = c.id {
+                cops_used[i] += 1;
+            }
+        }
+        Id::Cop(cops_used.iter().position_min().unwrap())
+    }
+
+    pub fn create_character_at(&mut self, screen_pos: Pos2, map: &map::Map) {
+        let pos = map.camera().screen_to_intermediary(screen_pos);
+        let mut new_ch = Character::new(self.next_id(), pos);
+        let find_screen_facing =
+            |v: usize| -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal());
+        let (v, _) = map.edges().find_local_minimum(find_screen_facing, 0);
+        new_ch.nearest_vertex = v;
+        self.characters.push(new_ch);
+    }
+
+    pub fn remove_cop_at_vertex(&mut self, v: usize) {
+        let f = |c: &Character| !c.id.is_robber() && c.nearest_vertex == v;
+        if let Some(i) = self.characters.iter().position(f) {
+            self.characters.remove(i);
+            self.forget(i);
         }
     }
 
@@ -396,34 +443,16 @@ impl CharacterState {
         ui.collapsing("Figuren", |ui| {
             ui.horizontal(|ui| {
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
-                let next_id = 'choose_next: {
-                    if self.characters.is_empty() {
-                        break 'choose_next Id::Robber;
-                    }
-                    let mut cops_used = [0usize; Id::COP_EMOJIES.len()];
-                    for c in &self.characters {
-                        if let Id::Cop(i) = c.id {
-                            cops_used[i] += 1;
-                        }
-                    }
-                    Id::Cop(cops_used.iter().position_min().unwrap())
-                };
                 let minus_text = format!("- Figur ({})", minus_emoji);
-                let plus_text = format!("+ Figur ({})", next_id.emoji());
-                if ui.button(minus_text).clicked() {
+                let plus_text = format!("+ Figur ({})", self.next_id().emoji());
+                if ui.button(minus_text).on_hover_text("F1").clicked() {
                     self.characters.pop();
-                    self.forget_move_history();
+                    self.forget(self.characters.len());
                     change = true;
                 }
-                if ui.button(plus_text).clicked() {
+                if ui.button(plus_text).on_hover_text("F2").clicked() {
                     let pos = map.camera().in_front_of_cam();
-                    let mut new_ch = Character::new(next_id, pos);
-                    let find_screen_facing = |v: usize| {
-                        -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal())
-                    };
-                    let (v, _) = map.edges().find_local_minimum(find_screen_facing, 0);
-                    new_ch.nearest_vertex = v;
-                    self.characters.push(new_ch);
+                    self.create_character_at(pos, map);
                     change = true;
                 }
             });
@@ -444,19 +473,14 @@ impl CharacterState {
                     }
                     if let Some(i) = delete {
                         self.characters.remove(i);
-                        self.forget_move_history();
+                        self.forget(i);
                         change = true;
                     }
                 }
             });
-            ui.checkbox(&mut self.show_allowed_next_steps, "zeige Zugoptionen");
-            ui.horizontal(|ui| {
-                ui.add(Checkbox::new(&mut self.show_past_steps, "zeige Züge"));
-                if ui.button("Reset Züge").clicked() {
-                    self.forget_move_history();
-                    change = true;
-                }
-            });
+            ui.checkbox(&mut self.show_allowed_next_steps, "zeige Zugoptionen")
+                .on_hover_text("F3");
+            ui.checkbox(&mut self.show_past_steps, "zeige Züge").on_hover_text("F4");
             ui.horizontal(|ui| {
                 if ui.button(" ⟲ ").on_hover_text("strg + z").clicked() {
                     self.reverse_move(map.edges(), map.positions(), queue);
@@ -464,6 +488,10 @@ impl CharacterState {
                 }
                 if ui.button(" ⟳ ").on_hover_text("strg + y").clicked() {
                     self.redo_move(map.edges(), map.positions(), queue);
+                    change = true;
+                }
+                if ui.button("Reset").clicked() {
+                    self.forget_move_history();
                     change = true;
                 }
             });
@@ -499,11 +527,68 @@ impl CharacterState {
             if !ch.on_node || con.visible[ch.nearest_vertex] {
                 let finished_move = ch.drag_and_draw(ui, con, nr_others_at_same_pos);
                 if finished_move {
-                    self.past_moves.push(i);
+                    self.past_moves.push((i, ch.nearest_vertex));
                     self.future_moves.clear();
                 }
             } else {
                 ch.draw_small_at_node(con);
+            }
+        }
+    }
+
+    pub fn draw_tails(&self, con: &DrawContext<'_>) {
+        if !self.show_past_steps {
+            return;
+        }
+        for ch in self.all() {
+            let glow = ch.id().glow();
+            let trans = glow.gamma_multiply(0.3);
+
+            let mut size = con.scale * 4.0;
+            for (&v1, &v2) in ch.past_vertices().iter().rev().tuple_windows() {
+                if !con.visible[v1] || !con.visible[v2] {
+                    continue;
+                }
+
+                let points = [con.vertex_draw_pos(v1), con.vertex_draw_pos(v2)];
+                let stroke = {
+                    let space_dist = (con.positions[v2] - con.positions[v1]).length();
+                    let max = con.map.data().max_shown_edge_length();
+                    let color = if space_dist < max { glow } else { trans };
+                    Stroke::new(size * 0.75, color)
+                };
+                let line = Shape::LineSegment { points, stroke };
+                con.painter.add(line);
+
+                if size > con.scale * 1.0 {
+                    size *= 0.9;
+                }
+            }
+        }
+    }
+
+    pub fn draw_allowed_next_steps(&self, con: &DrawContext<'_>) {
+        if !self.show_allowed_next_steps {
+            return;
+        }
+        let Some(last_moved_character) = self.last_moved() else {
+            return;
+        };
+        for ch in self.all() {
+            let name = ch.id();
+            if !ch.is_active() || name.same_job(last_moved_character.id()) {
+                continue;
+            }
+            let Some(&v) = ch.past_vertices().last() else {
+                continue;
+            };
+            for n in con.edges.neighbors_of(v) {
+                if con.visible[n] {
+                    let draw_pos = con.vertex_draw_pos(n);
+                    let stroke = Stroke::new(con.scale * 2.0, name.glow());
+                    let marker_circle = Shape::circle_stroke(draw_pos, con.scale * 6.5, stroke);
+                    con.painter.add(marker_circle);
+                }
             }
         }
     }

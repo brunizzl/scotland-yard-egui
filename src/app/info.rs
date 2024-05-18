@@ -259,7 +259,7 @@ impl Options {
                 }
                 ui.label("Farbe");
             });
-            ComboBox::from_id_source(&self.vertex_color_info() as *const _)
+            ComboBox::from_id_source(&self.last_selected_vertex_color_infos as *const _)
                 .selected_text(self.vertex_color_info().name_str())
                 .show_ui(ui, |ui| {
                     let mut curr = self.vertex_color_info();
@@ -269,13 +269,14 @@ impl Options {
                     }
                     if curr != self.vertex_color_info() {
                         let infos = &mut self.last_selected_vertex_color_infos;
-                        let new_pos = infos.iter().position(|&i| i == curr).unwrap_or(infos.len());
-                        infos[..new_pos].rotate_right(1);
+                        let new_pos = infos.iter().position(|&i| i == curr).unwrap_or(infos.len() - 1);
+                        infos[..=new_pos].rotate_right(1);
+                        debug_assert!(!infos.contains(&curr) || infos[0] == curr);
                         infos[0] = curr;
 
                         menu_change = true;
                     }
-                });
+                }).response.on_hover_text("rotiere durch letzte mit F5 / F6 / F7 / F8");
             match self.vertex_color_info() {
                 VertexColorInfo::MinCopDist | VertexColorInfo::MaxCopDist | VertexColorInfo::AnyCopDist => {
                     add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", (0, 1000), 1)
@@ -290,7 +291,7 @@ impl Options {
             ui.add_space(8.0);
             ui.label("Zahlen:");
             add_scale_drag_value(ui, &mut self.number_scale);
-            ComboBox::from_id_source(&self.vertex_number_info() as *const _)
+            ComboBox::from_id_source(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
                     let mut curr = self.vertex_number_info();
@@ -300,13 +301,14 @@ impl Options {
                     }
                     if curr != self.vertex_number_info() {
                         let infos = &mut self.last_selected_vertex_number_infos;
-                        let new_pos = infos.iter().position(|&i| i == curr).unwrap_or(infos.len());
-                        infos[..new_pos].rotate_right(1);
+                        let new_pos = infos.iter().position(|&i| i == curr).unwrap_or(infos.len() - 1);
+                        infos[..=new_pos].rotate_right(1);
+                        debug_assert!(!infos.contains(&curr) || infos[0] == curr);
                         infos[0] = curr;
 
                         menu_change = true;
                     }
-                });
+                }).response.on_hover_text("rotiere durch letzte mit F9 / F10 / F11 / F12");
 
 
             ui.add_space(8.0);
@@ -701,14 +703,32 @@ impl Info {
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         ui.input(|info| {
-            self.take_screenshot |= info.key_pressed(Key::F2);
-
+            if info.key_pressed(Key::F1) {
+                if let Some(pointer_pos) = info.pointer.latest_pos() {
+                    let (v, _) = con.find_closest_vertex(pointer_pos);
+                    self.characters.remove_cop_at_vertex(v);
+                    self.menu_change = true;
+                }
+            }
+            if info.key_pressed(Key::F2) {
+                if let Some(pointer_pos) = info.pointer.latest_pos() {
+                    self.characters.create_character_at(pointer_pos, con.map);
+                    self.menu_change = true;
+                }
+            }
+            if info.key_pressed(Key::F3) {
+                self.characters.show_allowed_next_steps ^= true;
+            }
+            if info.key_pressed(Key::F4) {
+                self.characters.show_past_steps ^= true;
+            }
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
                 self.characters.reverse_move(con.edges, con.positions, &mut self.queue);
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
                 self.characters.redo_move(con.edges, con.positions, &mut self.queue);
             }
+
             if info.key_down(Key::M) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.add_marker_at(pointer_pos, con);
@@ -719,15 +739,16 @@ impl Info {
                     self.remove_marker_at(pointer_pos, con);
                 }
             }
+
             for (n, key) in izip!(2.., [Key::F5, Key::F6, Key::F7, Key::F8]) {
                 if info.key_pressed(key) {
-                    self.options.last_selected_vertex_color_infos[..n].rotate_left(1);
+                    self.options.last_selected_vertex_color_infos[..n].rotate_right(1);
                     self.menu_change = true;
                 }
             }
             for (n, key) in izip!(2.., [Key::F9, Key::F10, Key::F11, Key::F12]) {
                 if info.key_pressed(key) {
-                    self.options.last_selected_vertex_number_infos[..n].rotate_left(1);
+                    self.options.last_selected_vertex_number_infos[..n].rotate_right(1);
                     self.menu_change = true;
                 }
             }
@@ -1153,68 +1174,6 @@ impl Info {
         }
     }
 
-    fn draw_character_tails(&self, con: &DrawContext<'_>) {
-        if !self.characters.show_past_steps() {
-            return;
-        }
-        for ch in self.characters.all() {
-            let f_len = ch.past_vertices().len() as f32;
-            let draw_size = |i| con.scale * 2.5 * (i + 0.8 * f_len) / f_len;
-
-            let glow = ch.id().glow();
-            for (i, (&v1, &v2)) in ch.past_vertices().iter().tuple_windows().enumerate() {
-                if !con.visible[v1] {
-                    continue;
-                }
-                let draw_pos_1 = con.vertex_draw_pos(v1);
-                let size = draw_size(i as f32);
-                let marker_circle = Shape::circle_filled(draw_pos_1, size, glow);
-                con.painter.add(marker_circle);
-                if !con.visible[v2] {
-                    continue;
-                }
-                let points = [draw_pos_1, con.vertex_draw_pos(v2)];
-                let stroke = Stroke::new(size * 0.75, glow);
-                let line = Shape::LineSegment { points, stroke };
-                con.painter.add(line);
-            }
-            if let Some(&v) = ch.past_vertices().last() {
-                if con.visible[v] {
-                    let draw_pos = con.vertex_draw_pos(v);
-                    let size = draw_size(f_len);
-                    let marker_circle = Shape::circle_filled(draw_pos, size, glow);
-                    con.painter.add(marker_circle);
-                }
-            }
-        }
-    }
-
-    fn draw_allowed_next_steps(&self, con: &DrawContext<'_>) {
-        if !self.characters.show_allowed_next_steps() {
-            return;
-        }
-        let Some(last_moved_character) = self.characters.last_moved() else {
-            return;
-        };
-        for ch in self.characters.all() {
-            let name = ch.id();
-            if !ch.is_active() || name.same_job(last_moved_character.id()) {
-                continue;
-            }
-            let Some(&v) = ch.past_vertices().last() else {
-                continue;
-            };
-            for n in con.edges.neighbors_of(v) {
-                if con.visible[n] {
-                    let draw_pos = con.vertex_draw_pos(n);
-                    let stroke = Stroke::new(con.scale * 3.0, name.glow());
-                    let marker_circle = Shape::circle_stroke(draw_pos, con.scale * 10.0, stroke);
-                    con.painter.add(marker_circle);
-                }
-            }
-        }
-    }
-
     fn draw_manual_markers(&self, con: &DrawContext<'_>) {
         let size = 4.5 * self.options.manual_marker_scale * con.scale;
         let mut f32_colors = [color::F32Color::default(); 8];
@@ -1245,8 +1204,8 @@ impl Info {
         self.draw_convex_cop_hull(con);
         self.draw_green_circles(con);
         self.draw_manual_markers(con);
-        self.draw_character_tails(con);
-        self.draw_allowed_next_steps(con);
+        self.characters.draw_tails(con);
+        self.characters.draw_allowed_next_steps(con);
         self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con);

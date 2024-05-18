@@ -119,9 +119,10 @@ impl State {
 }
 
 fn draw_usage_info(ui: &mut Ui) {
-    ui.collapsing("Bedienung", |ui| {
-        ui.label(
-            "\
+    ui.menu_button("Bedienung", |ui| {
+        ui.add(
+            Label::new(
+                "\
 Spielfeld rotieren / verschieben: 
 ziehen mit rechter Maustaste oder scrollen, 
 horizontal: shift + scrollen
@@ -131,6 +132,8 @@ strg + scrollen
 
 verschieben einer Figur:
 ziehen mit linker Maustaste",
+            )
+            .wrap(false),
         );
     });
 }
@@ -162,17 +165,17 @@ impl eframe::App for State {
                         self.menu_visible = false;
                     }
                 });
-                widgets::global_dark_light_mode_buttons(ui);
+                ui.horizontal(|ui| {
+                    widgets::global_dark_light_mode_buttons(ui);
+                    draw_usage_info(ui);
+                });
                 ui.separator();
 
                 ScrollArea::vertical().show(ui, |ui| {
-                    draw_usage_info(ui);
                     self.map.draw_menu(ui, &mut self.info);
                     self.info.draw_menu(ui, &self.map);
                     ui.add_space(50.0);
                 });
-
-                ui.add_space(5.0);
             });
         }
 

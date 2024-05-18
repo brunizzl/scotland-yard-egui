@@ -26,10 +26,13 @@ impl Camera3D {
         self.zoom
     }
 
-    /// position centered in front of camera in intermediate coordinates _NOT SCREEN COORDINATES_
+    /// position centered in front of camera in screen coordiantes
     pub fn in_front_of_cam(&self) -> Pos2 {
-        let screen_mid = self.to_screen.move_rect.to().center();
-        self.to_screen.move_rect.inverse().transform_pos(screen_mid)
+        self.to_screen.move_rect.to().center()
+    }
+
+    pub fn screen_to_intermediary(&self, screen_pos: Pos2) -> Pos2 {
+        self.to_screen.move_rect.inverse().transform_pos(screen_pos)
     }
 
     pub fn new() -> Self {
