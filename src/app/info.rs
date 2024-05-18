@@ -63,8 +63,11 @@ impl VertexColorInfo {
             RobberVertexClass => "Alle Knoten die in selber Symmetrieäquivalenzklasse sitzen \
             wie die aktuelle Räuberposition",
             CopsRotatedToEquivalence => "Coppositionen rotiert auf repräsentative Knoten selber Äquivalenzklasse",
-            CopsVoronoi => "Punkte, mit mehreren nähesten Cops (normale Farbe) \n\
-            und Punkte mit mehreren Cops \"fast\" am nähesten, e.g. diff <= 1 (transparente Farbe)",
+            CopsVoronoi => "Punkte mit mehreren nähesten Cops. Anzahl Cops von opak zu transparent:\n\
+            - drei Cops exakt\n\
+            - drei Cops ca. (zwei exakt und einer +1 oder einer exakt und zwei +1)\n\
+            - zwei Cops exakt, kein dritter +1\n\
+            - zwei Cops ca. (einer exakt und einer +1)",
             Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
         }
     }
@@ -797,12 +800,11 @@ impl Info {
                 let active_dists = self.characters.active_cops().map(|c| c.dists()).collect_vec();
                 for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
                     if vis {
-                        for (i, &d) in izip!(0.., &active_dists) {
-                            if d[v] == self.options.marked_cop_dist {
-                                const COLORS: &[Color32] = &color::MARKER_COLORS_U8;
-                                draw_circle_at(pos, COLORS[i % COLORS.len()]);
-                            }
-                        }
+                        let color = color::blend_picked(
+                            &color::MARKER_COLORS_F32,
+                            active_dists.iter().map(|d| d[v] == self.options.marked_cop_dist),
+                        );
+                        draw_circle_at(pos, color);
                     }
                 }
             },
@@ -916,9 +918,17 @@ impl Info {
             VertexColorInfo::CopsVoronoi => {
                 let active_dists = self.characters.active_cops().map(|c| c.dists()).collect_vec();
 
-                let color_exact = self.options.automatic_marker_color;
-                let color_about = self.options.automatic_marker_color.gamma_multiply(0.4);
-                let choose_color = |w| if w >= 20 { color_exact } else { color_about };
+                let color_3exact = self.options.automatic_marker_color;
+                let color_3about = self.options.automatic_marker_color.gamma_multiply(0.85);
+                let color_2exact = self.options.automatic_marker_color.gamma_multiply(0.6);
+                let color_2about = self.options.automatic_marker_color.gamma_multiply(0.3);
+                let choose_color = |w| match w {
+                    w if w >= 300 => color_3exact,
+                    w if w >= 201 => color_3about,
+                    200 => color_2exact,
+                    w if w >= 102 => color_3about,
+                    _ => color_2about,
+                };
 
                 for (v, &min_dist, &pos, &vis) in
                     izip!(0.., &self.min_cop_dist, con.positions, con.visible)
@@ -930,12 +940,12 @@ impl Info {
                         let weight: usize = active_dists
                             .iter()
                             .map(|d| match d[v] {
-                                n if n == min_dist => 10,
+                                n if n == min_dist => 100,
                                 n if n == min_dist + 1 => 1,
                                 _ => 0,
                             })
                             .sum();
-                        if weight > 10 {
+                        if weight > 100 {
                             draw_circle_at(pos, choose_color(weight));
                         }
                     }

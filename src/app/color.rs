@@ -64,14 +64,17 @@ fn blend<'a>(colors: impl Iterator<Item = &'a F32Color>) -> Color32 {
     floats_to_color(res_rgb, 1.0 / alpha_sum, res_alpha)
 }
 
-pub fn u32_marker_color(marker: u32, colors: &[F32Color]) -> Color32 {
-    let iter = izip!(colors, 0..).filter_map(|(col, i)| ((1u32 << i) & marker != 0).then_some(col));
+pub fn blend_picked(colors: &[F32Color], choices: impl Iterator<Item = bool>) -> Color32 {
+    let iter = izip!(colors.iter().cycle(), choices).filter_map(|(c, b)| b.then_some(c));
     blend(iter)
 }
 
+pub fn u32_marker_color(marker: u32, colors: &[F32Color]) -> Color32 {
+    blend_picked(colors, (0..32).map(|i| (1u32 << i) & marker != 0))
+}
+
 pub fn u8_marker_color(marker: u8, colors: &[F32Color]) -> Color32 {
-    let iter = izip!(colors, 0..).filter_map(|(col, i)| ((1u8 << i) & marker != 0).then_some(col));
-    blend(iter)
+    blend_picked(colors, (0..8).map(|i| (1u8 << i) & marker != 0))
 }
 
 //assume s, v, in interval 0..1000, h in interval 0..6000000
