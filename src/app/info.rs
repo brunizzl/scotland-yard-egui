@@ -800,11 +800,16 @@ impl Info {
                 let active_dists = self.characters.active_cops().map(|c| c.dists()).collect_vec();
                 for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
                     if vis {
-                        let color = color::blend_picked(
-                            &color::MARKER_COLORS_F32,
-                            active_dists.iter().map(|d| d[v] == self.options.marked_cop_dist),
-                        );
-                        draw_circle_at(pos, color);
+                        let mut any_picked = false;
+                        let picked = active_dists.iter().map(|d| {
+                            let res = d[v] == self.options.marked_cop_dist;
+                            any_picked |= res;
+                            res
+                        });
+                        let color = color::blend_picked(&color::MARKER_COLORS_F32, picked);
+                        if any_picked {
+                            draw_circle_at(pos, color);
+                        }
                     }
                 }
             },
@@ -813,10 +818,8 @@ impl Info {
                     izip!(self.escapable.escapable(), con.positions, con.visible)
                 {
                     if vis && esc != 0 {
-                        draw_circle_at(
-                            pos,
-                            color::u32_marker_color(esc, &color::MARKER_COLORS_F32),
-                        );
+                        let color = color::u32_marker_color(esc, &color::MARKER_COLORS_F32);
+                        draw_circle_at(pos, color);
                     }
                 }
             },
@@ -840,8 +843,8 @@ impl Info {
                 if let SymGroup::Explicit(equiv) = con.sym_group() {
                     for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
                         if vis {
-                            let colors = &super::color::MARKER_COLORS_U8;
-                            draw_circle_at(pos, colors[class as usize % colors.len()]);
+                            const COLORS: &[Color32] = &super::color::MARKER_COLORS_U8;
+                            draw_circle_at(pos, COLORS[class as usize % COLORS.len()]);
                         }
                     }
                 }

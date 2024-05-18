@@ -70,11 +70,11 @@ pub fn blend_picked(colors: &[F32Color], choices: impl Iterator<Item = bool>) ->
 }
 
 pub fn u32_marker_color(marker: u32, colors: &[F32Color]) -> Color32 {
-    blend_picked(colors, (0..32).map(|i| (1u32 << i) & marker != 0))
+    blend_picked(colors, (0..u32::BITS).map(|i| (1u32 << i) & marker != 0))
 }
 
 pub fn u8_marker_color(marker: u8, colors: &[F32Color]) -> Color32 {
-    blend_picked(colors, (0..8).map(|i| (1u8 << i) & marker != 0))
+    blend_picked(colors, (0..u8::BITS).map(|i| (1u8 << i) & marker != 0))
 }
 
 //assume s, v, in interval 0..1000, h in interval 0..6000000
