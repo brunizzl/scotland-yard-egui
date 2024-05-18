@@ -102,7 +102,10 @@ impl Camera3D {
                     self.rotate_z(drag.rotation_delta);
                 }
 
-                let zoom_delta = info.zoom_delta().sqrt(); //half the zoom speed
+                let zoom_delta = match info.multi_touch() {
+                    Some(touch) => touch.zoom_delta,
+                    None => info.zoom_delta().sqrt(), //zoom slower if done by ctrl + scrolling
+                };
                 self.zoom *= zoom_delta;
                 if zoom_delta != 1.0 {
                     if let Some(ptr_pos) = info.pointer.latest_pos() {

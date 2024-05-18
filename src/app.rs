@@ -59,16 +59,31 @@ impl<'a> DrawContext<'a> {
     }
 }
 
-/// returns if val was changed
-fn add_drag_value(ui: &mut Ui, val: &mut isize, name: &str, min: isize, max: isize) -> bool {
+/// returns if val was changed.
+/// step is a multiplier for floats and is added / subtracted for ints.
+fn add_drag_value<T, U>(ui: &mut Ui, val: &mut T, name: &str, (min, max): (T, T), step: U) -> bool
+where
+    T: egui::emath::Numeric,
+    U: Into<f64>,
+{
     ui.horizontal(|ui| {
         let prev = *val;
+        let fval = val.to_f64();
+        let step = step.into();
         if ui.button(" - ").clicked() && prev > min {
-            *val -= 1;
+            *val = T::from_f64(if T::INTEGRAL {
+                fval - step
+            } else {
+                fval / step
+            });
         }
         ui.add(DragValue::new(val).clamp_range(min..=max));
         if ui.button(" + ").clicked() && prev < max {
-            *val += 1;
+            *val = T::from_f64(if T::INTEGRAL {
+                fval + step
+            } else {
+                fval * step
+            });
         }
         ui.label(name);
         prev != *val
@@ -138,22 +153,26 @@ impl eframe::App for State {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         if self.menu_visible {
             SidePanel::left("left_panel").min_width(0.0).show(ctx, |ui| {
+                let compile_datetime = compile_time::datetime_str!();
+                ui.horizontal(|ui| {
+                    //add spaces to force minimum width of sidebar
+                    let compile_info = format!("kompiliert am {compile_datetime}  ");
+                    ui.add(Label::new(compile_info).wrap(false));
+                    if ui.button("⏴").on_hover_text("Menü einklappen").clicked() {
+                        self.menu_visible = false;
+                    }
+                });
+                widgets::global_dark_light_mode_buttons(ui);
+                ui.separator();
+
                 ScrollArea::vertical().show(ui, |ui| {
-                    let compile_datetime = compile_time::datetime_str!();
-                    ui.horizontal(|ui| {
-                        //add spaces to force minimum width of sidebar
-                        let compile_info = format!("kompiliert am {compile_datetime}  ");
-                        ui.add(Label::new(compile_info).wrap(false));
-                        if ui.button("⏴").on_hover_text("Menü einklappen").clicked() {
-                            self.menu_visible = false;
-                        }
-                    });
-                    widgets::global_dark_light_mode_buttons(ui);
                     draw_usage_info(ui);
                     self.map.draw_menu(ui, &mut self.info);
                     self.info.draw_menu(ui, &self.map);
                     ui.add_space(50.0);
                 });
+                
+                ui.add_space(5.0);
             });
         }
 

@@ -316,14 +316,16 @@ impl Map {
                 });
             change |= match &mut self.shape {
                 Shape::DividedIcosahedron(pressure) => {
-                    add_drag_value(ui, pressure, "Druck", 0, self.resolution)
+                    add_drag_value(ui, pressure, "Druck", (0, self.resolution), 1)
                 },
-                Shape::RegularPolygon2D(nr_sides) => add_drag_value(ui, nr_sides, "Seiten", 3, 10),
+                Shape::RegularPolygon2D(nr_sides) => {
+                    add_drag_value(ui, nr_sides, "Seiten", (3, 10), 1)
+                },
                 Shape::Random2D => ui.button("neu berechnen").clicked(),
                 _ => add_disabled_drag_value(ui),
             };
             ui.add_space(8.0);
-            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", 0, 200);
+            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (0, 200), 1);
             if change {
                 self.recompute_and_adjust(info);
             }

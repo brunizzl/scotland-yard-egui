@@ -154,16 +154,18 @@ struct Options {
     active_manual_marker: usize, //expected in 0..8
     shown_manual_markers: u8,    //bitmask
 
-    vertex_color_info: VertexColorInfo,
-    vertex_number_info: VertexNumberInfo,
+    /// currently selected one at index 0
+    last_selected_vertex_color_infos: [VertexColorInfo; 5],
+    /// currently selected one at index 0
+    last_selected_vertex_number_infos: [VertexNumberInfo; 5],
 
     //both are only used, when the respective VertexColorInfo(s) is/are active
     marked_cop_dist: isize, //determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
     marked_robber_dist: isize, //determines max dist marked in VertexColorInfo::RobberDist
 
-    number_scale: isize,
-    manual_marker_scale: isize,
-    automatic_marker_scale: isize,
+    number_scale: f32,
+    manual_marker_scale: f32,
+    automatic_marker_scale: f32,
 
     show_convex_hull: bool,
     show_hull_boundary: bool,
@@ -182,12 +184,12 @@ const DEFAULT_OPTIONS: Options = Options {
     marked_cop_dist: 10,
     marked_robber_dist: 10,
 
-    vertex_color_info: VertexColorInfo::None,
-    vertex_number_info: VertexNumberInfo::None,
+    last_selected_vertex_color_infos: [VertexColorInfo::None; 5],
+    last_selected_vertex_number_infos: [VertexNumberInfo::None; 5],
 
-    number_scale: 10,
-    manual_marker_scale: 10,
-    automatic_marker_scale: 10,
+    number_scale: 1.0,
+    manual_marker_scale: 1.0,
+    automatic_marker_scale: 1.0,
 
     show_convex_hull: false,
     show_hull_boundary: false,
@@ -196,7 +198,20 @@ const DEFAULT_OPTIONS: Options = Options {
     show_manual_marker_options: false,
 };
 
+fn add_scale_drag_value(ui: &mut Ui, val: &mut f32) -> bool {
+    const FIFTH_ROOT_OF_TWO: f64 = 1.148698354997035;
+    add_drag_value(ui, val, "Größe", (0.125, 8.0), FIFTH_ROOT_OF_TWO)
+}
+
 impl Options {
+    pub fn vertex_color_info(&self) -> VertexColorInfo {
+        self.last_selected_vertex_color_infos[0]
+    }
+
+    pub fn vertex_number_info(&self) -> VertexNumberInfo {
+        self.last_selected_vertex_number_infos[0]
+    }
+
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut menu_change = false;
         ui.collapsing("Knoteninfo", |ui| {
@@ -236,7 +251,7 @@ impl Options {
 
             ui.add_space(8.0);
             ui.label("Marker:");
-            add_drag_value(ui, &mut self.automatic_marker_scale, "Größe", 1, 100);
+            add_scale_drag_value(ui, &mut self.automatic_marker_scale);
             ui.horizontal(|ui| {
                 ui.color_edit_button_srgba(&mut self.automatic_marker_color);
                 if ui.button("Reset").on_hover_text("Setze Farbe zurück").clicked() {
@@ -244,22 +259,29 @@ impl Options {
                 }
                 ui.label("Farbe");
             });
-            ComboBox::from_id_source(&self.vertex_color_info as *const _)
-                .selected_text(self.vertex_color_info.name_str())
+            ComboBox::from_id_source(&self.vertex_color_info() as *const _)
+                .selected_text(self.vertex_color_info().name_str())
                 .show_ui(ui, |ui| {
-                    let old = self.vertex_color_info;
+                    let mut curr = self.vertex_color_info();
                     for val in VertexColorInfo::iter() {
-                        ui.radio_value(&mut self.vertex_color_info, val, val.name_str())
+                        ui.radio_value(&mut curr, val, val.name_str())
                             .on_hover_text(val.description());
                     }
-                    menu_change |= old != self.vertex_color_info;
+                    if curr != self.vertex_color_info() {
+                        let infos = &mut self.last_selected_vertex_color_infos;
+                        let new_pos = infos.iter().position(|&i| i == curr).unwrap_or(infos.len());
+                        infos[..new_pos].rotate_right(1);
+                        infos[0] = curr;
+
+                        menu_change = true;
+                    }
                 });
-            match self.vertex_color_info {
+            match self.vertex_color_info() {
                 VertexColorInfo::MinCopDist | VertexColorInfo::MaxCopDist | VertexColorInfo::AnyCopDist => {
-                    add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", 0, 1000)
+                    add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", (0, 1000), 1)
                 },
                 VertexColorInfo::RobberDist => {
-                    add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", 0, 1000)
+                    add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", (0, 1000), 1)
                 },
                 _ => add_disabled_drag_value(ui),
             };
@@ -267,16 +289,23 @@ impl Options {
 
             ui.add_space(8.0);
             ui.label("Zahlen:");
-            add_drag_value(ui, &mut self.number_scale, "Größe", 1, 100);
-            ComboBox::from_id_source(&self.vertex_number_info as *const _)
-                .selected_text(self.vertex_number_info.name_str())
+            add_scale_drag_value(ui, &mut self.number_scale);
+            ComboBox::from_id_source(&self.vertex_number_info() as *const _)
+                .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
-                    let old = self.vertex_number_info;
+                    let mut curr = self.vertex_number_info();
                     for val in VertexNumberInfo::iter() {
-                        ui.radio_value(&mut self.vertex_number_info, val, val.name_str())
+                        ui.radio_value(&mut curr, val, val.name_str())
                             .on_hover_text(val.description());
                     }
-                    menu_change |= old != self.vertex_number_info;
+                    if curr != self.vertex_number_info() {
+                        let infos = &mut self.last_selected_vertex_number_infos;
+                        let new_pos = infos.iter().position(|&i| i == curr).unwrap_or(infos.len());
+                        infos[..new_pos].rotate_right(1);
+                        infos[0] = curr;
+
+                        menu_change = true;
+                    }
                 });
 
 
@@ -299,7 +328,7 @@ impl Options {
                 mit Taste [m] hinzugefügt und [n] entfernt werden.\
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
                 );
-                add_drag_value(ui, &mut self.manual_marker_scale, "Größe", 1, 100);
+                add_scale_drag_value(ui, &mut self.manual_marker_scale);
 
                 for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
                     ui.horizontal(|ui| {
@@ -570,25 +599,25 @@ impl Info {
         let cop_moved = self.characters.cop_updated();
 
         let update_cop_advantage = matches!(
-            self.options.vertex_color_info,
+            self.options.vertex_color_info(),
             VertexColorInfo::Escape1 | VertexColorInfo::Debugging
         ) || matches!(
-            self.options.vertex_number_info,
+            self.options.vertex_number_info(),
             VertexNumberInfo::RobberAdvantage | VertexNumberInfo::Debugging
         );
 
         let update_escapable = matches!(
-            self.options.vertex_color_info,
+            self.options.vertex_color_info(),
             VertexColorInfo::Escape2 | VertexColorInfo::Debugging
         ) || matches!(
-            self.options.vertex_number_info,
+            self.options.vertex_number_info(),
             VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
         );
 
         let update_hull = update_cop_advantage
             || update_escapable
             || matches!(
-                self.options.vertex_color_info,
+                self.options.vertex_color_info(),
                 VertexColorInfo::SafeOutside | VertexColorInfo::SafeBoundary
             )
             || self.options.show_convex_hull
@@ -596,15 +625,15 @@ impl Info {
 
         let update_min_cop_dist = update_hull
             || matches!(
-                self.options.vertex_color_info,
+                self.options.vertex_color_info(),
                 VertexColorInfo::MinCopDist
                     | VertexColorInfo::NearNodes
                     | VertexColorInfo::CopsVoronoi
             )
-            || self.options.vertex_number_info == VertexNumberInfo::MinCopDist;
+            || self.options.vertex_number_info() == VertexNumberInfo::MinCopDist;
 
-        let update_max_cop_dist = self.options.vertex_number_info == VertexNumberInfo::MaxCopDist
-            || self.options.vertex_color_info == VertexColorInfo::MaxCopDist;
+        let update_max_cop_dist = self.options.vertex_number_info() == VertexNumberInfo::MaxCopDist
+            || self.options.vertex_color_info() == VertexColorInfo::MaxCopDist;
 
         let nr_vertices = con.edges.nr_vertices();
         if (cop_moved || self.max_cop_dist.len() != nr_vertices) && update_max_cop_dist {
@@ -690,6 +719,18 @@ impl Info {
                     self.remove_marker_at(pointer_pos, con);
                 }
             }
+            for (n, key) in izip!(2.., [Key::F5, Key::F6, Key::F7, Key::F8]) {
+                if info.key_pressed(key) {
+                    self.options.last_selected_vertex_color_infos[..n].rotate_left(1);
+                    self.menu_change = true;
+                }
+            }
+            for (n, key) in izip!(2.., [Key::F9, Key::F10, Key::F11, Key::F12]) {
+                if info.key_pressed(key) {
+                    self.options.last_selected_vertex_number_infos[..n].rotate_left(1);
+                    self.menu_change = true;
+                }
+            }
         });
     }
 
@@ -742,13 +783,13 @@ impl Info {
     }
 
     fn draw_green_circles(&self, con: &DrawContext<'_>) {
-        let size = 0.6 * (self.options.automatic_marker_scale as f32) * con.scale;
+        let size = 6.0 * self.options.automatic_marker_scale * con.scale;
         let draw_circle_at = |pos, color| {
             let draw_pos = con.cam().transform(pos);
             let marker_circle = Shape::circle_filled(draw_pos, size, color);
             con.painter.add(marker_circle);
         };
-        match self.options.vertex_color_info {
+        match self.options.vertex_color_info() {
             VertexColorInfo::NearNodes => {
                 if let Some(r) = self.characters.robber() {
                     for (r_dist, c_dist, &pos, &vis) in
@@ -959,7 +1000,7 @@ impl Info {
     }
 
     fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) {
-        let font = FontId::proportional(0.8 * (self.options.number_scale as f32) * con.scale);
+        let font = FontId::proportional(12.0 * self.options.number_scale * con.scale);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::WHITE
         } else {
@@ -993,7 +1034,7 @@ impl Info {
             draw!(numbers, show);
         };
 
-        match self.options.vertex_number_info {
+        match self.options.vertex_number_info() {
             VertexNumberInfo::Indices => {
                 draw!(0..);
             },
@@ -1113,14 +1154,14 @@ impl Info {
     }
 
     fn draw_character_tails(&self, con: &DrawContext<'_>) {
-        if !self.characters.show_steps() {
+        if !self.characters.show_past_steps() {
             return;
         }
         for ch in self.characters.all() {
             let f_len = ch.past_vertices().len() as f32;
             let draw_size = |i| con.scale * 2.5 * (i + 0.8 * f_len) / f_len;
 
-            let glow = ch.job().glow();
+            let glow = ch.id().glow();
             for (i, (&v1, &v2)) in ch.past_vertices().iter().tuple_windows().enumerate() {
                 if !con.visible[v1] {
                     continue;
@@ -1148,8 +1189,34 @@ impl Info {
         }
     }
 
+    fn draw_allowed_next_steps(&self, con: &DrawContext<'_>) {
+        if !self.characters.show_allowed_next_steps() {
+            return;
+        }
+        let Some(last_moved_character) = self.characters.last_moved() else {
+            return;
+        };
+        for ch in self.characters.all() {
+            let name = ch.id();
+            if !ch.is_active() || name.same_job(last_moved_character.id()) {
+                continue;
+            }
+            let Some(&v) = ch.past_vertices().last() else {
+                continue;
+            };
+            for n in con.edges.neighbors_of(v) {
+                if con.visible[n] {
+                    let draw_pos = con.vertex_draw_pos(n);
+                    let stroke = Stroke::new(con.scale * 3.0, name.glow());
+                    let marker_circle = Shape::circle_stroke(draw_pos, con.scale * 10.0, stroke);
+                    con.painter.add(marker_circle);
+                }
+            }
+        }
+    }
+
     fn draw_manual_markers(&self, con: &DrawContext<'_>) {
-        let size = 0.45 * (self.options.manual_marker_scale as f32) * con.scale;
+        let size = 4.5 * self.options.manual_marker_scale * con.scale;
         let mut f32_colors = [color::F32Color::default(); 8];
         let mask = self.options.shown_manual_markers;
         color::zip_to_f32(
@@ -1179,6 +1246,7 @@ impl Info {
         self.draw_green_circles(con);
         self.draw_manual_markers(con);
         self.draw_character_tails(con);
+        self.draw_allowed_next_steps(con);
         self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con);

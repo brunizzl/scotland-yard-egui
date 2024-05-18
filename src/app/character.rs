@@ -10,31 +10,31 @@ use crate::{
 
 use super::{color::*, *};
 
-#[derive(Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-pub enum Job {
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub enum Id {
     Cop(usize), //which emoji is chosen
     Robber,
 }
 
-impl Job {
+impl Id {
     pub fn str(&self) -> &'static str {
         match self {
-            Job::Cop(_) => "Cop",
-            Job::Robber => "Räuber",
+            Id::Cop(_) => "Cop",
+            Id::Robber => "Räuber",
         }
     }
 
     pub fn color(&self) -> Color32 {
         match self {
-            Job::Cop(_) => Color32::from_rgb(10, 50, 170),
-            Job::Robber => Color32::from_rgb(170, 40, 40),
+            Id::Cop(_) => Color32::from_rgb(10, 50, 170),
+            Id::Robber => Color32::from_rgb(170, 40, 40),
         }
     }
 
     pub fn glow(&self) -> Color32 {
         match self {
-            Job::Cop(_) => Color32::from_rgb(60, 120, 235),
-            Job::Robber => Color32::from_rgb(235, 120, 120),
+            Id::Cop(_) => Color32::from_rgb(60, 120, 235),
+            Id::Robber => Color32::from_rgb(235, 120, 120),
         }
     }
 
@@ -45,10 +45,14 @@ impl Job {
 
     pub fn emoji(self) -> &'static str {
         match self {
-            Job::Cop(i) => Self::COP_EMOJIES[i],
+            Id::Cop(i) => Self::COP_EMOJIES[i],
             //alternatives for robber: 👿🚴🏃🚶🐀🐢🕵💰
-            Job::Robber => "🏃",
+            Id::Robber => "🏃",
         }
+    }
+
+    pub fn same_job(self, other: Self) -> bool {
+        matches!(self, Self::Robber) == matches!(other, Self::Robber)
     }
 }
 
@@ -83,7 +87,7 @@ enum Pos {
 //denotes eighter a cop or the robber as node on screen
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct Character {
-    job: Job,
+    id: Id,
     pos: Pos,
 
     /// past values of [`Self::nearest_node`] where Character was not only dragged over
@@ -100,8 +104,8 @@ pub struct Character {
 }
 
 impl Character {
-    pub fn job(&self) -> Job {
-        self.job
+    pub fn id(&self) -> Id {
+        self.id
     }
 
     /// index of vertex where character is placed (if character is placed somewhere)
@@ -123,10 +127,10 @@ impl Character {
         self.enabled && self.on_node
     }
 
-    pub fn new(job: Job, pos2: Pos2) -> Self {
+    pub fn new(id: Id, pos2: Pos2) -> Self {
         //dragging set to true snaps to node next update
         Character {
-            job,
+            id,
             pos: Pos::OnScreen(pos2),
             past_vertices: Vec::new(),
             distances: Vec::new(),
@@ -139,17 +143,17 @@ impl Character {
 
     fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, ui: &Ui, scale: f32) {
         //draw circles
-        let character_circle = Shape::circle_filled(draw_pos, scale, self.job.color());
+        let character_circle = Shape::circle_filled(draw_pos, scale, self.id.color());
         painter.add(character_circle);
         if self.on_node {
-            let stroke = Stroke::new(scale * 0.375, self.job.glow());
+            let stroke = Stroke::new(scale * 0.375, self.id.glow());
             let marker_circle = Shape::circle_stroke(draw_pos, scale, stroke);
             painter.add(marker_circle);
         }
         //draw emoji
         let font = FontId::proportional(scale * 2.0);
         let emoji_pos = draw_pos - scale * vec2(0.0, 1.35);
-        let emoji_str = self.job.emoji().to_string();
+        let emoji_str = self.id.emoji().to_string();
         let mut layout_job = text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
         layout_job.halign = Align::Center;
         let galley = ui.fonts(|f| f.layout_job(layout_job));
@@ -160,7 +164,7 @@ impl Character {
     fn draw_small_at_node(&self, con: &DrawContext<'_>) {
         let character_size = f32::max(4.0, con.scale * 4.0);
         let draw_pos = con.vertex_draw_pos(self.nearest_vertex);
-        let character_circle = Shape::circle_filled(draw_pos, character_size, self.job.glow());
+        let character_circle = Shape::circle_filled(draw_pos, character_size, self.id.glow());
         con.painter.add(character_circle);
     }
 
@@ -272,24 +276,30 @@ pub struct CharacterState {
     past_moves: Vec<usize>,            //present is at end (same below)
     future_moves: Vec<(usize, usize)>, //fst is character index, snd is vertex index
 
-    show_steps: bool,
+    show_past_steps: bool,
+    show_allowed_next_steps: bool,
 }
 
 impl CharacterState {
-    pub fn show_steps(&self) -> bool {
-        self.show_steps
+    pub fn show_past_steps(&self) -> bool {
+        self.show_past_steps
+    }
+
+    pub fn show_allowed_next_steps(&self) -> bool {
+        self.show_allowed_next_steps
     }
 
     pub fn new() -> Self {
         Self {
             characters: vec![
-                Character::new(Job::Robber, Pos2::ZERO),
-                Character::new(Job::Cop(0), pos2(0.25, 0.0)),
+                Character::new(Id::Robber, Pos2::ZERO),
+                Character::new(Id::Cop(0), pos2(0.25, 0.0)),
             ],
             past_moves: Vec::new(),
             future_moves: Vec::new(),
 
-            show_steps: false,
+            show_past_steps: false,
+            show_allowed_next_steps: false,
         }
     }
 
@@ -385,21 +395,21 @@ impl CharacterState {
         let mut change = false;
         ui.collapsing("Figuren", |ui| {
             ui.horizontal(|ui| {
-                let minus_emoji = self.characters.last().map_or("🚫", |c| c.job.emoji());
-                let next_job = 'choose_job: {
+                let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
+                let next_id = 'choose_next: {
                     if self.characters.is_empty() {
-                        break 'choose_job Job::Robber;
+                        break 'choose_next Id::Robber;
                     }
-                    let mut cops_used = [0usize; Job::COP_EMOJIES.len()];
+                    let mut cops_used = [0usize; Id::COP_EMOJIES.len()];
                     for c in &self.characters {
-                        if let Job::Cop(i) = c.job {
+                        if let Id::Cop(i) = c.id {
                             cops_used[i] += 1;
                         }
                     }
-                    Job::Cop(cops_used.iter().position_min().unwrap())
+                    Id::Cop(cops_used.iter().position_min().unwrap())
                 };
                 let minus_text = format!("- Figur ({})", minus_emoji);
-                let plus_text = format!("+ Figur ({})", next_job.emoji());
+                let plus_text = format!("+ Figur ({})", next_id.emoji());
                 if ui.button(minus_text).clicked() {
                     self.characters.pop();
                     self.forget_move_history();
@@ -407,7 +417,7 @@ impl CharacterState {
                 }
                 if ui.button(plus_text).clicked() {
                     let pos = map.camera().in_front_of_cam();
-                    let mut new_ch = Character::new(next_job, pos);
+                    let mut new_ch = Character::new(next_id, pos);
                     let find_screen_facing = |v: usize| {
                         -map.positions()[v].to_vec3().normalized().dot(map.camera().screen_normal())
                     };
@@ -417,12 +427,12 @@ impl CharacterState {
                     change = true;
                 }
             });
-            ui.collapsing("Aktiv", |ui| {
+            ui.collapsing("Aktive Cops", |ui| {
                 if self.characters.len() > 1 {
                     let mut delete = None;
                     for (i, cop) in izip!(1.., &mut self.characters[1..]) {
                         ui.horizontal(|ui| {
-                            ui.label(cop.job.emoji());
+                            ui.label(cop.id.emoji());
                             let was_enabled = cop.enabled;
                             ui.checkbox(&mut cop.enabled, "")
                                 .on_hover_text("Berücksichte Cop bei Berechnungen");
@@ -439,9 +449,10 @@ impl CharacterState {
                     }
                 }
             });
+            ui.checkbox(&mut self.show_allowed_next_steps, "zeige Zugoptionen");
             ui.horizontal(|ui| {
-                ui.add(Checkbox::new(&mut self.show_steps, "zeige Schritte"));
-                if ui.button("Reset").clicked() {
+                ui.add(Checkbox::new(&mut self.show_past_steps, "zeige Züge"));
+                if ui.button("Reset Züge").clicked() {
                     self.forget_move_history();
                     change = true;
                 }
@@ -460,18 +471,12 @@ impl CharacterState {
             let print_style = |ch: Option<&Character>| {
                 ch.map_or_else(
                     || " 🚫   ".to_string(),
-                    |c| format!("{} ({})", c.job.str(), c.job.emoji()),
+                    |c| format!("{} ({})", c.id.str(), c.id.emoji()),
                 )
             };
 
-            ui.label(format!(
-                "letzter Schritt: {}",
-                print_style(self.last_moved())
-            ));
-            ui.label(format!(
-                "nächster Schritt: {}",
-                print_style(self.next_moved())
-            ));
+            ui.label(format!("letzter Zug: {}", print_style(self.last_moved())));
+            ui.label(format!("nächster Zug: {}", print_style(self.next_moved())));
         });
 
         change
