@@ -80,11 +80,11 @@ pub fn u8_marker_color(marker: u8, colors: &[F32Color]) -> Color32 {
 //assume s, v, in interval 0..1000, h in interval 0..6000000
 //we use integers, as floating point is disallowed in compile time...
 const fn hsv_to_rgb(h: usize, s: usize, v: usize) -> [f32; 3] {
-    assert!(h <= 6000000);
+    assert!(h <= 6_000_000);
     assert!(s <= 1000);
     assert!(v <= 1000);
 
-    let h_interval = h / 1000000; //in interval 0..6
+    let h_interval = h / 1_000_000; //in interval 0..6
     let f = (h / 1000) - h_interval * 1000;
     let p = (v * (1000 - s)) / 1000;
     let q = (v * (1000 - (s * f) / 1000)) / 1000;
@@ -106,7 +106,7 @@ const fn hsv_to_rgb(h: usize, s: usize, v: usize) -> [f32; 3] {
 
 const fn create_distinct_colors() -> [F32Color; 32] {
     let mut res = [F32Color([0.0; 3], 1.0); 32];
-    let tau = 6000000; //circular constant, e.g. 2 * pi, only blown up and int, because compiletime
+    let tau = 6_000_000; //circular constant, e.g. 2 * pi, only blown up and int, because compiletime
     let ang_offsets = [
         tau / 32,
         tau / 32 + tau / 8,

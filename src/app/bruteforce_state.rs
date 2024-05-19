@@ -503,12 +503,12 @@ impl BruteforceComputationState {
     }
 
     fn draw_results(&mut self, ui: &mut Ui) {
-        ui.add_space(5.0);
         enum Action {
             Verify,
             Store,
             Delete,
         }
+        ui.add_space(5.0);
         let mut action = None;
         for (game_type, outcome) in &self.results {
             Self::draw_result(ui, game_type, outcome);
@@ -549,9 +549,8 @@ impl BruteforceComputationState {
         if let Some((a, game_type)) = action {
             let strat = self.cop_strats.remove(&game_type).unwrap();
             match a {
-                Action::Delete => {},
+                Action::Delete | Action::Verify => {},
                 Action::Store => self.save_strat(game_type, strat),
-                Action::Verify => {},
             }
         }
     }
@@ -574,13 +573,10 @@ impl BruteforceComputationState {
                 ui.horizontal(|ui| {
                     ui.add(egui::widgets::Spinner::new());
                     let task_str = match worker.task {
-                        WorkTask::Compute => "rechne ",
-                        WorkTask::ComputeStrat => "rechne  ",
+                        WorkTask::Compute | WorkTask::ComputeStrat => "rechne ",
                         WorkTask::Verify => "verifiziere ",
-                        WorkTask::Load => "lade ",
-                        WorkTask::LoadStrat => "lade ",
-                        WorkTask::Store => "speichere ",
-                        WorkTask::StoreStrat => "speichere ",
+                        WorkTask::Load | WorkTask::LoadStrat => "lade ",
+                        WorkTask::Store | WorkTask::StoreStrat => "speichere ",
                     };
                     ui.label(format!(
                         "{} {}",

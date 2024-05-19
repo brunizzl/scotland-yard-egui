@@ -150,7 +150,7 @@ impl TikzPicture {
                             a.y,
                             b.x,
                             b.y
-                        ))
+                        ));
                     }
                 },
                 Shape::Text(t) => {
@@ -183,7 +183,7 @@ impl Drop for TikzPicture {
         };
         let mut write = |data: &str| file.write_all(data.as_bytes()).ok();
         write("\\begin{tikzpicture}\n");
-        for (&[r, g, b, _], name) in self.color_names.iter() {
+        for (&[r, g, b, _], name) in &self.color_names {
             write(&format!(
                 "  \\definecolor{{{name}}}{{RGB}}{{{r},{g},{b}}}\n"
             ));

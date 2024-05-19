@@ -80,15 +80,15 @@ impl Camera3D {
     }
 
     pub fn rotate_x(&mut self, angle: f32) {
-        self.update_direction(|v| v.rotate_x(angle))
+        self.update_direction(|v| v.rotate_x(angle));
     }
 
     pub fn rotate_y(&mut self, angle: f32) {
-        self.update_direction(|v| v.rotate_y(angle))
+        self.update_direction(|v| v.rotate_y(angle));
     }
 
     pub fn rotate_z(&mut self, angle: f32) {
-        self.update_direction(|v| v.rotate_z(angle))
+        self.update_direction(|v| v.rotate_z(angle));
     }
 
     /// only z-rotation, zoom is centered around mouse pointer

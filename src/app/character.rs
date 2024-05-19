@@ -284,7 +284,7 @@ impl Character {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct CharacterState {
+pub struct State {
     characters: Vec<Character>,
 
     /// oldest to newest. for an element fst is character index, snd is vertex index
@@ -296,7 +296,7 @@ pub struct CharacterState {
     pub show_allowed_next_steps: bool,
 }
 
-impl CharacterState {
+impl State {
     pub fn new() -> Self {
         Self {
             characters: vec![

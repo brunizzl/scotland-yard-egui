@@ -69,21 +69,21 @@ where
 {
     ui.horizontal(|ui| {
         let prev = *val;
-        let fval = val.to_f64();
+        let f_val = val.to_f64();
         let step = step.into();
         if ui.button(" - ").clicked() && prev > min {
             *val = T::from_f64(if T::INTEGRAL {
-                fval - step
+                f_val - step
             } else {
-                fval / step
+                f_val / step
             });
         }
         ui.add(DragValue::new(val).clamp_range(min..=max).update_while_editing(false));
         if ui.button(" + ").clicked() && prev < max {
             *val = T::from_f64(if T::INTEGRAL {
-                fval + step
+                f_val + step
             } else {
-                fval * step
+                f_val * step
             });
         }
         ui.label(name);

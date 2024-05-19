@@ -5,10 +5,11 @@ use itertools::{izip, Itertools};
 use egui::*;
 use strum::IntoEnumIterator;
 
-use crate::app::character::CharacterState;
+use crate::app::character::State;
 use crate::graph::{bruteforce as bf, *};
 
 use self::bruteforce_state::{BruteforceComputationState, GameType};
+use self::character::Character;
 
 use super::{color, *};
 
@@ -53,9 +54,7 @@ impl VertexColorInfo {
             dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
             aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
             die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.",
-            MinCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
-            MaxCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
-            AnyCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
+            MinCopDist | MaxCopDist | AnyCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
             RobberDist => "Alle Punkte die eingestellten Abstand zu Räuber haben",
             VertexEquivalenceClasses => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
             Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
@@ -171,7 +170,7 @@ struct Options {
     show_hull_boundary: bool,
     draw_vertices: bool,
     show_cop_strat: bool,
-    show_manual_marker_options: bool,
+    show_manual_marker_window: bool,
 }
 
 const DEFAULT_OPTIONS: Options = Options {
@@ -195,11 +194,11 @@ const DEFAULT_OPTIONS: Options = Options {
     show_hull_boundary: false,
     draw_vertices: false,
     show_cop_strat: false,
-    show_manual_marker_options: false,
+    show_manual_marker_window: false,
 };
 
 fn add_scale_drag_value(ui: &mut Ui, val: &mut f32) -> bool {
-    const FIFTH_ROOT_OF_TWO: f64 = 1.148698354997035;
+    const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
     add_drag_value(ui, val, "Größe", (0.125, 8.0), FIFTH_ROOT_OF_TWO)
 }
 
@@ -312,8 +311,8 @@ impl Options {
 
 
             ui.add_space(8.0);
-            if ui.add(Button::new("✏ Manuelle Marker").selected(self.show_manual_marker_options)).clicked() {
-                self.show_manual_marker_options = !self.show_manual_marker_options;
+            if ui.add(Button::new("✏ Manuelle Marker").selected(self.show_manual_marker_window)).clicked() {
+                self.show_manual_marker_window = !self.show_manual_marker_window;
             }
         });
 
@@ -322,7 +321,7 @@ impl Options {
 
     pub fn draw_windows(&mut self, ctx: &Context) {
         Window::new("✏")
-            .open(&mut self.show_manual_marker_options)
+            .open(&mut self.show_manual_marker_window)
             .collapsible(false)
             .show(ctx, |ui| {
                 ui.label("[Info]").on_hover_text(
@@ -374,7 +373,7 @@ pub struct Info {
     /// to not reallocate between frames/ algorithms, the storage is kept and passed to where needed.
     pub queue: VecDeque<usize>,
 
-    pub characters: CharacterState,
+    pub characters: State,
 
     options: Options,
     menu_change: bool,
@@ -403,7 +402,7 @@ impl Default for Info {
 
             queue: VecDeque::new(),
 
-            characters: CharacterState::new(),
+            characters: State::new(),
             options: DEFAULT_OPTIONS,
             menu_change: false,
 
@@ -432,7 +431,7 @@ impl Info {
     #[allow(dead_code)]
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
-        let characters = load_or(cc.storage, CHARACTERS, CharacterState::new);
+        let characters = load_or(cc.storage, CHARACTERS, State::new);
         let marked_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
         let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
 
@@ -580,7 +579,7 @@ impl Info {
             &self.cop_hull_data,
             con.edges,
             &mut self.queue,
-        )
+        );
     }
 
     /// recomputes everything
@@ -672,11 +671,11 @@ impl Info {
     }
 
     fn add_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
-        self.change_marker_at(screen_pos, con, true)
+        self.change_marker_at(screen_pos, con, true);
     }
 
     fn remove_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
-        self.change_marker_at(screen_pos, con, false)
+        self.change_marker_at(screen_pos, con, false);
     }
 
     fn screenshot_as_tikz(&mut self, con: &DrawContext<'_>) {
@@ -705,9 +704,7 @@ impl Info {
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
         let held_key = ui.input(|info| {
-            let Some(pointer_pos) = info.pointer.latest_pos() else {
-                return None;
-            };
+            let pointer_pos = info.pointer.latest_pos()?;
             if !con.response.rect.contains(pointer_pos) {
                 return None;
             }
@@ -880,7 +877,8 @@ impl Info {
                 }
             },
             VertexColorInfo::AnyCopDist => {
-                let active_dists = self.characters.active_cops().map(|c| c.dists()).collect_vec();
+                let active_dists =
+                    self.characters.active_cops().map(Character::dists).collect_vec();
                 for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
                     if vis {
                         let mut any_picked = false;
@@ -1002,7 +1000,8 @@ impl Info {
                 }
             },
             VertexColorInfo::CopsVoronoi => {
-                let active_dists = self.characters.active_cops().map(|c| c.dists()).collect_vec();
+                let active_dists =
+                    self.characters.active_cops().map(Character::dists).collect_vec();
 
                 let color_3exact = self.options.automatic_marker_color;
                 let color_3about = self.options.automatic_marker_color.gamma_multiply(0.85);
