@@ -704,16 +704,21 @@ impl Info {
     }
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
-        ui.input(|info| {
+        let held_key = ui.input(|info| {
+            let Some(pointer_pos) = info.pointer.latest_pos() else {
+                return None;
+            };
+            if !con.response.rect.contains(pointer_pos) {
+                return None;
+            }
+
             if info.key_pressed(Key::F2) {
-                if let Some(pointer_pos) = info.pointer.latest_pos() {
-                    let (v, dist) = con.find_closest_vertex(pointer_pos);
-                    if dist <= 10.0 {
-                        if !self.characters.remove_cop_at_vertex(v) {
-                            self.characters.create_character_at(pointer_pos, con.map);
-                        }
-                        self.menu_change = true;
+                let (v, dist) = con.find_closest_vertex(pointer_pos);
+                if dist <= 10.0 {
+                    if !self.characters.remove_cop_at_vertex(v) {
+                        self.characters.create_character_at(pointer_pos, con.map);
                     }
+                    self.menu_change = true;
                 }
             }
             if info.key_pressed(Key::F3) {
@@ -731,14 +736,10 @@ impl Info {
 
             let mouse_down = info.pointer.button_down(PointerButton::Primary);
             if tool == MouseTool::Draw && mouse_down {
-                if let Some(pointer_pos) = info.pointer.latest_pos() {
-                    self.add_marker_at(pointer_pos, con);
-                }
+                self.add_marker_at(pointer_pos, con);
             }
             if tool == MouseTool::Erase && mouse_down {
-                if let Some(pointer_pos) = info.pointer.latest_pos() {
-                    self.remove_marker_at(pointer_pos, con);
-                }
+                self.remove_marker_at(pointer_pos, con);
             }
 
             if info.key_down(Key::Q) {
@@ -748,6 +749,7 @@ impl Info {
                         self.menu_change = true;
                     }
                 }
+                return Some(Key::Q);
             }
             if info.key_down(Key::W) {
                 for (n, key) in izip!(2.., [Key::Num1, Key::Num2, Key::Num3, Key::Num4]) {
@@ -756,8 +758,22 @@ impl Info {
                         self.menu_change = true;
                     }
                 }
+                return Some(Key::W);
             }
+            None
         });
+
+        if let Some(key) = held_key {
+            let sc = |i: usize| self.options.last_selected_vertex_color_infos[i].name_str();
+            let sn = |i: usize| self.options.last_selected_vertex_number_infos[i].name_str();
+            let tip = match key {
+                Key::Q => format!("1: {}\n2: {}\n3: {}\n4: {}", sc(1), sc(2), sc(3), sc(4)),
+                Key::W => format!("1: {}\n2: {}\n3: {}\n4: {}", sn(1), sn(2), sn(3), sn(4)),
+                _ => unreachable!(),
+            };
+            let id = Id::new((&self.options as *const _, "tooltip-fast-switch"));
+            show_tooltip_text(ui.ctx(), id, tip);
+        }
     }
 
     fn draw_convex_cop_hull(&self, con: &DrawContext<'_>) {

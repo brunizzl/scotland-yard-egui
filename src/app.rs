@@ -150,17 +150,6 @@ impl State {
             fullscreen: false,
         }
     }
-
-    fn toggle_fullscreen(&mut self, ctx: &Context) {
-        if !NATIVE {
-            return;
-        }
-        let f11_pressed = ctx.input(|info| info.key_pressed(Key::F11));
-        if f11_pressed {
-            self.fullscreen ^= true;
-            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(self.fullscreen));
-        }
-    }
 }
 
 fn draw_usage_info(ui: &mut Ui) {
@@ -199,7 +188,10 @@ impl eframe::App for State {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        self.toggle_fullscreen(ctx);
+        if NATIVE && ctx.input(|info| info.key_pressed(Key::F11)) {
+            self.fullscreen ^= true;
+            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(self.fullscreen));
+        }
 
         if self.menu_visible {
             SidePanel::left("left_panel").min_width(0.0).show(ctx, |ui| {
@@ -214,6 +206,7 @@ impl eframe::App for State {
                 });
                 ui.horizontal(|ui| {
                     widgets::global_dark_light_mode_buttons(ui);
+
                     draw_usage_info(ui);
                 });
 
