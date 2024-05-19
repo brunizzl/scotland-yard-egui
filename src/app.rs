@@ -132,8 +132,9 @@ pub struct State {
     map: map::Map,
     info: info::Info,
 
-    mode: MouseTool,
+    tool: MouseTool,
     menu_visible: bool,
+    fullscreen: bool,
 }
 
 impl State {
@@ -141,13 +142,23 @@ impl State {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut info = info::Info::new(cc);
         let map = map::Map::new(&mut info, cc);
-        let active_mode = MouseTool::Drag;
-        let menu_visible = true;
         Self {
             map,
             info,
-            mode: active_mode,
-            menu_visible,
+            tool: MouseTool::Drag,
+            menu_visible: true,
+            fullscreen: false,
+        }
+    }
+
+    fn toggle_fullscreen(&mut self, ctx: &Context) {
+        if !NATIVE {
+            return;
+        }
+        let f11_pressed = ctx.input(|info| info.key_pressed(Key::F11));
+        if f11_pressed {
+            self.fullscreen ^= true;
+            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(self.fullscreen));
         }
     }
 }
@@ -188,6 +199,8 @@ impl eframe::App for State {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        self.toggle_fullscreen(ctx);
+
         if self.menu_visible {
             SidePanel::left("left_panel").min_width(0.0).show(ctx, |ui| {
                 let compile_datetime = compile_time::datetime_str!();
@@ -208,26 +221,26 @@ impl eframe::App for State {
                 ui.horizontal(|ui| {
                     ui.label("Werkzeug: ").on_hover_text("rotiere mit F1");
                     for mode in [MouseTool::Drag, MouseTool::Draw, MouseTool::Erase] {
-                        let button = Button::new(mode.symbol()).selected(self.mode == mode);
+                        let button = Button::new(mode.symbol()).selected(self.tool == mode);
                         if ui.add(button).on_hover_text(mode.what()).clicked() {
-                            self.mode = mode;
+                            self.tool = mode;
                         }
                     }
 
-                    let next = match self.mode {
+                    let next = match self.tool {
                         MouseTool::Drag => MouseTool::Draw,
                         MouseTool::Draw => MouseTool::Erase,
                         MouseTool::Erase => MouseTool::Drag,
                     };
                     let f1_down = ui.input(|info| {
                         if info.key_released(Key::F1) {
-                            self.mode = next;
+                            self.tool = next;
                         }
                         info.key_down(Key::F1)
                     });
                     if f1_down {
                         let symbol = RichText::new(next.symbol()).size(30.0);
-                        show_tooltip_text(ctx, Id::new(&self.mode as *const _), symbol);
+                        show_tooltip_text(ctx, Id::new(&self.tool as *const _), symbol);
                     }
                 });
 
@@ -242,7 +255,7 @@ impl eframe::App for State {
 
         CentralPanel::default().show(ctx, |ui| {
             let con = self.map.update_and_draw(ui);
-            self.info.update_and_draw(ui, &con, self.mode);
+            self.info.update_and_draw(ui, &con, self.tool);
 
             if !self.menu_visible {
                 let pos = Rect::from_center_size(pos2(12.0, 2.0), Vec2::ZERO);

@@ -276,7 +276,7 @@ impl Options {
 
                         menu_change = true;
                     }
-                }).response.on_hover_text("rotiere durch letzte mit F5 / F6 / F7 / F8");
+                }).response.on_hover_text("rotiere durch letzte mit [Q] + [1]/[2]/[3]/[4]");
             match self.vertex_color_info() {
                 VertexColorInfo::MinCopDist | VertexColorInfo::MaxCopDist | VertexColorInfo::AnyCopDist => {
                     add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", (0, 1000), 1)
@@ -308,7 +308,7 @@ impl Options {
 
                         menu_change = true;
                     }
-                }).response.on_hover_text("rotiere durch letzte mit F9 / F10 / F11 / F12");
+                }).response.on_hover_text("rotiere durch letzte mit [W] + [1]/[2]/[3]/[4]");
 
 
             ui.add_space(8.0);
@@ -701,7 +701,7 @@ impl Info {
         );
     }
 
-    pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>, mode: MouseTool) {
+    pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
         ui.input(|info| {
             if info.key_pressed(Key::F2) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
@@ -726,27 +726,31 @@ impl Info {
             }
 
             let mouse_down = info.pointer.button_down(PointerButton::Primary);
-            if mode == MouseTool::Draw && mouse_down {
+            if tool == MouseTool::Draw && mouse_down {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.add_marker_at(pointer_pos, con);
                 }
             }
-            if mode == MouseTool::Erase && mouse_down {
+            if tool == MouseTool::Erase && mouse_down {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.remove_marker_at(pointer_pos, con);
                 }
             }
 
-            for (n, key) in izip!(2.., [Key::F5, Key::F6, Key::F7, Key::F8]) {
-                if info.key_pressed(key) {
-                    self.options.last_selected_vertex_color_infos[..n].rotate_right(1);
-                    self.menu_change = true;
+            if info.key_down(Key::Q) {
+                for (n, key) in izip!(2.., [Key::Num1, Key::Num2, Key::Num3, Key::Num4]) {
+                    if info.key_pressed(key) {
+                        self.options.last_selected_vertex_color_infos[..n].rotate_right(1);
+                        self.menu_change = true;
+                    }
                 }
             }
-            for (n, key) in izip!(2.., [Key::F9, Key::F10, Key::F11, Key::F12]) {
-                if info.key_pressed(key) {
-                    self.options.last_selected_vertex_number_infos[..n].rotate_right(1);
-                    self.menu_change = true;
+            if info.key_down(Key::W) {
+                for (n, key) in izip!(2.., [Key::Num1, Key::Num2, Key::Num3, Key::Num4]) {
+                    if info.key_pressed(key) {
+                        self.options.last_selected_vertex_number_infos[..n].rotate_right(1);
+                        self.menu_change = true;
+                    }
                 }
             }
         });
@@ -1190,8 +1194,8 @@ impl Info {
         }
     }
 
-    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, mode: MouseTool) {
-        self.process_general_input(ui, con, mode);
+    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
+        self.process_general_input(ui, con, tool);
         if self.menu_change {
             self.definitely_update(con);
         } else {
@@ -1205,7 +1209,7 @@ impl Info {
         self.characters.draw_allowed_next_steps(con);
         self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
-        self.characters.draw(ui, con, mode == MouseTool::Drag);
+        self.characters.draw(ui, con, tool == MouseTool::Drag);
         self.characters.frame_is_finished();
         self.screenshot_as_tikz(con);
     }
