@@ -660,11 +660,13 @@ impl Info {
     fn change_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>, set: bool) {
         let bit = 1u8 << self.options.active_manual_marker;
         if !con.positions.is_empty() {
-            let (vertex, _) = con.find_closest_vertex(screen_pos);
-            if set {
-                self.marked_manually[vertex] |= bit;
-            } else if self.marked_manually[vertex] & bit != 0 {
-                self.marked_manually[vertex] -= bit;
+            let (vertex, dist) = con.find_closest_vertex(screen_pos);
+            if dist <= 10.0 {
+                if set {
+                    self.marked_manually[vertex] |= bit;
+                } else if self.marked_manually[vertex] & bit != 0 {
+                    self.marked_manually[vertex] -= bit;
+                }
             }
         }
     }
@@ -705,11 +707,13 @@ impl Info {
         ui.input(|info| {
             if info.key_pressed(Key::F2) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
-                    let (v, _) = con.find_closest_vertex(pointer_pos);
-                    if !self.characters.remove_cop_at_vertex(v) {
-                        self.characters.create_character_at(pointer_pos, con.map);
+                    let (v, dist) = con.find_closest_vertex(pointer_pos);
+                    if dist <= 10.0 {
+                        if !self.characters.remove_cop_at_vertex(v) {
+                            self.characters.create_character_at(pointer_pos, con.map);
+                        }
+                        self.menu_change = true;
                     }
-                    self.menu_change = true;
                 }
             }
             if info.key_pressed(Key::F3) {

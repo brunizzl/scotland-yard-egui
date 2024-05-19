@@ -115,7 +115,7 @@ impl MouseTool {
         match self {
             MouseTool::Drag => " ♟ ",
             MouseTool::Draw => " ✏ ",
-            MouseTool::Erase => " ⛔ ",
+            MouseTool::Erase => " 📗 ",
         }
     }
 
