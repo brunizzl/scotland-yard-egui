@@ -181,6 +181,7 @@ impl Character {
         ui: &Ui,
         con: &DrawContext<'_>,
         nr_others_at_same_pos: usize,
+        drag_enabled: bool,
     ) -> bool {
         let to_plane = con.cam().to_screen().to_plane;
         let move_rect = con.cam().to_screen().move_rect;
@@ -194,6 +195,11 @@ impl Character {
                     + (nr_others_at_same_pos as f32) * vec2(0.0, character_size * 0.75)
             },
         };
+
+        if !drag_enabled {
+            self.draw_large_at(draw_screen_pos, &con.painter, ui, character_size);
+            return false;
+        }
 
         let rect_len = if nr_others_at_same_pos > 0 { 1.0 } else { 3.0 } * character_size;
         let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
@@ -429,12 +435,14 @@ impl CharacterState {
         self.characters.push(new_ch);
     }
 
-    pub fn remove_cop_at_vertex(&mut self, v: usize) {
+    pub fn remove_cop_at_vertex(&mut self, v: usize) -> bool {
         let f = |c: &Character| !c.id.is_robber() && c.nearest_vertex == v;
         if let Some(i) = self.characters.iter().position(f) {
             self.characters.remove(i);
             self.forget(i);
+            return true;
         }
+        false
     }
 
     /// returns a menu change (e.g. a new character was added, one removed...)
@@ -445,7 +453,7 @@ impl CharacterState {
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
                 let minus_text = format!("- Figur ({})", minus_emoji);
                 let plus_text = format!("+ Figur ({})", self.next_id().emoji());
-                if ui.button(minus_text).on_hover_text("F1").clicked() {
+                if ui.button(minus_text).on_hover_text("F2").clicked() {
                     self.characters.pop();
                     self.forget(self.characters.len());
                     change = true;
@@ -516,7 +524,7 @@ impl CharacterState {
         }
     }
 
-    pub fn draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+    pub fn draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, drag_enabled: bool) {
         let mut positions = smallvec::SmallVec::<[usize; 20]>::new();
         positions.extend(self.characters.iter().map(|c| c.nearest_vertex));
 
@@ -525,7 +533,7 @@ impl CharacterState {
                 positions[..i].iter().filter(|&&p| p == ch.nearest_vertex).count();
             //always allow to drag, except character sits on backside of graph
             if !ch.on_node || con.visible[ch.nearest_vertex] {
-                let finished_move = ch.drag_and_draw(ui, con, nr_others_at_same_pos);
+                let finished_move = ch.drag_and_draw(ui, con, nr_others_at_same_pos, drag_enabled);
                 if finished_move {
                     self.past_moves.push((i, ch.nearest_vertex));
                     self.future_moves.clear();

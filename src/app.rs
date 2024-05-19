@@ -61,6 +61,7 @@ impl<'a> DrawContext<'a> {
 
 /// returns if val was changed.
 /// step is a multiplier for floats and is added / subtracted for ints.
+/// thus for floats, step is expected to be of form `1.0 + delta` for small growth rates
 fn add_drag_value<T, U>(ui: &mut Ui, val: &mut T, name: &str, (min, max): (T, T), step: U) -> bool
 where
     T: egui::emath::Numeric,
@@ -77,7 +78,7 @@ where
                 fval / step
             });
         }
-        ui.add(DragValue::new(val).clamp_range(min..=max));
+        ui.add(DragValue::new(val).clamp_range(min..=max).update_while_editing(false));
         if ui.button(" + ").clicked() && prev < max {
             *val = T::from_f64(if T::INTEGRAL {
                 fval + step
@@ -102,10 +103,36 @@ fn add_disabled_drag_value(ui: &mut Ui) -> bool {
     .inner
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum MouseTool {
+    Drag,
+    Draw,
+    Erase,
+}
+
+impl MouseTool {
+    fn symbol(self) -> &'static str {
+        match self {
+            MouseTool::Drag => " ♟ ",
+            MouseTool::Draw => " ✏ ",
+            MouseTool::Erase => " ⛔ ",
+        }
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            MouseTool::Drag => "bewege Figuren",
+            MouseTool::Draw => "zeichne",
+            MouseTool::Erase => "radiere",
+        }
+    }
+}
+
 pub struct State {
     map: map::Map,
     info: info::Info,
 
+    mode: MouseTool,
     menu_visible: bool,
 }
 
@@ -114,7 +141,14 @@ impl State {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut info = info::Info::new(cc);
         let map = map::Map::new(&mut info, cc);
-        Self { map, info, menu_visible: true }
+        let active_mode = MouseTool::Drag;
+        let menu_visible = true;
+        Self {
+            map,
+            info,
+            mode: active_mode,
+            menu_visible,
+        }
     }
 }
 
@@ -169,8 +203,35 @@ impl eframe::App for State {
                     widgets::global_dark_light_mode_buttons(ui);
                     draw_usage_info(ui);
                 });
-                ui.separator();
 
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Werkzeug: ").on_hover_text("rotiere mit F1");
+                    for mode in [MouseTool::Drag, MouseTool::Draw, MouseTool::Erase] {
+                        let button = Button::new(mode.symbol()).selected(self.mode == mode);
+                        if ui.add(button).on_hover_text(mode.what()).clicked() {
+                            self.mode = mode;
+                        }
+                    }
+
+                    let next = match self.mode {
+                        MouseTool::Drag => MouseTool::Draw,
+                        MouseTool::Draw => MouseTool::Erase,
+                        MouseTool::Erase => MouseTool::Drag,
+                    };
+                    let f1_down = ui.input(|info| {
+                        if info.key_released(Key::F1) {
+                            self.mode = next;
+                        }
+                        info.key_down(Key::F1)
+                    });
+                    if f1_down {
+                        let symbol = RichText::new(next.symbol()).size(30.0);
+                        show_tooltip_text(ctx, Id::new(&self.mode as *const _), symbol);
+                    }
+                });
+
+                ui.separator();
                 ScrollArea::vertical().show(ui, |ui| {
                     self.map.draw_menu(ui, &mut self.info);
                     self.info.draw_menu(ui, &self.map);
@@ -181,7 +242,7 @@ impl eframe::App for State {
 
         CentralPanel::default().show(ctx, |ui| {
             let con = self.map.update_and_draw(ui);
-            self.info.update_and_draw(ui, &con);
+            self.info.update_and_draw(ui, &con, self.mode);
 
             if !self.menu_visible {
                 let pos = Rect::from_center_size(pos2(12.0, 2.0), Vec2::ZERO);

@@ -326,8 +326,8 @@ impl Options {
             .collapsible(false)
             .show(ctx, |ui| {
                 ui.label("[Info]").on_hover_text(
-                    "Manuelle Marker können an dem der Mausposition nächsten Knoten \
-                mit Taste [m] hinzugefügt und [n] entfernt werden.\
+                    "Manuelle Marker der aktiven Farbe können an dem der Mausposition nächsten Knoten \
+                mit Klicken bei Auswahl des [✏]-Werkzeuges hinzugefügt und bei Auswahl von [⛔] entfernt werden.\
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
                 );
                 add_scale_drag_value(ui, &mut self.manual_marker_scale);
@@ -701,18 +701,14 @@ impl Info {
         );
     }
 
-    pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+    pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>, mode: MouseTool) {
         ui.input(|info| {
-            if info.key_pressed(Key::F1) {
-                if let Some(pointer_pos) = info.pointer.latest_pos() {
-                    let (v, _) = con.find_closest_vertex(pointer_pos);
-                    self.characters.remove_cop_at_vertex(v);
-                    self.menu_change = true;
-                }
-            }
             if info.key_pressed(Key::F2) {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
-                    self.characters.create_character_at(pointer_pos, con.map);
+                    let (v, _) = con.find_closest_vertex(pointer_pos);
+                    if !self.characters.remove_cop_at_vertex(v) {
+                        self.characters.create_character_at(pointer_pos, con.map);
+                    }
                     self.menu_change = true;
                 }
             }
@@ -729,12 +725,13 @@ impl Info {
                 self.characters.redo_move(con.edges, con.positions, &mut self.queue);
             }
 
-            if info.key_down(Key::M) {
+            let mouse_down = info.pointer.button_down(PointerButton::Primary);
+            if mode == MouseTool::Draw && mouse_down {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.add_marker_at(pointer_pos, con);
                 }
             }
-            if info.key_down(Key::N) {
+            if mode == MouseTool::Erase && mouse_down {
                 if let Some(pointer_pos) = info.pointer.latest_pos() {
                     self.remove_marker_at(pointer_pos, con);
                 }
@@ -1193,8 +1190,8 @@ impl Info {
         }
     }
 
-    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
-        self.process_general_input(ui, con);
+    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, mode: MouseTool) {
+        self.process_general_input(ui, con, mode);
         if self.menu_change {
             self.definitely_update(con);
         } else {
@@ -1208,7 +1205,7 @@ impl Info {
         self.characters.draw_allowed_next_steps(con);
         self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
-        self.characters.draw(ui, con);
+        self.characters.draw(ui, con, mode == MouseTool::Drag);
         self.characters.frame_is_finished();
         self.screenshot_as_tikz(con);
     }
