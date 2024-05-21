@@ -316,8 +316,8 @@ impl SymmetryGroup for TorusSymmetry6 {
     type Auto = TorusAutomorphism6;
     type AutoIter<'a> = SmallVec<[&'a TorusAutomorphism6; 4]>;
 
-    fn all_automorphisms(&self) -> std::slice::Iter<'_, Self::Auto> {
-        self.autos.iter()
+    fn all_automorphisms(&self) -> &[Self::Auto] {
+        &self.autos
     }
 
     fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
@@ -337,8 +337,8 @@ impl SymmetryGroup for TorusSymmetry4 {
     type Auto = TorusAutomorphism4;
     type AutoIter<'a> = SmallVec<[&'a TorusAutomorphism4; 4]>;
 
-    fn all_automorphisms(&self) -> std::slice::Iter<'_, Self::Auto> {
-        self.autos.iter()
+    fn all_automorphisms(&self) -> &[Self::Auto] {
+        &self.autos
     }
 
     fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {

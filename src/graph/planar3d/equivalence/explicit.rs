@@ -499,8 +499,8 @@ impl SymmetryGroup for ExplicitClasses {
         self.class_representative.iter().copied()
     }
 
-    fn all_automorphisms(&self) -> impl Iterator<Item = &Self::Auto> {
-        self.symmetry_transforms.iter()
+    fn all_automorphisms(&self) -> &[Self::Auto] {
+        &self.symmetry_transforms
     }
 
     fn into_enum(self) -> SymGroup {

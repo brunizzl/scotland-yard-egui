@@ -5,7 +5,6 @@ use itertools::{izip, Itertools};
 use egui::*;
 use strum::IntoEnumIterator;
 
-use crate::app::character::State;
 use crate::graph::{bruteforce as bf, *};
 
 use self::bruteforce_state::{BruteforceComputationState, GameType};
@@ -373,7 +372,7 @@ pub struct Info {
     /// to not reallocate between frames/ algorithms, the storage is kept and passed to where needed.
     pub queue: VecDeque<usize>,
 
-    pub characters: State,
+    pub characters: character::State,
 
     options: Options,
     menu_change: bool,
@@ -402,7 +401,7 @@ impl Default for Info {
 
             queue: VecDeque::new(),
 
-            characters: State::new(),
+            characters: character::State::new(),
             options: DEFAULT_OPTIONS,
             menu_change: false,
 
@@ -431,7 +430,7 @@ impl Info {
     #[allow(dead_code)]
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
-        let characters = load_or(cc.storage, CHARACTERS, State::new);
+        let characters = load_or(cc.storage, CHARACTERS, character::State::new);
         let marked_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
         let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
 
