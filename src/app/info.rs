@@ -317,43 +317,12 @@ impl Options {
 
         menu_change
     }
-
-    pub fn draw_windows(&mut self, ctx: &Context) {
-        Window::new("✏")
-            .open(&mut self.show_manual_marker_window)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                ui.label("[Info]").on_hover_text(
-                    "Manuelle Marker der aktiven Farbe können an dem der Mausposition nächsten Knoten \
-                mit Klicken bei Auswahl des [✏]-Werkzeuges hinzugefügt und bei Auswahl von [⛔] entfernt werden.\
-                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
-                );
-                add_scale_drag_value(ui, &mut self.manual_marker_scale);
-
-                for (i, color) in izip!(0.., &mut self.manual_marker_colors) {
-                    ui.horizontal(|ui| {
-                        ui.radio_value(&mut self.active_manual_marker, i, "");
-                        ui.color_edit_button_srgba(color);
-                        if ui.button("Reset").on_hover_text("setze Farbe zurück").clicked() {
-                            *color = color::HAND_PICKED_MARKER_COLORS[i];
-                        }
-
-                        let bit_i = 1u8 << i;
-                        let curr_shown = self.shown_manual_markers & bit_i != 0;
-                        let mut show = curr_shown;
-                        ui.add(Checkbox::new(&mut show, "")).on_hover_text("Anzeigen");
-                        if show {
-                            self.shown_manual_markers |= bit_i;
-                        } else if curr_shown {
-                            self.shown_manual_markers -= bit_i;
-                        }
-                    });
-                }
-            });
-    }
 }
 
 pub struct Info {
+    ///remembers all vertices currently colored by `VertexColorInfo` of `self.options`
+    currently_marked: Vec<bool>,
+
     //state kept for each node in map
     cop_hull_data: ConvexHullData,
     escapable: EscapeableNodes,
@@ -392,6 +361,8 @@ mod storage_keys {
 impl Default for Info {
     fn default() -> Self {
         Self {
+            currently_marked: Vec::new(),
+
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
             min_cop_dist: Vec::new(),
@@ -435,6 +406,8 @@ impl Info {
         let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
 
         Self {
+            currently_marked: Vec::new(),
+
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
             min_cop_dist: Vec::new(),
@@ -478,7 +451,52 @@ impl Info {
     }
 
     pub fn draw_windows(&mut self, ctx: &Context) {
-        self.options.draw_windows(ctx);
+        let opts = &mut self.options;
+        Window::new("✏")
+            .open(&mut opts.show_manual_marker_window)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.label("[Info]").on_hover_text(
+                    "Manuelle Marker der aktiven Farbe können an dem der Mausposition nächsten Knoten \
+                mit Klicken bei Auswahl des [✏]-Werkzeuges hinzugefügt und bei Auswahl von [📗] entfernt werden.\
+                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
+                );
+                add_scale_drag_value(ui, &mut opts.manual_marker_scale);
+
+                for (i, color) in izip!(0.., &mut opts.manual_marker_colors) {
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut opts.active_manual_marker, i, "");
+                        ui.color_edit_button_srgba(color);
+                        if ui.button(" F₀ ").on_hover_text("setze Farbe zurück").clicked() {
+                            *color = color::HAND_PICKED_MARKER_COLORS[i];
+                        }
+                        let bit_i = 1u8 << i;
+                        if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
+                            let mask = u8::MAX - bit_i;
+                            for marker in &mut self.marked_manually {
+                                *marker &= mask;
+                            }
+                        }
+                        if ui.button(" ⬇ ").on_hover_text("füge automatische Marker hinzu").clicked() {
+                            let iter = izip!(&self.currently_marked, &mut self.marked_manually);
+                            for (&set, marker) in iter {
+                                if set {
+                                    *marker |= bit_i;
+                                }
+                            }
+                        }
+
+                        let curr_shown = opts.shown_manual_markers & bit_i != 0;
+                        let mut show = curr_shown;
+                        ui.add(Checkbox::new(&mut show, "")).on_hover_text("Anzeigen");
+                        if show {
+                            opts.shown_manual_markers |= bit_i;
+                        } else if curr_shown {
+                            opts.shown_manual_markers -= bit_i;
+                        }
+                    });
+                }
+            });
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
@@ -820,87 +838,84 @@ impl Info {
         (active_cops, game_type)
     }
 
-    fn draw_green_circles(&self, con: &DrawContext<'_>) {
+    fn draw_green_circles(&mut self, con: &DrawContext<'_>) {
+        self.currently_marked.clear();
+        self.currently_marked.resize(con.edges.nr_vertices(), false);
+        let utils_iter = izip!(&mut self.currently_marked, con.positions, con.visible);
+
         let size = 6.0 * self.options.automatic_marker_scale * con.scale;
         let draw_circle_at = |pos, color| {
             let draw_pos = con.cam().transform(pos);
             let marker_circle = Shape::circle_filled(draw_pos, size, color);
             con.painter.add(marker_circle);
         };
+        macro_rules! draw_if {
+            ($cond:expr, $util:expr, $f_color:expr) => {
+                if $cond {
+                    let (re, &pos, &vis) = $util;
+                    *re = true;
+                    if vis {
+                        let color = $f_color;
+                        draw_circle_at(pos, color());
+                    }
+                }
+            };
+            ($cond:expr, $util:expr) => {
+                draw_if!($cond, $util, || self.options.automatic_marker_color);
+            };
+        }
         match self.options.vertex_color_info() {
             VertexColorInfo::NearNodes => {
                 if let Some(r) = self.characters.robber() {
-                    for (r_dist, c_dist, &pos, &vis) in
-                        izip!(r.dists(), &self.min_cop_dist, con.positions, con.visible)
-                    {
-                        if vis && r_dist < c_dist {
-                            draw_circle_at(pos, self.options.automatic_marker_color);
-                        }
+                    for (r_dist, c_dist, util) in izip!(r.dists(), &self.min_cop_dist, utils_iter) {
+                        draw_if!(r_dist < c_dist, util);
                     }
                 }
             },
             VertexColorInfo::Escape1 => {
-                for (&adv, &pos, &vis, &hull) in izip!(
-                    &self.cop_advantage,
-                    con.positions,
-                    con.visible,
-                    self.cop_hull_data.hull()
-                ) {
-                    if vis && hull.contained() && adv < -1 {
-                        draw_circle_at(pos, self.options.automatic_marker_color);
-                    }
+                for (&adv, &hull, util) in
+                    izip!(&self.cop_advantage, self.cop_hull_data.hull(), utils_iter)
+                {
+                    draw_if!(hull.contained() && adv < -1, util);
                 }
             },
             VertexColorInfo::RobberDist => {
                 if let Some(r) = self.characters.robber() {
                     let bnd = self.options.marked_robber_dist;
-                    for (&dist, &pos, &vis) in izip!(r.dists(), con.positions, con.visible) {
-                        if vis && dist == bnd {
-                            draw_circle_at(pos, self.options.automatic_marker_color);
-                        }
+                    for (&dist, util) in izip!(r.dists(), utils_iter) {
+                        draw_if!(dist == bnd, util);
                     }
                 }
             },
             VertexColorInfo::MinCopDist => {
-                for (&dist, &pos, &vis) in izip!(&self.min_cop_dist, con.positions, con.visible) {
-                    if vis && dist == self.options.marked_cop_dist {
-                        draw_circle_at(pos, self.options.automatic_marker_color);
-                    }
+                for (&dist, util) in izip!(&self.min_cop_dist, utils_iter) {
+                    draw_if!(dist == self.options.marked_cop_dist, util);
                 }
             },
             VertexColorInfo::MaxCopDist => {
-                for (&dist, &pos, &vis) in izip!(&self.max_cop_dist, con.positions, con.visible) {
-                    if vis && dist == self.options.marked_cop_dist {
-                        draw_circle_at(pos, self.options.automatic_marker_color);
-                    }
+                for (&dist, util) in izip!(&self.max_cop_dist, utils_iter) {
+                    draw_if!(dist == self.options.marked_cop_dist, util);
                 }
             },
             VertexColorInfo::AnyCopDist => {
                 let active_dists =
                     self.characters.active_cops().map(Character::dists).collect_vec();
-                for (v, &pos, &vis) in izip!(0.., con.positions, con.visible) {
-                    if vis {
-                        let mut any_picked = false;
-                        let picked = active_dists.iter().map(|d| {
-                            let res = d[v] == self.options.marked_cop_dist;
-                            any_picked |= res;
-                            res
-                        });
-                        let color = color::blend_picked(&color::MARKER_COLORS_F32, picked);
-                        if any_picked {
-                            draw_circle_at(pos, color);
-                        }
-                    }
+                for (v, util) in izip!(0.., utils_iter) {
+                    let mut any_picked = false;
+                    let picked = active_dists.iter().map(|d| {
+                        let res = d[v] == self.options.marked_cop_dist;
+                        any_picked |= res;
+                        res
+                    });
+                    //caution: don't evaluate color lazily, else `any_picked` is always false.
+                    let color = color::blend_picked(&color::MARKER_COLORS_F32, picked);
+                    draw_if!(any_picked, util, || color);
                 }
             },
             VertexColorInfo::Escape2 => {
-                for (&esc, &pos, &vis) in
-                    izip!(self.escapable.escapable(), con.positions, con.visible)
-                {
-                    if vis && esc != 0 {
-                        let color = color::u32_marker_color(esc, &color::MARKER_COLORS_F32);
-                        draw_circle_at(pos, color);
-                    }
+                for (&esc, util) in izip!(self.escapable.escapable(), utils_iter) {
+                    let color = || color::u32_marker_color(esc, &color::MARKER_COLORS_F32);
+                    draw_if!(esc != 0, util, color);
                 }
             },
             VertexColorInfo::BruteForceRes => {
@@ -912,10 +927,12 @@ impl Info {
                     let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
                     for (v, safe) in izip!(0.., safe_vertices) {
                         let v_rot = transform.dyn_apply_backward(v);
-                        if safe && con.visible[v_rot] {
-                            let rot_pos = con.positions[v_rot];
-                            draw_circle_at(rot_pos, self.options.automatic_marker_color);
-                        }
+                        let util = (
+                            &mut self.currently_marked[v_rot],
+                            &con.positions[v_rot],
+                            &con.visible[v_rot],
+                        );
+                        draw_if!(safe, util);
                     }
                 }
             },
@@ -923,6 +940,7 @@ impl Info {
                 if let SymGroup::Explicit(equiv) = con.sym_group() {
                     for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
                         if vis {
+                            //every vertex is marked, no need to record this.
                             const COLORS: &[Color32] = &super::color::MARKER_COLORS_U8;
                             draw_circle_at(pos, COLORS[class as usize % COLORS.len()]);
                         }
@@ -935,6 +953,7 @@ impl Info {
                     let v0 = r.vertex();
                     let mut f = |transform: &dyn DynAutomorphism| {
                         let sym_v = transform.dyn_apply_forward(v0);
+                        self.currently_marked[sym_v] = true;
                         if con.visible[sym_v] {
                             let sym_pos = con.positions[sym_v];
                             draw_circle_at(sym_pos, self.options.automatic_marker_color);
@@ -951,6 +970,7 @@ impl Info {
                 let sym_group = con.sym_group().to_dyn();
                 sym_group.dyn_to_representative(&mut active_cops);
                 for v in active_cops {
+                    self.currently_marked[v] = true;
                     let pos = con.positions[v];
                     if con.visible[v] {
                         draw_circle_at(pos, self.options.automatic_marker_color);
@@ -969,33 +989,24 @@ impl Info {
             VertexColorInfo::Debugging => {
                 for &v in self.escapable.inner_connecting_line() {
                     if con.visible[v] {
+                        self.currently_marked[v] = true;
                         let pos = con.positions[v];
                         draw_circle_at(pos, self.options.automatic_marker_color);
                     }
                 }
             },
             VertexColorInfo::SafeOutside => {
-                for (&in_hull, &dist, &pos, &vis) in izip!(
-                    self.cop_hull_data.hull(),
-                    &self.min_cop_dist,
-                    con.positions,
-                    con.visible
-                ) {
-                    if vis && in_hull.outside() && dist >= 2 {
-                        draw_circle_at(pos, self.options.automatic_marker_color);
-                    }
+                for (&in_hull, &dist, util) in
+                    izip!(self.cop_hull_data.hull(), &self.min_cop_dist, utils_iter)
+                {
+                    draw_if!(in_hull.outside() && dist >= 2, util);
                 }
             },
             VertexColorInfo::SafeBoundary => {
-                for (&in_hull, &dist, &pos, &vis) in izip!(
-                    self.cop_hull_data.hull(),
-                    &self.min_cop_dist,
-                    con.positions,
-                    con.visible
-                ) {
-                    if vis && in_hull.on_boundary() && dist >= 2 {
-                        draw_circle_at(pos, self.options.automatic_marker_color);
-                    }
+                for (&in_hull, &dist, util) in
+                    izip!(self.cop_hull_data.hull(), &self.min_cop_dist, utils_iter)
+                {
+                    draw_if!(in_hull.on_boundary() && dist >= 2, util);
                 }
             },
             VertexColorInfo::CopsVoronoi => {
@@ -1014,25 +1025,19 @@ impl Info {
                     _ => color_2about,
                 };
 
-                for (v, &min_dist, &pos, &vis) in
-                    izip!(0.., &self.min_cop_dist, con.positions, con.visible)
-                {
-                    if vis {
-                        // sometimes the change from region "owned" by one cop to region
-                        // "owned" by the next happens between vertices.
-                        // thus we also look for near misses.
-                        let weight: usize = active_dists
-                            .iter()
-                            .map(|d| match d[v] {
-                                n if n == min_dist => 100,
-                                n if n == min_dist + 1 => 1,
-                                _ => 0,
-                            })
-                            .sum();
-                        if weight > 100 {
-                            draw_circle_at(pos, choose_color(weight));
-                        }
-                    }
+                for (v, &min_dist, util) in izip!(0.., &self.min_cop_dist, utils_iter) {
+                    // sometimes the change from region "owned" by one cop to region
+                    // "owned" by the next happens between vertices.
+                    // thus we also look for near misses.
+                    let weight: usize = active_dists
+                        .iter()
+                        .map(|d| match d[v] {
+                            n if n == min_dist => 100,
+                            n if n == min_dist + 1 => 1,
+                            _ => 0,
+                        })
+                        .sum();
+                    draw_if!(weight > 100, util, || choose_color(weight));
                 }
             },
             VertexColorInfo::None => {},
