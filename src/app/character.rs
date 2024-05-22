@@ -435,11 +435,15 @@ impl State {
         self.characters.push(new_ch);
     }
 
+    /// if the robber is at the given position, he will remain, but forget his move history.
     pub fn remove_cop_at_vertex(&mut self, v: usize) -> bool {
-        let f = |c: &Character| !c.id.is_robber() && c.nearest_vertex == v;
-        if let Some(i) = self.characters.iter().position(f) {
-            self.characters.remove(i);
-            self.forget(i);
+        if let Some(i) = self.characters.iter().position(|c| c.nearest_vertex == v) {
+            if self.characters[i].id.is_robber() {
+                self.characters[i].past_vertices.clear();
+            } else {
+                self.characters.remove(i);
+                self.forget(i);
+            }
             return true;
         }
         false
