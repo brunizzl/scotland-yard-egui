@@ -15,12 +15,10 @@ eframe = { version = "0.27.2", default-features = false, features = [
     "persistence",   # Enable restoring app state when restarting the app.
 ] }
 log = "0.4"
-getrandom = { version = "0.2", features = ["js"] }
 
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }
 itertools = "0.11.0"
-rand = "0.8.5"
 compile-time = "0.2.0"
 bitvec = { version = "1.0.1", features = ["alloc", "serde"] }
 smallvec = "1.13.0"

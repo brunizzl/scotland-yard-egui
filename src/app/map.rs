@@ -20,7 +20,7 @@ pub enum Shape {
     TriangTorus,
     SquareTorus,
     RegularPolygon2D(isize),
-    Random2D,
+    Random2D(u32),
 }
 
 impl Shape {
@@ -37,7 +37,7 @@ impl Shape {
             Self::TriangTorus => "Torus (Dreiecke)",
             Self::SquareTorus => "Torus (Vierecke)",
             Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
-            Self::Random2D => "2D Kreisscheibe zufällig trianguliert",
+            Self::Random2D(_) => "2D Kreisscheibe zufällig trianguliert",
         }
     }
 
@@ -49,7 +49,7 @@ impl Shape {
             Self::FabianHamann => "Fabian-Hamann".to_string(),
             Self::Football => "Fussball".to_string(),
             Self::Octahedron => "Oktaeder".to_string(),
-            Self::Random2D => "Zufaellig".to_string(),
+            Self::Random2D(seed) => format!("Zufaellig-{seed}"),
             Self::TriangTorus => "Torus-Dreiecke".to_string(),
             Self::SquareTorus => "Torus-Vierecke".to_string(),
             Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
@@ -81,7 +81,7 @@ pub fn new_map_from(shape: Shape, res: usize) -> Embedding3D {
         Shape::Dodecahedron => Embedding3D::new_subdivided_dodecahedron(res, false, false),
         Shape::Football => Embedding3D::new_subdivided_football(res, false),
         Shape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
-        Shape::Random2D => Embedding3D::from_2d(graph::random_triangulated(res, 8)),
+        Shape::Random2D(seed) => Embedding3D::from_2d(graph::random_triangulated(res, 8, seed)),
         Shape::TriangTorus => Embedding3D::new_subdivided_triangle_torus(res),
         Shape::SquareTorus => Embedding3D::new_subdivided_squares_torus(res),
     }
@@ -123,8 +123,8 @@ impl Map {
             let last_res = load_or(cc.storage, RESOLUTION, || 12);
             //to not accidentally lag on restart, we limit maximal initial resolution for
             //graphs that are slow to build. currently this is only Random2D.
-            if last_res > 25 && matches!(shape, Shape::Random2D) {
-                (25, true)
+            if last_res > 50 && matches!(shape, Shape::Random2D(_)) {
+                (50, true)
             } else {
                 (last_res, false)
             }
@@ -145,7 +145,7 @@ impl Map {
 
         //graph is not exactly the same -> vertex indices are now worthless
         //(and in worst case larger than curr number of vertices)
-        if shrunk || matches!(shape, Shape::Random2D) {
+        if shrunk {
             info.characters.forget_move_history();
         }
 
@@ -311,7 +311,15 @@ impl Map {
                     {
                         self.shape = Shape::RegularPolygon2D(6);
                     }
-                    ui.radio_value(&mut self.shape, Shape::Random2D, Shape::Random2D.name_str());
+                    if ui
+                        .add(RadioButton::new(
+                            matches!(self.shape, Shape::Random2D(_)),
+                            Shape::Random2D(0).name_str(),
+                        ))
+                        .clicked()
+                    {
+                        self.shape = Shape::Random2D(1337);
+                    }
                     change |= self.shape != old_shape;
                 });
             change |= match &mut self.shape {
@@ -321,7 +329,7 @@ impl Map {
                 Shape::RegularPolygon2D(nr_sides) => {
                     add_drag_value(ui, nr_sides, "Seiten", (3, 10), 1)
                 },
-                Shape::Random2D => ui.button("neu berechnen").clicked(),
+                Shape::Random2D(seed) => add_drag_value(ui, seed, "Seed", (0, u32::MAX), 1),
                 _ => add_disabled_drag_value(ui),
             };
             ui.add_space(8.0);

@@ -418,16 +418,22 @@ impl Triangualtion {
         res
     }
 
-    fn new_random(nr_nodes: usize, circumference: usize) -> Self {
+    fn new_random(nr_nodes: usize, circumference: usize, seed: u32) -> Self {
         //start with square with unit circle in middle
         let mut res = Self::new_wheel(circumference);
 
-        use rand::distributions::{Distribution, Uniform};
-        let mut rng = rand::thread_rng();
-        let coordinate_generator = Uniform::from(-1.0..1.0);
+        use crate::rand;
+        let mut rng = rand::Lcg::new(seed as u64);
+        rng.waste(10);
+        let mut rand_unit_range = || {
+            const SCALE: f32 = 2.0 / (u32::MAX as f32);
+            let res = (rng.next() as f32) * SCALE - 1.0;
+            debug_assert!(((-1.0)..=1.0).contains(&res));
+            res
+        };
         let mut random_point = || loop {
-            let x = coordinate_generator.sample(&mut rng);
-            let y = coordinate_generator.sample(&mut rng);
+            let x = rand_unit_range();
+            let y = rand_unit_range();
             if x * x + y * y < 1.0 {
                 return pos2(x, y);
             }
@@ -441,18 +447,41 @@ impl Triangualtion {
                 break;
             }
         }
-        dbg!(res.graph.edges.max_neighbors());
+
+        //test random number generator, but only after graph has been build to
+        //ensure same graph in debug and release builds
+        debug_assert!({
+            let mut max = -1e10;
+            let mut min = 1e10;
+            let mut avg = 0.0;
+            let mut sig2 = 0.0;
+            const N: usize = 5000;
+            for _ in 0..N {
+                let x = rand_unit_range();
+                max = x.max(max);
+                min = x.min(min);
+                avg += x;
+                sig2 += x * x;
+            }
+            avg /= N as f32;
+            sig2 /= N as f32;
+            debug_assert!((0.9..=1.0).contains(&max));
+            debug_assert!((-1.0..-0.9).contains(&min));
+            debug_assert!(avg.abs() < 0.1);
+            debug_assert!((sig2 - 0.33333).abs() < 0.1);
+            true
+        });
         res
     }
 } //impl Triangulation
 
-pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Embedding2D {
+pub fn random_triangulated(radius: usize, nr_refine_steps: usize, seed: u32) -> Embedding2D {
     let r = radius as f32;
     let circumference = (std::f32::consts::TAU * r) as usize;
     let nr_nodes = (std::f32::consts::PI * r * r) as usize;
-    let mut tri = Triangualtion::new_random(nr_nodes, circumference);
+    let mut tri = Triangualtion::new_random(nr_nodes, circumference, seed);
 
-    let heat_step = 1.0 / nr_refine_steps as f32;
+    let heat_step = 1.0 / (nr_refine_steps + 1) as f32;
     for step in 0..nr_refine_steps {
         tri.divide_longest_edges();
         tri.graph.sort_neigbors();
@@ -465,6 +494,7 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize) -> Embedding2D
     }
     tri.graph.edges.maybe_shrink_capacity(0);
     tri.graph.sort_neigbors();
+    dbg!(tri.graph.edges.max_neighbors());
     tri.graph
 }
 
