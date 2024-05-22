@@ -493,6 +493,7 @@ impl State {
                     }
                 }
             });
+            ui.add_space(8.0);
             ui.checkbox(&mut self.show_allowed_next_steps, "zeige Zugoptionen")
                 .on_hover_text("F3");
             ui.checkbox(&mut self.show_past_steps, "zeige Züge").on_hover_text("F4");

@@ -192,6 +192,9 @@ impl eframe::App for State {
             self.fullscreen ^= true;
             ctx.send_viewport_cmd(ViewportCommand::Fullscreen(self.fullscreen));
         }
+        if ctx.input(|info| info.modifiers.ctrl && info.key_pressed(Key::B)) {
+            self.menu_visible ^= true;
+        }
 
         if self.menu_visible {
             SidePanel::left("left_panel").min_width(0.0).show(ctx, |ui| {
@@ -200,7 +203,7 @@ impl eframe::App for State {
                     //add spaces to force minimum width of sidebar
                     let compile_info = format!("kompiliert am {compile_datetime}  ");
                     ui.add(Label::new(compile_info).wrap(false));
-                    if ui.button("⏴").on_hover_text("Menü einklappen").clicked() {
+                    if ui.button("⏴").on_hover_text("Menü einklappen (strg + b)").clicked() {
                         self.menu_visible = false;
                     }
                 });
@@ -253,7 +256,7 @@ impl eframe::App for State {
             if !self.menu_visible {
                 let pos = Rect::from_center_size(pos2(12.0, 2.0), Vec2::ZERO);
                 let open = Button::new("⏵");
-                if ui.put(pos, open).on_hover_text("Menü ausklappen").clicked() {
+                if ui.put(pos, open).on_hover_text("Menü ausklappen (strg + b)").clicked() {
                     self.menu_visible = true;
                 }
             }
