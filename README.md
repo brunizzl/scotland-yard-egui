@@ -43,6 +43,7 @@ On Fedora Rawhide you need to run:
 #### Nice To Have
 * extract base functionality of EdgeList to own thing
 * fix bug where sometimes lazy-safe regions have floating parts left that should have been removed.
+* add randomly (with seed 👀) triangulated torus as graph option
 
 #### Lowest priority
 * platonic symmetry as own type (way faster to compute than explicit, only switch to explicit in bruteforce)

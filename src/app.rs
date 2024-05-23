@@ -150,6 +150,24 @@ impl State {
             fullscreen: false,
         }
     }
+
+    fn show_tool_tooltip(&mut self, ctx: &Context) {
+        let next = match self.tool {
+            MouseTool::Drag => MouseTool::Draw,
+            MouseTool::Draw => MouseTool::Erase,
+            MouseTool::Erase => MouseTool::Drag,
+        };
+        let f1_down = ctx.input(|info| {
+            if info.key_released(Key::F1) {
+                self.tool = next;
+            }
+            info.key_down(Key::F1)
+        });
+        if f1_down {
+            let symbol = RichText::new(next.symbol()).size(30.0);
+            show_tooltip_text(ctx, Id::new(&self.tool as *const _), symbol);
+        }
+    }
 }
 
 fn draw_usage_info(ui: &mut Ui) {
@@ -195,13 +213,14 @@ impl eframe::App for State {
         if ctx.input(|info| info.modifiers.ctrl && info.key_pressed(Key::B)) {
             self.menu_visible ^= true;
         }
+        self.show_tool_tooltip(ctx);
 
         if self.menu_visible {
-            SidePanel::left("left_panel").min_width(0.0).show(ctx, |ui| {
+            SidePanel::left("left_panel").show(ctx, |ui| {
                 let compile_datetime = compile_time::datetime_str!();
                 ui.horizontal(|ui| {
                     //add spaces to force minimum width of sidebar
-                    let compile_info = format!("kompiliert am {compile_datetime}  ");
+                    let compile_info = format!("kompiliert: {compile_datetime} ");
                     ui.add(Label::new(compile_info).wrap(false));
                     if ui.button("⏴").on_hover_text("Menü einklappen (strg + b)").clicked() {
                         self.menu_visible = false;
@@ -222,26 +241,13 @@ impl eframe::App for State {
                             self.tool = mode;
                         }
                     }
-
-                    let next = match self.tool {
-                        MouseTool::Drag => MouseTool::Draw,
-                        MouseTool::Draw => MouseTool::Erase,
-                        MouseTool::Erase => MouseTool::Drag,
-                    };
-                    let f1_down = ui.input(|info| {
-                        if info.key_released(Key::F1) {
-                            self.tool = next;
-                        }
-                        info.key_down(Key::F1)
-                    });
-                    if f1_down {
-                        let symbol = RichText::new(next.symbol()).size(30.0);
-                        show_tooltip_text(ctx, Id::new(&self.tool as *const _), symbol);
-                    }
                 });
 
                 ui.separator();
                 ScrollArea::vertical().show(ui, |ui| {
+                    //this forces the scroll bar to the right edge of the left panel
+                    ui.allocate_at_least(Vec2::new(ui.available_width(), 0.0), Sense::hover());
+
                     self.map.draw_menu(ui, &mut self.info);
                     self.info.draw_menu(ui, &self.map);
                     ui.add_space(50.0);
@@ -259,6 +265,11 @@ impl eframe::App for State {
                 if ui.put(pos, open).on_hover_text("Menü ausklappen (strg + b)").clicked() {
                     self.menu_visible = true;
                 }
+            }
+            if matches!(self.tool, MouseTool::Draw | MouseTool::Erase)
+                && con.response.contains_pointer()
+            {
+                ctx.set_cursor_icon(CursorIcon::Crosshair);
             }
         });
 

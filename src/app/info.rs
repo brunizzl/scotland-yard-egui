@@ -465,12 +465,21 @@ impl Info {
 
                 for (i, color) in izip!(0.., &mut opts.manual_marker_colors) {
                     ui.horizontal(|ui| {
-                        ui.radio_value(&mut opts.active_manual_marker, i, "");
+                        let bit_i = 1u8 << i;
+                        if ui.radio(opts.active_manual_marker == i, "").on_hover_text("wähle Farbe").clicked() {
+                            opts.active_manual_marker = i;
+                            opts.shown_manual_markers |= bit_i;
+                        }
+                        let mut show = opts.shown_manual_markers & bit_i != 0;
+                        if ui.checkbox(&mut show, "").on_hover_text("Anzeigen").clicked() {
+                            opts.shown_manual_markers ^= bit_i;
+                            debug_assert_eq!(show, (opts.shown_manual_markers & bit_i) != 0);
+                        };
+
                         ui.color_edit_button_srgba(color);
                         if ui.button(" F₀ ").on_hover_text("setze Farbe zurück").clicked() {
                             *color = color::HAND_PICKED_MARKER_COLORS[i];
                         }
-                        let bit_i = 1u8 << i;
                         if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
                             let mask = u8::MAX - bit_i;
                             for marker in &mut self.marked_manually {
@@ -486,14 +495,6 @@ impl Info {
                             }
                         }
 
-                        let curr_shown = opts.shown_manual_markers & bit_i != 0;
-                        let mut show = curr_shown;
-                        ui.add(Checkbox::new(&mut show, "")).on_hover_text("Anzeigen");
-                        if show {
-                            opts.shown_manual_markers |= bit_i;
-                        } else if curr_shown {
-                            opts.shown_manual_markers -= bit_i;
-                        }
                     });
                 }
             });
@@ -677,7 +678,7 @@ impl Info {
         let bit = 1u8 << self.options.active_manual_marker;
         if !con.positions.is_empty() {
             let (vertex, dist) = con.find_closest_vertex(screen_pos);
-            if dist <= 10.0 {
+            if dist <= 25.0 * con.scale {
                 if set {
                     self.marked_manually[vertex] |= bit;
                 } else if self.marked_manually[vertex] & bit != 0 {
@@ -721,20 +722,6 @@ impl Info {
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
         let held_key = ui.input(|info| {
-            let pointer_pos = info.pointer.latest_pos()?;
-            if !con.response.rect.contains(pointer_pos) {
-                return None;
-            }
-
-            if info.key_pressed(Key::F2) {
-                let (v, dist) = con.find_closest_vertex(pointer_pos);
-                if dist <= 10.0 {
-                    if !self.characters.remove_cop_at_vertex(v) {
-                        self.characters.create_character_at(pointer_pos, con.map);
-                    }
-                    self.menu_change = true;
-                }
-            }
             if info.key_pressed(Key::F3) {
                 self.characters.show_allowed_next_steps ^= true;
             }
@@ -746,6 +733,21 @@ impl Info {
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
                 self.characters.redo_move(con.edges, con.positions, &mut self.queue);
+            }
+
+            let pointer_pos = info.pointer.latest_pos()?;
+            if !con.response.contains_pointer() {
+                return None;
+            }
+
+            if info.key_pressed(Key::F2) {
+                let (v, dist) = con.find_closest_vertex(pointer_pos);
+                if dist <= 25.0 * con.scale {
+                    if !self.characters.remove_cop_at_vertex(v) {
+                        self.characters.create_character_at(pointer_pos, con.map);
+                    }
+                    self.menu_change = true;
+                }
             }
 
             let mouse_down = info.pointer.button_down(PointerButton::Primary);

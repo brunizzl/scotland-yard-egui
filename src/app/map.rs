@@ -37,7 +37,7 @@ impl Shape {
             Self::TriangTorus => "Torus (Dreiecke)",
             Self::SquareTorus => "Torus (Vierecke)",
             Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
-            Self::Random2D(_) => "2D Kreisscheibe zufällig trianguliert",
+            Self::Random2D(_) => "2D Kreisscheibe trianguliert",
         }
     }
 
