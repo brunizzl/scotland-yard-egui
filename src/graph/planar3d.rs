@@ -49,6 +49,40 @@ fn normalize_positions(positions: &mut [Pos3]) {
     }
 }
 
+fn sort_neigbors(edges: &mut EdgeList, positions: &[Pos3]) {
+    for (v1, neighs) in edges.neighbors_mut().enumerate() {
+        let p1 = positions[v1];
+
+        let diff = |&i2: &Index| {
+            let v2 = i2.get().unwrap();
+            let p2 = positions[v2];
+            p2 - p1
+        };
+        let order_floats = |f1: f32, f2: f32| {
+            if f1 < f2 {
+                std::cmp::Ordering::Less
+            } else if f1 > f2 {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        };
+        let order_dirs = |d1: Vec3, d2: Vec3| {
+            let cmp_x = order_floats(d1.x, d2.x);
+            if cmp_x.is_ne() {
+                return cmp_x;
+            }
+            let cmp_y = order_floats(d1.y, d2.y);
+            if cmp_y.is_ne() {
+                return cmp_y;
+            }
+            order_floats(d1.z, d2.z)
+        };
+
+        neighs.sort_by(|n1, n2| order_dirs(diff(n1), diff(n2)));
+    }
+}
+
 /// to improve positioning of characters when switching to a 2d embedding,
 /// the embedding sits outside the x-y plane.
 pub const Z_OFFSET_2D: f32 = 0.5;
@@ -218,6 +252,8 @@ impl Embedding3D {
 
         let nr_visible_surface_vertices = surface.nr_vertices();
         let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
+
+        sort_neigbors(&mut edges, &vertices);
         let mut res = Self {
             surface,
             nr_visible_surface_vertices,
@@ -356,6 +392,8 @@ impl Embedding3D {
             vec![BidirectionalRange::uninitialized(); hull.edges.used_space()];
         let inner_vertices = vec![0..0; hull.face_normals.len()];
         let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
+
+        sort_neigbors(&mut edges, &vertices);
         let res = Self {
             surface: hull,
             nr_visible_surface_vertices: vertices.len(),
@@ -481,6 +519,7 @@ impl Embedding3D {
                 }
             }
         }
+        sort_neigbors(&mut self.edges, &self.vertices);
     }
 
     /// custom subdivision of graph described in Fabian Hamann's masters thesis.
@@ -617,6 +656,7 @@ impl Embedding3D {
         }
         let sym = torus::TorusSymmetry::new(nr_vertices);
 
+        sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexTriangleHull::empty(),
             nr_visible_surface_vertices: usize::MAX,
@@ -674,6 +714,7 @@ impl Embedding3D {
         }
         let sym = torus::TorusSymmetry::new(nr_vertices);
 
+        sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexTriangleHull::empty(),
             nr_visible_surface_vertices: usize::MAX,
@@ -703,7 +744,9 @@ impl Embedding3D {
         }
 
         let surface = ConvexTriangleHull::new_from_graph(surface_positions, surface_edges);
-        Self::subdivide_surface_with_triangles(surface, divisions, false, true)
+        let mut res = Self::subdivide_surface_with_triangles(surface, divisions, false, true);
+        sort_neigbors(&mut res.edges, &res.vertices);
+        res
     }
 
     /// draws all visible edges, updates visible while doing it

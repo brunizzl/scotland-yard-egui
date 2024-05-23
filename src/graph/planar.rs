@@ -68,16 +68,13 @@ impl Embedding2D {
     }
 
     fn sort_neigbors(&mut self) {
-        for (v1, neighs) in self.edges.potential_neighbors_mut().enumerate() {
+        for (v1, neighs) in self.edges.neighbors_mut().enumerate() {
             let p1 = self.positions[v1];
 
             let angle = |&i2: &Index| {
-                if let Some(v2) = i2.get() {
-                    let p2 = self.positions[v2];
-                    (p2 - p1).angle()
-                } else {
-                    f32::MAX
-                }
+                let v2 = i2.get().unwrap();
+                let p2 = self.positions[v2];
+                (p2 - p1).angle()
             };
 
             let order_floats = |f1: f32, f2: f32| {
