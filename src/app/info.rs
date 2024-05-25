@@ -458,7 +458,8 @@ impl Info {
             .show(ctx, |ui| {
                 ui.label("[Info]").on_hover_text(
                     "Manuelle Marker der aktiven Farbe können an dem der Mausposition nächsten Knoten \
-                mit Klicken bei Auswahl des [✏]-Werkzeuges hinzugefügt und bei Auswahl von [📗] entfernt werden.\
+                mit Klicken bei Auswahl des [✏]-Werkzeuges hinzugefügt und bei Auswahl von [📗] entfernt werden. \
+                Alternativ: Setzten mit [m] und Entfernen mit [n]. \
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
                 );
                 add_scale_drag_value(ui, &mut opts.manual_marker_scale);
@@ -466,7 +467,8 @@ impl Info {
                 for (i, color) in izip!(0.., &mut opts.manual_marker_colors) {
                     ui.horizontal(|ui| {
                         let bit_i = 1u8 << i;
-                        if ui.radio(opts.active_manual_marker == i, "").on_hover_text("wähle Farbe").clicked() {
+                        let hover_choose = format!("wähle Farbe (l + {})", i + 1);
+                        if ui.radio(opts.active_manual_marker == i, "").on_hover_text(hover_choose).clicked() {
                             opts.active_manual_marker = i;
                             opts.shown_manual_markers |= bit_i;
                         }
@@ -751,10 +753,10 @@ impl Info {
             }
 
             let mouse_down = info.pointer.button_down(PointerButton::Primary);
-            if tool == MouseTool::Draw && mouse_down {
+            if tool == MouseTool::Draw && mouse_down || info.key_pressed(Key::M) {
                 self.add_marker_at(pointer_pos, con);
             }
-            if tool == MouseTool::Erase && mouse_down {
+            if tool == MouseTool::Erase && mouse_down || info.key_pressed(Key::N) {
                 self.remove_marker_at(pointer_pos, con);
             }
 
@@ -776,19 +778,51 @@ impl Info {
                 }
                 return Some(Key::W);
             }
+            if info.key_down(Key::L) {
+                use Key::*;
+                const NUMS: [Key; 8] = [Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8];
+                for (n, key) in izip!(0.., NUMS) {
+                    if info.key_pressed(key) {
+                        self.options.active_manual_marker = n;
+                    }
+                }
+                return Some(Key::L);
+            }
             None
         });
 
         if let Some(key) = held_key {
-            let sc = |i: usize| self.options.last_selected_vertex_color_infos[i].name_str();
-            let sn = |i: usize| self.options.last_selected_vertex_number_infos[i].name_str();
-            let tip = match key {
-                Key::Q => format!("1: {}\n2: {}\n3: {}\n4: {}", sc(1), sc(2), sc(3), sc(4)),
-                Key::W => format!("1: {}\n2: {}\n3: {}\n4: {}", sn(1), sn(2), sn(3), sn(4)),
-                _ => unreachable!(),
-            };
             let id = Id::new((&self.options as *const _, "tooltip-fast-switch"));
-            show_tooltip_text(ui.ctx(), id, tip);
+            show_tooltip(ui.ctx(), id, |ui| {
+                let opts = &self.options;
+                match key {
+                    Key::Q => {
+                        for n in 1..5 {
+                            let s = opts.last_selected_vertex_color_infos[n].name_str();
+                            ui.label(format!("{n}: {s}"));
+                        }
+                    },
+                    Key::W => {
+                        for n in 1..5 {
+                            let s = opts.last_selected_vertex_number_infos[n].name_str();
+                            ui.label(format!("{n}: {s}"));
+                        }
+                    },
+                    Key::L => {
+                        const SIZE: Vec2 = vec2(28.0, 14.0); //14.0 is default text size
+                        for (n, &c) in izip!(1.., &opts.manual_marker_colors) {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{n}: "));
+                                color_picker::show_color(ui, c, SIZE);
+                                if n - 1 == opts.active_manual_marker {
+                                    ui.label("⬅");
+                                }
+                            });
+                        }
+                    },
+                    _ => unreachable!(),
+                }
+            });
         }
     }
 
