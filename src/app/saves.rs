@@ -64,6 +64,9 @@ impl SavedStates {
     }
 
     pub fn update(&mut self, ui: &mut Ui, map: &mut map::Map, info: &mut info::Info) {
+        if !super::NATIVE {
+            return;
+        }
         ui.menu_button(" 🖴 laden / speichern", |ui| {
             let text_galleys = {
                 let screen_width = ui.ctx().available_rect().width();
