@@ -101,16 +101,11 @@ impl SavedStates {
                 ui.label("speichern als: ");
                 ui.text_edit_singleline(&mut self.new_name);
                 if ui.button("Ok").clicked() {
-                    log::debug!("0");
                     self.add(map, info);
                 }
             });
 
             ui.separator();
-
-            let old_wrap = ui.style().wrap;
-            ui.style_mut().wrap = Some(false);
-
             if self.deleted.is_some() {
                 let name = self.deleted.as_ref().unwrap().name.clone();
                 if ui.button(format!("\"{name}\" wiederherstellen")).clicked() {
@@ -125,7 +120,7 @@ impl SavedStates {
                 for (i, text) in izip!(0.., text_galleys) {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button(text).clicked() {
+                        if ui.button(text).on_hover_text("laden").clicked() {
                             load = Some(i);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -144,7 +139,6 @@ impl SavedStates {
                     self.saves[i].load(map, info);
                 }
             });
-            ui.style_mut().wrap = old_wrap;
         });
     }
 }
