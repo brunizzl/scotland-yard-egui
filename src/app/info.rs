@@ -462,7 +462,7 @@ impl Info {
                 for (i, color) in izip!(0.., &mut opts.manual_marker_colors) {
                     ui.horizontal(|ui| {
                         let bit_i = 1u8 << i;
-                        let hover_choose = format!("wähle Farbe (l + {})", i + 1);
+                        let hover_choose = format!("wähle Farbe (f + {})", i + 1);
                         if ui.radio(opts.active_manual_marker == i, "").on_hover_text(hover_choose).clicked() {
                             opts.active_manual_marker = i;
                             opts.shown_manual_markers |= bit_i;
@@ -773,7 +773,7 @@ impl Info {
                 }
                 return Some(Key::W);
             }
-            if info.key_down(Key::L) {
+            if info.key_down(Key::F) {
                 use Key::*;
                 const NUMS: [Key; 8] = [Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8];
                 for (n, key) in izip!(0.., NUMS) {
@@ -781,7 +781,7 @@ impl Info {
                         self.options.active_manual_marker = n;
                     }
                 }
-                return Some(Key::L);
+                return Some(Key::F);
             }
             None
         });
@@ -803,7 +803,7 @@ impl Info {
                             ui.label(format!("{n}: {s}"));
                         }
                     },
-                    Key::L => {
+                    Key::F => {
                         const SIZE: Vec2 = vec2(28.0, 14.0); //14.0 is default text size
                         for (n, &c) in izip!(1.., &opts.manual_marker_colors) {
                             ui.horizontal(|ui| {

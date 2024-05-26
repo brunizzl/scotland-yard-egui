@@ -47,6 +47,11 @@ impl SavedStates {
     }
 
     fn add(&mut self, map: &map::Map, info: &info::Info) {
+        let name = if self.new_name.is_empty() {
+            "unbenannt".to_string()
+        } else {
+            self.new_name.clone()
+        };
         let saved_at = if NATIVE {
             std::time::SystemTime::now()
         } else {
@@ -57,7 +62,7 @@ impl SavedStates {
         let characters = info.characters.clone_without_distances();
         let manual_markers = crate::rle::encode(&info.marked_manually);
         let new_safe = SavedState {
-            name: self.new_name.clone(),
+            name,
             saved_at,
             shape: map_shape,
             resolution: map_resolution,
@@ -109,19 +114,19 @@ impl SavedStates {
             if self.deleted.is_some() {
                 let name = self.deleted.as_ref().unwrap().name.clone();
                 if ui.button(format!("\"{name}\" wiederherstellen")).clicked() {
-                    if let Some(del) = self.deleted.take() {
-                        self.saves.push(del);
+                    self.saves.push(self.deleted.take().unwrap());
+                    if NATIVE {
+                        self.saves.sort_by_key(|s| s.saved_at);
                     }
                 }
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let mut delete = None;
-                let mut load = None;
                 for (i, text) in izip!(0.., text_galleys) {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui.button(text).on_hover_text("laden").clicked() {
-                            load = Some(i);
+                            self.saves[i].load(map, info);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button(" 🗑 ").on_hover_text("löschen").clicked() {
@@ -130,13 +135,8 @@ impl SavedStates {
                         });
                     });
                 }
-
                 if let Some(i) = delete {
-                    let del = self.saves.remove(i);
-                    self.deleted = Some(del);
-                }
-                if let Some(i) = load {
-                    self.saves[i].load(map, info);
+                    self.deleted = Some(self.saves.remove(i));
                 }
             });
         });
