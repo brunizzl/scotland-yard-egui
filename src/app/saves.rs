@@ -3,21 +3,21 @@ use itertools::{izip, Itertools};
 
 use egui::{vec2, Ui};
 
-use super::{character, info, load_or, map};
+use super::{character, info, load_or, map, NATIVE};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct SavedState {
     name: String,
     saved_at: std::time::SystemTime,
-    map_shape: map::Shape,
-    map_resolution: isize,
+    shape: map::Shape,
+    resolution: isize,
     characters: character::State,
     manual_markers: Vec<(usize, u8)>, //run length encoding info's manual markers
 }
 
 impl SavedState {
     fn load(&mut self, map: &mut map::Map, info: &mut info::Info) {
-        map.change_to(self.map_shape, self.map_resolution);
+        map.change_to(self.shape, self.resolution);
         info.characters = self.characters.clone_without_distances();
         info.marked_manually = crate::rle::decode(&self.manual_markers);
         map.adjust_info(info);
@@ -47,7 +47,11 @@ impl SavedStates {
     }
 
     fn add(&mut self, map: &map::Map, info: &info::Info) {
-        let saved_at = std::time::SystemTime::now();
+        let saved_at = if NATIVE {
+            std::time::SystemTime::now()
+        } else {
+            std::time::SystemTime::UNIX_EPOCH
+        };
         let map_shape = map.shape();
         let map_resolution = map.resolution() as isize;
         let characters = info.characters.clone_without_distances();
@@ -55,8 +59,8 @@ impl SavedStates {
         let new_safe = SavedState {
             name: self.new_name.clone(),
             saved_at,
-            map_shape,
-            map_resolution,
+            shape: map_shape,
+            resolution: map_resolution,
             characters,
             manual_markers,
         };
@@ -64,30 +68,25 @@ impl SavedStates {
     }
 
     pub fn update(&mut self, ui: &mut Ui, map: &mut map::Map, info: &mut info::Info) {
-        if !super::NATIVE {
-            return;
-        }
-        ui.menu_button(" 🖴 laden / speichern", |ui| {
+        ui.menu_button(" 🖴  laden / speichern", |ui| {
             let text_galleys = {
-                let screen_width = ui.ctx().available_rect().width();
+                let max_width = ui.ctx().available_rect().width() * 0.9;
                 self.saves
                     .iter()
                     .map(|s| {
-                        let saved_at = chrono::DateTime::<chrono::Local>::from(s.saved_at);
-                        let text = egui::RichText::new(format!(
-                            "{}\n{} ({}), {} um {}",
-                            s.name,
-                            s.map_shape.emoji(),
-                            s.map_resolution,
-                            saved_at.date_naive(),
-                            saved_at.time().round_subsecs(0)
-                        ));
-                        egui::WidgetText::RichText(text).into_galley(
-                            ui,
-                            Some(false),
-                            screen_width,
-                            egui::TextStyle::Body,
-                        )
+                        use egui::{RichText, TextStyle, WidgetText};
+                        let time = if NATIVE {
+                            let saved_at = chrono::DateTime::<chrono::Local>::from(s.saved_at);
+                            let date = saved_at.date_naive();
+                            let time = saved_at.time().round_subsecs(0);
+                            format!(", {date} um {time}")
+                        } else {
+                            String::new()
+                        };
+                        let shape = s.shape.emoji();
+                        let text = format!("{}\n{} ({}){}", s.name, shape, s.resolution, time);
+                        let widget = WidgetText::RichText(RichText::new(text));
+                        widget.into_galley(ui, Some(false), max_width, TextStyle::Body)
                     })
                     .collect_vec()
             };
@@ -102,11 +101,16 @@ impl SavedStates {
                 ui.label("speichern als: ");
                 ui.text_edit_singleline(&mut self.new_name);
                 if ui.button("Ok").clicked() {
+                    log::debug!("0");
                     self.add(map, info);
                 }
             });
 
             ui.separator();
+
+            let old_wrap = ui.style().wrap;
+            ui.style_mut().wrap = Some(false);
+
             if self.deleted.is_some() {
                 let name = self.deleted.as_ref().unwrap().name.clone();
                 if ui.button(format!("\"{name}\" wiederherstellen")).clicked() {
@@ -118,9 +122,6 @@ impl SavedStates {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let mut delete = None;
                 let mut load = None;
-
-                let old_wrap = ui.style().wrap;
-                ui.style_mut().wrap = Some(false);
                 for (i, text) in izip!(0.., text_galleys) {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
@@ -134,7 +135,6 @@ impl SavedStates {
                         });
                     });
                 }
-                ui.style_mut().wrap = old_wrap;
 
                 if let Some(i) = delete {
                     let del = self.saves.remove(i);
@@ -144,6 +144,7 @@ impl SavedStates {
                     self.saves[i].load(map, info);
                 }
             });
+            ui.style_mut().wrap = old_wrap;
         });
     }
 }
