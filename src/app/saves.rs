@@ -90,8 +90,8 @@ impl SavedStates {
             };
             {
                 let max_name_len = text_galleys.iter().map(|g| g.rect.width()).fold(0.0, f32::max);
-                //assume buttons for delete / load fit in 80 units.
-                let space = max_name_len + 80.0;
+                //assume button for delete fits in 50 units.
+                let space = max_name_len + 50.0;
                 ui.allocate_at_least(vec2(space, 0.0), egui::Sense::hover());
             }
 
@@ -121,11 +121,10 @@ impl SavedStates {
                 for (i, text) in izip!(0.., text_galleys) {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        ui.label(text);
+                        if ui.button(text).clicked() {
+                            load = Some(i);
+                        }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("laden").clicked() {
-                                load = Some(i);
-                            }
                             if ui.button(" 🗑 ").on_hover_text("löschen").clicked() {
                                 delete = Some(i);
                             }

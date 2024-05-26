@@ -393,7 +393,6 @@ impl Info {
         eframe::set_value(storage, MARKED_MANUALLY, &rle_manually);
     }
 
-    #[allow(dead_code)]
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
         let characters = load_or(cc.storage, CHARACTERS, character::State::new);
