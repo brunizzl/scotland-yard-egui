@@ -10,6 +10,7 @@ pub mod character;
 mod color;
 mod info;
 pub mod map;
+mod saves;
 mod tikz;
 
 mod bruteforce_state;
@@ -135,6 +136,8 @@ pub struct State {
     tool: MouseTool,
     menu_visible: bool,
     fullscreen: bool,
+
+    saves: saves::SavedStates,
 }
 
 impl State {
@@ -142,12 +145,14 @@ impl State {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut info = info::Info::new(cc);
         let map = map::Map::new(&mut info, cc);
+        let saves = saves::SavedStates::new(cc);
         Self {
             map,
             info,
             tool: MouseTool::Drag,
             menu_visible: true,
             fullscreen: false,
+            saves,
         }
     }
 
@@ -171,7 +176,7 @@ impl State {
 }
 
 fn draw_usage_info(ui: &mut Ui) {
-    ui.menu_button("Bedienung", |ui| {
+    ui.menu_button(" ？ Hilfe", |ui| {
         ui.add(
             Label::new(
                 "\
@@ -203,6 +208,7 @@ impl eframe::App for State {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.map.save(storage);
         self.info.save(storage);
+        self.saves.save(storage);
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
@@ -227,9 +233,11 @@ impl eframe::App for State {
                     }
                 });
                 ui.horizontal(|ui| {
-                    widgets::global_dark_light_mode_buttons(ui);
+                    widgets::global_dark_light_mode_switch(ui);
 
                     draw_usage_info(ui);
+
+                    self.saves.update(ui, &mut self.map, &mut self.info);
                 });
 
                 ui.separator();

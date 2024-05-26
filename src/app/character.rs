@@ -80,7 +80,7 @@ pub fn emojis_as_latex_commands() -> HashMap<&'static str, &'static str> {
     ])
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 enum Pos {
     /// [`Pos3`] is position of vertex where character was last dropped of.
     /// this is only relevant, when a new graph is computed: it places the character at the node on the new graph
@@ -280,6 +280,15 @@ impl Character {
         edges.calc_distances_to(queue, &mut self.distances);
 
         self.updated = true;
+    }
+
+    fn clone_without_distances(&self) -> Self {
+        Self {
+            past_vertices: self.past_vertices.clone(),
+            distances: Vec::new(),
+            updated: true,
+            ..*self
+        }
     }
 }
 
@@ -481,7 +490,7 @@ impl State {
                             ui.checkbox(&mut cop.enabled, "")
                                 .on_hover_text("Berücksichte Cop bei Berechnungen");
                             change |= was_enabled != cop.enabled;
-                            if ui.button("Löschen").clicked() {
+                            if ui.button(" 🗑 ").on_hover_text("löschen").clicked() {
                                 delete = Some(i);
                             }
                         });
@@ -606,6 +615,20 @@ impl State {
                     con.painter.add(marker_circle);
                 }
             }
+        }
+    }
+
+    pub fn clone_without_distances(&self) -> Self {
+        Self {
+            characters: self
+                .characters
+                .iter()
+                .map(Character::clone_without_distances)
+                .collect_vec(),
+            past_moves: self.past_moves.clone(),
+            future_moves: self.future_moves.clone(),
+
+            ..*self
         }
     }
 }

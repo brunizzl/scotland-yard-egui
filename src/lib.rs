@@ -10,5 +10,6 @@ mod graph;
 /// general purpose math concepts
 mod geo;
 
-#[allow(dead_code)]
 mod rand;
+
+mod rle;

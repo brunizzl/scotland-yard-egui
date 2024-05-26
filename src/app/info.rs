@@ -389,20 +389,16 @@ impl Info {
         use storage_keys::*;
         eframe::set_value(storage, OPTIONS, &self.options);
         eframe::set_value(storage, CHARACTERS, &self.characters);
-
-        if self.marked_manually.iter().any(|&x| x != 0) {
-            eframe::set_value(storage, MARKED_MANUALLY, &self.marked_manually);
-        } else {
-            let empty = Vec::<u8>::new();
-            eframe::set_value(storage, MARKED_MANUALLY, &empty);
-        }
+        let rle_manually = crate::rle::encode(&self.marked_manually);
+        eframe::set_value(storage, MARKED_MANUALLY, &rle_manually);
     }
 
     #[allow(dead_code)]
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
         let characters = load_or(cc.storage, CHARACTERS, character::State::new);
-        let marked_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
+        let rle_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
+        let marked_manually = crate::rle::decode(&rle_manually);
         let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
 
         Self {

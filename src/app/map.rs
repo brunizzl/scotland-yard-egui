@@ -24,7 +24,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    const fn name_str(self) -> &'static str {
+    pub const fn name_str(self) -> &'static str {
         match self {
             Self::Tetrahedron => "Tetraeder",
             Self::Octahedron => "Oktaeder",
@@ -55,6 +55,23 @@ impl Shape {
             Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
             Self::Tetrahedron => "Tetraeder".to_string(),
             Self::Icosahedron => "Ikosaeder".to_string(),
+        }
+    }
+
+    pub fn emoji(self) -> &'static str {
+        match self {
+            Self::Tetrahedron => "🌐Tet",
+            Self::Octahedron => "🌐Oct",
+            Self::Icosahedron => "🌐Ico",
+            Self::DividedIcosahedron(_) => "🌐Ico💨",
+            Self::Cube => "🎲",
+            Self::Football => "⚽",
+            Self::FabianHamann => "⚽F.H.",
+            Self::Dodecahedron => "🌐Dod",
+            Self::TriangTorus => "🍩6",
+            Self::SquareTorus => "🍩4",
+            Self::RegularPolygon2D(_) => "⬣",
+            Self::Random2D(_) => "⏺",
         }
     }
 }
@@ -227,7 +244,13 @@ impl Map {
         self.update_vertex_visibility();
     }
 
-    fn adjust_info(&self, info: &mut Info) {
+    pub fn change_to(&mut self, shape: Shape, resolution: isize) {
+        self.shape = shape;
+        self.resolution = resolution;
+        self.recompute();
+    }
+
+    pub fn adjust_info(&self, info: &mut Info) {
         for ch in info.characters.all_mut() {
             ch.adjust_to_new_map(&self.data, &mut info.queue);
         }
