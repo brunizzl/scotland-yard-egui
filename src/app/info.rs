@@ -783,6 +783,10 @@ impl Info {
                 }
                 return Some(Key::F);
             }
+            if info.key_pressed(Key::R) {
+                self.characters
+                    .repeat_snd_last_move(con.edges, con.positions, &mut self.queue);
+            }
             None
         });
 

@@ -359,6 +359,51 @@ impl State {
         }
     }
 
+    /// if move history has at least length 2, the character moving that second last move moves again
+    /// in the most similar direction
+    pub fn repeat_snd_last_move(
+        &mut self,
+        edges: &EdgeList,
+        positions: &[Pos3],
+        queue: &mut VecDeque<usize>,
+    ) {
+        if self.past_moves.len() >= 2 {
+            let (i, curr_v) = self.past_moves[self.past_moves.len() - 2];
+            let ch = &mut self.characters[i];
+            let prev_v = if ch.past_vertices.last() == Some(&curr_v) {
+                assert!(ch.past_vertices.len() >= 2);
+                ch.past_vertices[ch.past_vertices.len() - 2]
+            } else {
+                debug_assert!(ch.past_vertices.len() >= 3);
+                //(maybe) TODO: also handle case where same character walked two steps in succession
+                return;
+            };
+            let next_v = {
+                let to_curr = positions[curr_v] - positions[prev_v];
+                let next_pos = positions[curr_v] + to_curr;
+                let mut err = 1e10;
+                let mut best = usize::MAX;
+                for n in edges.neighbors_of(curr_v) {
+                    let new_err = (positions[n] - next_pos).length();
+                    if new_err < err {
+                        err = new_err;
+                        best = n;
+                    }
+                }
+                if best == usize::MAX {
+                    return;
+                }
+                best
+            };
+            ch.past_vertices.push(next_v);
+            ch.nearest_vertex = next_v;
+            ch.update_distances(edges, queue);
+            ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
+            ch.on_node = true;
+            self.past_moves.push((i, next_v));
+        }
+    }
+
     pub fn forget_move_history(&mut self) {
         self.past_moves.clear();
         self.future_moves.clear();
