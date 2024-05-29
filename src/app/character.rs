@@ -401,6 +401,7 @@ impl State {
             ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
             ch.on_node = true;
             self.past_moves.push((i, next_v));
+            self.future_moves.clear();
         }
     }
 
