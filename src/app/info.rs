@@ -606,11 +606,7 @@ impl Info {
     }
 
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {
-        self.dilemma.update(
-            con.edges,
-            self.escapable.escapable(),
-            &mut self.queue,
-        );
+        self.dilemma.update(con.edges, self.escapable.escapable(), &mut self.queue);
     }
 
     /// recomputes everything
@@ -647,10 +643,11 @@ impl Info {
             VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
         );
 
-        let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)|| matches!(
-            self.options.vertex_number_info(),
-            VertexNumberInfo::Debugging
-        );
+        let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)
+            || matches!(
+                self.options.vertex_number_info(),
+                VertexNumberInfo::Debugging
+            );
 
         let update_hull = update_cop_advantage
             || update_escapable
