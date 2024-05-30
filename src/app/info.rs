@@ -22,6 +22,7 @@ pub enum VertexColorInfo {
     SafeBoundary,
     Escape1,
     Escape2,
+    Dilemma,
     BruteForceRes,
     MinCopDist,
     MaxCopDist,
@@ -49,6 +50,8 @@ impl VertexColorInfo {
             die der Räuber zum Rand braucht, diesen nicht auf Länge 0 kürzen können. \n\
             Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
             als die Cops diesen Abschnitt dicht machen können.",
+            Dilemma => "Knoten von denen aus ein \"Fluchtoption 2\" Knoten erreicht werden kann, weil \
+            sich mehrere von denen überlappen (funzt noch nicht immer)",
             BruteForceRes => "Wenn Bruteforce Berechnung ergeben hat, \
             dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
             aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
@@ -78,6 +81,7 @@ impl VertexColorInfo {
             SafeBoundary => "Sicherere Grenze",
             Escape1 => "Punkte mit Fluchtoption 1",
             Escape2 => "Punkte mit Fluchtoption 2",
+            Dilemma => "Punkte mit Fluchtoption 3",
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
@@ -326,6 +330,8 @@ pub struct Info {
     //state kept for each node in map
     cop_hull_data: ConvexHullData,
     escapable: EscapeableNodes,
+    dilemma: DilemmaNodes,
+
     /// elementwise minimum of `.distance` of active cops in `self.characters`
     min_cop_dist: Vec<isize>,
     /// elementwise maximum of `.distance` of active cops in `self.characters`
@@ -365,6 +371,7 @@ impl Default for Info {
 
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
+            dilemma: DilemmaNodes::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -405,6 +412,7 @@ impl Info {
 
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
+            dilemma: DilemmaNodes::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -597,6 +605,14 @@ impl Info {
         );
     }
 
+    fn update_dilemma(&mut self, con: &DrawContext<'_>) {
+        self.dilemma.update(
+            con.edges,
+            self.escapable.escapable(),
+            &mut self.queue,
+        );
+    }
+
     /// recomputes everything
     fn definitely_update(&mut self, con: &DrawContext<'_>) {
         self.characters.update(con, &mut self.queue);
@@ -604,6 +620,7 @@ impl Info {
         self.update_max_cop_dist(con.edges);
         self.update_convex_cop_hull(con);
         self.update_escapable(con);
+        self.update_dilemma(con);
         self.update_cop_advantage(con.edges);
     }
 
@@ -624,10 +641,15 @@ impl Info {
 
         let update_escapable = matches!(
             self.options.vertex_color_info(),
-            VertexColorInfo::Escape2 | VertexColorInfo::Debugging
+            VertexColorInfo::Escape2 | VertexColorInfo::Debugging | VertexColorInfo::Dilemma
         ) || matches!(
             self.options.vertex_number_info(),
             VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
+        );
+
+        let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)|| matches!(
+            self.options.vertex_number_info(),
+            VertexNumberInfo::Debugging
         );
 
         let update_hull = update_cop_advantage
@@ -663,6 +685,9 @@ impl Info {
         }
         if (cop_moved || self.escapable.escapable().len() != nr_vertices) && update_escapable {
             self.update_escapable(con);
+        }
+        if (cop_moved || self.dilemma.dilemma().len() != nr_vertices) && update_dilemma {
+            self.update_dilemma(con);
         }
         if (cop_moved || robber_moved || self.cop_advantage.len() != nr_vertices)
             && update_cop_advantage
@@ -949,6 +974,12 @@ impl Info {
             },
             VertexColorInfo::Escape2 => {
                 for (&esc, util) in izip!(self.escapable.escapable(), utils_iter) {
+                    let color = || color::u32_marker_color(esc, &color::MARKER_COLORS_F32);
+                    draw_if!(esc != 0, util, color);
+                }
+            },
+            VertexColorInfo::Dilemma => {
+                for (&esc, util) in izip!(self.dilemma.dilemma(), utils_iter) {
                     let color = || color::u32_marker_color(esc, &color::MARKER_COLORS_F32);
                     draw_if!(esc != 0, util, color);
                 }

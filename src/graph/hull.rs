@@ -11,6 +11,9 @@ mod boundary;
 mod escapable;
 pub use escapable::EscapeableNodes;
 
+mod escapable_extra;
+pub use escapable_extra::DilemmaNodes;
+
 /// geodesic convex hull over some vertices with respect to some graph
 pub struct ConvexHullData {
     /// one entry per vertex in graph
