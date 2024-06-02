@@ -256,7 +256,7 @@ impl Options {
             add_scale_drag_value(ui, &mut self.automatic_marker_scale);
             ui.horizontal(|ui| {
                 ui.color_edit_button_srgba(&mut self.automatic_marker_color);
-                if ui.button("Reset").on_hover_text("Setze Farbe zurück").clicked() {
+                if ui.button(" F₀ ").on_hover_text("Setze Farbe zurück").clicked() {
                     self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
                 }
                 ui.label("Farbe");
@@ -455,6 +455,8 @@ impl Info {
 
     pub fn draw_windows(&mut self, ctx: &Context) {
         let opts = &mut self.options;
+        let automatic_markers_shown = opts.vertex_color_info() != VertexColorInfo::None;
+        let hull_shown = opts.show_convex_hull;
         Window::new("✏")
             .open(&mut opts.show_manual_marker_window)
             .collapsible(false)
@@ -491,11 +493,26 @@ impl Info {
                                 *marker &= mask;
                             }
                         }
-                        if ui.button(" ⬇ ").on_hover_text("füge automatische Marker hinzu").clicked() {
-                            let iter = izip!(&self.currently_marked, &mut self.marked_manually);
-                            for (&set, marker) in iter {
-                                if set {
-                                    *marker |= bit_i;
+
+                        let hint = match () {
+                            () if automatic_markers_shown => "füge automatische Marker hinzu",
+                            () if hull_shown => "füge Konvexe Hülle hinzu",
+                            () => "füge Konvexe Hülle / automatische Marker hinzu",
+                        };
+                        if ui.button(" ⬇ ").on_hover_text(hint).clicked() {
+                            if automatic_markers_shown {
+                                let iter = izip!(&self.currently_marked, &mut self.marked_manually);
+                                for (&set, marker) in iter {
+                                    if set {
+                                        *marker |= bit_i;
+                                    }
+                                }
+                            } else if hull_shown {
+                                let iter = izip!(self.cop_hull_data.hull(), &mut self.marked_manually);
+                                for (&hull, marker) in iter {
+                                    if hull.contained() {
+                                        *marker |= bit_i;
+                                    }
                                 }
                             }
                         }
@@ -606,7 +623,12 @@ impl Info {
     }
 
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {
-        self.dilemma.update(con.edges, self.escapable.escapable(), &mut self.queue);
+        self.dilemma.update(
+            con.edges,
+            self.escapable.escapable(),
+            self.cop_hull_data.hull(),
+            &mut self.queue,
+        );
     }
 
     /// recomputes everything
@@ -748,7 +770,7 @@ impl Info {
                 self.characters.show_past_steps ^= true;
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
-                self.characters.reverse_move(con.edges, con.positions, &mut self.queue);
+                self.characters.undo_move(con.edges, con.positions, &mut self.queue);
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
                 self.characters.redo_move(con.edges, con.positions, &mut self.queue);

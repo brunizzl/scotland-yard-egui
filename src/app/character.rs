@@ -20,7 +20,7 @@ pub enum Id {
 }
 
 impl Id {
-    pub fn str(&self) -> &'static str {
+    pub fn job_str(&self) -> &'static str {
         match self {
             Id::Cop(_) => "Cop",
             Id::Robber => "Räuber",
@@ -324,38 +324,99 @@ impl State {
         self.past_moves.last().map(|&(c, _)| &self.characters[c])
     }
 
+    pub fn snd_last_moved(&self) -> Option<&Character> {
+        let nr_past = self.past_moves.len();
+        (nr_past >= 2).then(|| {
+            let (c, _) = self.past_moves[nr_past - 2];
+            &self.characters[c]
+        })
+    }
+
     pub fn next_moved(&self) -> Option<&Character> {
         self.future_moves.last().map(|&(c, _)| &self.characters[c])
     }
 
-    pub fn reverse_move(
+    /// moves are both `self.past_moves` and `self.future_moves`.
+    /// result is rounded up to return something greater than zero if moves exist
+    fn five_percent_of_moves(&self) -> usize {
+        (self.past_moves.len() + self.future_moves.len() + 19) / 20
+    }
+
+    /// undoes move but will not update character distances.
+    /// returns index of changed character.
+    fn undo_move_without_update(&mut self, positions: &[Pos3]) -> Option<usize> {
+        let (i, v) = self.past_moves.pop()?;
+        self.future_moves.push((i, v));
+        let ch = &mut self.characters[i];
+        ch.on_node = true;
+        ch.past_vertices.pop();
+        if let Some(&v_last) = ch.past_vertices.last() {
+            ch.nearest_vertex = v_last;
+            ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
+        }
+        Some(i)
+    }
+
+    pub fn undo_move(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
+        if let Some(i) = self.undo_move_without_update(positions) {
+            let ch = &mut self.characters[i];
+            ch.update_distances(edges, queue);
+        }
+    }
+
+    fn undo_multiple_moves(
         &mut self,
         edges: &EdgeList,
         positions: &[Pos3],
         queue: &mut VecDeque<usize>,
+        number: usize,
     ) {
-        if let Some((i, v)) = self.past_moves.pop() {
-            self.future_moves.push((i, v));
-            let ch = &mut self.characters[i];
-            ch.on_node = true;
-            ch.past_vertices.pop();
-            if let Some(&v_last) = ch.past_vertices.last() {
-                ch.nearest_vertex = v_last;
+        let mut need_update = vec![false; self.characters.len()];
+        for i in std::iter::from_fn(|| self.undo_move_without_update(positions)).take(number) {
+            need_update[i] = true;
+        }
+        for (&up, ch) in izip!(&need_update, &mut self.characters) {
+            if up {
                 ch.update_distances(edges, queue);
-                ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
             }
         }
     }
 
+    /// redoes move but will not update character distances.
+    /// returns index of changed character.
+    fn redo_move_without_update(&mut self, positions: &[Pos3]) -> Option<usize> {
+        let (i, v) = self.future_moves.pop()?;
+        self.past_moves.push((i, v));
+        let ch = &mut self.characters[i];
+        ch.past_vertices.push(v);
+        ch.nearest_vertex = v;
+        ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
+        ch.on_node = true;
+        Some(i)
+    }
+
     pub fn redo_move(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
-        if let Some((i, v)) = self.future_moves.pop() {
-            self.past_moves.push((i, v));
+        if let Some(i) = self.redo_move_without_update(positions) {
             let ch = &mut self.characters[i];
-            ch.past_vertices.push(v);
-            ch.nearest_vertex = v;
             ch.update_distances(edges, queue);
-            ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
-            ch.on_node = true;
+        }
+    }
+
+    fn redo_multiple_moves(
+        &mut self,
+        edges: &EdgeList,
+        positions: &[Pos3],
+        queue: &mut VecDeque<usize>,
+        number: usize,
+    ) {
+        let mut need_update = vec![false; self.characters.len()];
+        for i in std::iter::from_fn(|| self.redo_move_without_update(positions)).take(number) {
+            need_update[i] = true;
+        }
+        for (&up, ch) in izip!(&need_update, &mut self.characters) {
+            if up {
+                ch.update_distances(edges, queue);
+            }
         }
     }
 
@@ -510,7 +571,7 @@ impl State {
     /// returns a menu change (e.g. a new character was added, one removed...)
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, queue: &mut VecDeque<usize>) -> bool {
         let mut change = false;
-        ui.collapsing("Figuren", |ui| {
+        ui.collapsing("Figuren / Züge", |ui| {
             ui.horizontal(|ui| {
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
                 let minus_text = format!("- Figur ({})", minus_emoji);
@@ -526,7 +587,7 @@ impl State {
                     change = true;
                 }
             });
-            ui.collapsing("Aktive Cops", |ui| {
+            ui.collapsing("alle Cops", |ui| {
                 if self.characters.len() > 1 {
                     let mut delete = None;
                     for (i, cop) in izip!(1.., &mut self.characters[1..]) {
@@ -534,7 +595,7 @@ impl State {
                             ui.label(cop.id.emoji());
                             let was_enabled = cop.enabled;
                             ui.checkbox(&mut cop.enabled, "")
-                                .on_hover_text("Berücksichte Cop bei Berechnungen");
+                                .on_hover_text("berücksichte Cop bei Berechnungen");
                             change |= was_enabled != cop.enabled;
                             if ui.button(" 🗑 ").on_hover_text("löschen").clicked() {
                                 delete = Some(i);
@@ -553,29 +614,56 @@ impl State {
                 .on_hover_text("F3");
             ui.checkbox(&mut self.show_past_steps, "zeige Züge").on_hover_text("F4");
             ui.horizontal(|ui| {
-                if ui.button(" ⟲ ").on_hover_text("strg + z").clicked() {
-                    self.reverse_move(map.edges(), map.positions(), queue);
+                //⏭⏮⏩⏪
+                if ui.button(" ⏮ ").on_hover_text("zurück zum Anfang der Zeit").clicked() {
+                    self.undo_multiple_moves(map.edges(), map.positions(), queue, usize::MAX);
                     change = true;
                 }
-                if ui.button(" ⟳ ").on_hover_text("strg + y").clicked() {
+                if ui.button(" ⏪ ").on_hover_text("5% der Zeit zurückspulen").clicked() {
+                    let nr = self.five_percent_of_moves();
+                    self.undo_multiple_moves(map.edges(), map.positions(), queue, nr);
+                    change = true;
+                }
+                if ui
+                    .button(" ⟲ ")
+                    .on_hover_text("einen Zug in Vergangenheit (strg + z)")
+                    .clicked()
+                {
+                    self.undo_move(map.edges(), map.positions(), queue);
+                    change = true;
+                }
+                if ui.button(" ⟳ ").on_hover_text("einen Zug in Zukunft (strg + y)").clicked() {
                     self.redo_move(map.edges(), map.positions(), queue);
                     change = true;
                 }
-                if ui.button("Reset").clicked() {
-                    self.forget_move_history();
+                if ui.button(" ⏩ ").on_hover_text("5% der Zeit vorspulen").clicked() {
+                    let nr = self.five_percent_of_moves();
+                    self.redo_multiple_moves(map.edges(), map.positions(), queue, nr);
+                    change = true;
+                }
+                if ui.button(" ⏭ ").on_hover_text("vorspulen ans Ende der Zeit").clicked() {
+                    self.redo_multiple_moves(map.edges(), map.positions(), queue, usize::MAX);
                     change = true;
                 }
             });
 
-            let print_style = |ch: Option<&Character>| {
-                ch.map_or_else(
+            ui.add_space(8.0);
+            let mut print_move = |move_name: &str, ch: Option<&Character>| {
+                let ch_name = ch.map_or_else(
                     || " 🚫   ".to_string(),
-                    |c| format!("{} ({})", c.id.str(), c.id.emoji()),
-                )
+                    |c| format!("{} ({})", c.id.job_str(), c.id.emoji()),
+                );
+                ui.label(format!("{move_name}: {ch_name}"));
             };
+            print_move("vorletzter Zug", self.snd_last_moved());
+            print_move("letzter Zug", self.last_moved());
+            print_move("nächster Zug", self.next_moved());
 
-            ui.label(format!("letzter Zug: {}", print_style(self.last_moved())));
-            ui.label(format!("nächster Zug: {}", print_style(self.next_moved())));
+            ui.add_space(8.0);
+            if ui.button(" 🗑 ").on_hover_text("Spiel vergessen").clicked() {
+                self.forget_move_history();
+                change = true;
+            }
         });
 
         change

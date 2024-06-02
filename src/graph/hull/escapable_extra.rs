@@ -115,9 +115,7 @@ impl DilemmaNodes {
         }
     }
 
-    /// values is just some memory with length `edges.nr_vertices()`
-    /// to be used as temporary space
-    fn update_dilemma(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+    fn update_dilemma(&mut self, edges: &EdgeList, hull: &[InSet], queue: &mut VecDeque<usize>) {
         debug_assert_eq!(self.overlapping.len(), edges.nr_vertices());
         self.dilemma.clear();
         self.dilemma.resize(self.overlapping.len(), 0);
@@ -130,6 +128,9 @@ impl DilemmaNodes {
             let marker = 1 << i;
             let mut nr_found = 1;
             while let Some(v) = queue.pop_front() {
+                if hull[v].outside() {
+                    continue;
+                }
                 if self.overlapping[v] & marker != 0 {
                     if self.dilemma[v] & marker == 0 {
                         self.dilemma[v] |= marker;
@@ -167,8 +168,14 @@ impl DilemmaNodes {
 
     /// values is just some memory with length `edges.nr_vertices()`
     /// to be used as temporary space
-    pub fn update(&mut self, edges: &EdgeList, lazy_safe: &[u32], queue: &mut VecDeque<usize>) {
+    pub fn update(
+        &mut self,
+        edges: &EdgeList,
+        lazy_safe: &[u32],
+        hull: &[InSet],
+        queue: &mut VecDeque<usize>,
+    ) {
         self.update_overlapping(lazy_safe, edges);
-        self.update_dilemma(edges, queue);
+        self.update_dilemma(edges, hull, queue);
     }
 }
