@@ -188,6 +188,14 @@ impl SavedStates {
     }
 
     pub fn update(&mut self, ui: &mut Ui, map: &mut map::Map, info: &mut info::Info) {
+        if let Some(save) = self.active.map(|i| &self.saves[i]) {
+            let same_shape = save.shape == map.shape();
+            let same_res = save.resolution == map.resolution() as isize;
+            if !same_shape || !same_res {
+                self.active = None;
+            }
+        }
+
         ui.menu_button(" 🖴  laden / speichern", |ui| {
             let text_galleys = {
                 let max_width = ui.ctx().available_rect().width() * 0.9;
