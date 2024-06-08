@@ -90,16 +90,24 @@ impl OrdBy {
         }
     }
 
-    fn sort(self, states: &mut SavedStates) {
+    fn sort(self, states: &mut Vec<SavedState>, active: &mut Option<usize>) {
+        fn sort_<T, F: Fn(&T) -> K, K: Ord>(xs: &mut Vec<T>, active: &mut Option<usize>, f: F) {
+            let mut to_sort = izip!(std::mem::take(xs), 0..).collect_vec();
+            to_sort.sort_by_key(|(s, _)| f(s));
+            if let Some(i) = *active {
+                *active = Some(to_sort.iter().position(|(_, j)| i == *j).unwrap());
+            }
+            xs.extend(to_sort.into_iter().map(|(s, _)| s));
+        }
         match self {
             //as i understand, we can't return a non-static reference here :(
             //rust std library: please fix. I dislike that clone very much.
-            Self::Name => states.sort_by_key(|s| s.name.clone()),
-            Self::Date => states.sort_by_key(|s| s.saved_at),
-            Self::Shape => states.sort_by_key(|s| s.shape),
-            Self::Res => states.sort_by_key(|s| s.resolution),
-            Self::NrCops => states.sort_by_key(|s| s.characters.all().len()),
-        }
+            Self::Name => sort_(states, active, |s| s.name.clone()),
+            Self::Date => sort_(states, active, |s| s.saved_at),
+            Self::Shape => sort_(states, active, |s| s.shape),
+            Self::Res => sort_(states, active, |s| s.resolution),
+            Self::NrCops => sort_(states, active, |s| s.characters.all().len()),
+        };
     }
 }
 
@@ -137,22 +145,20 @@ impl SavedStates {
     const ORDER_STORAGE_KEY: &'static str = "app::save-states::order";
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let saves = if NATIVE {
+        let mut saves = if NATIVE {
             Self::load_from_filesystem()
         } else {
             load_or(cc.storage, Self::SAVES_STORAGE_KEY, Vec::new)
         };
         let (active, ord) = load_or(cc.storage, Self::ORDER_STORAGE_KEY, || (None, OrdBy::Name));
-        let mut res = Self {
+        ord.sort(&mut saves, &mut None);
+        Self {
             new_name: String::new(),
             saves,
             deleted: None,
-            active: None,
+            active,
             ord,
-        };
-        ord.sort(&mut res);
-        res.active = active; //active index was post sorting, so it would be wrong to set this earlier.
-        res
+        }
     }
 
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -205,22 +211,7 @@ impl SavedStates {
         new_save.store_in_filesystem();
         self.active = Some(self.saves.len());
         self.saves.push(new_save);
-        self.ord.sort(self);
-    }
-
-    fn sort_by_key<F, K>(&mut self, mut f: F)
-    where
-        F: FnMut(&SavedState) -> K,
-        K: Ord,
-    {
-        if let Some(i) = self.active {
-            let mut to_sort = izip!(std::mem::take(&mut self.saves), 0..).collect_vec();
-            to_sort.sort_by_key(|(s, _)| f(s));
-            self.active = Some(to_sort.iter().position(|(_, j)| i == *j).unwrap());
-            self.saves.extend(to_sort.into_iter().map(|(s, _)| s));
-        } else {
-            self.saves.sort_by_key(f);
-        }
+        self.ord.sort(&mut self.saves, &mut self.active);
     }
 
     pub fn update(&mut self, ui: &mut Ui, map: &mut map::Map, info: &mut info::Info) {
@@ -292,8 +283,8 @@ impl SavedStates {
                         continue;
                     }
                     if highlight(ui.button(ord.name()), self.ord == ord).clicked() {
-                        ord.sort(self);
                         self.ord = ord;
+                        ord.sort(&mut self.saves, &mut self.active);
                     }
                 }
             });
@@ -303,7 +294,7 @@ impl SavedStates {
                 let name = self.deleted.as_ref().unwrap().name.clone();
                 if ui.button(format!("\"{name}\" wiederherstellen")).clicked() {
                     self.saves.push(self.deleted.take().unwrap());
-                    self.ord.sort(self);
+                    self.ord.sort(&mut self.saves, &mut self.active);
                 }
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
