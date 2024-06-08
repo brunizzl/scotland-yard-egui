@@ -7,10 +7,11 @@ use chrono::{SubsecRound, Timelike};
 use itertools::{izip, Itertools};
 
 use egui::{vec2, Ui};
+use serde::{Deserialize, Serialize};
 
 use super::{character, info, load_or, map, NATIVE};
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Deserialize, Serialize)]
 struct SavedState {
     name: String,
     saved_at: std::time::SystemTime,
@@ -69,11 +70,45 @@ impl SavedState {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum_macros::EnumIter)]
+enum OrdBy {
+    Name,
+    Date,
+    Shape,
+    Res,
+    NrCops,
+}
+
+impl OrdBy {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Date => "Datum",
+            Self::Shape => "Form",
+            Self::Res => "Aufl.",
+            Self::NrCops => "Nr Cops",
+        }
+    }
+
+    fn sort(self, states: &mut SavedStates) {
+        match self {
+            //as i understand, we can't return a non-static reference here :(
+            //rust std library: please fix. I dislike that clone very much.
+            Self::Name => states.sort_by_key(|s| s.name.clone()),
+            Self::Date => states.sort_by_key(|s| s.saved_at),
+            Self::Shape => states.sort_by_key(|s| s.shape),
+            Self::Res => states.sort_by_key(|s| s.resolution),
+            Self::NrCops => states.sort_by_key(|s| s.characters.all().len()),
+        }
+    }
+}
+
 pub struct SavedStates {
     new_name: String,
     saves: Vec<SavedState>,
     deleted: Option<SavedState>,
     active: Option<usize>,
+    ord: OrdBy,
 }
 
 impl SavedStates {
@@ -85,10 +120,8 @@ impl SavedStates {
         let try_load = |entry: Result<fs::DirEntry, _>| -> ron::Result<SavedState> {
             let entry = entry?;
             let mut file = fs::File::open(entry.path())?;
-            let file_str = {
-                let mut s = String::new();
-                file.read_to_string(&mut s).map(|_| s)?
-            };
+            let mut s = String::new();
+            let file_str = file.read_to_string(&mut s).map(|_| s)?;
             ron::from_str(&file_str).map_err(|e| e.code)
         };
         for entry in path {
@@ -100,25 +133,26 @@ impl SavedStates {
         res
     }
 
-    const STORAGE_KEY: &'static str = "app::save-states";
+    const SAVES_STORAGE_KEY: &'static str = "app::save-states";
+    const ORDER_STORAGE_KEY: &'static str = "app::save-states::order";
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut saves: Vec<SavedState> = Vec::new();
-        if NATIVE {
-            saves = Self::load_from_filesystem();
-        }
-        if saves.is_empty() {
-            saves = load_or(cc.storage, Self::STORAGE_KEY, Vec::new);
-            for save in &saves {
-                save.store_in_filesystem();
-            }
-        }
-        Self {
+        let saves = if NATIVE {
+            Self::load_from_filesystem()
+        } else {
+            load_or(cc.storage, Self::SAVES_STORAGE_KEY, Vec::new)
+        };
+        let (active, ord) = load_or(cc.storage, Self::ORDER_STORAGE_KEY, || (None, OrdBy::Name));
+        let mut res = Self {
             new_name: String::new(),
             saves,
             deleted: None,
             active: None,
-        }
+            ord,
+        };
+        ord.sort(&mut res);
+        res.active = active; //active index was post sorting, so it would be wrong to set this earlier.
+        res
     }
 
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -128,13 +162,14 @@ impl SavedStates {
         // in native, we save each entry at the moment of creation and as their own file,
         // thus it is then not required to duplicate that info in the general app data
         if !NATIVE {
-            eframe::set_value(storage, Self::STORAGE_KEY, &self.saves);
+            eframe::set_value(storage, Self::SAVES_STORAGE_KEY, &self.saves);
         }
+        eframe::set_value(storage, Self::ORDER_STORAGE_KEY, &(self.active, self.ord));
     }
 
     fn delete(&mut self, i: usize) {
         if let Some(s) = &self.deleted {
-            s.remove_from_filesystem()
+            s.remove_from_filesystem();
         }
         self.deleted = Some(self.saves.remove(i));
         match &mut self.active {
@@ -170,6 +205,7 @@ impl SavedStates {
         new_save.store_in_filesystem();
         self.active = Some(self.saves.len());
         self.saves.push(new_save);
+        self.ord.sort(self);
     }
 
     fn sort_by_key<F, K>(&mut self, mut f: F)
@@ -193,6 +229,14 @@ impl SavedStates {
             let same_res = save.resolution == map.resolution() as isize;
             if !same_shape || !same_res {
                 self.active = None;
+            }
+        }
+
+        fn highlight(button: egui::Response, highlight: bool) -> egui::Response {
+            if highlight {
+                button.highlight()
+            } else {
+                button
             }
         }
 
@@ -240,23 +284,17 @@ impl SavedStates {
 
             ui.separator();
             ui.horizontal(|ui| {
+                use strum::IntoEnumIterator;
                 ui.label("sortieren:");
-                if ui.button("Name").clicked() {
-                    //as i understand, we can't return a non-static reference here :(
-                    //rust std library: please fix.
-                    self.sort_by_key(|s| s.name.clone());
-                }
-                if ui.button("Form").clicked() {
-                    self.sort_by_key(|s| s.shape);
-                }
-                if ui.button("Aufl.").clicked() {
-                    self.sort_by_key(|s| s.resolution);
-                }
-                if ui.button("Datum").clicked() {
-                    self.sort_by_key(|s| s.saved_at);
-                }
-                if ui.button("Nr Cops").clicked() {
-                    self.sort_by_key(|s| s.characters.all().len());
+                for ord in OrdBy::iter() {
+                    if !NATIVE && ord == OrdBy::Date {
+                        //date is scuffed in wasm -> skip
+                        continue;
+                    }
+                    if highlight(ui.button(ord.name()), self.ord == ord).clicked() {
+                        ord.sort(self);
+                        self.ord = ord;
+                    }
                 }
             });
 
@@ -271,28 +309,20 @@ impl SavedStates {
                 }
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let mut delete = None;
                 for (i, text) in izip!(0.., text_galleys) {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        let button = if Some(i) == self.active {
-                            ui.button(text).highlight()
-                        } else {
-                            ui.button(text)
-                        };
+                        let button = highlight(ui.button(text), Some(i) == self.active);
                         if button.on_hover_text("laden").clicked() {
                             self.saves[i].set(map, info);
                             self.active = Some(i);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button(" 🗑 ").on_hover_text("löschen").clicked() {
-                                delete = Some(i);
+                                self.delete(i);
                             }
                         });
                     });
-                }
-                if let Some(i) = delete {
-                    self.delete(i);
                 }
             });
         });

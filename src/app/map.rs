@@ -1,5 +1,6 @@
 use egui::*;
 use itertools::izip;
+use serde::{Deserialize, Serialize};
 
 use crate::app::{cam::Camera3D, info::Info};
 use crate::geo::Pos3;
@@ -7,7 +8,7 @@ use crate::graph::{self, EdgeList, Embedding3D};
 
 use super::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum Shape {
     Tetrahedron,
     Octahedron,
