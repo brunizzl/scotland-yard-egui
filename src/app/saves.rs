@@ -303,9 +303,7 @@ impl SavedStates {
                 let name = self.deleted.as_ref().unwrap().name.clone();
                 if ui.button(format!("\"{name}\" wiederherstellen")).clicked() {
                     self.saves.push(self.deleted.take().unwrap());
-                    if NATIVE {
-                        self.sort_by_key(|s| s.saved_at);
-                    }
+                    self.ord.sort(self);
                 }
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
