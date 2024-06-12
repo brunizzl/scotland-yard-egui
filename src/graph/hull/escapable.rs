@@ -1,5 +1,39 @@
 use super::*;
 
+/// all cops delimiting a Region are listed here
+/// values are interpreted as indices in `cops` slice, e.g. 
+/// index 0 maps to the second position in all of the characters.
+#[derive(Debug)]
+struct DelimitingGroup {
+    marker: u32,
+    pair: (usize, usize),
+    inner: smallvec::SmallVec<[usize; 6]>,
+}
+
+impl DelimitingGroup {
+    fn new(marker: u32, pair: (usize, usize)) -> Self {
+        Self { marker, pair, inner: smallvec::SmallVec::new() }
+    }
+
+    fn marker_bit(&self) -> u32 {
+        self.marker.ilog2()
+    }
+
+    #[allow(dead_code)]
+    fn debug_string(&self, cops: &[Character]) -> String {
+        let emoji = |v| cops.iter().find(|c| c.vertex() == v).unwrap().id().emoji();
+        let inner = {
+            let nr_seps = self.inner.len().saturating_sub(1);
+            let seps = std::iter::repeat(", ").take(nr_seps);
+            let mut res = String::new();
+            res.extend(self.inner.iter().map(|&v| emoji(v)).interleave(seps));
+            res
+        };
+        let (c0, c1) = self.pair;
+        format!("bit {}: ({}, {}) + [{}]", self.marker_bit(), emoji(c0), emoji(c1), inner)
+    }
+}
+
 /// divides vertices in convex hull into subsets where a robber escape through some boundary segment
 /// is possible
 /// (each segment lies between two cops on boundary, cops in interior are not considered in computation)
@@ -32,6 +66,9 @@ pub struct EscapeableNodes {
     /// is not only part of the original escapable, but also of the
     /// shrunk region, because interior cops could endanger some parts.
     keep_escapable: Vec<Keep>, //one entry per vertex
+
+    /// a cop participates in those groups, where he is dangerous to the corresponding region.
+    cop_groups: Vec<DelimitingGroup>,
 }
 
 /// determines which bit is set in [`EscapeableNodes::escapable`]
@@ -71,6 +108,7 @@ impl EscapeableNodes {
             cop_pair_hull: CopPairHullData::default(),
             some_inner_boundaries: Default::default(),
             keep_escapable: Vec::new(),
+            cop_groups: Vec::new(),
         }
     }
 
@@ -185,8 +223,7 @@ impl EscapeableNodes {
                 let next_to_region = edges.neighbors_of(v).any(|n| escapable[n] & marker != 0);
                 active && distinct && (in_region || next_to_region)
             };
-            for i in 0..cops.len() {
-                let cop_i = &cops[i];
+            for (i, cop_i) in izip!(0.., cops) {
                 if !endangers(&self.escapable, cop_i) {
                     continue;
                 }
@@ -369,8 +406,14 @@ impl EscapeableNodes {
         //positions. this is obv. wrong
         for cop in cops.iter().filter(|c| c.is_active()) {
             self.escapable[cop.vertex()] = 0;
+            let mut regions = 0;
             for n in edges.neighbors_of(cop.vertex()) {
-                self.escapable[n] = 0;
+                regions |= std::mem::replace(&mut self.escapable[n], 0);
+            }
+            for group in &mut self.cop_groups {
+                if regions & group.marker != 0 {
+                    group.inner.push(cop.vertex())
+                }
             }
         }
     }
@@ -389,7 +432,8 @@ impl EscapeableNodes {
             hull_data.safe_boundary_indices(),
             hull_data.safe_boundary_parts()
         );
-        for (cop_pair, indices, vertices) in iter {
+        for (cop_pair, indices, vertices) in iter {            
+            let marker = compute_marker(cop_pair, cops);
             let max_escapable_dist = indices.len() as isize - 1;
             debug_assert_eq!(indices.len(), vertices.len());
 
@@ -420,9 +464,9 @@ impl EscapeableNodes {
             let owner = last_owner.unwrap();
             debug_assert!(queue.is_empty());
             queue.push_back(last_v);
-            let marker = compute_marker(cop_pair, cops);
             self.escapable[last_v] |= marker;
             self.add_region_to_escapable(owner, marker, edges, queue);
+            self.cop_groups.push(DelimitingGroup::new(marker, cop_pair));
         }
     }
 
@@ -440,8 +484,14 @@ impl EscapeableNodes {
         self.escapable.resize(nr_vertices, 0);
         self.last_write_by.resize(nr_vertices, 0); //no owner is 0 (as a cop stands at pos 0 of hull boundary)
         self.some_boundary_dist.resize(nr_vertices, isize::MAX);
+        self.cop_groups.clear();
 
         self.consider_boundary_cops(cops, hull_data, edges, queue);
         self.consider_interior_cops(cops, hull_data, edges, queue);
+
+        println!("-------- groups in escapable ------------");
+        for group in &self.cop_groups {
+            println!("{}", group.debug_string(cops));
+        }
     }
 }
