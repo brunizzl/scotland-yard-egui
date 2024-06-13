@@ -361,14 +361,10 @@ impl EscapeableNodes {
                         debug_assert!(queue.is_empty());
                         if let Some(last_owner) = last_owner {
                             let keep = &mut self.keep_escapable[..];
-                            for &v in safe_segment {
-                                if self.last_write_by[v] == last_owner {
-                                    keep[v] = Keep::Yes;
-                                    queue.push_back(v);
-                                }
-                            }
+                            let is_owned = |&&v: &&_| self.last_write_by[v] == last_owner;
+                            let init = safe_segment.iter().filter(is_owned);
                             let safe = |n, _: &[_]| self.last_write_by[n] == last_owner;
-                            edges.recolor_region_with(Keep::Yes, keep, safe, queue);
+                            edges.recolor_with_init(Keep::Yes, keep, safe, queue, init);
                         }
                     }
 
@@ -394,12 +390,9 @@ impl EscapeableNodes {
                     }
 
                     //step 6: reset self.keep_in_escapable (use recolor to not iterate over whole array)
-                    for &v in safe_outher_boundary {
-                        queue.push_back(v);
-                        self.keep_escapable[v] = Keep::No;
-                    }
                     let keep = &mut self.keep_escapable[..];
-                    edges.recolor_region_with(Keep::No, keep, |_, _| true, queue);
+                    let init = safe_outher_boundary.iter();
+                    edges.recolor_with_init(Keep::No, keep, |_, _| true, queue, init);
                     debug_assert!(keep.iter().all(|&k| k == Keep::No));
 
                     //finally: guarantee inner cops are still endangering curr region

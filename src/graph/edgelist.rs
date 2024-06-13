@@ -377,6 +377,27 @@ impl EdgeList {
         nr_colored
     }
 
+    pub fn recolor_with_init<'a, Color, F, I>(
+        &self,
+        new: Color,
+        colors: &mut [Color],
+        is_old: F,
+        queue: &mut VecDeque<usize>,
+        init: I,
+    ) -> usize
+    where
+        Color: Eq + Clone + std::fmt::Debug,
+        F: FnMut(usize, &[Color]) -> bool,
+        I: Iterator<Item = &'a usize>,
+    {
+        debug_assert!(queue.is_empty());
+        for &v in init {
+            colors[v] = new.clone();
+            queue.push_back(v);
+        }
+        self.recolor_region_with(new, colors, is_old, queue)
+    }
+
     /// paintbucket tool, all in queue are starting vertices
     pub fn recolor_region<Color>(
         &self,

@@ -142,12 +142,8 @@ impl PlaneCopStat {
             edges.calc_distances_to_with(&mut dists, select, queue);
 
             //clean up dists to be used to find the next danger region
-            queue.extend(danger_points.iter());
-            for &v in &danger_points {
-                queue.push_back(v);
-                dists[v] = isize::MAX;
-            }
-            edges.recolor_region_with(isize::MAX, &mut dists, |_, _| true, queue);
+            let init = danger_points.iter();
+            edges.recolor_with_init(isize::MAX, &mut dists, |_, _| true, queue, init);
             debug_assert!(dists.iter().all(|&v| v == isize::MAX));
         }
     }
