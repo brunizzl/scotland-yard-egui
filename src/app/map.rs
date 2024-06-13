@@ -147,7 +147,7 @@ impl Map {
                 (last_res, false)
             }
         };
-        let camera = load_or(cc.storage, CAMERA, Camera3D::new);
+        let camera = load_or(cc.storage, CAMERA, Camera3D::default);
 
         let mut result = Self {
             data: Embedding3D::empty(),
@@ -270,9 +270,7 @@ impl Map {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) {
-        if ui.button("🏠 Position").clicked() {
-            self.camera.reset();
-        }
+        self.camera.draw_menu(ui);
         ui.collapsing("Spielfeld", |ui| {
             let mut change = false;
             ui.label("Form:");

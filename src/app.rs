@@ -93,6 +93,11 @@ where
     .inner
 }
 
+fn add_scale_drag_value(ui: &mut Ui, val: &mut f32, name: &str) -> bool {
+    const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
+    add_drag_value(ui, val, name, (0.125, 8.0), FIFTH_ROOT_OF_TWO)
+}
+
 fn add_disabled_drag_value(ui: &mut Ui) -> bool {
     ui.horizontal(|ui| {
         ui.add_enabled(false, Button::new(" - "));

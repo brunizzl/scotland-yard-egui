@@ -125,7 +125,7 @@ const fn create_distinct_colors() -> [F32Color; 32] {
         while k < 32 {
             let ang = (tau * k) / 32 + ang_offset;
             let sat = 870;
-            let val = 850;
+            let val = 750;
             res[i].0 = hsv_to_rgb(ang, sat, val);
             i += 1;
             k += 32 / 4;

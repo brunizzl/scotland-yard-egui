@@ -10,6 +10,7 @@ pub struct Camera3D {
     /// < 1.0  -> zoomed out
     /// > 1.0  -> zoomed in
     zoom: f32,
+    zoom_speed: f32,
 
     direction: [Vec3; 3],
 
@@ -19,6 +20,22 @@ pub struct Camera3D {
     position: Pos2,
 
     to_screen: ToScreen,
+}
+
+impl Default for Camera3D {
+    fn default() -> Self {
+        let default_rect = Rect::from_center_size(Pos2::ZERO, Vec2::splat(1.0));
+        Self {
+            zoom: 1.0,
+            zoom_speed: 0.5,
+            direction: DEFAULT_AXES,
+            position: Pos2::new(0.0, 0.0),
+            to_screen: ToScreen::new(
+                Project3To2::new(&DEFAULT_AXES),
+                RectTransform::identity(default_rect),
+            ),
+        }
+    }
 }
 
 impl Camera3D {
@@ -33,19 +50,6 @@ impl Camera3D {
 
     pub fn screen_to_intermediary(&self, screen_pos: Pos2) -> Pos2 {
         self.to_screen.move_rect.inverse().transform_pos(screen_pos)
-    }
-
-    pub fn new() -> Self {
-        let default_rect = Rect::from_center_size(Pos2::ZERO, Vec2::splat(1.0));
-        Self {
-            zoom: 1.0,
-            direction: DEFAULT_AXES,
-            position: Pos2::new(0.0, 0.0),
-            to_screen: ToScreen::new(
-                Project3To2::new(&DEFAULT_AXES),
-                RectTransform::identity(default_rect),
-            ),
-        }
     }
 
     pub fn update_to_screen(&mut self, screen: Rect) {
@@ -73,6 +77,17 @@ impl Camera3D {
         self.to_screen = ToScreen::new(project, move_rect);
     }
 
+    pub fn draw_menu(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Kamera: ");
+            if ui.button(" 🏠 ").on_hover_text("setze Kamera zurück").clicked() {
+                self.reset();
+            }
+            ui.add(DragValue::new(&mut self.zoom_speed).clamp_range(0.05..=4.0).speed(0.05))
+                .on_hover_text("Zoomgeschwindigkeit");
+        });
+    }
+
     pub fn update_direction(&mut self, mut f: impl FnMut(Vec3) -> Vec3) {
         for axis in &mut self.direction {
             *axis = f(*axis);
@@ -91,6 +106,13 @@ impl Camera3D {
         self.update_direction(|v| v.rotate_z(angle));
     }
 
+    fn zoom_delta(&self, info: &InputState) -> f32 {
+        match info.multi_touch() {
+            Some(touch) => touch.zoom_delta,
+            None => info.zoom_delta().powf(self.zoom_speed), //speed is adjustable if done by ctrl + scrolling
+        }
+    }
+
     /// only z-rotation, zoom is centered around mouse pointer
     pub fn update_2d(&mut self, ui: &mut Ui, screen: Rect) {
         if ui.rect_contains_pointer(screen) {
@@ -105,10 +127,7 @@ impl Camera3D {
                     self.rotate_z(drag.rotation_delta);
                 }
 
-                let zoom_delta = match info.multi_touch() {
-                    Some(touch) => touch.zoom_delta,
-                    None => info.zoom_delta().powf(0.25), //zoom slower if done by ctrl + scrolling
-                };
+                let zoom_delta = self.zoom_delta(info);
                 self.zoom *= zoom_delta;
                 if zoom_delta != 1.0 {
                     if let Some(ptr_pos) = info.pointer.latest_pos() {
@@ -143,8 +162,7 @@ impl Camera3D {
                 self.rotate_y(drag_rot.x);
                 geo::gram_schmidt_3d(&mut self.direction);
 
-                let zoom_delta = info.zoom_delta().sqrt(); //half the zoom speed
-                self.zoom *= zoom_delta;
+                self.zoom *= self.zoom_delta(info);
             });
         }
         self.update_to_screen(screen);
@@ -159,7 +177,10 @@ impl Camera3D {
     }
 
     pub fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self {
+            zoom_speed: self.zoom_speed,
+            ..Self::default()
+        };
     }
 
     pub fn transform(&self, real_pos: Pos3) -> Pos2 {

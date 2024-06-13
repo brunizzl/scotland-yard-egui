@@ -211,11 +211,6 @@ impl Default for Options {
     }
 }
 
-fn add_scale_drag_value(ui: &mut Ui, val: &mut f32) -> bool {
-    const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
-    add_drag_value(ui, val, "Größe", (0.125, 8.0), FIFTH_ROOT_OF_TWO)
-}
-
 impl Options {
     pub fn vertex_color_info(&self) -> VertexColorInfo {
         self.last_selected_vertex_color_infos[0]
@@ -264,7 +259,7 @@ impl Options {
 
             ui.add_space(8.0);
             ui.label("Marker:");
-            add_scale_drag_value(ui, &mut self.automatic_marker_scale);
+            add_scale_drag_value(ui, &mut self.automatic_marker_scale, "Größe");
             ui.horizontal(|ui| {
                 ui.color_edit_button_srgba(&mut self.automatic_marker_color);
                 if ui.button(" F₀ ").on_hover_text("Setze Farbe zurück").clicked() {
@@ -303,7 +298,7 @@ impl Options {
 
             ui.add_space(8.0);
             ui.label("Zahlen:");
-            add_scale_drag_value(ui, &mut self.number_scale);
+            add_scale_drag_value(ui, &mut self.number_scale, "Größe");
             ComboBox::from_id_source(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
@@ -481,7 +476,7 @@ impl Info {
                 Alternativ: Setzten mit [m] und Entfernen mit [n]. \
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
                 );
-                add_scale_drag_value(ui, &mut opts.manual_marker_scale);
+                add_scale_drag_value(ui, &mut opts.manual_marker_scale, "Größe");
 
                 for (i, color) in izip!(0.., &mut opts.manual_marker_colors) {
                     ui.horizontal(|ui| {
@@ -1188,7 +1183,10 @@ impl Info {
                 layout_job.halign = Align::Center;
                 let galley = ui.fonts(|f| f.layout_job(layout_job));
                 let screen_pos = con.cam().transform(pos);
-                let text = Shape::Text(TextShape::new(screen_pos, galley, color));
+                // shift pos upwards (negative y direction), so text is centered on vertex
+                // why the heck is the best value not 0.5 btw?
+                let above_pos = screen_pos - font.size * vec2(0.0, 0.53);
+                let text = Shape::Text(TextShape::new(above_pos, galley, color));
                 con.painter.add(text);
             }
         };
