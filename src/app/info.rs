@@ -952,7 +952,13 @@ impl Info {
         (active_cops, game_type)
     }
 
-    fn draw_green_circles(&mut self, con: &DrawContext<'_>) {
+    fn draw_green_circles(&mut self, ui: &Ui, con: &DrawContext<'_>) {
+        let colors = if ui.ctx().style().visuals.dark_mode {
+            &color::DARK_MARKER_COLORS_F32
+        } else {
+            &color::BRIGHT_MARKER_COLORS_F32
+        };
+
         self.currently_marked.clear();
         self.currently_marked.resize(con.edges.nr_vertices(), false);
         let utils_iter = izip!(&mut self.currently_marked, con.positions, con.visible);
@@ -1022,19 +1028,19 @@ impl Info {
                         res
                     });
                     //caution: don't evaluate color lazily, else `any_picked` is always false.
-                    let color = color::blend_picked(&color::MARKER_COLORS_F32, picked);
+                    let color = color::blend_picked(colors, picked);
                     draw_if!(any_picked, util, || color);
                 }
             },
             VertexColorInfo::Escape2 => {
                 for (&esc, util) in izip!(self.escapable.escapable(), utils_iter) {
-                    let color = || color::u32_marker_color(esc, &color::MARKER_COLORS_F32);
+                    let color = || color::u32_marker_color(esc, colors);
                     draw_if!(esc != 0, util, color);
                 }
             },
             VertexColorInfo::Dilemma => {
                 for (&esc, util) in izip!(self.dilemma.dilemma(), utils_iter) {
-                    let color = || color::u32_marker_color(esc, &color::MARKER_COLORS_F32);
+                    let color = || color::u32_marker_color(esc, colors);
                     draw_if!(esc != 0, util, color);
                 }
             },
@@ -1060,9 +1066,9 @@ impl Info {
                 if let SymGroup::Explicit(equiv) = con.sym_group() {
                     for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
                         if vis {
-                            //every vertex is marked, no need to record this.
-                            const COLORS: &[Color32] = &super::color::MARKER_COLORS_U8;
-                            draw_circle_at(pos, COLORS[class as usize % COLORS.len()]);
+                            //every (visible) vertex is marked, no need to record this.
+                            let color = colors[class as usize % colors.len()].into();
+                            draw_circle_at(pos, color);
                         }
                     }
                 }
@@ -1162,7 +1168,7 @@ impl Info {
             },
             VertexColorInfo::CopStratPlaneDanger => {
                 for (&dang, util) in izip!(self.plane_cop_strat.danger_zones(), utils_iter) {
-                    let color = || color::u32_marker_color(dang, &color::MARKER_COLORS_F32);
+                    let color = || color::u32_marker_color(dang, colors);
                     draw_if!(dang != 0, util, color);
                 }
             },
@@ -1355,7 +1361,7 @@ impl Info {
         }
         self.draw_vertices(con);
         self.draw_convex_cop_hull(con);
-        self.draw_green_circles(con);
+        self.draw_green_circles(ui, con);
         self.draw_manual_markers(con);
         self.characters.draw_tails(con);
         self.characters.draw_allowed_next_steps(con);
