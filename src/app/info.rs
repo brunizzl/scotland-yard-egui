@@ -162,9 +162,9 @@ struct Options {
     shown_manual_markers: u8,    //bitmask
 
     /// currently selected one at index 0
-    last_selected_vertex_color_infos: [VertexColorInfo; 5],
+    last_selected_vertex_color_infos: [VertexColorInfo; 7],
     /// currently selected one at index 0
-    last_selected_vertex_number_infos: [VertexNumberInfo; 5],
+    last_selected_vertex_number_infos: [VertexNumberInfo; 7],
 
     //both are only used, when the respective VertexColorInfo(s) is/are active
     marked_cop_dist: isize, //determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
@@ -191,8 +191,8 @@ const DEFAULT_OPTIONS: Options = Options {
     marked_cop_dist: 10,
     marked_robber_dist: 10,
 
-    last_selected_vertex_color_infos: [VertexColorInfo::None; 5],
-    last_selected_vertex_number_infos: [VertexNumberInfo::None; 5],
+    last_selected_vertex_color_infos: [VertexColorInfo::None; 7],
+    last_selected_vertex_number_infos: [VertexNumberInfo::None; 7],
 
     number_scale: 1.0,
     manual_marker_scale: 1.0,
@@ -204,6 +204,12 @@ const DEFAULT_OPTIONS: Options = Options {
     show_cop_strat: false,
     show_manual_marker_window: false,
 };
+
+impl Default for Options {
+    fn default() -> Self {
+        DEFAULT_OPTIONS
+    }
+}
 
 fn add_scale_drag_value(ui: &mut Ui, val: &mut f32) -> bool {
     const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
@@ -831,8 +837,12 @@ impl Info {
                 self.remove_marker_at(pointer_pos, con);
             }
 
+            const NUMS: [Key; 8] = {
+                use Key::*;
+                [Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8]
+            };
             if info.key_down(Key::Q) {
-                for (n, key) in izip!(2.., [Key::Num1, Key::Num2, Key::Num3, Key::Num4]) {
+                for (n, &key) in izip!(2.., &NUMS[..6]) {
                     if info.key_pressed(key) {
                         self.options.last_selected_vertex_color_infos[..n].rotate_right(1);
                         self.menu_change = true;
@@ -841,7 +851,7 @@ impl Info {
                 return Some(Key::Q);
             }
             if info.key_down(Key::W) {
-                for (n, key) in izip!(2.., [Key::Num1, Key::Num2, Key::Num3, Key::Num4]) {
+                for (n, &key) in izip!(2.., &NUMS[..6]) {
                     if info.key_pressed(key) {
                         self.options.last_selected_vertex_number_infos[..n].rotate_right(1);
                         self.menu_change = true;
@@ -850,8 +860,6 @@ impl Info {
                 return Some(Key::W);
             }
             if info.key_down(Key::F) {
-                use Key::*;
-                const NUMS: [Key; 8] = [Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8];
                 for (n, key) in izip!(0.., NUMS) {
                     if info.key_pressed(key) {
                         self.options.active_manual_marker = n;
@@ -872,13 +880,13 @@ impl Info {
                 let opts = &self.options;
                 match key {
                     Key::Q => {
-                        for n in 1..5 {
+                        for n in 1..7 {
                             let s = opts.last_selected_vertex_color_infos[n].name_str();
                             ui.label(format!("{n}: {s}"));
                         }
                     },
                     Key::W => {
-                        for n in 1..5 {
+                        for n in 1..7 {
                             let s = opts.last_selected_vertex_number_infos[n].name_str();
                             ui.label(format!("{n}: {s}"));
                         }
