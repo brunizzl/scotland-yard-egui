@@ -1,5 +1,3 @@
-use std::usize;
-
 ///  linear congruential generator
 pub struct Lcg {
     state: u64,
