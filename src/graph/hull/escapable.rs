@@ -1,7 +1,7 @@
 use super::*;
 
 /// all cops delimiting a Region are listed here
-/// values are interpreted as indices in `cops` slice, e.g. 
+/// values are interpreted as indices in `cops` slice, e.g.
 /// index 0 maps to the second position in all of the characters.
 #[derive(Debug)]
 struct DelimitingGroup {
@@ -12,7 +12,11 @@ struct DelimitingGroup {
 
 impl DelimitingGroup {
     fn new(marker: u32, pair: (usize, usize)) -> Self {
-        Self { marker, pair, inner: smallvec::SmallVec::new() }
+        Self {
+            marker,
+            pair,
+            inner: smallvec::SmallVec::new(),
+        }
     }
 
     fn marker_bit(&self) -> u32 {
@@ -30,7 +34,13 @@ impl DelimitingGroup {
             res
         };
         let (c0, c1) = self.pair;
-        format!("bit {}: ({}, {}) + [{}]", self.marker_bit(), emoji(c0), emoji(c1), inner)
+        format!(
+            "bit {}: ({}, {}) + [{}]",
+            self.marker_bit(),
+            emoji(c0),
+            emoji(c1),
+            inner
+        )
     }
 }
 
@@ -432,7 +442,7 @@ impl EscapeableNodes {
             hull_data.safe_boundary_indices(),
             hull_data.safe_boundary_parts()
         );
-        for (cop_pair, indices, vertices) in iter {            
+        for (cop_pair, indices, vertices) in iter {
             let marker = compute_marker(cop_pair, cops);
             let max_escapable_dist = indices.len() as isize - 1;
             debug_assert_eq!(indices.len(), vertices.len());

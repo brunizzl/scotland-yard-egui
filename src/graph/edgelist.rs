@@ -321,15 +321,15 @@ impl EdgeList {
         mut select: F,
         queue: &mut VecDeque<usize>,
     ) where
-        F: FnMut(usize, &[isize]) -> bool,
+        F: FnMut(usize, &[isize], isize) -> bool,
     {
         debug_assert_eq!(distances.len(), self.nr_vertices());
         let mut local_queue = std::mem::take(queue);
         while let Some(v) = local_queue.pop_front() {
-            let dist = distances[v];
+            let new_dist = distances[v] + 1;
             for n in self.neighbors_of(v) {
-                if select(n, distances) && distances[n] > dist + 1 {
-                    distances[n] = dist + 1;
+                if select(n, distances, new_dist) {
+                    distances[n] = new_dist;
                     local_queue.push_back(n);
                 }
             }
@@ -339,7 +339,7 @@ impl EdgeList {
 
     /// everything in queue is starting point and expected to already have the correct distance
     pub fn calc_distances_to(&self, queue: &mut VecDeque<usize>, distances: &mut [isize]) {
-        self.calc_distances_to_with(distances, |_, _| true, queue)
+        self.calc_distances_to_with(distances, |n, dists, new_dist| dists[n] > new_dist, queue)
     }
 
     /// paintbucket tool, all in queue are starting vertices, is_old decides if a color is changed to new

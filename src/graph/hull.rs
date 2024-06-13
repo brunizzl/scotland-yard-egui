@@ -14,6 +14,9 @@ pub use escapable::EscapeableNodes;
 mod escapable_extra;
 pub use escapable_extra::DilemmaNodes;
 
+mod plane_cop_strat;
+pub use plane_cop_strat::PlaneCopStat;
+
 /// geodesic convex hull over some vertices with respect to some graph
 pub struct ConvexHullData {
     /// one entry per vertex in graph

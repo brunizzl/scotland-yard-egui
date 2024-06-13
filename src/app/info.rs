@@ -32,6 +32,7 @@ pub enum VertexColorInfo {
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
     CopsVoronoi,
+    CopStratPlaneDanger, //makes only sense in infinite plane
     Debugging,
 }
 
@@ -51,7 +52,8 @@ impl VertexColorInfo {
             Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
             als die Cops diesen Abschnitt dicht machen können.",
             Dilemma => "Knoten von denen aus ein \"Fluchtoption 2\" Knoten erreicht werden kann, weil \
-            sich mehrere von denen überlappen (funzt noch nicht immer)",
+            sich mehrere von denen überlappen (funzt noch bei weitem nicht immer. \
+            Diese Schätzung kann sowohl zu konservativ, als auch zu generös sein.)",
             BruteForceRes => "Wenn Bruteforce Berechnung ergeben hat, \
             dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
             aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
@@ -69,6 +71,8 @@ impl VertexColorInfo {
             - drei Cops ca. (zwei exakt und einer +1 oder einer exakt und zwei +1)\n\
             - zwei Cops exakt, kein dritter +1\n\
             - zwei Cops ca. (einer exakt und einer +1)",
+            CopStratPlaneDanger => "Knoten die Räuber nicht betreten sollte, wenn Cops bestimmte \
+            Strategie auf unendlicher Ebene fahren.",
             Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
         }
     }
@@ -91,6 +95,7 @@ impl VertexColorInfo {
             RobberVertexClass => "Äquivalenzklasse Räuberknoten",
             CopsRotatedToEquivalence => "Rotierte Coppositionen",
             CopsVoronoi => "Cops Voronoi",
+            CopStratPlaneDanger => "Cops Ebene Strat Gefahr",
             Debugging => "Debugging",
         }
     }
@@ -118,16 +123,16 @@ impl VertexNumberInfo {
             Indices => "nur relevant für Debugging",
             RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
             EscapeableNodes => "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
-                Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
+            Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
             MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
             MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",
             VertexEquivalenceClass => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
-                Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
-                Das macht Bruteforce etwas weniger speicherintensiv.",
+            Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
+            Das macht Bruteforce etwas weniger speicherintensiv.",
             RobberDist => "Abstand von Räuberposition zu jedem Knoten",
             BruteforceCopMoves => "Wenn Cops optimal ziehen, lebt Räuber noch maximal so viele Züge",
             Debugging => "Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
-                gerade spannend zum debuggen war",
+            gerade spannend zum debuggen war",
         }
     }
 
@@ -331,6 +336,7 @@ pub struct Info {
     cop_hull_data: ConvexHullData,
     escapable: EscapeableNodes,
     dilemma: DilemmaNodes,
+    plane_cop_strat: PlaneCopStat,
 
     /// elementwise minimum of `.distance` of active cops in `self.characters`
     min_cop_dist: Vec<isize>,
@@ -372,6 +378,7 @@ impl Default for Info {
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
             dilemma: DilemmaNodes::new(),
+            plane_cop_strat: PlaneCopStat::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -413,6 +420,7 @@ impl Info {
             cop_hull_data: ConvexHullData::new(),
             escapable: EscapeableNodes::new(),
             dilemma: DilemmaNodes::new(),
+            plane_cop_strat: PlaneCopStat::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -631,8 +639,19 @@ impl Info {
         );
     }
 
+    fn update_plane_cop_strat(&mut self, con: &DrawContext<'_>) {
+        self.plane_cop_strat.update(
+            con.map.shape(),
+            con.edges,
+            self.cop_hull_data.hull(),
+            self.escapable.escapable(),
+            &self.characters,
+            &mut self.queue,
+        );
+    }
+
     /// recomputes everything
-    fn definitely_update(&mut self, con: &DrawContext<'_>) {
+    pub fn definitely_update(&mut self, con: &DrawContext<'_>) {
         self.characters.update(con, &mut self.queue);
         self.update_min_cop_dist(con.edges);
         self.update_max_cop_dist(con.edges);
@@ -640,6 +659,7 @@ impl Info {
         self.update_escapable(con);
         self.update_dilemma(con);
         self.update_cop_advantage(con.edges);
+        self.update_plane_cop_strat(con);
     }
 
     /// recomputes only things currently shown or required by things currently shown
@@ -657,13 +677,20 @@ impl Info {
             VertexNumberInfo::RobberAdvantage | VertexNumberInfo::Debugging
         );
 
-        let update_escapable = matches!(
+        let update_plane_cop_strat = matches!(
             self.options.vertex_color_info(),
-            VertexColorInfo::Escape2 | VertexColorInfo::Debugging | VertexColorInfo::Dilemma
-        ) || matches!(
-            self.options.vertex_number_info(),
-            VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
+            VertexColorInfo::CopStratPlaneDanger
         );
+
+        let update_escapable = update_plane_cop_strat
+            || matches!(
+                self.options.vertex_color_info(),
+                VertexColorInfo::Escape2 | VertexColorInfo::Debugging | VertexColorInfo::Dilemma
+            )
+            || matches!(
+                self.options.vertex_number_info(),
+                VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
+            );
 
         let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)
             || matches!(
@@ -712,6 +739,11 @@ impl Info {
             && update_cop_advantage
         {
             self.update_cop_advantage(con.edges);
+        }
+        if (cop_moved || self.plane_cop_strat.danger_zones().len() != nr_vertices)
+            && update_plane_cop_strat
+        {
+            self.update_plane_cop_strat(con);
         }
     }
 
@@ -1125,6 +1157,12 @@ impl Info {
                     draw_if!(weight > 100, util, || choose_color(weight));
                 }
             },
+            VertexColorInfo::CopStratPlaneDanger => {
+                for (&dang, util) in izip!(self.plane_cop_strat.danger_zones(), utils_iter) {
+                    let color = || color::u32_marker_color(dang, &color::MARKER_COLORS_F32);
+                    draw_if!(dang != 0, util, color);
+                }
+            },
             VertexColorInfo::None => {},
         }
     }
@@ -1304,7 +1342,7 @@ impl Info {
 
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
         self.process_general_input(ui, con, tool);
-        if self.menu_change {
+        if self.menu_change || ui.ctx().frame_nr() == 0 {
             self.definitely_update(con);
         } else {
             self.maybe_update(con);
