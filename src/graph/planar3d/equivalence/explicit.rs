@@ -9,11 +9,11 @@ pub struct ExplicitAutomorphism {
 }
 
 impl Automorphism for ExplicitAutomorphism {
-    fn forward(&self) -> std::iter::Copied<std::slice::Iter<'_, usize>> {
+    fn forward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
         self.forward.iter().copied()
     }
 
-    fn backward(&self) -> std::iter::Copied<std::slice::Iter<'_, usize>> {
+    fn backward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
         self.backward.iter().copied()
     }
 
@@ -495,7 +495,7 @@ impl SymmetryGroup for ExplicitClasses {
         self.transform_all(vertices)
     }
 
-    fn class_representatives(&self) -> std::iter::Copied<std::slice::Iter<'_, usize>> {
+    fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
         self.class_representative.iter().copied()
     }
 

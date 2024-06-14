@@ -46,11 +46,11 @@ impl Identity {
 }
 
 impl Automorphism for Identity {
-    fn forward(&self) -> std::ops::Range<usize> {
+    fn forward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
         0..self.nr_vertices()
     }
 
-    fn backward(&self) -> std::ops::Range<usize> {
+    fn backward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
         0..self.nr_vertices()
     }
 
@@ -108,7 +108,7 @@ impl SymmetryGroup for NoSymmetry {
         std::iter::once(&self.identity[0])
     }
 
-    fn class_representatives(&self) -> std::ops::Range<usize> {
+    fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
         self.identity[0].forward()
     }
 
