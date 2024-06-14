@@ -3,7 +3,7 @@ name = "scotland-yard-egui"
 version = "0.1.0"
 authors = ["Bruno Borchardt"]
 edition = "2021"
-rust-version = "1.76.0"
+rust-version = "1.79.0"
 
 
 [dependencies]
