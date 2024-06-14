@@ -217,7 +217,7 @@ impl EscapeableNodes {
             hull_data.boundary_cop_vertices(),
             hull_data.safe_boundary_parts()
         );
-        for ((v_left, v_right), safe_outher_boundary) in iter {
+        for (&(v_left, v_right), safe_outher_boundary) in iter {
             let marker = compute_marker((v_left, v_right), cops);
             let left_cop = cops.iter().find(|c| c.vertex() == v_left).unwrap();
             let right_cop = cops.iter().find(|c| c.vertex() == v_right).unwrap();
@@ -435,7 +435,7 @@ impl EscapeableNodes {
             hull_data.safe_boundary_indices(),
             hull_data.safe_boundary_parts()
         );
-        for (cop_pair, indices, vertices) in iter {
+        for (&cop_pair, indices, vertices) in iter {
             let marker = compute_marker(cop_pair, cops);
             let max_escapable_dist = indices.len() as isize - 1;
             debug_assert_eq!(indices.len(), vertices.len());

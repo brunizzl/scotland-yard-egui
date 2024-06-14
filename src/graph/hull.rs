@@ -27,9 +27,12 @@ pub struct ConvexHullData {
     boundary: Vec<usize>,
 
     /// indexes in self.boundary, each segment is delimited by two cops on boundary.
-    /// includes the boundary cops at beginning and end
+    /// includes only vertices with min cop dist >= 2
     /// segments without any interior point (e.g. delimiting cops with distance <= 2) are NOT stored.
-    segments: Vec<Range<usize>>,
+    safe_segments: Vec<Range<usize>>,
+
+    /// same length as [`Self::segments`], stores vertices of cops guarding the segment of same index.
+    guards: Vec<(usize, usize)>,
 }
 
 impl ConvexHullData {
@@ -37,7 +40,8 @@ impl ConvexHullData {
         Self {
             hull: Vec::new(),
             boundary: Vec::new(),
-            segments: Vec::new(),
+            safe_segments: Vec::new(),
+            guards: Vec::new(),
         }
     }
 
@@ -50,29 +54,21 @@ impl ConvexHullData {
         &self.boundary
     }
 
-    fn safe_boundary_indices(&self) -> impl ExactSizeIterator<Item = Range<usize>> + '_ + Clone {
-        self.segments.iter().map(|seg| {
-            let interior = (seg.start + 2)..(seg.end - 2);
-            debug_assert!(!interior.is_empty());
-            interior
-        })
+    fn safe_boundary_indices(&self) -> &[Range<usize>] {
+        &self.safe_segments
     }
 
     /// each segment consists of vertices on boundary, segments are divided by cops
     /// iterator contains vertices of safe parts of boundary, e.g. cops and neighboring vertices cut away from begin and end.
     pub fn safe_boundary_parts(&self) -> impl ExactSizeIterator<Item = &'_ [usize]> + '_ + Clone {
-        self.safe_boundary_indices().map(|interior| &self.boundary[interior])
+        self.safe_segments.iter().map(|seg| &self.boundary[seg.clone()])
     }
 
     /// each segment consists of vertices on boundary, segments are divided by cops
     /// iterator contains vertices of both boundary cops for a given boundary.
     /// each boundary cop should thus appear twice.
-    pub fn boundary_cop_vertices(
-        &self,
-    ) -> impl ExactSizeIterator<Item = (usize, usize)> + '_ + Clone {
-        self.segments
-            .iter()
-            .map(|seg| (self.boundary[seg.start], self.boundary[seg.end - 1]))
+    pub fn boundary_cop_vertices(&self) -> &[(usize, usize)] {
+        &self.guards
     }
 
     fn update_inside(
@@ -166,7 +162,8 @@ impl ConvexHullData {
     }
 
     fn update_segments(&mut self, min_cop_dist: &[isize]) {
-        self.segments.clear();
+        self.guards.clear();
+        self.safe_segments.clear();
         debug_assert_eq!(self.hull.len(), min_cop_dist.len());
         if self.boundary.len() < 5 {
             return;
@@ -187,9 +184,14 @@ impl ConvexHullData {
                     return;
                 }
             }
-            let segment_interior = (start + 1)..(stop - 1);
-            if segment_interior.start < segment_interior.end {
-                self.segments.push((start - 1)..(stop + 1));
+
+            let (cop_1, cop_2) = (self.boundary[start - 1], self.boundary[stop]);
+            debug_assert_eq!(min_cop_dist[cop_1], 0);
+            debug_assert_eq!(min_cop_dist[cop_2], 0);
+            let safe_part = (start + 1)..(stop - 1);
+            if !safe_part.is_empty() {
+                self.guards.push((cop_1, cop_2));
+                self.safe_segments.push(safe_part);
             }
             start = stop;
         }
@@ -329,6 +331,10 @@ fn retain_safe_inner_boundary(
                 take_if_unique!(|&&v| edges.neighbors_of(v).any(|n| keep[n] == Keep::Yes));
                 take_if_unique!(|&&v| edges.neighbors_of(v).all(|n| keep[n] == Keep::Perhaps));
                 //at this point something went wrong and we try to continue on a best effort basis
+                println!(
+                    "fehler in hull::retain_safe_inner_boundary an {:?}",
+                    check_range
+                );
                 boundary[check_front]
             };
             retain_end += 1;
