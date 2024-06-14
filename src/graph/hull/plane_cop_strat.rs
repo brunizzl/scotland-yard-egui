@@ -105,10 +105,10 @@ impl PlaneCopStat {
             // the closest a lazy-safe (e.g. escapable) vertex is to any cop is 2.
             // the easiest way to only add a representaive vertex of a neighboring escapable region once is
             // to restrict ourselfs to only walk there via the cop's neighbors on the hull boundary.
-            let mut danger_roots = smallvec::SmallVec::<[usize; 2]>::new();
             let boundary_neighs = edges.neighbors_of(cop_i_v).filter(|&n| hull[n].on_boundary());
             let valid_nns = |n| edges.neighbors_of(n).filter(|&nn| escapable[nn] != 0);
-            danger_roots.extend(boundary_neighs.flat_map(valid_nns));
+            type RootsVec = smallvec::SmallVec<[usize; 2]>;
+            let danger_roots = RootsVec::from_iter(boundary_neighs.flat_map(valid_nns));
             debug_assert!({
                 let disconnected = |(&v1, &v2)| !edges.has_edge(v1, v2);
                 iproduct!(danger_roots.iter(), danger_roots.iter()).all(disconnected)

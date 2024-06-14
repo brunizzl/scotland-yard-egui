@@ -83,8 +83,18 @@ impl Camera3D {
             if ui.button(" 🏠 ").on_hover_text("setze Kamera zurück").clicked() {
                 self.reset();
             }
+            ui.add_space(5.0);
             ui.add(DragValue::new(&mut self.zoom_speed).clamp_range(0.05..=4.0).speed(0.05))
                 .on_hover_text("Zoomgeschwindigkeit");
+            ui.add_space(5.0);
+            if ui.add(Button::new(" 🔄 ").sense(Sense::drag())).dragged() {
+                ui.ctx().request_repaint();
+                self.rotate_z(-0.01 * self.zoom_speed);
+            }
+            if ui.add(Button::new(" 🔃 ").sense(Sense::drag())).dragged() {
+                ui.ctx().request_repaint();
+                self.rotate_z(0.01 * self.zoom_speed);
+            }
         });
     }
 

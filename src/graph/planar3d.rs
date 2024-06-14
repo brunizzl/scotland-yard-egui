@@ -730,12 +730,14 @@ impl Embedding3D {
     }
 
     pub fn new_2d_triangulated_regular_polygon(sides: usize, divisions: usize) -> Self {
-        let mut surface_positions = Vec::with_capacity(sides + 1);
-        surface_positions.push(pos3(0.0, 0.0, Z_OFFSET_2D));
-        surface_positions.extend((0..sides).map(|i| {
-            let angle = std::f32::consts::TAU * ((i as f32 + 0.5) / (sides as f32) + 0.25);
-            pos3(angle.cos(), angle.sin(), Z_OFFSET_2D)
-        }));
+        let surface_positions = Vec::from_iter({
+            let center = std::iter::once(pos3(0.0, 0.0, Z_OFFSET_2D));
+            let corners = (0..sides).map(|i| {
+                let angle = std::f32::consts::TAU * ((i as f32 + 0.5) / (sides as f32) + 0.25);
+                pos3(angle.cos(), angle.sin(), Z_OFFSET_2D)
+            });
+            center.chain(corners)
+        });
 
         let mut surface_edges = EdgeList::new(sides, sides + 1);
         for (v1, v2) in (1..(sides + 1)).circular_tuple_windows() {

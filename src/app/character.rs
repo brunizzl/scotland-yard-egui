@@ -509,9 +509,7 @@ impl State {
     }
 
     pub fn active_cop_vertices(&self) -> smallvec::SmallVec<[usize; 8]> {
-        let mut res = smallvec::SmallVec::new();
-        res.extend(self.active_cops().map(|c| c.nearest_vertex));
-        res
+        smallvec::SmallVec::from_iter(self.active_cops().map(|c| c.nearest_vertex))
     }
 
     pub fn robber_updated(&self) -> bool {
@@ -676,8 +674,8 @@ impl State {
     }
 
     pub fn draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, drag_enabled: bool) {
-        let mut positions = smallvec::SmallVec::<[usize; 20]>::new();
-        positions.extend(self.characters.iter().map(|c| c.nearest_vertex));
+        type PosVec = smallvec::SmallVec<[usize; 20]>;
+        let positions = PosVec::from_iter(self.characters.iter().map(|c| c.nearest_vertex));
 
         for (i, ch) in self.characters.iter_mut().enumerate() {
             let nr_others_at_same_pos =
