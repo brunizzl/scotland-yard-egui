@@ -84,8 +84,8 @@ impl Camera3D {
                 self.reset();
             }
             ui.add_space(5.0);
-            ui.add(DragValue::new(&mut self.zoom_speed).clamp_range(0.05..=4.0).speed(0.05))
-                .on_hover_text("Zoomgeschwindigkeit");
+            ui.add(DragValue::new(&mut self.zoom_speed).clamp_range(0.05..=4.0).speed(0.01))
+                .on_hover_text("Zoom-/Scrollgeschwindigkeit");
             ui.add_space(5.0);
             if ui.add(Button::new(" 🔄 ").sense(Sense::drag())).dragged() {
                 ui.ctx().request_repaint();
@@ -131,7 +131,7 @@ impl Camera3D {
                 if info.pointer.button_down(PointerButton::Secondary) {
                     self.position += info.pointer.delta();
                 }
-                self.position += info.raw_scroll_delta;
+                self.position += info.smooth_scroll_delta * self.zoom_speed;
                 if let Some(drag) = info.multi_touch() {
                     self.position += drag.translation_delta;
                     self.rotate_z(drag.rotation_delta);
@@ -162,7 +162,7 @@ impl Camera3D {
                 if info.pointer.button_down(PointerButton::Secondary) {
                     drag_dist -= info.pointer.delta();
                 }
-                drag_dist -= info.raw_scroll_delta;
+                drag_dist -= info.smooth_scroll_delta * self.zoom_speed;
                 if let Some(drag) = info.multi_touch() {
                     drag_dist -= drag.translation_delta;
                     self.rotate_z(drag.rotation_delta);

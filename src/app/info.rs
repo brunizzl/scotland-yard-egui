@@ -796,9 +796,9 @@ impl Info {
             let date_str = format!("{}-{}-{}", date.year(), date.month(), date.day());
             let time = now.time();
             let time_str = format!("{}-{}-{}", time.hour(), time.minute(), time.second());
-            std::path::PathBuf::from(format!("screenshots/{date_str}--{time_str}.txt"))
+            std::path::PathBuf::from(format!("screenshots/{date_str}--{time_str}.tex"))
         } else {
-            std::path::PathBuf::from(format!("screenshots/{name}.txt",))
+            std::path::PathBuf::from(format!("screenshots/{name}.tex",))
         };
         super::tikz::draw_to_file(
             file_name,
