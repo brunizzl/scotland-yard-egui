@@ -54,10 +54,6 @@ impl ConvexHullData {
         &self.boundary
     }
 
-    fn safe_boundary_indices(&self) -> &[Range<usize>] {
-        &self.safe_segments
-    }
-
     /// each segment consists of vertices on boundary, segments are divided by cops
     /// iterator contains vertices of safe parts of boundary, e.g. cops and neighboring vertices cut away from begin and end.
     pub fn safe_boundary_parts(&self) -> impl ExactSizeIterator<Item = &'_ [usize]> + '_ + Clone {
@@ -161,7 +157,7 @@ impl ConvexHullData {
         }
     }
 
-    fn update_segments(&mut self, min_cop_dist: &[isize]) {
+    fn update_segments(&mut self, edges: &EdgeList, min_cop_dist: &[isize]) {
         self.guards.clear();
         self.safe_segments.clear();
         debug_assert_eq!(self.hull.len(), min_cop_dist.len());
@@ -171,28 +167,33 @@ impl ConvexHullData {
         debug_assert_eq!(0, min_cop_dist[self.boundary[0]]);
         let mut start = 1;
         loop {
-            while min_cop_dist[self.boundary[start]] == 0 {
+            while min_cop_dist[self.boundary[start]] <= 1 {
                 start += 1;
                 if start == self.boundary.len() {
                     return;
                 }
             }
             let mut stop = start;
-            while min_cop_dist[self.boundary[stop]] != 0 {
+            while min_cop_dist[self.boundary[stop]] > 1 {
                 stop += 1;
                 if stop == self.boundary.len() {
                     return;
                 }
             }
 
-            let (cop_1, cop_2) = (self.boundary[start - 1], self.boundary[stop]);
-            debug_assert_eq!(min_cop_dist[cop_1], 0);
-            debug_assert_eq!(min_cop_dist[cop_2], 0);
-            let safe_part = (start + 1)..(stop - 1);
-            if !safe_part.is_empty() {
-                self.guards.push((cop_1, cop_2));
-                self.safe_segments.push(safe_part);
-            }
+            let find_cop = |i: usize| {
+                let v0 = self.boundary[i];
+                edges.neighbors_of(v0).find(|&v| min_cop_dist[v] == 0).unwrap()
+            };
+            let (cop_1, cop_2) = (find_cop(start - 1), find_cop(stop));
+            self.guards.push((cop_1, cop_2));
+
+            debug_assert_eq!(min_cop_dist[self.boundary[start]], 2);
+            debug_assert_eq!(min_cop_dist[self.boundary[stop - 1]], 2);
+            let safe_part = start..stop;
+            debug_assert!(!safe_part.is_empty());
+            self.safe_segments.push(safe_part);
+
             start = stop;
         }
     }
@@ -207,7 +208,7 @@ impl ConvexHullData {
     ) {
         self.update_inside(cops, edges, queue, vertices_outside_hull);
         self.update_boundary(cops, edges, queue);
-        self.update_segments(min_cop_dist);
+        self.update_segments(edges, min_cop_dist);
     }
 }
 
@@ -300,6 +301,7 @@ fn retain_safe_inner_boundary(
     let mut check_front = 0;
     {
         let boundary = &mut boundary[..];
+        let mut check_vals = smallvec::SmallVec::<[usize; 6]>::new();
         while check_front < boundary.len() {
             let dist_at = |i| cop_dist[boundary[i]];
             let check_dist = dist_at(check_front);
@@ -308,38 +310,85 @@ fn retain_safe_inner_boundary(
                 check_end += 1;
             }
 
-            let check_range = &boundary[check_front..check_end];
-            let check_len = check_range.len();
+            check_vals.clear();
+            check_vals.extend(boundary[check_front..check_end].iter().copied());
+            let check_len = check_vals.len();
+            if retain_end > 0 {
+                let last_v = boundary[retain_end - 1];
+                check_vals.retain(|v| edges.has_edge(*v, last_v));
+            }
 
             boundary[retain_end] = 'next_vertex: {
+                if check_vals.len() == 1 {
+                    break 'next_vertex check_vals[0];
+                }
                 macro_rules! take_if_unique {
                     ($f:expr) => {{
-                        let mut iter = check_range.iter().filter($f);
+                        let mut iter = check_vals.iter().filter($f);
                         if let (Some(&v), None) = (iter.next(), iter.next()) {
                             break 'next_vertex v;
                         }
                     }};
                 }
-                if let &[v] = check_range {
-                    break 'next_vertex v;
-                }
-                if retain_end > 0 {
-                    let last_v = boundary[retain_end - 1];
-                    take_if_unique!(|&&v| edges.has_edge(v, last_v));
-                }
-                take_if_unique!(|&&v| keep[v] == Keep::YesOnBoundary);
+                const YOB: Keep = Keep::YesOnBoundary;
+                take_if_unique!(|&&v| keep[v] == YOB);
+                take_if_unique!(|&&v| edges.neighbors_of(v).any(|n| keep[n] == YOB));
                 take_if_unique!(|&&v| edges.neighbors_of(v).any(|n| keep[n] == Keep::Yes));
                 take_if_unique!(|&&v| edges.neighbors_of(v).all(|n| keep[n] == Keep::Perhaps));
+                take_if_unique!(|&&v| keep[v] == Keep::Yes);
+
                 //at this point something went wrong and we try to continue on a best effort basis
                 println!(
-                    "fehler in hull::retain_safe_inner_boundary an {:?}",
-                    check_range
+                    "fehler in hull::retain_safe_inner_boundary an {:?} (indices {:?}): \
+                    bnd = {:?}, n-bnd = {:?}, yes = {:?}, n-yes = {:?}, n-perhaps = {:?}",
+                    check_vals,
+                    check_front..check_end,
+                    check_vals.iter().filter(|&&v| keep[v] == YOB).collect_vec(),
+                    check_vals
+                        .iter()
+                        .filter(|&&v| edges.neighbors_of(v).any(|n| keep[n] == YOB))
+                        .collect_vec(),
+                    check_vals.iter().filter(|&&v| keep[v] == Keep::Yes).collect_vec(),
+                    check_vals
+                        .iter()
+                        .filter(|&&v| edges.neighbors_of(v).any(|n| keep[n] == Keep::Yes))
+                        .collect_vec(),
+                    check_vals
+                        .iter()
+                        .filter(|&&v| edges.neighbors_of(v).all(|n| keep[n] == Keep::Perhaps))
+                        .collect_vec(),
                 );
-                boundary[check_front]
+                macro_rules! take_largest {
+                    ($f:expr) => {{
+                        let mut best_nr = 0;
+                        let mut best_val = usize::MAX;
+                        for &val in &check_vals {
+                            let new_nr = $f(val).count();
+                            if new_nr > best_nr {
+                                best_nr = new_nr;
+                                best_val = val;
+                            }
+                        }
+                        if best_val != usize::MAX {
+                            println!("^ entschieden für {best_val}");
+                            break 'next_vertex best_val;
+                        }
+                    }};
+                }
+                take_largest!(|v| edges.neighbors_of(v).filter(|&n| keep[n] == YOB));
+                take_largest!(|v| edges.neighbors_of(v).filter(|&n| keep[n] == Keep::Yes));
+                take_largest!(|v| edges.neighbors_of(v).filter(|&n| keep[n] != Keep::No));
+
+                println!("^ ungelöst");
+                assert!(!check_vals.is_empty());
+                check_vals[0]
             };
             retain_end += 1;
             check_front += check_len;
         }
     }
     boundary.truncate(retain_end);
+
+    debug_assert!(boundary.first().map_or(true, |&v| cop_dist[v] == 2));
+    debug_assert!(edges.has_path(boundary));
 }

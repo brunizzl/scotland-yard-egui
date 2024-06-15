@@ -1,5 +1,3 @@
-use itertools::iproduct;
-
 use crate::app::character;
 use crate::app::map;
 
@@ -103,27 +101,33 @@ impl PlaneCopStat {
             };
 
             // the closest a lazy-safe (e.g. escapable) vertex is to any cop is 2.
-            // the easiest way to only add a representaive vertex of a neighboring escapable region once is
+            // the fastest way to only add a representaive vertex of a neighboring escapable region once is
             // to restrict ourselfs to only walk there via the cop's neighbors on the hull boundary.
-            let boundary_neighs = edges.neighbors_of(cop_i_v).filter(|&n| hull[n].on_boundary());
-            let valid_nns = |n| edges.neighbors_of(n).filter(|&nn| escapable[nn] != 0);
-            type RootsVec = smallvec::SmallVec<[usize; 2]>;
-            let danger_roots = RootsVec::from_iter(boundary_neighs.flat_map(valid_nns));
-            debug_assert!({
-                let disconnected = |(&v1, &v2)| !edges.has_edge(v1, v2);
-                iproduct!(danger_roots.iter(), danger_roots.iter()).all(disconnected)
-            });
-            debug_assert!(danger_roots.len() <= 2);
+            let danger_roots = {
+                let mut esc_markers = 0;
+                let mut roots = smallvec::SmallVec::<[usize; 2]>::new();
+                for n in edges.neighbors_of(cop_i_v).filter(|&n| hull[n].on_boundary()) {
+                    for nn in edges.neighbors_of(n) {
+                        if escapable[nn] != 0 && esc_markers & escapable[nn] == 0 {
+                            esc_markers |= escapable[nn];
+                            roots.push(nn);
+                        }
+                    }
+                }
+                roots
+            };
+            // because we have only one entry per neighboring escapable region, there can only
+            // be at most two neighboring regions. this is because such a region always exists
+            // attached to the hull boundary and there are only two boundary sections next to a single cop.
+            // this argument breaks down on the torus, because the convex hull there is not actually convex
+            // and thus cops can stand at weird places looking like the small middle in an hour glass.
+            let on_torus = matches!(shape, map::Shape::TriangTorus | map::Shape::SquareTorus);
+            debug_assert!(danger_roots.len() <= 2 || on_torus);
 
             for danger_root in danger_roots {
                 let esc_marker = escapable[danger_root];
                 let marked_esc = |v: usize| escapable[v] & esc_marker != 0;
                 let i_dists = cop_i.dists();
-                let valid_next = |v: usize, n: usize| {
-                    let on_boundary = edges.neighbors_of(n).any(|nn| !marked_esc(nn));
-                    let is_further = i_dists[v] < i_dists[n];
-                    marked_esc(n) && on_boundary && is_further
-                };
 
                 queue.clear();
                 queue.push_back(danger_root);
@@ -132,15 +136,27 @@ impl PlaneCopStat {
                 // by a move of cop_i away from his precious corner
                 while let Some(v) = queue.pop_front() {
                     danger_points.push(v);
-                    let mut found_corner = false;
-                    let valid_ns = || edges.neighbors_of(v).filter(|&n| valid_next(v, n));
-                    for n in valid_ns() {
-                        let is_outside = |&nn: &_| !marked_esc(nn);
-                        let nr_outside = edges.neighbors_of(n).filter(is_outside).count();
-                        found_corner |= nr_outside >= min_outside_at_corner;
-                    }
-                    if !found_corner {
-                        queue.extend(valid_ns().filter(|&n| hull[n].in_interieur()));
+                    let valid_ns = edges.neighbors_of(v).filter(|&n: &usize| {
+                        let on_marked_boundary = edges.neighbors_of(n).any(|nn| !marked_esc(nn));
+                        // allow equality because cop can sit one unit inside hull,
+                        // thus the first step from danger_root could fail otherwise in that case.
+                        // we need this condition to terminate for obvious reasons.
+                        // in fact: i am not certain the allowed equality always guarantees termination.
+                        // TODO: think about this more and if so remove the filter in extend below.
+                        let isnt_closer = i_dists[n] >= i_dists[v];
+                        // required because isnt_closer may not filter out danger_root.
+                        // and danger_root's neighbor on the hull boundary is not filtered out otherwise eighter.
+                        let in_iterior = hull[n].in_interieur();
+                        marked_esc(n) && on_marked_boundary && isnt_closer && in_iterior
+                    });
+                    if valid_ns.clone().all(|n| {
+                        let unmarked = |&nn: &_| !marked_esc(nn);
+                        let nr_unmarked = edges.neighbors_of(n).filter(unmarked).count();
+                        nr_unmarked < min_outside_at_corner // not a corner of our escapable region
+                    }) {
+                        // the filter might look expensive, but we have a proportional time cost in the
+                        // paintbucket tool below anyway. this test guarantees termination of the while loop.
+                        queue.extend(valid_ns.filter(|n| !danger_points.contains(n)));
                     }
                 }
 

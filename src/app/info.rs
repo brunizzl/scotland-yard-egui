@@ -34,6 +34,7 @@ pub enum VertexColorInfo {
     CopsVoronoi,
     CopStratPlaneDanger, //makes only sense in infinite plane
     Debugging,
+    SpecificVertex,
 }
 
 impl VertexColorInfo {
@@ -74,6 +75,7 @@ impl VertexColorInfo {
             CopStratPlaneDanger => "Knoten die Räuber nicht betreten sollte, wenn Cops bestimmte \
             Strategie auf unendlicher Ebene fahren.",
             Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
+            SpecificVertex => "Knoten mit bestimmten Index, nur relevant für Debugging",
         }
     }
     const fn name_str(self) -> &'static str {
@@ -97,6 +99,7 @@ impl VertexColorInfo {
             CopsVoronoi => "Cops Voronoi",
             CopStratPlaneDanger => "Cops Ebene Strat Gefahr",
             Debugging => "Debugging",
+            SpecificVertex => "einzelner Knoten",
         }
     }
 }
@@ -166,9 +169,11 @@ struct Options {
     /// currently selected one at index 0
     last_selected_vertex_number_infos: [VertexNumberInfo; 7],
 
-    //both are only used, when the respective VertexColorInfo(s) is/are active
+    //these are only used, when the respective VertexColorInfo(s) is/are active
     marked_cop_dist: isize, //determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
     marked_robber_dist: isize, //determines max dist marked in VertexColorInfo::RobberDist
+    #[serde(skip)]
+    specific_shown_vertex: usize,
 
     number_scale: f32,
     manual_marker_scale: f32,
@@ -190,6 +195,7 @@ const DEFAULT_OPTIONS: Options = Options {
 
     marked_cop_dist: 10,
     marked_robber_dist: 10,
+    specific_shown_vertex: 0,
 
     last_selected_vertex_color_infos: [VertexColorInfo::None; 7],
     last_selected_vertex_number_infos: [VertexNumberInfo::None; 7],
@@ -292,6 +298,13 @@ impl Options {
                 VertexColorInfo::RobberDist => {
                     add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", (0, 1000), 1)
                 },
+                VertexColorInfo::SpecificVertex => {
+                    ui.horizontal(|ui| {
+                        ui.add(DragValue::new(&mut self.specific_shown_vertex));
+                        ui.label("Index");
+                    });
+                    false
+                }
                 _ => add_disabled_drag_value(ui),
             };
 
@@ -624,6 +637,7 @@ impl Info {
 
     fn update_escapable(&mut self, con: &DrawContext<'_>) {
         self.escapable.update(
+            con.map.shape(),
             self.characters.cops(),
             &self.cop_hull_data,
             con.edges,
@@ -1033,8 +1047,9 @@ impl Info {
                 }
             },
             VertexColorInfo::Escape2 => {
+                let colors = self.escapable.order_by_cops(self.characters.cops(), colors);
                 for (&esc, util) in izip!(self.escapable.escapable(), utils_iter) {
-                    let color = || color::u32_marker_color(esc, colors);
+                    let color = || color::u32_marker_color(esc, &colors);
                     draw_if!(esc != 0, util, color);
                 }
             },
@@ -1170,6 +1185,11 @@ impl Info {
                 for (&dang, util) in izip!(self.plane_cop_strat.danger_zones(), utils_iter) {
                     let color = || color::u32_marker_color(dang, colors);
                     draw_if!(dang != 0, util, color);
+                }
+            },
+            VertexColorInfo::SpecificVertex => {
+                if let Some(&pos) = con.positions.get(self.options.specific_shown_vertex) {
+                    draw_circle_at(pos, self.options.automatic_marker_color);
                 }
             },
             VertexColorInfo::None => {},

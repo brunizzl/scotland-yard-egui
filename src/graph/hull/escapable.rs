@@ -1,10 +1,12 @@
+use crate::app::map;
+
 use super::*;
 
 /// all cops delimiting a Region are listed here
 /// values are interpreted as indices in `cops` slice, e.g.
 /// index 0 maps to the second position in all of the characters.
 #[derive(Debug)]
-struct DelimitingGroup {
+pub struct DelimitingGroup {
     marker: u32,
     pair: (usize, usize),
     inner: smallvec::SmallVec<[usize; 6]>,
@@ -19,8 +21,8 @@ impl DelimitingGroup {
         }
     }
 
-    fn marker_bit(&self) -> u32 {
-        self.marker.ilog2()
+    fn marker_bit(&self) -> usize {
+        self.marker.ilog2() as usize
     }
 
     #[allow(dead_code)]
@@ -33,7 +35,7 @@ impl DelimitingGroup {
         };
         let (c0, c1) = self.pair;
         format!(
-            "bit {}: ({}, {}) + [{}]",
+            "bit {:>2}: ({}, {}) + [{}]",
             self.marker_bit(),
             emoji(c0),
             emoji(c1),
@@ -79,16 +81,35 @@ pub struct EscapeableNodes {
     cop_groups: Vec<DelimitingGroup>,
 }
 
-/// determines which bit is set in [`EscapeableNodes::escapable`]
-fn compute_marker(cop_pair: (usize, usize), cops: &[Character]) -> u32 {
-    let cop1 = cop_pair.0;
-    let cop1_index = cops.iter().position(|c| c.vertex() == cop1).unwrap();
+fn marker_bit_from_cops(cop_pair: (usize, usize), cops: &[Character]) -> usize {
     // on planar graphs taking the first index should always be sufficient.
     // (as each cop starts only up to one boundary segment)
-    1u32 << (cop1_index % 32)
+    cops.iter().position(|c| c.vertex() == cop_pair.0).unwrap()
+}
+
+/// determines which bit is set in [`EscapeableNodes::escapable`]
+fn compute_marker(cop_pair: (usize, usize), cops: &[Character], marker_nr: usize) -> u32 {
+    const USE_COPS: bool = false;
+    let bit = if USE_COPS {
+        marker_bit_from_cops(cop_pair, cops)
+    } else {
+        // this is more reliable to not accidentally create two disdinct regions with same marker
+        marker_nr
+    };
+    1u32 << (bit % 32)
 }
 
 impl EscapeableNodes {
+    /// orders `colors` as if marker bit of escapable region was chosen by the guarding cop pair
+    pub fn order_by_cops<T: Clone>(&self, cops: &[Character], colors: &[T; 32]) -> [T; 32] {
+        let mut res = colors.clone();
+        for group in &self.cop_groups {
+            let from_cops = marker_bit_from_cops(group.pair, cops);
+            res[group.marker_bit()] = colors[from_cops].clone();
+        }
+        res
+    }
+
     pub fn escapable(&self) -> &[u32] {
         &self.escapable
     }
@@ -184,6 +205,7 @@ impl EscapeableNodes {
             for n in edges.neighbors_of(v) {
                 //already marked -> don't add to queue again
                 if self.escapable[n] & marker != 0 {
+                    // this may currently fail in tori, because the whole thing is scuffed there
                     debug_assert_eq!(self.last_write_by[n], owner);
                     continue;
                 }
@@ -195,10 +217,17 @@ impl EscapeableNodes {
         }
     }
 
+    /// finds characters at passed positions
+    fn get_cop_characters((v1, v2): (usize, usize), cops: &[Character]) -> [&Character; 2] {
+        let find = |v| cops.iter().find(|c| c.vertex() == v).unwrap();
+        [find(v1), find(v2)]
+    }
+
     /// assumes escapable regions from boundary cops inwards have already been build.
     /// these regions will now be deleted in regions where third cops could otherwise interfere.
     fn consider_interior_cops(
         &mut self,
+        shape: map::Shape,
         cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
@@ -212,18 +241,18 @@ impl EscapeableNodes {
         let mut owner = hull_data.boundary.len();
         queue.clear();
         let iter = izip!(
+            0..,
             hull_data.boundary_cop_vertices(),
             hull_data.safe_boundary_parts()
         );
-        for (&(v_left, v_right), safe_outher_boundary) in iter {
-            let marker = compute_marker((v_left, v_right), cops);
-            let left_cop = cops.iter().find(|c| c.vertex() == v_left).unwrap();
-            let right_cop = cops.iter().find(|c| c.vertex() == v_right).unwrap();
+        for (marker_nr, &pair, safe_outher_boundary) in iter {
+            let marker = compute_marker(pair, cops, marker_nr);
+            let [left_cop, right_cop] = Self::get_cop_characters(pair, cops);
 
             let endangers = |escapable: &[u32], c: &Character| {
                 let v = c.vertex();
                 let active = c.is_active();
-                let distinct = v != v_left && v != v_right;
+                let distinct = v != pair.0 && v != pair.1;
                 //if cop is not at least next to region, then there must be some point on the region boundary
                 //that can be reached faster by a robber starting in the region than by that outside cop.
                 //this is by definition of the regions.
@@ -293,13 +322,30 @@ impl EscapeableNodes {
                             self.keep_escapable[v] = Keep::Yes;
                             queue.push_back(v);
                         } else {
-                            //TODO: why is this assertion sometimes wrong?
-                            //debug_assert_eq!(self.keep_escapable[v], Keep::Perhaps);
+                            debug_assert!(
+                                self.keep_escapable[v] == Keep::Perhaps
+                                    || safe_outher_boundary.iter().filter(|&&v2| v2 == v).count()
+                                        > 1
+                            );
                             self.keep_escapable[v] = Keep::YesOnBoundary;
                         }
                     }
-                    let paint =
-                        |n: usize, keep: &[_]| keep[n] == Keep::No && hull_data.hull[n].contained();
+                    //preliminary: ensure region is disconnected from rest of hull before applying paintbucket
+                    for cop in [left_cop, right_cop] {
+                        for n in edges.neighbors_of(cop.vertex()) {
+                            if hull_data.hull[n].on_boundary() {
+                                self.keep_escapable[n] = Keep::YesOnBoundary;
+                            }
+                        }
+                    }
+                    let paint = |n: usize, keep: &[_]| {
+                        let res = keep[n] == Keep::No && hull_data.hull[n].contained();
+                        //fails on torus, because the whole thing fails on torus
+                        use map::Shape::{SquareTorus, TriangTorus};
+                        let on_torus = matches!(shape, TriangTorus | SquareTorus);
+                        debug_assert!(!res || (self.escapable[n] & marker != 0) || on_torus);
+                        res
+                    };
                     edges.recolor_region_with(Keep::Yes, &mut self.keep_escapable, paint, queue);
 
                     //step 3: prune inner boundaries to only contain safe halfs reaching outside
@@ -315,9 +361,6 @@ impl EscapeableNodes {
                             &self.keep_escapable,
                             edges,
                         );
-                        debug_assert!(boundary.first().map_or(true, |&v| c1.dists()[v] == 2));
-                        debug_assert!(boundary.last().map_or(true, |&v| c2.dists()[v] == 2));
-                        debug_assert!(edges.has_path(boundary)); //somehow we can't assert this in tori :(
                     }
 
                     //step 4: find escapable region for each cop pair and paint it with KeepVertex::Yes
@@ -422,57 +465,97 @@ impl EscapeableNodes {
     /// ignores cops in interior of hull, computes safe regions only with respect to boundary cops
     fn consider_boundary_cops(
         &mut self,
+        shape: map::Shape,
         cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
+        self.keep_escapable.clear();
+        self.keep_escapable.resize(edges.nr_vertices(), Keep::No);
+        for (keep, &h) in izip!(&mut self.keep_escapable, hull_data.hull()) {
+            *keep = match h {
+                InSet::Interieur | InSet::No => Keep::No,
+                InSet::OnBoundary => Keep::YesOnBoundary,
+                _ => unreachable!(),
+            };
+        }
+
         queue.clear();
+        let mut owner = 1;
+        let mut boundary = std::mem::take(&mut self.some_inner_boundaries[0]);
         let iter = izip!(
+            0..,
             hull_data.boundary_cop_vertices(),
-            hull_data.safe_boundary_indices(),
             hull_data.safe_boundary_parts()
         );
-        for (&cop_pair, indices, vertices) in iter {
-            let marker = compute_marker(cop_pair, cops);
-            let max_escapable_dist = indices.len() as isize - 1;
-            debug_assert_eq!(indices.len(), vertices.len());
+        for (marker_nr, &pair, safe_outher) in iter {
+            let marker = compute_marker(pair, cops, marker_nr);
+            let [c1, c2] = Self::get_cop_characters(pair, cops);
+            let max_escapable_dist = { c1.dists()[c2.vertex()] - 4 };
 
+            self.cop_pair_hull.compute_hull([c1, c2], edges, queue);
+            boundary.clear();
+            boundary::find_unordered_boundary(
+                &mut boundary,
+                &self.cop_pair_hull.hull,
+                edges,
+                &self.cop_pair_hull.all_vertices,
+            );
+            self.cop_pair_hull.reset_hull(c1, edges, queue);
+            //get rid of vertices too close to cops at first, else retain_safe_inner_boundary can run into problems
+            boundary.retain(|&v| isize::min(c1.dists()[v], c2.dists()[v]) > 1);
+            retain_safe_inner_boundary(c1.dists(), &mut boundary, &self.keep_escapable, edges);
+
+            let mut last_owner = None;
+            let mut compute_dists_to = |v| {
+                if last_owner.is_some() {
+                    //algorithm is only correct if all vertices in
+                    //safe_segment turn out to be actually safe.
+                    debug_assert_eq!(Some(self.last_write_by[v]), last_owner);
+                }
+                debug_assert!(queue.is_empty());
+                queue.push_back(v);
+                self.some_boundary_dist[v] = 0;
+                self.last_write_by[v] = owner;
+                let in_hull = |n: usize| hull_data.hull[n].contained();
+                self.calc_small_dists(in_hull, edges, queue, max_escapable_dist, last_owner, owner);
+                last_owner = Some(owner);
+                owner += 1;
+            };
             //we call calc_small_dists vor every vertex in our boundary segement.
             //to speed up computation, our first and second vertex are on opposing ends.
             //future boundary vertices thus only consider inner vertices reached by both extremes,
             //which should get us some constant factor in speedup.
-            let mut last_owner = None;
-            let mut last_v = usize::MAX;
-            let mut compute_dists_to = |owner, v| {
-                debug_assert!(owner != 0);
-                queue.push_back(v);
-                self.some_boundary_dist[v] = 0;
-                self.last_write_by[v] = owner;
-                let in_hull = |x: usize| hull_data.hull[x].contained();
-                self.calc_small_dists(in_hull, edges, queue, max_escapable_dist, last_owner, owner);
-                last_owner = Some(owner);
-                last_v = v;
-            };
-            let mut iter = izip!(indices.clone(), vertices);
-            if let Some((owner, &v)) = iter.next_back() {
-                compute_dists_to(owner, v);
+            let mut iter = boundary.iter();
+            if let Some(&v) = iter.next_back() {
+                compute_dists_to(v);
             }
-            for (owner, &v) in iter {
-                compute_dists_to(owner, v);
+            for &v in iter {
+                compute_dists_to(v);
             }
 
-            let owner = last_owner.unwrap();
-            debug_assert!(queue.is_empty());
-            queue.push_back(last_v);
-            self.escapable[last_v] |= marker;
-            self.add_region_to_escapable(owner, marker, edges, queue);
-            self.cop_groups.push(DelimitingGroup::new(marker, cop_pair));
+            if let Some(&last_v) = boundary.last() {
+                let v_owner = last_owner.unwrap();
+                debug_assert!(queue.is_empty());
+                queue.push_back(last_v);
+                self.escapable[last_v] |= marker;
+                self.add_region_to_escapable(v_owner, marker, edges, queue);
+            } else {
+                use map::Shape::{SquareTorus, TriangTorus};
+                debug_assert!(matches!(shape, TriangTorus | SquareTorus));
+            }
+            for &v in safe_outher {
+                self.escapable[v] |= marker;
+            }
+            self.cop_groups.push(DelimitingGroup::new(marker, pair));
         }
+        self.some_inner_boundaries[0] = boundary;
     }
 
     pub fn update(
         &mut self,
+        shape: map::Shape,
         cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
@@ -487,8 +570,8 @@ impl EscapeableNodes {
         self.some_boundary_dist.resize(nr_vertices, isize::MAX);
         self.cop_groups.clear();
 
-        self.consider_boundary_cops(cops, hull_data, edges, queue);
-        self.consider_interior_cops(cops, hull_data, edges, queue);
+        self.consider_boundary_cops(shape, cops, hull_data, edges, queue);
+        self.consider_interior_cops(shape, cops, hull_data, edges, queue);
 
         println!("-------- groups in escapable ------------");
         for group in &self.cop_groups {

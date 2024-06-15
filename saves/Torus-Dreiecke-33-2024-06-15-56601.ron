@@ -1,0 +1,77 @@
+(
+	name: "lazy-safe funzt nicht",
+	saved_at: (
+		secs_since_epoch: 1718459001,
+		nanos_since_epoch: 400455200,
+	),
+	shape: TriangTorus,
+	resolution: 33,
+	characters: (
+		characters: [(
+			id: Robber,
+			pos: OnVertex((
+				x: -0.10606067,
+				y: -0.18370232,
+				z: 0.5,
+			)),
+			past_vertices: [360],
+			nearest_vertex: 360,
+			on_node: true,
+			enabled: true,
+			updated: true,
+		), (
+			id: Cop(3),
+			pos: OnVertex((
+				x: 0.27941173,
+				y: 0.12735668,
+				z: 0.5,
+			)),
+			past_vertices: [540, 648, 788, 858, 861, 862, 967, 1037],
+			nearest_vertex: 1037,
+			on_node: true,
+			enabled: true,
+			updated: true,
+		), (
+			id: Cop(2),
+			pos: OnVertex((
+				x: -0.35294116,
+				y: 0.15282801,
+				z: 0.5,
+			)),
+			past_vertices: [19, 54, 124, 127, 128, 233, 303],
+			nearest_vertex: 303,
+			on_node: true,
+			enabled: true,
+			updated: true,
+		), (
+			id: Cop(7),
+			pos: OnVertex((
+				x: -0.0735294,
+				y: -0.2801847,
+				z: 0.5,
+			)),
+			past_vertices: [1058, 1023, 530, 676, 638, 72, 142, 145, 146, 251, 321],
+			nearest_vertex: 321,
+			on_node: true,
+			enabled: true,
+			updated: true,
+		), (
+			id: Cop(0),
+			pos: OnVertex((
+				x: -0.102941185,
+				y: 0.38207003,
+				z: 0.5,
+			)),
+			past_vertices: [518, 588, 591, 592, 697, 767],
+			nearest_vertex: 767,
+			on_node: true,
+			enabled: true,
+			updated: true,
+		)],
+		past_moves: [(3, 1023), (3, 530), (3, 676), (3, 638), (2, 54), (3, 72), (1, 648), (1, 788), (2, 124), (4, 588), (1, 858), (3, 142), (2, 127), (4, 591), (1, 861), (3, 145), (2, 128), (4, 592), (1, 862), (3, 146), (2, 233), (4, 697), (1, 967), (3, 251), (2, 303), (4, 767), (1, 1037), (3, 321)],
+		future_moves: [],
+		show_past_steps: false,
+		show_allowed_next_steps: false,
+),
+	manual_markers: [(248, 0), (1, 1), (865, 0), (1, 1), (110, 0)],
+)

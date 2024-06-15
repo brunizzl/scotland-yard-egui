@@ -412,11 +412,14 @@ impl EdgeList {
         self.recolor_region_with(new, colors, |n, cs| cs[n] == old, queue)
     }
 
-    pub fn find_local_minimum(
+    pub fn find_local_minimum<T>(
         &self,
-        mut potential: impl FnMut(usize) -> f32,
+        mut potential: impl FnMut(usize) -> T,
         node_hint: usize,
-    ) -> (usize, f32) {
+    ) -> (usize, T)
+    where
+        T: PartialOrd,
+    {
         let mut nearest = node_hint;
         let mut smallest_pot = potential(node_hint);
         let mut maybe_neighbor_better = true;
