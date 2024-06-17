@@ -343,6 +343,7 @@ impl EscapeableNodes {
                         //fails on torus, because the whole thing fails on torus
                         use map::Shape::{SquareTorus, TriangTorus};
                         let on_torus = matches!(shape, TriangTorus | SquareTorus);
+                        // todo: when is this failing? (sometimes also on regular plane)
                         debug_assert!(!res || (self.escapable[n] & marker != 0) || on_torus);
                         res
                     };
@@ -471,14 +472,19 @@ impl EscapeableNodes {
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
+        // using keep_escapable here is kinda surprising, because well, there is nothing to keep at this stage.
+        // in an older version of this function, there was no such surprise here. this has changed,
+        // because we now compute the starting region the same way we compute a subregion in Self::consider_interior_cops.
+        // the main role of keep_escapable there is obviously to keep track of which vertices to
+        // remove from an existing region.
+        // keep_escapable is however also used to find the correct part of the boundary of self.cop_pair_hull.
+        // the boundary tries to orient itself on the boundary of the complete hull. which is what we set.
         self.keep_escapable.clear();
         self.keep_escapable.resize(edges.nr_vertices(), Keep::No);
-        for (keep, &h) in izip!(&mut self.keep_escapable, hull_data.hull()) {
-            *keep = match h {
-                InSet::Interieur | InSet::No => Keep::No,
-                InSet::OnBoundary => Keep::YesOnBoundary,
-                _ => unreachable!(),
-            };
+        for (keep, h) in izip!(&mut self.keep_escapable, hull_data.hull()) {
+            if h.on_boundary() {
+                *keep = Keep::YesOnBoundary;
+            }
         }
 
         queue.clear();
