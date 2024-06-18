@@ -5,7 +5,7 @@
 		nanos_since_epoch: 400455200,
 	),
 	shape: TriangTorus,
-	resolution: 33,
+	resolution: 35,
 	characters: (
 		characters: [(
 			id: Robber,

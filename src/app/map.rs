@@ -75,6 +75,23 @@ impl Shape {
             Self::Random2D(_) => "⏺",
         }
     }
+
+    pub fn min_res(self) -> isize {
+        match self {
+            Self::Tetrahedron
+            | Self::Octahedron
+            | Self::Icosahedron
+            | Self::DividedIcosahedron(_)
+            | Self::Cube
+            | Self::Football
+            | Self::FabianHamann
+            | Self::Dodecahedron
+            | Self::RegularPolygon2D(_)
+            | Self::Random2D(_) => 0,
+            Self::TriangTorus => 2,
+            Self::SquareTorus => 2,
+        }
+    }
 }
 
 pub fn new_map_from(shape: Shape, res: usize) -> Embedding3D {
@@ -100,8 +117,8 @@ pub fn new_map_from(shape: Shape, res: usize) -> Embedding3D {
         Shape::Football => Embedding3D::new_subdivided_football(res, false),
         Shape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
         Shape::Random2D(seed) => Embedding3D::from_2d(graph::random_triangulated(res, 8, seed)),
-        Shape::TriangTorus => Embedding3D::new_subdivided_triangle_torus(res),
-        Shape::SquareTorus => Embedding3D::new_subdivided_squares_torus(res),
+        Shape::TriangTorus => Embedding3D::new_subdivided_triangle_torus(res as isize),
+        Shape::SquareTorus => Embedding3D::new_subdivided_squares_torus(res as isize),
     }
 }
 
@@ -355,7 +372,8 @@ impl Map {
                 _ => add_disabled_drag_value(ui),
             };
             ui.add_space(8.0);
-            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (0, 200), 1);
+            let min = self.shape.min_res();
+            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (min, 200), 1);
             if change {
                 self.recompute_and_adjust(info);
             }

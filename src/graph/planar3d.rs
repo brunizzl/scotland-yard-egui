@@ -610,25 +610,25 @@ impl Embedding3D {
     /// this is topologically a torus.
     /// now slant the shape to the right until the upper left corner sits centered above the bottom side.
     /// connecting the upper left and lower right corners yields the two equilateral triangles.
-    pub fn new_subdivided_triangle_torus(divisions: usize) -> Self {
-        let side_len = (divisions as isize) + 2;
-        let nr_vertices = (side_len * side_len) as usize;
+    pub fn new_subdivided_triangle_torus(len: isize) -> Self {
+        assert!(len >= 2);
+        let nr_vertices = (len * len) as usize;
         let mut vertices = Vec::with_capacity(nr_vertices);
         let mut edges = EdgeList::new(6, nr_vertices);
-        let index_of = |x, y| (x * side_len + y) as usize;
+        let index_of = |x, y| (x * len + y) as usize;
 
-        let scale = 1.0 / (divisions as f32 + 1.0);
+        let scale = 1.0 / (len as f32 + 1.0);
         let x_step = scale * vec3(1.0, 0.0, 0.0);
         let y_step = scale * vec3(-0.5, f32::sqrt(3.0) / 2.0, 0.0);
         let corner = pos3(-0.25, -f32::sqrt(3.0) / 4.0, Z_OFFSET_2D);
-        for x in 0..side_len {
-            for y in 0..side_len {
+        for x in 0..len {
+            for y in 0..len {
                 let pos = corner + (x as f32) * x_step + (y as f32) * y_step;
                 vertices.push(pos);
 
                 let v = index_of(x, y);
                 debug_assert_eq!(v + 1, vertices.len());
-                if divisions > 0 {
+                if len > 2 {
                     for (nx, ny) in [
                         (x - 1, y),
                         (x + 1, y),
@@ -637,8 +637,8 @@ impl Embedding3D {
                         (x - 1, y - 1),
                         (x + 1, y + 1),
                     ] {
-                        let nx = (nx + side_len) % side_len;
-                        let ny = (ny + side_len) % side_len;
+                        let nx = (nx + len) % len;
+                        let ny = (ny + len) % len;
                         let nv = index_of(nx, ny);
                         if nv < v {
                             edges.add_edge(v, nv);
@@ -647,7 +647,7 @@ impl Embedding3D {
                 }
             }
         }
-        if divisions == 0 {
+        if len == 2 {
             for v1 in 0..4 {
                 for v2 in (v1 + 1)..4 {
                     edges.add_edge(v1, v2);
@@ -662,7 +662,7 @@ impl Embedding3D {
             nr_visible_surface_vertices: usize::MAX,
             is_regular_triangulation: false,
             is_flat: true,
-            max_shown_edge_length: if divisions > 0 { 0.55 } else { 1.1 },
+            max_shown_edge_length: if len > 0 { 0.55 } else { 1.1 },
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
@@ -675,28 +675,28 @@ impl Embedding3D {
     /// imagine taking a square and  connecting the left and right sides and the top and bottom sides.
     /// this is topologically a torus.
     #[allow(dead_code)]
-    pub fn new_subdivided_squares_torus(divisions: usize) -> Self {
-        let side_len = (divisions as isize) + 2;
-        let nr_vertices = (side_len * side_len) as usize;
+    pub fn new_subdivided_squares_torus(len: isize) -> Self {
+        assert!(len >= 2);
+        let nr_vertices = (len * len) as usize;
         let mut vertices = Vec::with_capacity(nr_vertices);
         let mut edges = EdgeList::new(6, nr_vertices);
-        let index_of = |x, y| (x * side_len + y) as usize;
+        let index_of = |x, y| (x * len + y) as usize;
 
-        let scale = 1.0 / (divisions as f32 + 1.0);
+        let scale = 1.0 / (len as f32 + 1.0);
         let x_step = scale * vec3(1.0, 0.0, 0.0);
         let y_step = scale * vec3(0.0, 1.0, 0.0);
         let corner = pos3(-0.5, -0.5, Z_OFFSET_2D);
-        for x in 0..side_len {
-            for y in 0..side_len {
+        for x in 0..len {
+            for y in 0..len {
                 let pos = corner + (x as f32) * x_step + (y as f32) * y_step;
                 vertices.push(pos);
 
                 let v = index_of(x, y);
                 debug_assert_eq!(v + 1, vertices.len());
-                if divisions > 0 {
+                if len > 2 {
                     for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                        let nx = (nx + side_len) % side_len;
-                        let ny = (ny + side_len) % side_len;
+                        let nx = (nx + len) % len;
+                        let ny = (ny + len) % len;
                         let nv = index_of(nx, ny);
                         if nv < v {
                             edges.add_edge(v, nv);
@@ -705,7 +705,7 @@ impl Embedding3D {
                 }
             }
         }
-        if divisions == 0 {
+        if len == 2 {
             debug_assert_eq!(edges.nr_vertices(), 4);
             edges.add_edge(0, 1);
             edges.add_edge(1, 3);
@@ -720,7 +720,7 @@ impl Embedding3D {
             nr_visible_surface_vertices: usize::MAX,
             is_regular_triangulation: false,
             is_flat: true,
-            max_shown_edge_length: if divisions > 0 { 0.55 } else { 1.9 },
+            max_shown_edge_length: if len > 0 { 0.55 } else { 1.9 },
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
