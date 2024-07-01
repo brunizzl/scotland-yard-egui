@@ -20,6 +20,10 @@ pub struct Camera3D {
     position: Pos2,
 
     to_screen: ToScreen,
+
+    /// eighter lock all rotations (` == false`)
+    /// or allow z-Axis (screen normal) rotations
+    allow_rotation_2d: bool,
 }
 
 impl Default for Camera3D {
@@ -34,6 +38,7 @@ impl Default for Camera3D {
                 Project3To2::new(&DEFAULT_AXES),
                 RectTransform::identity(default_rect),
             ),
+            allow_rotation_2d: true,
         }
     }
 }
@@ -80,21 +85,24 @@ impl Camera3D {
     pub fn draw_menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label("Kamera: ");
-            if ui.button(" 🏠 ").on_hover_text("setze Kamera zurück").clicked() {
+            if ui.button("🏠").on_hover_text("setze Kamera zurück").clicked() {
                 self.reset();
             }
-            ui.add_space(5.0);
+            ui.add_space(3.0);
             ui.add(DragValue::new(&mut self.zoom_speed).clamp_range(0.05..=4.0).speed(0.01))
-                .on_hover_text("Zoom-/Scrollgeschwindigkeit");
-            ui.add_space(5.0);
-            if ui.add(Button::new(" 🔄 ").sense(Sense::drag())).dragged() {
+                .on_hover_text("Zoom-/Scroll-/Rotationsgeschwindigkeit");
+            ui.add_space(3.0);
+            if ui.add(Button::new("🔄").sense(Sense::drag())).dragged() {
                 ui.ctx().request_repaint();
-                self.rotate_z(-0.01 * self.zoom_speed);
+                self.rotate_z_2d(-0.01 * self.zoom_speed, Vec2::ZERO);
             }
-            if ui.add(Button::new(" 🔃 ").sense(Sense::drag())).dragged() {
+            if ui.add(Button::new("🔃").sense(Sense::drag())).dragged() {
                 ui.ctx().request_repaint();
-                self.rotate_z(0.01 * self.zoom_speed);
+                self.rotate_z_2d(0.01 * self.zoom_speed, Vec2::ZERO);
             }
+            ui.add_space(3.0);
+            ui.checkbox(&mut self.allow_rotation_2d, "")
+                .on_hover_text("erlaube Rotieren mit Touchgesten für 2D Graphen");
         });
     }
 
@@ -116,6 +124,16 @@ impl Camera3D {
         self.update_direction(|v| v.rotate_z(angle));
     }
 
+    fn rotate_z_2d(&mut self, angle: f32, offset: Vec2) {
+        self.rotate_z(angle);
+        self.position = {
+            let no_off = self.position - offset;
+            let as_vec = Vec3::new(no_off.x, no_off.y, 0.0);
+            let rotated = as_vec.rotate_z(angle);
+            pos2(rotated.x, rotated.y) + offset
+        };
+    }
+
     fn zoom_delta(&self, info: &InputState) -> f32 {
         match info.multi_touch() {
             Some(touch) => touch.zoom_delta,
@@ -134,7 +152,14 @@ impl Camera3D {
                 self.position += info.smooth_scroll_delta * self.zoom_speed;
                 if let Some(drag) = info.multi_touch() {
                     self.position += drag.translation_delta;
-                    self.rotate_z(drag.rotation_delta);
+                    if self.allow_rotation_2d {
+                        let offset = info
+                            .pointer
+                            .interact_pos()
+                            .map(|p| p - screen.center())
+                            .unwrap_or(Vec2::ZERO);
+                        self.rotate_z_2d(drag.rotation_delta, offset);
+                    }
                 }
 
                 let zoom_delta = self.zoom_delta(info);
