@@ -214,6 +214,7 @@ impl Camera3D {
     pub fn reset(&mut self) {
         *self = Self {
             zoom_speed: self.zoom_speed,
+            allow_rotation_2d: self.allow_rotation_2d,
             ..Self::default()
         };
     }
