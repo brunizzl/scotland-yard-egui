@@ -440,14 +440,27 @@ impl State {
                 return;
             };
             let next_v = {
+                // the next vertex should have the fewest possible commn neighbors with the last vertex
+                // as proxy to increase the distance to the last vertex as fast as possible.
+                // in case this graph-structure-only condition yields multiple candidates, we then
+                // take the vertex which is closest to a step extrapolated from the last step.
+                let prev_neighs =
+                    smallvec::SmallVec::<[_; 8]>::from_iter(edges.neighbors_of(prev_v));
                 let to_curr = positions[curr_v] - positions[prev_v];
                 let next_pos = positions[curr_v] + to_curr;
-                let mut err = 1e10;
+                let mut fewest_common = usize::MAX;
+                let mut closest_pos = 1e10;
                 let mut best = usize::MAX;
                 for n in edges.neighbors_of(curr_v) {
-                    let new_err = (positions[n] - next_pos).length();
-                    if new_err < err {
-                        err = new_err;
+                    let nr_common =
+                        edges.neighbors_of(n).filter(|nn| prev_neighs.contains(nn)).count()
+                            + 100 * prev_neighs.contains(&n) as usize;
+                    let pos_err = (positions[n] - next_pos).length();
+                    if nr_common < fewest_common
+                        || (nr_common == fewest_common && pos_err < closest_pos)
+                    {
+                        fewest_common = nr_common;
+                        closest_pos = pos_err;
                         best = n;
                     }
                 }

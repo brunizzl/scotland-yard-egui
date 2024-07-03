@@ -822,6 +822,10 @@ impl Info {
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
                 self.characters.redo_move(con.edges, con.positions, &mut self.queue);
             }
+            if info.modifiers.ctrl && info.key_pressed(Key::R) {
+                self.characters
+                    .repeat_snd_last_move(con.edges, con.positions, &mut self.queue);
+            }
 
             let pointer_pos = info.pointer.latest_pos()?;
             if !con.response.contains_pointer() {
@@ -875,10 +879,6 @@ impl Info {
                     }
                 }
                 return Some(Key::F);
-            }
-            if info.key_pressed(Key::R) {
-                self.characters
-                    .repeat_snd_last_move(con.edges, con.positions, &mut self.queue);
             }
             None
         });
