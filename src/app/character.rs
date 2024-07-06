@@ -3,7 +3,6 @@ use std::{
     collections::{HashMap, VecDeque},
 };
 
-use egui::*;
 use itertools::{izip, Itertools};
 
 use crate::{

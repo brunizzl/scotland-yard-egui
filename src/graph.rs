@@ -21,6 +21,9 @@ pub use planar3d::*;
 /// bruteforce algortithms to compute the lazy-cop number of a graph
 pub mod bruteforce;
 
+pub mod shape;
+pub use shape::Shape;
+
 #[allow(dead_code)]
 /// compressed sparse row matrix for bool entries, e.g. no actual value array exists
 /// great to e.g. neighbors in a sparse (for example planar) graph

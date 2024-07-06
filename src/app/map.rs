@@ -1,47 +1,18 @@
-use egui::*;
+use crate::graph::Shape;
 use itertools::izip;
-use crate::graph_shape::GraphShape;
 
 use crate::app::{cam::Camera3D, info::Info};
 use crate::geo::Pos3;
-use crate::graph::{self, EdgeList, Embedding3D};
+use crate::graph::{EdgeList, Embedding3D};
 
 use super::*;
-
-pub fn new_map_from(shape: GraphShape, res: usize) -> Embedding3D {
-    match shape {
-        GraphShape::Icosahedron => Embedding3D::new_subdivided_icosahedron(res),
-        GraphShape::Octahedron => Embedding3D::new_subdivided_octahedron(res),
-        GraphShape::Tetrahedron => Embedding3D::new_subdivided_tetrahedron(res),
-        GraphShape::DividedIcosahedron(pressure) => {
-            let res1 = usize::min(res, pressure as usize);
-            let res2 = if res1 == 0 {
-                res
-            } else {
-                (usize::max(res, 1) - 1) / (res1 + 1)
-            };
-            Embedding3D::new_subdivided_subdivided_icosahedron(res1, res2)
-        },
-        GraphShape::RegularPolygon2D(nr_sides) => {
-            let sides = nr_sides as usize;
-            Embedding3D::new_2d_triangulated_regular_polygon(sides, res)
-        },
-        GraphShape::Cube => Embedding3D::new_subdivided_cube(res),
-        GraphShape::Dodecahedron => Embedding3D::new_subdivided_dodecahedron(res, false, false),
-        GraphShape::Football => Embedding3D::new_subdivided_football(res, false),
-        GraphShape::FabianHamann => Embedding3D::new_subdivided_football(res, true),
-        GraphShape::Random2D(seed) => Embedding3D::from_2d(graph::random_triangulated(res, 8, seed)),
-        GraphShape::TriangTorus => Embedding3D::new_subdivided_triangle_torus(res as isize),
-        GraphShape::SquareTorus => Embedding3D::new_subdivided_squares_torus(res as isize),
-    }
-}
 
 pub struct Map {
     data: Embedding3D,
     visible: Vec<bool>, //one entry per vertex, stores if that vertex can currently be seen on screen
     extreme_vertices: Vec<usize>,
 
-    shape: GraphShape,
+    shape: Shape,
     resolution: isize,
     camera: Camera3D,
 }
@@ -53,7 +24,7 @@ mod storage_keys {
 }
 
 impl Map {
-    pub fn shape(&self) -> GraphShape {
+    pub fn shape(&self) -> Shape {
         self.shape
     }
 
@@ -67,12 +38,12 @@ impl Map {
 
     pub fn new(info: &mut Info, cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
-        let shape = load_or(cc.storage, SHAPE, || GraphShape::Icosahedron);
+        let shape = load_or(cc.storage, SHAPE, || Shape::Icosahedron);
         let (resolution, shrunk) = {
             let last_res = load_or(cc.storage, RESOLUTION, || 12);
             //to not accidentally lag on restart, we limit maximal initial resolution for
             //graphs that are slow to build. currently this is only Random2D.
-            if last_res > 50 && matches!(shape, GraphShape::Random2D(_)) {
+            if last_res > 50 && matches!(shape, Shape::Random2D(_)) {
                 (50, true)
             } else {
                 (last_res, false)
@@ -81,7 +52,7 @@ impl Map {
         let camera = load_or(cc.storage, CAMERA, Camera3D::default);
 
         let mut result = Self {
-            data: Embedding3D::empty(),
+            data: Embedding3D::default(),
             visible: Vec::new(),
             extreme_vertices: Vec::new(),
 
@@ -148,7 +119,7 @@ impl Map {
     }
 
     pub fn is_3d(&self) -> bool {
-        !self.data.is_flat()
+        self.data.shape().is_3d()
     }
 
     pub fn camera(&self) -> &Camera3D {
@@ -164,7 +135,7 @@ impl Map {
     }
 
     fn recompute(&mut self) {
-        self.data = new_map_from(self.shape, self.resolution as usize);
+        self.data = Embedding3D::new_map_from(self.shape, self.resolution as usize);
         if self.is_3d() {
             self.extreme_vertices.clear();
             self.camera.reset_position();
@@ -176,7 +147,7 @@ impl Map {
         self.update_vertex_visibility();
     }
 
-    pub fn change_to(&mut self, shape: GraphShape, resolution: isize) {
+    pub fn change_to(&mut self, shape: Shape, resolution: isize) {
         self.shape = shape;
         self.resolution = resolution;
         self.recompute();
@@ -211,78 +182,78 @@ impl Map {
                     let old_shape = self.shape;
                     ui.radio_value(
                         &mut self.shape,
-                        GraphShape::Tetrahedron,
-                        GraphShape::Tetrahedron.name_str(),
+                        Shape::Tetrahedron,
+                        Shape::Tetrahedron.name_str(),
                     );
                     ui.radio_value(
                         &mut self.shape,
-                        GraphShape::Octahedron,
-                        GraphShape::Octahedron.name_str(),
+                        Shape::Octahedron,
+                        Shape::Octahedron.name_str(),
                     );
                     ui.radio_value(
                         &mut self.shape,
-                        GraphShape::Icosahedron,
-                        GraphShape::Icosahedron.name_str(),
+                        Shape::Icosahedron,
+                        Shape::Icosahedron.name_str(),
                     );
                     if ui
                         .add(RadioButton::new(
-                            matches!(self.shape, GraphShape::DividedIcosahedron(_)),
-                            GraphShape::DividedIcosahedron(0).name_str(),
+                            matches!(self.shape, Shape::DividedIcosahedron(_)),
+                            Shape::DividedIcosahedron(0).name_str(),
                         ))
                         .clicked()
                     {
-                        self.shape = GraphShape::DividedIcosahedron(0);
+                        self.shape = Shape::DividedIcosahedron(0);
                     }
                     ui.radio_value(
                         &mut self.shape,
-                        GraphShape::Dodecahedron,
-                        GraphShape::Dodecahedron.name_str(),
+                        Shape::Dodecahedron,
+                        Shape::Dodecahedron.name_str(),
                     );
-                    ui.radio_value(&mut self.shape, GraphShape::Cube, GraphShape::Cube.name_str());
-                    ui.radio_value(&mut self.shape, GraphShape::Football, GraphShape::Football.name_str());
+                    ui.radio_value(&mut self.shape, Shape::Cube, Shape::Cube.name_str());
+                    ui.radio_value(&mut self.shape, Shape::Football, Shape::Football.name_str());
                     ui.radio_value(
                         &mut self.shape,
-                        GraphShape::FabianHamann,
-                        GraphShape::FabianHamann.name_str(),
-                    );
-                    ui.radio_value(
-                        &mut self.shape,
-                        GraphShape::TriangTorus,
-                        GraphShape::TriangTorus.name_str(),
+                        Shape::FabianHamann,
+                        Shape::FabianHamann.name_str(),
                     );
                     ui.radio_value(
                         &mut self.shape,
-                        GraphShape::SquareTorus,
-                        GraphShape::SquareTorus.name_str(),
+                        Shape::TriangTorus,
+                        Shape::TriangTorus.name_str(),
+                    );
+                    ui.radio_value(
+                        &mut self.shape,
+                        Shape::SquareTorus,
+                        Shape::SquareTorus.name_str(),
                     );
                     if ui
                         .add(RadioButton::new(
-                            matches!(self.shape, GraphShape::RegularPolygon2D(_)),
-                            GraphShape::RegularPolygon2D(0).name_str(),
+                            matches!(self.shape, Shape::RegularPolygon2D(_)),
+                            Shape::RegularPolygon2D(0).name_str(),
                         ))
                         .clicked()
                     {
-                        self.shape = GraphShape::RegularPolygon2D(6);
+                        self.shape = Shape::RegularPolygon2D(6);
                     }
                     if ui
                         .add(RadioButton::new(
-                            matches!(self.shape, GraphShape::Random2D(_)),
-                            GraphShape::Random2D(0).name_str(),
+                            matches!(self.shape, Shape::Random2D(_)),
+                            Shape::Random2D(0).name_str(),
                         ))
                         .clicked()
                     {
-                        self.shape = GraphShape::Random2D(1337);
+                        self.shape = Shape::Random2D(1337);
                     }
                     change |= self.shape != old_shape;
                 });
             change |= match &mut self.shape {
-                GraphShape::DividedIcosahedron(pressure) => {
+                Shape::DividedIcosahedron(pressure) => {
                     add_drag_value(ui, pressure, "Druck", (0, self.resolution), 1)
                 },
-                GraphShape::RegularPolygon2D(nr_sides) => {
+                Shape::RegularPolygon2D(nr_sides) => {
                     add_drag_value(ui, nr_sides, "Seiten", (3, 10), 1)
                 },
-                GraphShape::Random2D(seed) => add_drag_value(ui, seed, "Seed", (0, u32::MAX), 1),
+                Shape::Random2D(seed) => add_drag_value(ui, seed, "Seed", (0, u32::MAX), 1),
                 _ => add_disabled_drag_value(ui),
             };
             ui.add_space(8.0);

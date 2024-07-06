@@ -227,8 +227,12 @@ impl ConvexTriangleHull {
     /// each triangle of the original shape is subdivided in smaller triangles, where divisions
     /// denotes the number of vertices added per original boundary
     fn subdivide_hull(plat: Self, divisions: usize) -> Self {
-        let embedding =
-            Embedding3D::subdivide_surface_with_triangles(plat, divisions, false, false);
+        let embedding = Embedding3D::subdivide_surface_with_triangles(
+            plat,
+            divisions,
+            false,
+            Shape::Random2D(0),
+        );
         let (mut vertices, edges) = (embedding.vertices, embedding.edges);
 
         //bring all vertices to sphere surface

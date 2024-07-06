@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::graph::bruteforce as bf;
-use crate::graph::NoSymmetry;
+use crate::graph::{Embedding3D, NoSymmetry};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GameType {
     pub nr_cops: usize,
     pub resolution: usize,
-    pub shape: crate::GraphShape,
+    pub shape: crate::graph::Shape,
 }
 
 impl GameType {
@@ -35,7 +35,7 @@ impl GameType {
     }
 
     fn create_edges(&self) -> EdgeList {
-        let embedding = map::new_map_from(self.shape, self.resolution);
+        let embedding = Embedding3D::new_map_from(self.shape, self.resolution);
         embedding.into_edges()
     }
 }

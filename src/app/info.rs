@@ -2,10 +2,9 @@ use std::collections::VecDeque;
 
 use itertools::{izip, Itertools};
 
-use egui::*;
 use strum::IntoEnumIterator;
 
-use crate::graph::{bruteforce as bf, *};
+use crate::graph::{self, bruteforce as bf};
 
 use self::bruteforce_state::{BruteforceComputationState, GameType};
 use self::character::Character;
@@ -347,10 +346,10 @@ pub struct Info {
     currently_marked: Vec<bool>,
 
     //state kept for each node in map
-    cop_hull_data: ConvexHullData,
-    escapable: EscapeableNodes,
-    dilemma: DilemmaNodes,
-    plane_cop_strat: PlaneCopStat,
+    cop_hull_data: graph::ConvexHullData,
+    escapable: graph::EscapeableNodes,
+    dilemma: graph::DilemmaNodes,
+    plane_cop_strat: graph::PlaneCopStat,
 
     /// elementwise minimum of `.distance` of active cops in `self.characters`
     min_cop_dist: Vec<isize>,
@@ -389,10 +388,10 @@ impl Default for Info {
         Self {
             currently_marked: Vec::new(),
 
-            cop_hull_data: ConvexHullData::new(),
-            escapable: EscapeableNodes::new(),
-            dilemma: DilemmaNodes::new(),
-            plane_cop_strat: PlaneCopStat::new(),
+            cop_hull_data: graph::ConvexHullData::new(),
+            escapable: graph::EscapeableNodes::new(),
+            dilemma: graph::DilemmaNodes::new(),
+            plane_cop_strat: graph::PlaneCopStat::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -431,10 +430,10 @@ impl Info {
         Self {
             currently_marked: Vec::new(),
 
-            cop_hull_data: ConvexHullData::new(),
-            escapable: EscapeableNodes::new(),
-            dilemma: DilemmaNodes::new(),
-            plane_cop_strat: PlaneCopStat::new(),
+            cop_hull_data: graph::ConvexHullData::new(),
+            escapable: graph::EscapeableNodes::new(),
+            dilemma: graph::DilemmaNodes::new(),
+            plane_cop_strat: graph::PlaneCopStat::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -1092,7 +1091,7 @@ impl Info {
                 if let Some(r) = self.characters.robber() {
                     let sym_group = con.sym_group().to_dyn();
                     let v0 = r.vertex();
-                    let mut f = |transform: &dyn DynAutomorphism| {
+                    let mut f = |transform: &dyn graph::DynAutomorphism| {
                         let sym_v = transform.dyn_apply_forward(v0);
                         self.currently_marked[sym_v] = true;
                         if con.visible[sym_v] {
@@ -1100,12 +1099,13 @@ impl Info {
                             draw_circle_at(sym_pos, self.options.automatic_marker_color);
                         }
                     };
-                    sym_group.for_each_transform(&mut f as &mut dyn FnMut(&dyn DynAutomorphism));
+                    sym_group
+                        .for_each_transform(&mut f as &mut dyn FnMut(&dyn graph::DynAutomorphism));
                 }
             },
             VertexColorInfo::CopsRotatedToEquivalence => {
                 let mut active_cops = self.characters.active_cop_vertices();
-                if active_cops.len() > bruteforce::MAX_COPS {
+                if active_cops.len() > bf::MAX_COPS {
                     return;
                 }
                 let sym_group = con.sym_group().to_dyn();

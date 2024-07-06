@@ -79,7 +79,11 @@ where
                 f_val / step
             });
         }
-        ui.add(DragValue::new(val).clamp_range(min..=max).update_while_editing(false));
+        ui.add(
+            egui::DragValue::new(val)
+                .clamp_range(min..=max)
+                .update_while_editing(false),
+        );
         if ui.button(" + ").clicked() && prev < max {
             *val = T::from_f64(if T::INTEGRAL {
                 f_val + step
@@ -100,10 +104,10 @@ fn add_scale_drag_value(ui: &mut Ui, val: &mut f32, name: &str) -> bool {
 
 fn add_disabled_drag_value(ui: &mut Ui) -> bool {
     ui.horizontal(|ui| {
-        ui.add_enabled(false, Button::new(" - "));
+        ui.add_enabled(false, egui::Button::new(" - "));
         let mut val: isize = 0;
-        ui.add_enabled(false, DragValue::new(&mut val));
-        ui.add_enabled(false, Button::new(" + "));
+        ui.add_enabled(false, egui::DragValue::new(&mut val));
+        ui.add_enabled(false, egui::Button::new(" + "));
         false
     })
     .inner

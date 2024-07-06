@@ -1,8 +1,7 @@
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
-pub enum GraphShape {
+pub enum Shape {
     Tetrahedron,
     Octahedron,
     Icosahedron,
@@ -17,7 +16,7 @@ pub enum GraphShape {
     Random2D(u32),
 }
 
-impl GraphShape {
+impl Shape {
     pub const fn name_str(self) -> &'static str {
         match self {
             Self::Tetrahedron => "Tetraeder",
@@ -83,6 +82,24 @@ impl GraphShape {
             | Self::Random2D(_) => 0,
             Self::TriangTorus => 2,
             Self::SquareTorus => 2,
+        }
+    }
+
+    pub fn is_3d(self) -> bool {
+        match self {
+            Self::Tetrahedron
+            | Self::Octahedron
+            | Self::Icosahedron
+            | Self::DividedIcosahedron(_)
+            | Self::Cube
+            | Self::Football
+            | Self::FabianHamann
+            | Self::Dodecahedron => true,
+
+            Self::TriangTorus
+            | Self::SquareTorus
+            | Self::RegularPolygon2D(_)
+            | Self::Random2D(_) => false,
         }
     }
 }
