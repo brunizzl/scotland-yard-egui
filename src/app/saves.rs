@@ -15,7 +15,7 @@ use super::{character, info, load_or, map, NATIVE};
 struct SavedState {
     name: String,
     saved_at: std::time::SystemTime,
-    shape: map::Shape,
+    shape: crate::GraphShape,
     resolution: isize,
     characters: character::State,
     manual_markers: Vec<(usize, u8)>, //run length encoding of info's manual markers

@@ -11,7 +11,7 @@ use crate::graph::NoSymmetry;
 pub struct GameType {
     pub nr_cops: usize,
     pub resolution: usize,
-    pub shape: map::Shape,
+    pub shape: crate::GraphShape,
 }
 
 impl GameType {

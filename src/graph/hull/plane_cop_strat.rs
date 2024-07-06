@@ -1,5 +1,5 @@
 use crate::app::character;
-use crate::app::map;
+use crate::GraphShape;
 
 use super::*;
 
@@ -49,7 +49,7 @@ impl PlaneCopStat {
 
     pub fn update(
         &mut self,
-        shape: map::Shape,
+        shape: GraphShape,
         edges: &EdgeList,
         hull: &[InSet],
         escapable: &[u32],
@@ -59,8 +59,8 @@ impl PlaneCopStat {
         self.danger_zones.clear();
         self.danger_zones.resize(edges.nr_vertices(), 0);
         let min_outside_at_corner = match shape {
-            map::Shape::RegularPolygon2D(6) | map::Shape::TriangTorus => 3,
-            map::Shape::SquareTorus => 2,
+            GraphShape::RegularPolygon2D(6) | GraphShape::TriangTorus => 3,
+            GraphShape::SquareTorus => 2,
             _ => {
                 // currently i only thought about a strategy for 4-regular or 6-regular graphs.
                 return;
@@ -121,7 +121,7 @@ impl PlaneCopStat {
             // attached to the hull boundary and there are only two boundary sections next to a single cop.
             // this argument breaks down on the torus, because the convex hull there is not actually convex
             // and thus cops can stand at weird places looking like the small middle in an hour glass.
-            let on_torus = matches!(shape, map::Shape::TriangTorus | map::Shape::SquareTorus);
+            let on_torus = matches!(shape, GraphShape::TriangTorus | GraphShape::SquareTorus);
             debug_assert!(danger_roots.len() <= 2 || on_torus);
 
             for danger_root in danger_roots {

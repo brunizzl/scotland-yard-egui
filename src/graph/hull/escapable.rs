@@ -1,5 +1,5 @@
-use crate::app::map;
 
+use crate::GraphShape;
 use super::*;
 
 /// all cops delimiting a Region are listed here
@@ -227,7 +227,7 @@ impl EscapeableNodes {
     /// these regions will now be deleted in regions where third cops could otherwise interfere.
     fn consider_interior_cops(
         &mut self,
-        shape: map::Shape,
+        shape: GraphShape,
         cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
@@ -341,7 +341,7 @@ impl EscapeableNodes {
                     let paint = |n: usize, keep: &[_]| {
                         let res = keep[n] == Keep::No && hull_data.hull[n].contained();
                         //fails on torus, because the whole thing fails on torus
-                        use map::Shape::{SquareTorus, TriangTorus};
+                        use GraphShape::{SquareTorus, TriangTorus};
                         let on_torus = matches!(shape, TriangTorus | SquareTorus);
                         // todo: when is this failing? (sometimes also on regular plane)
                         debug_assert!(!res || (self.escapable[n] & marker != 0) || on_torus);
@@ -466,7 +466,7 @@ impl EscapeableNodes {
     /// ignores cops in interior of hull, computes safe regions only with respect to boundary cops
     fn consider_boundary_cops(
         &mut self,
-        shape: map::Shape,
+        shape: GraphShape,
         cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
@@ -548,7 +548,7 @@ impl EscapeableNodes {
                 self.escapable[last_v] |= marker;
                 self.add_region_to_escapable(v_owner, marker, edges, queue);
             } else {
-                use map::Shape::{SquareTorus, TriangTorus};
+                use GraphShape::{SquareTorus, TriangTorus};
                 debug_assert!(matches!(shape, TriangTorus | SquareTorus));
             }
             for &v in safe_outher {
@@ -561,7 +561,7 @@ impl EscapeableNodes {
 
     pub fn update(
         &mut self,
-        shape: map::Shape,
+        shape: GraphShape,
         cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
