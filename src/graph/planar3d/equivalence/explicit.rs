@@ -122,7 +122,7 @@ impl ExplicitClasses {
     }
 
     //only works for those platonic solids with threeangles as base shape
-    pub fn enumerate_platonic_symmetry_transforms(plat: &ConvexTriangleHull) -> Vec<Matrix3x3> {
+    pub fn enumerate_platonic_symmetry_transforms(plat: &ConvexHull) -> Vec<Matrix3x3> {
         //indicator for platonic, not guarantee
         let degree = plat.edges.max_degree();
         debug_assert_eq!(degree, plat.edges.min_degree());

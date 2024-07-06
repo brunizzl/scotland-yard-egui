@@ -15,8 +15,8 @@ pub use equivalence::*;
 mod bidirectional_range;
 use bidirectional_range::*;
 
-mod convex_triangle_hull;
-use convex_triangle_hull::*;
+mod convex_hull;
+use convex_hull::*;
 
 fn is_small(x: f32) -> bool {
     x.abs() < 1e-4
@@ -90,7 +90,7 @@ pub const Z_OFFSET_2D: f32 = 0.5;
 
 pub struct Embedding3D {
     /// all vertices are expected to lie on this surface.
-    surface: ConvexTriangleHull,
+    surface: ConvexHull,
 
     shape: Shape,
 
@@ -154,7 +154,7 @@ impl Embedding3D {
     }
 
     #[allow(dead_code)]
-    pub fn surface(&self) -> &ConvexTriangleHull {
+    pub fn surface(&self) -> &ConvexHull {
         &self.surface
     }
 
@@ -167,7 +167,7 @@ impl Embedding3D {
     }
 
     fn subdivide_surface_with_triangles(
-        surface: ConvexTriangleHull,
+        surface: ConvexHull,
         divisions: usize,
         is_platonic: bool,
         shape: Shape,
@@ -278,22 +278,22 @@ impl Embedding3D {
     }
 
     fn new_subdivided_icosahedron(divisions: usize) -> Self {
-        let ico = ConvexTriangleHull::new_icosahedron();
+        let ico = ConvexHull::new_icosahedron();
         Self::subdivide_surface_with_triangles(ico, divisions, true, Shape::Icosahedron)
     }
 
     fn new_subdivided_subdivided_icosahedron(d1: usize, d2: usize, shape: Shape) -> Self {
-        let ico = ConvexTriangleHull::new_subdivided_icosahedron(d1);
+        let ico = ConvexHull::new_subdivided_icosahedron(d1);
         Self::subdivide_surface_with_triangles(ico, d2, false, shape)
     }
 
     fn new_subdivided_tetrahedron(divisions: usize) -> Self {
-        let tet = ConvexTriangleHull::new_tetrahedron();
+        let tet = ConvexHull::new_tetrahedron();
         Self::subdivide_surface_with_triangles(tet, divisions, true, Shape::Tetrahedron)
     }
 
     fn new_subdivided_octahedron(divisions: usize) -> Self {
-        let oct = ConvexTriangleHull::new_octahedron();
+        let oct = ConvexHull::new_octahedron();
         Self::subdivide_surface_with_triangles(oct, divisions, true, Shape::Octahedron)
     }
 
@@ -310,7 +310,7 @@ impl Embedding3D {
         debug_assert!(face_info.iter().tuple_windows().all(|((_, a), (_, b))| a >= b));
 
         let mut faces = Vec::new();
-        let mut hull = ConvexTriangleHull {
+        let mut hull = ConvexHull {
             vertices: vertices.clone(),
             edges: edges.clone(),
             face_normals: Vec::new(),
@@ -393,7 +393,7 @@ impl Embedding3D {
             }
         }
 
-        let hull_dual_edges = ConvexTriangleHull::discover_dual(&hull.faces);
+        let hull_dual_edges = ConvexHull::discover_dual(&hull.faces);
         hull.dual_edges = hull_dual_edges;
 
         let edge_dividing_vertices =
@@ -675,7 +675,7 @@ impl Embedding3D {
 
         sort_neigbors(&mut edges, &vertices);
         Self {
-            surface: ConvexTriangleHull::empty(),
+            surface: ConvexHull::empty(),
             shape: Shape::TriangTorus,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
@@ -729,7 +729,7 @@ impl Embedding3D {
 
         sort_neigbors(&mut edges, &vertices);
         Self {
-            surface: ConvexTriangleHull::empty(),
+            surface: ConvexHull::empty(),
             shape: Shape::SquareTorus,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
@@ -755,7 +755,7 @@ impl Embedding3D {
             surface_edges.add_edge(v1, v2);
         }
 
-        let surface = ConvexTriangleHull::new_from_graph(surface_positions, surface_edges);
+        let surface = ConvexHull::new_from_triangulation(surface_positions, surface_edges);
         let mut res = Self::subdivide_surface_with_triangles(
             surface,
             divisions,
@@ -773,10 +773,10 @@ impl Embedding3D {
         painter: &Painter,
         stroke: Stroke,
         visible: &mut [bool],
-        draw_inner: bool,
+        draw_inner_fast: bool,
     ) {
         debug_assert!(
-            !draw_inner
+            !draw_inner_fast
                 || matches!(
                     self.shape,
                     Shape::Octahedron
@@ -827,7 +827,7 @@ impl Embedding3D {
             //note: updating the vertex visibility below results in this function overall
             //  still having the same O complexity, but combining edges this way yields
             //  smaller screenshots.
-            if draw_inner {
+            if draw_inner_fast {
                 let &[v1, v2, v3] = face else {
                     panic!();
                 };
@@ -847,6 +847,8 @@ impl Embedding3D {
                 for (v1, v2) in edge_1_2.zip(edge_2_3.reversed()) {
                     draw_line(&self.vertices, v1, v2);
                 }
+            } else {
+                //TODO
             }
         }
     }
@@ -973,7 +975,7 @@ impl Embedding3D {
         let vertices = positions_2d.iter().map(|p| pos3(p.x, p.y, Z)).collect_vec();
         let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
         Self {
-            surface: ConvexTriangleHull::empty(),
+            surface: ConvexHull::empty(),
             shape,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),

@@ -2,8 +2,8 @@ use bool_csr::BoolCSR;
 
 use super::*;
 
-/// triangulation of a closed 2d surface embedded in 3d
-pub struct ConvexTriangleHull {
+/// closed 2d surface embedded in 3d
+pub struct ConvexHull {
     pub vertices: Vec<Pos3>,
 
     /// outher unit normal of each face
@@ -20,7 +20,7 @@ pub struct ConvexTriangleHull {
     pub dual_edges: EdgeList,
 }
 
-impl ConvexTriangleHull {
+impl ConvexHull {
     #[allow(dead_code)]
     pub fn nr_vertices(&self) -> usize {
         self.vertices.len()
@@ -49,7 +49,7 @@ impl ConvexTriangleHull {
         }
     }
 
-    fn discover_faces(vertices: &[Pos3], edges: &EdgeList) -> (BoolCSR, Vec<Vec3>) {
+    fn discover_triangles(vertices: &[Pos3], edges: &EdgeList) -> (BoolCSR, Vec<Vec3>) {
         //enumerates each edge twice: once in each direction
         let mut unused_edges = edges.all_valid_edge_indices();
 
@@ -141,8 +141,8 @@ impl ConvexTriangleHull {
         res
     }
 
-    pub fn new_from_graph(vertex_positions: Vec<Pos3>, vertex_neighbors: EdgeList) -> Self {
-        let (faces, face_normals) = Self::discover_faces(&vertex_positions, &vertex_neighbors);
+    pub fn new_from_triangulation(vertex_positions: Vec<Pos3>, vertex_neighbors: EdgeList) -> Self {
+        let (faces, face_normals) = Self::discover_triangles(&vertex_positions, &vertex_neighbors);
 
         let dual_edges = Self::discover_dual(&faces);
 
@@ -158,9 +158,9 @@ impl ConvexTriangleHull {
     /// connects the closest vertices to have edges,
     /// positions are assumed to lie centered around the origin
     /// assumes all edges to have same length.
-    pub fn new_uniform_from_positions(vertex_positions: Vec<Pos3>) -> Self {
+    pub fn new_uniform_triangluation_from_positions(vertex_positions: Vec<Pos3>) -> Self {
         let vertex_neighbors = edges_from_uniform_positions(&vertex_positions);
-        Self::new_from_graph(vertex_positions, vertex_neighbors)
+        Self::new_from_triangulation(vertex_positions, vertex_neighbors)
     }
 
     pub fn new_tetrahedron() -> Self {
@@ -173,7 +173,7 @@ impl ConvexTriangleHull {
             pos3(0.0, -a, s),
         ];
         normalize_positions(&mut vs);
-        Self::new_uniform_from_positions(vs)
+        Self::new_uniform_triangluation_from_positions(vs)
     }
 
     pub fn new_octahedron() -> Self {
@@ -186,7 +186,7 @@ impl ConvexTriangleHull {
             pos3(0.0, 0.0, -1.0),
         ];
         normalize_positions(&mut vs);
-        Self::new_uniform_from_positions(vs)
+        Self::new_uniform_triangluation_from_positions(vs)
     }
 
     pub fn new_icosahedron() -> Self {
@@ -207,32 +207,32 @@ impl ConvexTriangleHull {
             pos3(-c, 0.0, -a),
         ];
         normalize_positions(&mut vs);
-        Self::new_uniform_from_positions(vs)
+        Self::new_uniform_triangluation_from_positions(vs)
     }
 
     pub fn new_subdivided_icosahedron(divisions: usize) -> Self {
         let mut iso = Self::new_icosahedron();
         normalize_positions(&mut iso.vertices);
-        Self::subdivide_hull(iso, divisions)
+        Self::subdivide_triangulation(iso, divisions)
     }
 
     #[allow(dead_code)]
     pub fn new_subdivided_octahedron(divisions: usize) -> Self {
         let mut oct = Self::new_octahedron();
         normalize_positions(&mut oct.vertices);
-        Self::subdivide_hull(oct, divisions)
+        Self::subdivide_triangulation(oct, divisions)
     }
 
     #[allow(dead_code)]
     pub fn new_subdivided_tetrahedron(divisions: usize) -> Self {
         let mut tet = Self::new_tetrahedron();
         normalize_positions(&mut tet.vertices);
-        Self::subdivide_hull(tet, divisions)
+        Self::subdivide_triangulation(tet, divisions)
     }
 
     /// each triangle of the original shape is subdivided in smaller triangles, where divisions
     /// denotes the number of vertices added per original boundary
-    fn subdivide_hull(plat: Self, divisions: usize) -> Self {
+    fn subdivide_triangulation(plat: Self, divisions: usize) -> Self {
         let embedding = Embedding3D::subdivide_surface_with_triangles(
             plat,
             divisions,
@@ -244,7 +244,7 @@ impl ConvexTriangleHull {
         //bring all vertices to sphere surface
         normalize_positions(&mut vertices);
 
-        let (faces, face_normals) = Self::discover_faces(&vertices, &edges);
+        let (faces, face_normals) = Self::discover_triangles(&vertices, &edges);
 
         let dual_edges = Self::discover_dual(&faces);
 
