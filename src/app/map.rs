@@ -250,7 +250,7 @@ impl Map {
                 _ => add_disabled_drag_value(ui),
             };
             ui.add_space(8.0);
-            let min = self.shape().min_res();
+            let min = new_shape.min_res();
             change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (min, 200), 1);
             if change {
                 self.recompute(new_shape);

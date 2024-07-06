@@ -183,46 +183,13 @@ impl ToScreen {
         self.to_plane.signed_dist(face_normal) > 0.0
     }
 
-    fn crosses_screen_boundary(&self, line: Line2) -> bool {
-        self.screen.crosses_boundary(line)
-    }
-
     /// assumes a, b, c to be ordered counterclockwise
-    pub fn triangle_visible(&self, a: Pos3, b: Pos3, c: Pos3) -> bool {
-        let u = self.apply(a);
-        let v = self.apply(b);
-        let w = self.apply(c);
-        let screen = self.move_rect.to();
-
-        if screen.contains(u) || screen.contains(v) || screen.contains(w) {
-            //at least one corner is visible
-            return true;
-        }
-
-        let line_uv = line_from_to(u, v);
-        let line_vw = line_from_to(v, w);
-        let line_wu = line_from_to(w, u);
-        if self.crosses_screen_boundary(line_uv)
-            || self.crosses_screen_boundary(line_vw)
-            || self.crosses_screen_boundary(line_wu)
-        {
-            //at least one edge is visible
-            return true;
-        }
-        //if we get here, we know, that no part of the triangle an the screen boundary intersect,
-        //and that no point of the triangle is contained in the screen.
-        //thus the only option left is for the screen to be completely contained in the triangle.
-        //which screen point we test to lie inside the triangle is thus irrelevant.
-        //just to be save numerically, we use the center.
-        let screen_center = screen.center();
-        if left_of_line(line_uv, screen_center)
-            && left_of_line(line_vw, screen_center)
-            && left_of_line(line_wu, screen_center)
-        {
-            return true;
-        }
-
-        false
+    pub fn face_maybe_visible(&self, corners: impl Iterator<Item = Pos3>) -> bool {
+        let corners_on_screen =
+            smallvec::SmallVec::<[Pos2; 8]>::from_iter(corners.map(|c| self.apply(c)));
+        let bounding_box = egui::Rect::from_points(&corners_on_screen);
+        let screen = *self.move_rect.to();
+        Rect::intersects(bounding_box, screen)
     }
 
     pub fn pos_visible(&self, pos: Pos3) -> bool {

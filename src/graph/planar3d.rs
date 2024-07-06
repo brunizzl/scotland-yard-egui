@@ -91,8 +91,6 @@ pub const Z_OFFSET_2D: f32 = 0.5;
 pub struct Embedding3D {
     /// all vertices are expected to lie on this surface.
     surface: ConvexTriangleHull,
-    /// some surface vertices may only be there for technical reasons. these will not be drawn.
-    nr_visible_surface_vertices: usize,
 
     shape: Shape,
 
@@ -259,13 +257,11 @@ impl Embedding3D {
             inner_vertices.push(faces_inner);
         }
 
-        let nr_visible_surface_vertices = surface.nr_vertices();
         let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
 
         sort_neigbors(&mut edges, &vertices);
         let mut res = Self {
             surface,
-            nr_visible_surface_vertices,
             shape,
             edge_dividing_vertices,
             inner_vertices,
@@ -339,7 +335,7 @@ impl Embedding3D {
             }
         }
 
-        for (faces, &(_, show)) in faces.iter_mut().zip(face_info) {
+        for (faces, &(_, triangulate)) in faces.iter_mut().zip(face_info) {
             for face in faces.iter_mut() {
                 let compute_normal = |vs: &[Pos3], v1, v2, v3| {
                     let p1: Pos3 = vs[v1];
@@ -372,23 +368,27 @@ impl Embedding3D {
                     }
                     panic!();
                 }
-                let center = Pos3::average(face.iter().map(|&v| hull.vertices[v]));
-                let center_v = hull.edges.push();
-                debug_assert_eq!(center_v, hull.vertices.len());
-                hull.vertices.push(center);
-                if show {
+                if triangulate {
+                    let center = Pos3::average(face.iter().map(|&v| hull.vertices[v]));
+                    hull.vertices.push(center);
                     vertices.push(center);
                     edges.push();
-                }
-                for (&v1, &v2) in face.iter().circular_tuple_windows() {
-                    debug_assert!(edges.neighbors_of(v1).contains(&v2));
-                    hull.edges.add_edge(v1, center_v);
-                    if show {
-                        edges.add_edge(v1, center_v)
+                    let center_v = hull.edges.push();
+                    for (v1, v2) in face.iter().copied().circular_tuple_windows() {
+                        debug_assert!(edges.neighbors_of(v1).contains(&v2));
+                        dbg!((v1, center_v));
+                        hull.edges.add_edge(v1, center_v);
+                        edges.add_edge(v1, center_v);
+                        let tri = direct_triangle(&hull.vertices, [center_v, v1, v2]);
+                        hull.face_normals.push(compute_normal(&hull.vertices, center_v, v1, v2));
+                        hull.faces.add_row(tri.into_iter());
                     }
-                    let tri = direct_triangle(&hull.vertices, [center_v, v1, v2]);
-                    hull.face_normals.push(compute_normal(&hull.vertices, center_v, v1, v2));
-                    hull.faces.add_row(tri.into_iter());
+                } else {
+                    let [v1, v2, v3, ..] = face[..] else {
+                        panic!();
+                    };
+                    hull.face_normals.push(compute_normal(&hull.vertices, v1, v2, v3));
+                    hull.faces.add_row(face.iter().copied());
                 }
             }
         }
@@ -404,7 +404,6 @@ impl Embedding3D {
         sort_neigbors(&mut edges, &vertices);
         let res = Self {
             surface: hull,
-            nr_visible_surface_vertices: vertices.len(),
             shape,
             edge_dividing_vertices,
             inner_vertices,
@@ -677,7 +676,6 @@ impl Embedding3D {
         sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexTriangleHull::empty(),
-            nr_visible_surface_vertices: usize::MAX,
             shape: Shape::TriangTorus,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
@@ -732,7 +730,6 @@ impl Embedding3D {
         sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexTriangleHull::empty(),
-            nr_visible_surface_vertices: usize::MAX,
             shape: Shape::SquareTorus,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
@@ -786,7 +783,6 @@ impl Embedding3D {
                         | Shape::Tetrahedron
                         | Shape::Icosahedron
                         | Shape::DividedIcosahedron(_)
-                        | Shape::Dodecahedron
                         | Shape::RegularPolygon2D(_)
                 )
         );
@@ -806,34 +802,24 @@ impl Embedding3D {
             self.inner_vertices.iter()
         );
         for (&normal, face, inner) in iter {
-            let &[v1, v2, v3] = face else {
-                panic!();
-            };
             if !to_screen.faces_camera(normal) {
                 continue;
             }
-            let p1 = self.surface.vertices[v1];
-            let p2 = self.surface.vertices[v2];
-            let p3 = self.surface.vertices[v3];
-            if !to_screen.triangle_visible(p1, p2, p3) {
+            if !to_screen.face_maybe_visible(face.iter().map(|&v| self.vertices[v])) {
                 continue;
             }
 
-            //draw visible edges of self.surface
-            let show_v = |v| v < self.nr_visible_surface_vertices;
-            let show_edge = |u, v| show_v(u) && show_v(v);
-            for (u, v) in [v1, v2, v3].into_iter().circular_tuple_windows() {
-                if show_edge(u, v) {
-                    draw_line(&self.surface.vertices, u, v);
-                }
-            }
+            //draw edges of self.surface
+            for (&u, &v) in face.iter().circular_tuple_windows() {
+                draw_line(&self.surface.vertices, u, v);
+                let edge_index = self.surface.edges.directed_index(u, v);
+                let edge = self.edge_dividing_vertices[edge_index];
 
-            let edge_1_2_index = self.surface.edges.directed_index(v1, v2);
-            let edge_1_3_index = self.surface.edges.directed_index(v1, v3);
-            let edge_2_3_index = self.surface.edges.directed_index(v2, v3);
-            let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index];
-            let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index];
-            let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index];
+                //update vertex visibility
+                visible[v] = true;
+                edge.for_each(|v| visible[v] = true);
+            }
+            inner.clone().for_each(|v| visible[v] = true);
 
             //draw inner edges
             //this dosn't draw each actual tiny edge, but instead all edges lying in
@@ -842,6 +828,16 @@ impl Embedding3D {
             //  still having the same O complexity, but combining edges this way yields
             //  smaller screenshots.
             if draw_inner {
+                let &[v1, v2, v3] = face else {
+                    panic!();
+                };
+                let edge_1_2_index = self.surface.edges.directed_index(v1, v2);
+                let edge_1_3_index = self.surface.edges.directed_index(v1, v3);
+                let edge_2_3_index = self.surface.edges.directed_index(v2, v3);
+                let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index];
+                let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index];
+                let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index];
+
                 for (v1, v2) in edge_1_2.zip(edge_1_3) {
                     draw_line(&self.vertices, v1, v2);
                 }
@@ -852,20 +848,6 @@ impl Embedding3D {
                     draw_line(&self.vertices, v1, v2);
                 }
             }
-
-            //update vertex visibility
-            let mut mark_visible_at = |v| {
-                if show_v(v) {
-                    visible[v] = true;
-                }
-            };
-            mark_visible_at(v1);
-            mark_visible_at(v2);
-            mark_visible_at(v3);
-            inner.clone().for_each(|v| visible[v] = true);
-            edge_1_2.for_each(|v| visible[v] = true);
-            edge_1_3.for_each(|v| visible[v] = true);
-            edge_2_3.for_each(|v| visible[v] = true);
         }
     }
 
@@ -946,14 +928,13 @@ impl Embedding3D {
             | Shape::Tetrahedron
             | Shape::Icosahedron
             | Shape::DividedIcosahedron(_)
-            | Shape::Dodecahedron
             | Shape::RegularPolygon2D(_) => {
                 self.draw_visible_hull_edges(to_screen, painter, stroke, visible, true);
                 false
             },
-            Shape::Cube | Shape::FabianHamann | Shape::Football => {
+            Shape::Cube | Shape::FabianHamann | Shape::Football | Shape::Dodecahedron => {
                 self.draw_visible_hull_edges(to_screen, painter, stroke, visible, false);
-                true
+                false
             },
             Shape::TriangTorus => {
                 self.draw_torus_edges(to_screen, painter, stroke, true);
@@ -993,7 +974,6 @@ impl Embedding3D {
         let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
         Self {
             surface: ConvexTriangleHull::empty(),
-            nr_visible_surface_vertices: usize::MAX,
             shape,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
@@ -1036,8 +1016,6 @@ impl Embedding3D {
     /// (this means mostly one face, except two when on an edge and more if vertex is vertex of surface.)
     #[allow(dead_code)]
     pub fn faces_of(&self, v: usize) -> SmallVec<[usize; 5]> {
-        assert_eq!(self.surface.nr_vertices(), self.nr_visible_surface_vertices);
-
         let v_pos = self.vertices[v];
         let (closest_face, _) = self.surface.dual_edges.find_local_minimum(
             |face_i| {

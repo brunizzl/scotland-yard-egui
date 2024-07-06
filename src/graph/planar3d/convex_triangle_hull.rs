@@ -42,7 +42,7 @@ impl ConvexTriangleHull {
         normalize_positions(&mut self.vertices);
         for (normal, vs) in izip!(&mut self.face_normals, self.faces.iter_rows()) {
             let [v1, v2, v3, ..] = vs else {
-                panic!();
+                panic!("a face must have at least 3 vertices");
             };
             let pos = |&v| self.vertices[v];
             *normal = geo::plane_normal(pos(v1), pos(v2), pos(v3));
