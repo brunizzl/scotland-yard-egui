@@ -12,7 +12,6 @@ pub struct Map {
     visible: Vec<bool>, //one entry per vertex, stores if that vertex can currently be seen on screen
     extreme_vertices: Vec<usize>,
 
-    shape: Shape,
     resolution: isize,
     camera: Camera3D,
 }
@@ -25,7 +24,7 @@ mod storage_keys {
 
 impl Map {
     pub fn shape(&self) -> Shape {
-        self.shape
+        self.data.shape()
     }
 
     pub fn data(&self) -> &Embedding3D {
@@ -56,11 +55,10 @@ impl Map {
             visible: Vec::new(),
             extreme_vertices: Vec::new(),
 
-            shape,
             resolution,
             camera,
         };
-        result.recompute();
+        result.recompute(result.shape());
         result.adjust_info(info);
 
         //graph is not exactly the same -> vertex indices are now worthless
@@ -74,7 +72,7 @@ impl Map {
 
     pub fn save(&self, storage: &mut dyn eframe::Storage) {
         use storage_keys::*;
-        eframe::set_value(storage, SHAPE, &self.shape);
+        eframe::set_value(storage, SHAPE, &self.shape());
         eframe::set_value(storage, RESOLUTION, &self.resolution);
         eframe::set_value(storage, CAMERA, &self.camera);
     }
@@ -134,8 +132,10 @@ impl Map {
         }
     }
 
-    fn recompute(&mut self) {
-        self.data = Embedding3D::new_map_from(self.shape, self.resolution as usize);
+    /// this function takes `&mut self` instead of returning a new `Self`,
+    /// because sometimes info is kept, e.g. `self.camera` if current and new shape are both 3D / 2D
+    fn recompute(&mut self, new_shape: Shape) {
+        self.data = Embedding3D::new_map_from(new_shape, self.resolution as usize);
         if self.is_3d() {
             self.extreme_vertices.clear();
             self.camera.reset_position();
@@ -148,9 +148,8 @@ impl Map {
     }
 
     pub fn change_to(&mut self, shape: Shape, resolution: isize) {
-        self.shape = shape;
         self.resolution = resolution;
-        self.recompute();
+        self.recompute(shape);
     }
 
     pub fn adjust_info(&self, info: &mut Info) {
@@ -165,88 +164,82 @@ impl Map {
         }
     }
 
-    fn recompute_and_adjust(&mut self, info: &mut Info) {
-        self.recompute();
-        self.adjust_info(info);
-        info.characters.forget_move_history();
-    }
-
     pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) {
+        let mut new_shape = self.shape();
         self.camera.draw_menu(ui);
         ui.collapsing("Spielfeld", |ui| {
             let mut change = false;
             ui.label("Form:");
-            ComboBox::from_id_source(&self.shape as *const _)
-                .selected_text(self.shape.name_str())
+            ComboBox::from_id_source(&self.data as *const _)
+                .selected_text(self.shape().name_str())
                 .show_ui(ui, |ui| {
-                    let old_shape = self.shape;
                     ui.radio_value(
-                        &mut self.shape,
+                        &mut new_shape,
                         Shape::Tetrahedron,
                         Shape::Tetrahedron.name_str(),
                     );
                     ui.radio_value(
-                        &mut self.shape,
+                        &mut new_shape,
                         Shape::Octahedron,
                         Shape::Octahedron.name_str(),
                     );
                     ui.radio_value(
-                        &mut self.shape,
+                        &mut new_shape,
                         Shape::Icosahedron,
                         Shape::Icosahedron.name_str(),
                     );
                     if ui
                         .add(RadioButton::new(
-                            matches!(self.shape, Shape::DividedIcosahedron(_)),
+                            matches!(new_shape, Shape::DividedIcosahedron(_)),
                             Shape::DividedIcosahedron(0).name_str(),
                         ))
                         .clicked()
                     {
-                        self.shape = Shape::DividedIcosahedron(0);
+                        new_shape = Shape::DividedIcosahedron(0);
                     }
                     ui.radio_value(
-                        &mut self.shape,
+                        &mut new_shape,
                         Shape::Dodecahedron,
                         Shape::Dodecahedron.name_str(),
                     );
-                    ui.radio_value(&mut self.shape, Shape::Cube, Shape::Cube.name_str());
-                    ui.radio_value(&mut self.shape, Shape::Football, Shape::Football.name_str());
+                    ui.radio_value(&mut new_shape, Shape::Cube, Shape::Cube.name_str());
+                    ui.radio_value(&mut new_shape, Shape::Football, Shape::Football.name_str());
                     ui.radio_value(
-                        &mut self.shape,
+                        &mut new_shape,
                         Shape::FabianHamann,
                         Shape::FabianHamann.name_str(),
                     );
                     ui.radio_value(
-                        &mut self.shape,
+                        &mut new_shape,
                         Shape::TriangTorus,
                         Shape::TriangTorus.name_str(),
                     );
                     ui.radio_value(
-                        &mut self.shape,
+                        &mut new_shape,
                         Shape::SquareTorus,
                         Shape::SquareTorus.name_str(),
                     );
                     if ui
                         .add(RadioButton::new(
-                            matches!(self.shape, Shape::RegularPolygon2D(_)),
+                            matches!(new_shape, Shape::RegularPolygon2D(_)),
                             Shape::RegularPolygon2D(0).name_str(),
                         ))
                         .clicked()
                     {
-                        self.shape = Shape::RegularPolygon2D(6);
+                        new_shape = Shape::RegularPolygon2D(6);
                     }
                     if ui
                         .add(RadioButton::new(
-                            matches!(self.shape, Shape::Random2D(_)),
+                            matches!(new_shape, Shape::Random2D(_)),
                             Shape::Random2D(0).name_str(),
                         ))
                         .clicked()
                     {
-                        self.shape = Shape::Random2D(1337);
+                        new_shape = Shape::Random2D(1337);
                     }
-                    change |= self.shape != old_shape;
+                    change |= new_shape != self.shape();
                 });
-            change |= match &mut self.shape {
+            change |= match &mut new_shape {
                 Shape::DividedIcosahedron(pressure) => {
                     add_drag_value(ui, pressure, "Druck", (0, self.resolution), 1)
                 },
@@ -257,10 +250,12 @@ impl Map {
                 _ => add_disabled_drag_value(ui),
             };
             ui.add_space(8.0);
-            let min = self.shape.min_res();
+            let min = self.shape().min_res();
             change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (min, 200), 1);
             if change {
-                self.recompute_and_adjust(info);
+                self.recompute(new_shape);
+                self.adjust_info(info);
+                info.characters.forget_move_history();
             }
             ui.label(format!("    ➡ {} Knoten", self.data.nr_vertices()));
         });
