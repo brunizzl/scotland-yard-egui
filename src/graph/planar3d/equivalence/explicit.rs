@@ -130,7 +130,7 @@ impl ExplicitClasses {
 
         let reflect = {
             let fst_tri_normal = plat.face_normals[0];
-            let fst_tri_fst_vertex = plat.triangles[0][0];
+            let fst_tri_fst_vertex = plat.faces[0][0];
             let v_dir = plat.vertices[fst_tri_fst_vertex].to_vec3();
             let reflect_normal = Vec3::cross(fst_tri_normal, v_dir).normalized();
             Matrix3x3::new_reflector(reflect_normal)
@@ -197,10 +197,10 @@ impl ExplicitClasses {
         representative: &[usize],
     ) -> BoolCSR {
         debug_assert!(!transforms.is_empty());
-        let mut res = BoolCSR::new(transforms.len());
+        let mut res = BoolCSR::new();
 
         for (v, &dir) in izip!(0.., vertex_directions) {
-            res.add_row();
+            res.start_new_row();
             debug_assert!(dir.is_normalized());
             let repr_dir = vertex_directions[representative[v]];
             for (m, mat) in izip!(0.., transforms) {

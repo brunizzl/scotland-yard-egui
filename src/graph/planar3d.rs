@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use bool_csr::BoolCSR;
 use egui::{Painter, Stroke};
 use itertools::{izip, Itertools};
 use smallvec::{smallvec, SmallVec};
@@ -204,7 +205,10 @@ impl Embedding3D {
         });
         assert_eq!(vertices.len(), edges.nr_vertices());
 
-        for &[v1, v2, v3] in &surface.triangles {
+        for face in surface.faces.iter_rows() {
+            let &[v1, v2, v3] = face else {
+                panic!();
+            };
             let fst_inner_face_vertex = vertices.len();
             let edge_1_2_index = surface.edges.directed_index(v1, v2);
             let edge_1_3_index = surface.edges.directed_index(v1, v3);
@@ -314,7 +318,7 @@ impl Embedding3D {
             vertices: vertices.clone(),
             edges: edges.clone(),
             face_normals: Vec::new(),
-            triangles: Vec::new(),
+            faces: BoolCSR::new(),
             dual_edges: EdgeList::empty(), //caution: needs to be set to correct values at end
         };
         for &(circumference, _) in face_info {
@@ -354,7 +358,7 @@ impl Embedding3D {
                 if let [v1, v2, v3] = face[..] {
                     let [u, v, w] = direct_triangle(&hull.vertices, [v1, v2, v3]);
                     hull.face_normals.push(compute_normal(&hull.vertices, u, v, w));
-                    hull.triangles.push([u, v, w]);
+                    hull.faces.add_row([u, v, w].into_iter());
                     continue;
                 }
                 //order face s.t. neighboring vertices in graph are neighbors in face
@@ -384,12 +388,12 @@ impl Embedding3D {
                     }
                     let tri = direct_triangle(&hull.vertices, [center_v, v1, v2]);
                     hull.face_normals.push(compute_normal(&hull.vertices, center_v, v1, v2));
-                    hull.triangles.push(tri);
+                    hull.faces.add_row(tri.into_iter());
                 }
             }
         }
 
-        let hull_dual_edges = ConvexTriangleHull::discover_dual(&hull.triangles);
+        let hull_dual_edges = ConvexTriangleHull::discover_dual(&hull.faces);
         hull.dual_edges = hull_dual_edges;
 
         let edge_dividing_vertices =
@@ -532,8 +536,12 @@ impl Embedding3D {
         debug_assert_eq!(edges.count_entries(), 180);
 
         let face_info = [(6, show_hex_mid), (5, false)];
-        let (mut res, _faces) =
-            Self::embed_archimedian_solid(vertices, edges, &face_info, Shape::Football);
+        let shape = if show_hex_mid {
+            Shape::FabianHamann
+        } else {
+            Shape::Football
+        };
+        let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info, shape);
         res.subdivide_all_edges(divisions);
         res
     }
@@ -794,10 +802,13 @@ impl Embedding3D {
         };
         let iter = itertools::izip!(
             self.surface.face_normals.iter(),
-            self.surface.triangles.iter(),
+            self.surface.faces.iter_rows(),
             self.inner_vertices.iter()
         );
-        for (&normal, &[v1, v2, v3], inner) in iter {
+        for (&normal, face, inner) in iter {
+            let &[v1, v2, v3] = face else {
+                panic!();
+            };
             if !to_screen.faces_camera(normal) {
                 continue;
             }
@@ -1031,7 +1042,7 @@ impl Embedding3D {
         let (closest_face, _) = self.surface.dual_edges.find_local_minimum(
             |face_i| {
                 let face_mid = Pos3::average(
-                    self.surface.triangles[face_i].iter().map(|&v| self.surface.vertices[v]),
+                    self.surface.faces[face_i].iter().map(|&v| self.surface.vertices[v]),
                 );
                 //assumes convexity (like so many other places)
                 (face_mid - v_pos).length_sq()
@@ -1041,8 +1052,8 @@ impl Embedding3D {
         if self.inner_vertices[closest_face].contains(&v) {
             return smallvec![closest_face];
         }
-        let tri = self.surface.triangles[closest_face];
-        if tri.contains(&v) {
+        let face = &self.surface.faces[closest_face];
+        if face.contains(&v) {
             // v is vertex of surface -> is corner of multiple faces
             let mut res = smallvec![closest_face];
             let mut last_face = usize::MAX;
@@ -1055,7 +1066,7 @@ impl Embedding3D {
                     if next_face == closest_face {
                         break 'next_face;
                     }
-                    if self.surface.triangles[next_face].contains(&v) {
+                    if self.surface.faces[next_face].contains(&v) {
                         res.push(next_face);
                         last_face = curr_face;
                         continue 'next_face;
@@ -1065,7 +1076,7 @@ impl Embedding3D {
             }
             return res;
         }
-        for (&v1, &v2) in tri.iter().circular_tuple_windows() {
+        for (&v1, &v2) in face.iter().circular_tuple_windows() {
             let edge_index = self.surface.edges.directed_index(v1, v2);
             let edge = self.edge_dividing_vertices[edge_index];
             if edge.clone().contains(&v) {
@@ -1074,8 +1085,8 @@ impl Embedding3D {
                     .dual_edges
                     .neighbors_of(closest_face)
                     .find(|&neigh_face| {
-                        let neigh_tri = self.surface.triangles[neigh_face];
-                        neigh_tri.contains(&v1) && neigh_tri.contains(&v2)
+                        let neigh_face = &self.surface.faces[neigh_face];
+                        neigh_face.contains(&v1) && neigh_face.contains(&v2)
                     })
                     .unwrap();
                 return smallvec![closest_face, neigh_face];

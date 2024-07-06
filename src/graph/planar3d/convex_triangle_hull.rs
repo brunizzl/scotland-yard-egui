@@ -1,3 +1,5 @@
+use bool_csr::BoolCSR;
+
 use super::*;
 
 /// triangulation of a closed 2d surface embedded in 3d
@@ -12,7 +14,7 @@ pub struct ConvexTriangleHull {
     pub edges: EdgeList,
 
     /// indices of vertices surrounding face
-    pub triangles: Vec<[usize; 3]>,
+    pub faces: BoolCSR,
 
     /// two faces are connected, iff they share a (primal) edge.
     pub dual_edges: EdgeList,
@@ -29,7 +31,7 @@ impl ConvexTriangleHull {
             vertices: Vec::new(),
             face_normals: Vec::new(),
             edges: EdgeList::empty(),
-            triangles: Vec::new(),
+            faces: BoolCSR::new(),
             dual_edges: EdgeList::empty(),
         }
     }
@@ -38,17 +40,20 @@ impl ConvexTriangleHull {
     /// updates face normals
     pub fn normalize_positions(&mut self) {
         normalize_positions(&mut self.vertices);
-        for (normal, [v1, v2, v3]) in izip!(&mut self.face_normals, &self.triangles) {
+        for (normal, vs) in izip!(&mut self.face_normals, self.faces.iter_rows()) {
+            let [v1, v2, v3, ..] = vs else {
+                panic!();
+            };
             let pos = |&v| self.vertices[v];
             *normal = geo::plane_normal(pos(v1), pos(v2), pos(v3));
         }
     }
 
-    fn discover_faces(vertices: &[Pos3], edges: &EdgeList) -> (Vec<[usize; 3]>, Vec<Vec3>) {
+    fn discover_faces(vertices: &[Pos3], edges: &EdgeList) -> (BoolCSR, Vec<Vec3>) {
         //enumerates each edge twice: once in each direction
         let mut unused_edges = edges.all_valid_edge_indices();
 
-        let mut triangles = Vec::new();
+        let mut triangles = BoolCSR::new();
         let mut normals = Vec::new();
 
         let mut next_search_start = 0;
@@ -105,7 +110,7 @@ impl ConvexTriangleHull {
 
             let v3_pos = vertices[v3];
             normals.push(geo::plane_normal(v1_pos, v2_pos, v3_pos));
-            triangles.push([v1, v2, v3]);
+            triangles.add_row([v1, v2, v3].into_iter());
         }
 
         //an actual 3d surface is assumed to be closed, e.g. there are no "outher" triangles,
@@ -117,16 +122,17 @@ impl ConvexTriangleHull {
         (triangles, normals)
     }
 
-    /// with faces indexed as in passed-in `triangles`, this returns the dual graph.
-    pub fn discover_dual(triangles: &[[usize; 3]]) -> EdgeList {
-        let mut res = EdgeList::new(3, triangles.len());
+    pub fn discover_dual(faces: &BoolCSR) -> EdgeList {
+        let mut res = EdgeList::new(3, faces.nr_rows());
 
-        fn share_edge(tri1: &[usize; 3], tri2: &[usize; 3]) -> bool {
+        // assumption: each vertex has degree > 2, e.g. no two edges lie on the
+        // boundary of same two faces.
+        fn share_edge(tri1: &[usize], tri2: &[usize]) -> bool {
             tri1.iter().filter(|&v| tri2.contains(v)).count() == 2
         }
 
-        for (i1, tri1) in izip!(0.., triangles) {
-            for (i2, tri2) in izip!(i1.., &triangles[i1..]) {
+        for (i1, tri1) in izip!(0.., faces.iter_rows()) {
+            for (i2, tri2) in izip!(i1.., faces.iter_rows().skip(i1)) {
                 if share_edge(tri1, tri2) {
                     res.add_edge(i1, i2);
                 }
@@ -136,14 +142,14 @@ impl ConvexTriangleHull {
     }
 
     pub fn new_from_graph(vertex_positions: Vec<Pos3>, vertex_neighbors: EdgeList) -> Self {
-        let (triangles, face_normals) = Self::discover_faces(&vertex_positions, &vertex_neighbors);
+        let (faces, face_normals) = Self::discover_faces(&vertex_positions, &vertex_neighbors);
 
-        let dual_edges = Self::discover_dual(&triangles);
+        let dual_edges = Self::discover_dual(&faces);
 
         Self {
             vertices: vertex_positions,
             edges: vertex_neighbors,
-            triangles,
+            faces,
             face_normals,
             dual_edges,
         }
@@ -238,21 +244,16 @@ impl ConvexTriangleHull {
         //bring all vertices to sphere surface
         normalize_positions(&mut vertices);
 
-        let (triangles, face_normals) = Self::discover_faces(&vertices, &edges);
+        let (faces, face_normals) = Self::discover_faces(&vertices, &edges);
 
-        let dual_edges = Self::discover_dual(&triangles);
+        let dual_edges = Self::discover_dual(&faces);
 
         Self {
             vertices,
             edges,
-            triangles,
+            faces,
             face_normals,
             dual_edges,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn triangles(&self) -> &[[usize; 3]] {
-        &self.triangles
     }
 }
