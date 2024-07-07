@@ -127,6 +127,7 @@ impl Embedding3D {
     }
 
     pub fn nr_vertices(&self) -> usize {
+        debug_assert_eq!(self.edges.nr_vertices(), self.vertices.len());
         self.vertices.len()
     }
 
@@ -600,6 +601,12 @@ impl Embedding3D {
         res
     }
 
+    /// u and v are assumed to be vertices in self.surface
+    fn subdivided_edge(&self, u: usize, v: usize) -> BidirectionalRange {
+        let edge_index = self.surface.edges.directed_index(u, v);
+        self.edge_dividing_vertices[edge_index]
+    }
+
     fn new_subdivided_cube(divisions: usize) -> Self {
         let p = 1.0;
         let n = -1.0;
@@ -616,9 +623,57 @@ impl Embedding3D {
         normalize_positions(&mut vertices);
         let edges = edges_from_uniform_positions(&vertices);
         let face_info = [(4, false)];
-        let (mut res, _faces) =
+        let (mut res, faces) =
             Self::embed_archimedian_solid(vertices, edges, &face_info, Shape::Cube);
         res.subdivide_all_edges(divisions);
+
+        // add inner vertices
+        res.inner_vertices.clear();
+        for face in faces {
+            let [v1, v2, v3, v4] = face[..] else {
+                panic!();
+            };
+            debug_assert!(res.surface.edges.has_path(&face));
+            debug_assert!(res.surface.edges.has_edge(v1, v4));
+            if divisions == 0 {
+                continue;
+            }
+            let corner = res.vertices[v1];
+            let scale = 1.0 / (divisions as f32 + 1.0);
+            let dir_a = scale * (res.vertices[v2] - corner);
+            let dir_b = scale * (res.vertices[v4] - corner);
+
+            let start = res.nr_vertices();
+            for ia in 1..=divisions {
+                for ib in 1..=divisions {
+                    res.edges.push();
+                    res.vertices.push(corner + (ia as f32) * dir_a + (ib as f32) * dir_b);
+                }
+            }
+            let end = res.nr_vertices();
+            res.inner_vertices.push(start..end);
+            
+            let index = |ia, ib| start + ia * divisions + ib;
+
+            let edge_12 = res.subdivided_edge(v1, v2);
+            let edge_43 = res.subdivided_edge(v4, v3);
+            for (ia, start_a, end_a) in izip!(0.., edge_12, edge_43) {
+                res.edges.add_edge(index(ia, 0), start_a);
+                res.edges.add_edge(index(ia, divisions - 1), end_a);
+                for (ib1, ib2) in (0..divisions).tuple_windows() {
+                    res.edges.add_edge(index(ia, ib1), index(ia, ib2));
+                }
+            }
+            let edge_23 = res.subdivided_edge(v2, v3);
+            let edge_14 = res.subdivided_edge(v1, v4);
+            for (ib, start_b, end_b) in izip!(0.., edge_14, edge_23) {
+                res.edges.add_edge(index(0, ib), start_b);
+                res.edges.add_edge(index(divisions - 1, ib), end_b);
+                for (ia1, ia2) in (0..divisions).tuple_windows() {
+                    res.edges.add_edge(index(ia1, ib), index(ia2, ib));
+                }
+            }
+        }
         res
     }
 
@@ -812,12 +867,10 @@ impl Embedding3D {
             //draw edges of self.surface
             for (&u, &v) in face.iter().circular_tuple_windows() {
                 draw_line(&self.surface.vertices, u, v);
-                let edge_index = self.surface.edges.directed_index(u, v);
-                let edge = self.edge_dividing_vertices[edge_index];
 
                 //update vertex visibility
                 visible[v] = true;
-                edge.for_each(|v| visible[v] = true);
+                self.subdivided_edge(u, v).for_each(|v| visible[v] = true);
             }
             inner.clone().for_each(|v| visible[v] = true);
 
@@ -831,12 +884,9 @@ impl Embedding3D {
                 let &[v1, v2, v3] = face else {
                     panic!();
                 };
-                let edge_1_2_index = self.surface.edges.directed_index(v1, v2);
-                let edge_1_3_index = self.surface.edges.directed_index(v1, v3);
-                let edge_2_3_index = self.surface.edges.directed_index(v2, v3);
-                let edge_1_2 = self.edge_dividing_vertices[edge_1_2_index];
-                let edge_1_3 = self.edge_dividing_vertices[edge_1_3_index];
-                let edge_2_3 = self.edge_dividing_vertices[edge_2_3_index];
+                let edge_1_2 = self.subdivided_edge(v1, v2);
+                let edge_1_3 = self.subdivided_edge(v1, v3);
+                let edge_2_3 = self.subdivided_edge(v2, v3);
 
                 for (v1, v2) in edge_1_2.zip(edge_1_3) {
                     draw_line(&self.vertices, v1, v2);
@@ -848,7 +898,16 @@ impl Embedding3D {
                     draw_line(&self.vertices, v1, v2);
                 }
             } else {
-                //TODO
+                // assumption: an inner vertex is only connected to other
+                // inner vertices of same face or vertices on edges / corners of face
+                let inner_edges = self.edges.neighbors().skip(inner.start);
+                for (v, ns) in izip!(inner.clone(), inner_edges) {
+                    for n in ns {
+                        if !inner.contains(&n) || v < n {
+                            draw_line(&self.vertices, v, n);
+                        }
+                    }
+                }
             }
         }
     }

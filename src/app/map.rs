@@ -58,7 +58,7 @@ impl Map {
             resolution,
             camera,
         };
-        result.recompute(result.shape());
+        result.recompute(shape);
         result.adjust_info(info);
 
         //graph is not exactly the same -> vertex indices are now worthless
