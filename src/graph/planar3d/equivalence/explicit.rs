@@ -121,7 +121,6 @@ impl ExplicitClasses {
         len
     }
 
-    //only works for those platonic solids with threeangles as base shape
     pub fn enumerate_platonic_symmetry_transforms(plat: &ConvexHull) -> Vec<Matrix3x3> {
         //indicator for platonic, not guarantee
         let degree = plat.edges.max_degree();
@@ -164,7 +163,9 @@ impl ExplicitClasses {
         use std::f32::consts::TAU;
         {
             //axes through faces
-            let angles = [TAU / 3.0, 2.0 * TAU / 3.0];
+            let nf = plat.faces[0].len();
+            debug_assert!(plat.faces.iter_rows().all(|r| r.len() == nf));
+            let angles = (1..nf).map(|i| TAU * (i as f32) / (nf as f32)).collect_vec();
             for &face_normal in &plat.face_normals {
                 add_new_rotations(face_normal, &angles);
             }

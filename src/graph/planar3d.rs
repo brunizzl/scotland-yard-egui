@@ -127,7 +127,7 @@ impl Embedding3D {
     }
 
     pub fn nr_vertices(&self) -> usize {
-        debug_assert_eq!(self.edges.nr_vertices(), self.vertices.len());
+        debug_assert_eq!(self.vertices.len(), self.edges.nr_vertices());
         self.vertices.len()
     }
 
@@ -182,10 +182,6 @@ impl Embedding3D {
         let scaled_dir = |p1, p2| (p2 - p1) / ((divisions + 1) as f32);
         surface.edges.for_each_edge(|v2, v1| {
             debug_assert!(v1 < v2); //every edge is only iterated over in one direction
-            let fw_edge = surface.edges.directed_index(v1, v2);
-            let bw_edge = surface.edges.directed_index(v2, v1);
-            debug_assert!(edge_dividing_vertices[fw_edge].is_uninitialized());
-            debug_assert!(edge_dividing_vertices[bw_edge].is_uninitialized());
             let p1 = vertices[v1];
             let p2 = vertices[v2];
             let dir = scaled_dir(p1, p2);
@@ -197,6 +193,10 @@ impl Embedding3D {
                 vertices.push(p);
             }
             let inner = BidirectionalRange::new_forward(fst_inner_edge_vertex, vertices.len());
+            let fw_edge = surface.edges.directed_index(v1, v2);
+            let bw_edge = surface.edges.directed_index(v2, v1);
+            debug_assert!(edge_dividing_vertices[fw_edge].is_uninitialized());
+            debug_assert!(edge_dividing_vertices[bw_edge].is_uninitialized());
             edge_dividing_vertices[fw_edge] = inner;
             edge_dividing_vertices[bw_edge] = inner.reversed();
             use std::iter::once;
@@ -352,11 +352,12 @@ impl Embedding3D {
                     }
                 };
 
-                if let [v1, v2, v3] = face[..] {
-                    let [u, v, w] = direct_triangle(&hull.vertices, [v1, v2, v3]);
-                    hull.face_normals.push(compute_normal(&hull.vertices, u, v, w));
-                    hull.faces.add_row([u, v, w].into_iter());
-                    continue;
+                {
+                    // enforce consistent direction in face
+                    let [v1, v2, v3, ..] = face[..] else {
+                        panic!();
+                    };
+                    face[0..3].clone_from_slice(&direct_triangle(&hull.vertices, [v1, v2, v3]));
                 }
                 //order face s.t. neighboring vertices in graph are neighbors in face
                 'find_swap: for i in 2..face.len() {
@@ -371,7 +372,6 @@ impl Embedding3D {
                 }
                 if triangulate {
                     let center = Pos3::average(face.iter().map(|&v| hull.vertices[v]));
-                    hull.vertices.push(center);
                     vertices.push(center);
                     edges.push();
                     let center_v = hull.edges.push();
@@ -516,12 +516,13 @@ impl Embedding3D {
                     self.edges.add_edge(curr, v2);
 
                     let inner_end = curr + 1;
-                    for (u, v) in [(v1, v2), (v2, v1)] {
-                        let i = self.surface.edges.directed_index(u, v);
-                        debug_assert!(self.edge_dividing_vertices[i].count() == 0);
-                        self.edge_dividing_vertices[i] =
-                            BidirectionalRange::new_forward(fst_inner, inner_end);
-                    }
+                    let inner = BidirectionalRange::new_forward(fst_inner, inner_end);
+                    let fw_edge = self.surface.edges.directed_index(v1, v2);
+                    let bw_edge = self.surface.edges.directed_index(v2, v1);
+                    debug_assert!(self.edge_dividing_vertices[fw_edge].is_uninitialized());
+                    debug_assert!(self.edge_dividing_vertices[bw_edge].is_uninitialized());
+                    self.edge_dividing_vertices[fw_edge] = inner;
+                    self.edge_dividing_vertices[bw_edge] = inner.reversed();
                 }
             }
         }
@@ -652,7 +653,7 @@ impl Embedding3D {
             }
             let end = res.nr_vertices();
             res.inner_vertices.push(start..end);
-            
+
             let index = |ia, ib| start + ia * divisions + ib;
 
             let edge_12 = res.subdivided_edge(v1, v2);
@@ -674,6 +675,8 @@ impl Embedding3D {
                 }
             }
         }
+        let sym = ExplicitClasses::new_for_subdivided_platonic(&res, divisions);
+        res.sym_group = SymGroup::Explicit(sym.unwrap());
         res
     }
 
@@ -741,7 +744,7 @@ impl Embedding3D {
     }
 
     /// rendered flat as one large subdivided square.
-    /// imagine taking a square and  connecting the left and right sides and the top and bottom sides.
+    /// imagine taking a square and connecting the left and right sides and the top and bottom sides.
     /// this is topologically a torus.
     fn new_subdivided_squares_torus(len: isize) -> Self {
         assert!(len >= 2);
@@ -903,7 +906,10 @@ impl Embedding3D {
                 let inner_edges = self.edges.neighbors().skip(inner.start);
                 for (v, ns) in izip!(inner.clone(), inner_edges) {
                     for n in ns {
-                        if !inner.contains(&n) || v < n {
+                        // only draw each edge in one direction, assume that edges
+                        // to face edge / corner are to vertices with smaller index
+                        debug_assert!(inner.contains(&n) || n < v);
+                        if n < v {
                             draw_line(&self.vertices, v, n);
                         }
                     }
