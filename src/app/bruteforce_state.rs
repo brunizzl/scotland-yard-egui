@@ -158,6 +158,9 @@ struct GameOutcome {
 use std::collections::BTreeMap;
 pub struct BruteforceComputationState {
     workers: Vec<Worker>,
+    curr_game_type: GameType,
+    robber_strat_stored: bool,
+    cops_strat_stored: bool,
     results: BTreeMap<GameType, GameOutcome>,
     cop_strats: BTreeMap<GameType, bf::CopStrategy>,
     error: Option<(GameType, String)>,
@@ -167,6 +170,13 @@ impl BruteforceComputationState {
     pub fn new() -> Self {
         Self {
             workers: Vec::new(),
+            curr_game_type: GameType {
+                nr_cops: usize::MAX,
+                resolution: 0,
+                shape: crate::graph::Shape::Icosahedron,
+            },
+            robber_strat_stored: false,
+            cops_strat_stored: false,
             results: BTreeMap::new(),
             cop_strats: BTreeMap::new(),
             error: None,
@@ -563,6 +573,12 @@ impl BruteforceComputationState {
                 resolution: map.resolution(),
                 shape: map.shape(),
             };
+            if game_type != self.curr_game_type {
+                self.curr_game_type = game_type;
+                self.robber_strat_stored = NATIVE && game_type.file_name("bruteforce").exists();
+                self.cops_strat_stored =
+                    NATIVE && game_type.file_name("bruteforce-police").exists();
+            }
             let mut computing_curr = false;
             let mut computing_curr_strat = false;
             for worker in &self.workers {
@@ -589,26 +605,27 @@ impl BruteforceComputationState {
                 }
                 ui.add_space(5.0);
             }
+
+            let disclaimer = "WARNUNG: weil WASM keine Threads mag, blockt \
+                die Websiteversion bei dieser Rechnung die GUI.\n\
+                Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
+                Bruteforceberechnungen nicht möglich macht.";
+
             ui.label("Räuberstrategie:");
             ui.horizontal(|ui| {
                 let curr_known = self.results.contains_key(&game_type);
-                let enable = !computing_curr && !curr_known;
+                let enable_compute = !computing_curr && !curr_known;
+                let compute_button = Button::new("Berechnen");
                 if ui
-                    .add_enabled(
-                        enable,
-                        Button::new("Berechnen"),
-                    )
-                    .on_hover_text(
-                        "WARNUNG: weil WASM keine Threads mag, blockt \
-                        die Websiteversion bei dieser Rechnung die GUI.\n\
-                        Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
-                        Bruteforceberechnungen nicht möglich macht.",
-                    )
+                    .add_enabled(enable_compute, compute_button)
+                    .on_hover_text(disclaimer)
                     .clicked()
                 {
                     self.start_computation(nr_cops, map);
                 }
-                if NATIVE && ui.add_enabled(!curr_known, Button::new("laden 🖴")).clicked() {
+                let enable_load = self.robber_strat_stored && !curr_known;
+                let load_button = Button::new("laden 🖴");
+                if ui.add_enabled(enable_load, load_button).clicked() {
                     self.load_result_from(game_type);
                 }
             });
@@ -616,22 +633,22 @@ impl BruteforceComputationState {
             ui.label("Copstrategie:");
             ui.horizontal(|ui| {
                 let curr_known = self.cop_strats.contains_key(&game_type);
-                let enable = !computing_curr_strat && !curr_known;
+                let enable_compute = !computing_curr_strat && !curr_known;
+                let compute_button = Button::new("Berechnen");
                 if ui
-                    .add_enabled(
-                        enable,
-                        Button::new("Berechnen"),
-                    )
+                    .add_enabled(enable_compute, compute_button)
+                    .on_hover_text(disclaimer)
                     .clicked()
                 {
                     self.start_strat_computation(nr_cops, map);
                 }
-                if NATIVE && ui.add_enabled(!curr_known, Button::new("laden 🖴")).clicked() {
+                let enable_load = self.cops_strat_stored && !curr_known;
+                let load_button = Button::new("laden 🖴");
+                if ui.add_enabled(enable_load, load_button).clicked() {
                     self.load_strat_from(game_type);
                 }
             });
             ui.add_space(5.0);
-
 
             self.draw_results(ui);
 
