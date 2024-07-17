@@ -799,8 +799,53 @@ impl Info {
         } else {
             std::path::PathBuf::from(format!("screenshots/{name}.tex",))
         };
+        let header = {
+            let shape = con.map.shape().to_sting();
+            let res = con.map.resolution();
+            let color_info = self.options.vertex_color_info().name_str();
+            let number_info = self.options.vertex_number_info().name_str();
+            let cam_x = con.cam().position.x;
+            let cam_y = con.cam().position.y;
+            let angle = con.cam().z_angle();
+            let zoom = con.cam().zoom;
+            let active_police_vertices = {
+                let vertices = self.characters.active_cop_vertices();
+                let nr_seps = vertices.len().saturating_sub(1);
+                let seps = std::iter::repeat(", ".to_string()).take(nr_seps);
+                String::from_iter(vertices.iter().map(|&v| v.to_string()).interleave(seps))
+            };
+            let inactive_police_vertices = {
+                let vertices = self
+                    .characters
+                    .all()
+                    .iter()
+                    .filter_map(|c| (!c.is_active()).then_some(c.vertex().to_string()))
+                    .collect_vec();
+                let nr_seps = vertices.len().saturating_sub(1);
+                let seps = std::iter::repeat(", ".to_string()).take(nr_seps);
+                String::from_iter(vertices.into_iter().interleave(seps))
+            };
+            let robber_vertex = self
+                .characters
+                .robber()
+                .map_or("<Keiner>".to_string(), |r| r.vertex().to_string());
+            format!(
+                "\n\
+                % Form: {shape}\n\
+                % Auflösung: {res}\n\
+                % gezeigte Infopunkte: {color_info}\n\
+                % gezeige Infozahlen: {number_info}\n\
+                % Kameraposition: ({cam_x}, {cam_y}) Winkel: {angle} Zoom: {zoom}\n\
+                % Positionen aktiver Polizisten: [{active_police_vertices}]\n\
+                % Positionen inaktiver Polizisten: [{inactive_police_vertices}]\n\
+                % Räuberknoten: {robber_vertex}\n\
+                \n\
+                \n"
+            )
+        };
         super::tikz::draw_to_file(
             file_name,
+            header,
             &con.painter,
             *con.screen(),
             character::emojis_as_latex_commands(),

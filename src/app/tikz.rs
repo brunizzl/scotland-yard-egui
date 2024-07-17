@@ -23,6 +23,7 @@ type StrMap = HashMap<&'static str, &'static str>;
 
 struct TikzPicture {
     file_name: std::path::PathBuf,
+    header: String,
     content: String,
     color_names: HashMap<[u8; 4], String>,
     text_replacements: StrMap,
@@ -63,7 +64,17 @@ impl TikzPicture {
     /// egui has the origin in the left upper corner with the y-axis pointing down.
     /// tikz has the origin in the left lower corner with the y-axis pointing up.
     /// we use `clip_rect` to find the transformation to get us from egui to tikz coordinates.
-    fn new(file_name: std::path::PathBuf, clip_rect: Rect, text_replacements: StrMap) -> Self {
+    fn new(
+        file_name: std::path::PathBuf,
+        header: String,
+        clip_rect: Rect,
+        text_replacements: StrMap,
+    ) -> Self {
+        let is_comment = |line: &str| {
+            let trimmed = line.trim();
+            trimmed.starts_with('%') || trimmed.is_empty()
+        };
+        assert!(header.split('\n').all(is_comment));
         let tikz_rect = {
             let x_range = Rangef::new(0.0, 8.0);
             let y_range = Rangef::new(0.0, 8.0 / clip_rect.aspect_ratio());
@@ -72,6 +83,7 @@ impl TikzPicture {
         let border = geo::BoundedRect::from_rect(clip_rect);
         Self {
             file_name,
+            header,
             content: String::new(),
             color_names: HashMap::new(),
             to_tikz: RectTransform::from_to(clip_rect, tikz_rect),
@@ -183,6 +195,7 @@ impl Drop for TikzPicture {
             },
         };
         let mut write = |data: &str| file.write_all(data.as_bytes()).ok();
+        write(&self.header);
         write("\\begin{tikzpicture}\n");
         for (&[r, g, b, _], name) in &self.color_names {
             write(&format!(
@@ -201,11 +214,12 @@ impl Drop for TikzPicture {
 
 pub fn draw_to_file(
     file_name: std::path::PathBuf,
+    header: String,
     content: &egui::Painter,
     clip: Rect,
     replace: StrMap,
 ) {
-    let mut pic = TikzPicture::new(file_name, clip, replace);
+    let mut pic = TikzPicture::new(file_name, header, clip, replace);
     let mut all_visible_shapes = Vec::new();
     content.for_each_shape(|clipped| {
         let bounding_box = clipped.shape.visual_bounding_rect();

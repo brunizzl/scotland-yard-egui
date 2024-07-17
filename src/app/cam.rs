@@ -9,7 +9,7 @@ pub struct Camera3D {
     /// == 1.0 -> no change
     /// < 1.0  -> zoomed out
     /// > 1.0  -> zoomed in
-    zoom: f32,
+    pub zoom: f32,
     zoom_speed: f32,
 
     direction: [Vec3; 3],
@@ -17,7 +17,7 @@ pub struct Camera3D {
     /// offset of center independent of zoom + direction (e.g. in draw plane)
     /// note: this is in neighter coordinate system of `self.to_screen`, because
     /// it is used to add drag offset, which is a zoom-dependent translation.
-    position: Pos2,
+    pub position: Pos2,
 
     to_screen: ToScreen,
 
@@ -122,6 +122,10 @@ impl Camera3D {
 
     pub fn rotate_z(&mut self, angle: f32) {
         self.update_direction(|v| v.rotate_z(angle));
+    }
+
+    pub fn z_angle(&self) -> f32 {
+        self.direction[2].angle_between(DEFAULT_AXES[2])
     }
 
     fn rotate_z_2d(&mut self, angle: f32, offset: Vec2) {
