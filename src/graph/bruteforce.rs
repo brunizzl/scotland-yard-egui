@@ -898,20 +898,20 @@ where
         let curr_times = f.nr_moves_left(curr_cop_positions);
         let mut curr_is_at_max = false;
         for (v, neighs) in izip!(0.., edges.neighbors()) {
-            let new_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
-            const MAX_TIME: UTime = UTime::MAX - 1;
-            if new_time == MAX_TIME {
+            let max_neigh_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
+            const OVERFLOW_NEIGH_TIME: UTime = UTime::MAX - 1;
+            if max_neigh_time == OVERFLOW_NEIGH_TIME {
                 return Err(format!(
                     "Cops brauchen mehr Züge als in {} passen",
                     std::any::type_name::<UTime>()
                 ));
             }
-            let new_time = new_time.saturating_add(1);
+            let new_time = max_neigh_time.saturating_add(1);
             times_should_cops_move_to_curr[v] = if new_time == queue.curr_max() {
                 curr_is_at_max = true;
                 UTime::MAX
             } else {
-                debug_assert!(new_time < queue.curr_max());
+                debug_assert!(new_time < queue.curr_max() || new_time == UTime::MAX);
                 new_time
             };
         }

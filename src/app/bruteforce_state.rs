@@ -491,21 +491,20 @@ impl BruteforceComputationState {
     }
 
     fn draw_strat(ui: &mut Ui, game_type: &GameType, strat: &bf::CopStrategy) {
-        let cops_str = if game_type.nr_cops == 1 {
-            "einen Cop".to_owned()
+        let one_cop = game_type.nr_cops == 1;
+        let cops_str = if one_cop {
+            "ein Cop".to_owned()
         } else {
             game_type.nr_cops.to_string() + " Cops"
         };
-        let outcome = if strat.cops_win {
-            "gewinnen"
-        } else {
-            "verlieren"
-        };
+        let outcome = if strat.cops_win { "gewinn" } else { "verlier" };
+        let outcome_end = if one_cop { "t" } else { "en" };
 
         ui.label(format!(
-            "{} {} auf {} mit Auflösung {} (max. {} Züge)",
+            "{} {}{} auf {} mit Auflösung {} (max. {} Züge)",
             cops_str,
             outcome,
+            outcome_end,
             game_type.shape.to_sting(),
             game_type.resolution,
             strat.max_moves,
