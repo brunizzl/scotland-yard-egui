@@ -95,7 +95,7 @@ impl OrdBy {
             let mut to_sort = izip!(std::mem::take(xs), 0..).collect_vec();
             to_sort.sort_by_key(|(s, _)| f(s));
             if let Some(i) = *active {
-                *active = Some(to_sort.iter().position(|(_, j)| i == *j).unwrap());
+                *active = to_sort.iter().position(|(_, j)| i == *j);
             }
             xs.extend(to_sort.into_iter().map(|(s, _)| s));
         }
@@ -215,7 +215,7 @@ impl SavedStates {
     }
 
     pub fn update(&mut self, ui: &mut Ui, map: &mut map::Map, info: &mut info::Info) {
-        if let Some(save) = self.active.map(|i| &self.saves[i]) {
+        if let Some(save) = self.active.and_then(|i| self.saves.get(i)) {
             let same_shape = save.shape == map.shape();
             let same_res = save.resolution == map.resolution() as isize;
             if !same_shape || !same_res {
