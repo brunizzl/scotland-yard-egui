@@ -84,6 +84,7 @@ impl CopConfigurations {
         edges: &EdgeList,
         sym: &S,
         nr_cops: usize,
+        log: impl Fn(String),
     ) -> Result<Self, String> {
         let nr_map_vertices = edges.nr_vertices();
         let curr_rest_config_size = 0.max(nr_cops as isize - 1) as usize;
@@ -111,13 +112,21 @@ impl CopConfigurations {
 
         let mut configurations = std::collections::BTreeMap::new();
 
+        let mut time_until_log_refresh: usize = 1;
         let mut add_configs_for_first = |fst_cop: usize| {
             curr_rest_config.iter_mut().for_each(|c| *c = fst_cop);
             let mut new_configuration = Vec::new();
-            let mut i = 0;
             if nr_cops > 1 {
                 loop {
-                    i += 1;
+                    time_until_log_refresh -= 1;
+                    if time_until_log_refresh == 0 {
+                        log(format!(
+                            "liste Coppositionen, aktuell \n[{fst_cop}] + {:?}",
+                            curr_rest_config
+                        ));
+                        time_until_log_refresh = 50000;
+                    }
+
                     debug_assert!(curr_rest_config.iter().tuple_windows().all(|(a, b)| a <= b));
                     if is_stored_config(sym, fst_cop, &curr_rest_config) {
                         let packed = pack_rest(nr_map_vertices, &curr_rest_config);
@@ -133,13 +142,6 @@ impl CopConfigurations {
             } else {
                 new_configuration.push(0);
             }
-            println!(
-                "{} -> {} / {} = {}",
-                fst_cop,
-                new_configuration.len(),
-                i,
-                new_configuration.len() as f32 / i as f32
-            );
             let old = configurations.insert(fst_cop, new_configuration);
             debug_assert!(old.is_none());
             Ok(())
@@ -477,7 +479,9 @@ pub fn compute_safe_robber_positions<S>(
 where
     S: SymmetryGroup + Serialize,
 {
-    let log = |msg| log_sender.as_ref().map(|s| s.send(msg).ok());
+    let log = |msg| {
+        log_sender.as_ref().map(|s| s.send(msg).ok());
+    };
 
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
@@ -489,7 +493,7 @@ where
     }
 
     log("liste Polizeipositionen".into());
-    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops)?;
+    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, log)?;
 
     log("initialisiere Räubergewinnfunktion".into());
     let Some(mut f) = SafeRobberPositions::new(edges.nr_vertices(), &cop_moves) else {
@@ -837,7 +841,9 @@ pub fn compute_cop_strategy<S>(
 where
     S: SymmetryGroup + Serialize,
 {
-    let log = |msg| log_sender.as_ref().map(|s| s.send(msg).ok());
+    let log = |msg| {
+        log_sender.as_ref().map(|s| s.send(msg).ok());
+    };
 
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
@@ -849,7 +855,7 @@ where
     }
 
     log("liste Polizeipositionen".into());
-    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops)?;
+    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, log)?;
 
     log("initialisiere Cop Startegie".into());
     let Some(mut f) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
