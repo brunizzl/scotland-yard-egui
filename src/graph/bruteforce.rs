@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 use bitvec::prelude as bv;
 use itertools::{izip, Itertools};
@@ -56,36 +56,6 @@ fn is_stored_config(sym: &impl SymmetryGroup, fst_cop: usize, rest_cops: &[usize
     config_copy[0] == fst_cop && config_copy[1..] == rest_cops[..]
 }
 
-fn eager_unpack(cops: CompactCops, nr_cops: usize, nr_vertices: usize) -> [usize; MAX_COPS] {
-    let mut unpacked = [usize::MAX; MAX_COPS];
-    let CompactCops { fst_cop, mut rest_cops } = cops;
-    unpacked[0] = fst_cop;
-    for cop in &mut unpacked[1..=nr_cops] {
-        *cop = rest_cops % nr_vertices;
-        rest_cops /= nr_vertices;
-    }
-    unpacked
-}
-
-fn lazy_cop_moves_from(
-    edges: &EdgeList,
-    positions: CompactCops,
-    nr_cops: usize,
-) -> impl Iterator<Item = [usize; MAX_COPS]> + '_ + Clone {
-    assert!(nr_cops <= MAX_COPS);
-    let unpacked = eager_unpack(positions, nr_cops, edges.nr_vertices());
-    let iter = (0..nr_cops).flat_map(move |i| {
-        let cop_i_pos = unpacked[i];
-        edges.neighbors_of(cop_i_pos).map(move |n| {
-            let mut neighbor_state = unpacked;
-            neighbor_state[i] = n;
-            neighbor_state
-        })
-    });
-
-    iter
-}
-
 impl CopConfigurations {
     fn nr_configurations(&self) -> usize {
         self.configurations.values().map(|c| c.len()).sum()
@@ -109,60 +79,6 @@ impl CopConfigurations {
         }
     }
 
-    pub fn new_v2<S: SymmetryGroup>(
-        edges: &EdgeList,
-        sym: &S,
-        nr_cops: usize,
-    ) -> Result<Self, String> {
-        let nr_map_vertices = edges.nr_vertices();
-        let curr_rest_config_size = 0.max(nr_cops as isize - 1) as usize;
-        if (nr_map_vertices - 1).checked_pow(curr_rest_config_size as u32).is_none() {
-            return Err("Polizeipositionen passen nicht in usize".to_string());
-        }
-
-        let mut representatives = std::collections::HashMap::new();
-        for fst_cop in sym.class_representatives() {
-            representatives.insert(fst_cop, std::collections::HashSet::new());
-        }
-        let mut queue = std::collections::VecDeque::new();
-        {
-            let mut fst_cop_state = [0usize; MAX_COPS];
-            let fst_cop_state = &mut fst_cop_state[..nr_cops];
-            sym.to_representative(fst_cop_state);
-            let cop_0 = fst_cop_state[0];
-            let rest = pack_rest(nr_map_vertices, &fst_cop_state[1..]);
-            representatives.get_mut(&cop_0).unwrap().insert(rest);
-            queue.push_back(CompactCops {
-                fst_cop: cop_0,
-                rest_cops: rest,
-            });
-        }
-        while let Some(cops) = queue.pop_front() {
-            for mut neighbor in lazy_cop_moves_from(edges, cops, nr_cops) {
-                let neighbor = &mut neighbor[..nr_cops];
-                sym.to_representative(neighbor);
-                let fst_cop = neighbor[0];
-                let rest_cops = pack_rest(nr_map_vertices, &neighbor[1..]);
-                if representatives.get_mut(&fst_cop).unwrap().insert(rest_cops) {
-                    queue.push_back(CompactCops { fst_cop, rest_cops });
-                }
-            }
-        }
-
-        let mut configurations = BTreeMap::new();
-        for (fst_cop, rest_cops_set) in representatives {
-            let mut rest_cops_vec = rest_cops_set.into_iter().collect_vec();
-            rest_cops_vec.sort();
-            configurations.insert(fst_cop, rest_cops_vec);
-        }
-
-        Ok(Self {
-            nr_cops,
-            nr_map_vertices,
-            configurations,
-        })
-    }
-
     /// returns [`Self`] if enough memory is available
     pub fn new<S: SymmetryGroup>(
         edges: &EdgeList,
@@ -170,7 +86,6 @@ impl CopConfigurations {
         nr_cops: usize,
         log: impl Fn(String),
     ) -> Result<Self, String> {
-        let start_old = std::time::Instant::now();
         let nr_map_vertices = edges.nr_vertices();
         let curr_rest_config_size = 0.max(nr_cops as isize - 1) as usize;
         if (nr_map_vertices - 1).checked_pow(curr_rest_config_size as u32).is_none() {
@@ -234,27 +149,6 @@ impl CopConfigurations {
         for fst_cop in sym.class_representatives() {
             add_configs_for_first(fst_cop)?;
         }
-        let end_old = std::time::Instant::now();
-        let start_new = end_old;
-        let alternative = Self::new_v2(edges, sym, nr_cops).unwrap();
-        let end_new = std::time::Instant::now();
-        let dur_old = (end_old - start_old).as_secs_f64();
-        let dur_new = (end_new - start_new).as_secs_f64();
-        println!(
-            "took {:.5}s old vs {:.5}s new (new / old = {:.5})",
-            dur_old,
-            dur_new,
-            dur_new / dur_old
-        );
-        assert_eq!(alternative.configurations, configurations);
-        println!("vergleiche methoden:");
-        for ((a0, a_rest), (b0, b_rest)) in izip!(&configurations, &alternative.configurations) {
-            assert_eq!(a0, b0);
-            assert_eq!(a_rest, b_rest);
-            let end = usize::min(20, a_rest.len());
-            println!("{:?}\n{:?}", &a_rest[..end], &b_rest[..end]);
-        }
-        println!("vergleich fettich!\n");
 
         Ok(Self {
             nr_cops,

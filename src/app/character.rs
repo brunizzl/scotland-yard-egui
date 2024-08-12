@@ -597,6 +597,7 @@ impl State {
                     change = true;
                 }
             });
+            let nr_cops = self.cops().len();
             let draw_cops = |ui: &mut Ui| {
                 if self.characters.len() > 1 {
                     let mut delete = None;
@@ -620,7 +621,7 @@ impl State {
                 }
             };
             ui.add_space(5.0);
-            ui.menu_button("alle Cops", |ui| {
+            ui.menu_button(format!("alle Cops ({})", nr_cops), |ui| {
                 egui::ScrollArea::vertical().show(ui, draw_cops);
             });
             ui.add_space(8.0);
