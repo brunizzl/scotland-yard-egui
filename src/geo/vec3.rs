@@ -6,7 +6,6 @@ use egui::vec2;
 /// copy of egui's Vec2, but with one extra dimension
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq, serde::Deserialize, serde::Serialize)]
-#[cfg_attr(feature = "bytemuck", derive(bytemuck::Pod, bytemuck::Zeroable))]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
