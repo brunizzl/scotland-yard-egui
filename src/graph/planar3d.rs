@@ -374,10 +374,10 @@ impl Embedding3D {
                     let center = Pos3::average(face.iter().map(|&v| hull.vertices[v]));
                     vertices.push(center);
                     edges.push();
+                    hull.vertices.push(center);
                     let center_v = hull.edges.push();
                     for (v1, v2) in face.iter().copied().circular_tuple_windows() {
                         debug_assert!(edges.neighbors_of(v1).contains(&v2));
-                        dbg!((v1, center_v));
                         hull.edges.add_edge(v1, center_v);
                         edges.add_edge(v1, center_v);
                         let tri = direct_triangle(&hull.vertices, [center_v, v1, v2]);
@@ -527,6 +527,7 @@ impl Embedding3D {
             }
         }
         sort_neigbors(&mut self.edges, &self.vertices);
+        self.sym_group = SymGroup::None(NoSymmetry::new(self.vertices.len()));
     }
 
     /// custom subdivision of graph described in Fabian Hamann's masters thesis.

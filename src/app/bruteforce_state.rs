@@ -475,13 +475,16 @@ impl BruteforceComputationState {
             game_type.nr_cops.to_string() + " Cops"
         };
 
-        ui.label(format!(
-            "Räuber {} gegen {} auf {} mit Auflösung {}",
-            outcome_str,
-            cops_str,
-            game_type.shape.to_sting(),
-            game_type.resolution
-        ));
+        ui.add(
+            Label::new(format!(
+                "Räuber {} gegen {} auf {} mit Auflösung {}",
+                outcome_str,
+                cops_str,
+                game_type.shape.to_sting(),
+                game_type.resolution
+            ))
+            .wrap(false),
+        );
         ui.label(match &outcome.confidence {
             Confidence::Both => "(verifiziert)".to_string(),
             Confidence::NoSymmetry => "(Algo ohne Symmetrie)".to_string(),
@@ -500,15 +503,18 @@ impl BruteforceComputationState {
         let outcome = if strat.cops_win { "gewinn" } else { "verlier" };
         let outcome_end = if one_cop { "t" } else { "en" };
 
-        ui.label(format!(
-            "{} {}{} auf {} mit Auflösung {} (max. {} Züge)",
-            cops_str,
-            outcome,
-            outcome_end,
-            game_type.shape.to_sting(),
-            game_type.resolution,
-            strat.max_moves,
-        ));
+        ui.add(
+            Label::new(format!(
+                "{} {}{} auf {} mit Auflösung {} (max. {} Züge)",
+                cops_str,
+                outcome,
+                outcome_end,
+                game_type.shape.to_sting(),
+                game_type.resolution,
+                strat.max_moves,
+            ))
+            .wrap(false),
+        );
     }
 
     fn draw_results(&mut self, ui: &mut Ui) {
@@ -578,32 +584,51 @@ impl BruteforceComputationState {
                 self.cops_strat_stored =
                     NATIVE && game_type.file_name("bruteforce-police").exists();
             }
-            let mut computing_curr = false;
-            let mut computing_curr_strat = false;
-            for worker in &self.workers {
-                if worker.game_type == game_type {
-                    computing_curr |= matches!(worker.task, WorkTask::Compute | WorkTask::Load);
-                    computing_curr_strat |= worker.task == WorkTask::ComputeStrat;
+            let draw_workers = |ui: &mut Ui| {
+                for worker in &self.workers {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::widgets::Spinner::new());
+                        let task_str = match worker.task {
+                            WorkTask::Compute | WorkTask::ComputeStrat => "rechne ",
+                            WorkTask::Verify => "verifiziere ",
+                            WorkTask::Load | WorkTask::LoadStrat => "lade ",
+                            WorkTask::Store | WorkTask::StoreStrat => "speichere ",
+                        };
+                        ui.label(format!(
+                            "{} {}",
+                            task_str,
+                            worker.game_type.as_tuple_string()
+                        ));
+                    });
+                    if let Some(msg) = &worker.status {
+                        ui.label(msg);
+                    }
+                    ui.add_space(5.0);
                 }
-                ui.horizontal(|ui| {
-                    ui.add(egui::widgets::Spinner::new());
-                    let task_str = match worker.task {
-                        WorkTask::Compute | WorkTask::ComputeStrat => "rechne ",
-                        WorkTask::Verify => "verifiziere ",
-                        WorkTask::Load | WorkTask::LoadStrat => "lade ",
-                        WorkTask::Store | WorkTask::StoreStrat => "speichere ",
-                    };
-                    ui.label(format!(
-                        "{} {}",
-                        task_str,
-                        worker.game_type.as_tuple_string()
-                    ));
+            };
+
+            let nr_active = self.workers.len();
+            if nr_active > 0 {
+                let end = if nr_active == 1 { "" } else { "en" };
+                let msg = format!("{} aktive Rechnung{}", nr_active, end);
+                ui.menu_button(msg, |ui| {
+                    egui::ScrollArea::vertical().show(ui, draw_workers);
                 });
-                if let Some(msg) = &worker.status {
-                    ui.label(msg);
-                }
-                ui.add_space(5.0);
+            } else {
+                ui.add_enabled(false, Button::new("0 aktive Rechnungen"));
             }
+
+            let nr_done = self.results.len() + self.cop_strats.len();
+            if nr_done > 0 {
+                let end = if nr_done == 1 { "" } else { "se" };
+                let msg = format!("{} Ergebnis{}", nr_done, end);
+                ui.menu_button(msg, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.draw_results(ui));
+                });
+            } else {
+                ui.add_enabled(false, Button::new("0 Ergebnisse"));
+            }
+            ui.add_space(5.0);
 
             let disclaimer = "WARNUNG: weil WASM keine Threads mag, blockt \
                 die Websiteversion bei dieser Rechnung die GUI.\n\
@@ -611,9 +636,12 @@ impl BruteforceComputationState {
                 Bruteforceberechnungen nicht möglich macht.";
 
             ui.label("Räuberstrategie:");
+            let computing_robber_strat = self.workers.iter().any(|w| {
+                w.game_type == game_type && matches!(w.task, WorkTask::Compute | WorkTask::Load)
+            });
             ui.horizontal(|ui| {
                 let curr_known = self.results.contains_key(&game_type);
-                let enable_compute = !computing_curr && !curr_known;
+                let enable_compute = !computing_robber_strat && !curr_known;
                 let compute_button = Button::new("Berechnen");
                 if ui
                     .add_enabled(enable_compute, compute_button)
@@ -630,9 +658,12 @@ impl BruteforceComputationState {
             });
             ui.add_space(5.0);
             ui.label("Copstrategie:");
+            let computing_cop_strat = self.workers.iter().any(|worker| {
+                worker.game_type == game_type && worker.task == WorkTask::ComputeStrat
+            });
             ui.horizontal(|ui| {
                 let curr_known = self.cop_strats.contains_key(&game_type);
-                let enable_compute = !computing_curr_strat && !curr_known;
+                let enable_compute = !computing_cop_strat && !curr_known;
                 let compute_button = Button::new("Berechnen");
                 if ui
                     .add_enabled(enable_compute, compute_button)
@@ -647,11 +678,9 @@ impl BruteforceComputationState {
                     self.load_strat_from(game_type);
                 }
             });
-            ui.add_space(5.0);
-
-            self.draw_results(ui);
 
             if let Some((game_type, err)) = &self.error {
+                ui.add_space(5.0);
                 ui.label(format!(
                     "Fehler für {}:\n{}",
                     game_type.as_tuple_string(),

@@ -597,7 +597,7 @@ impl State {
                     change = true;
                 }
             });
-            ui.collapsing("alle Cops", |ui| {
+            let draw_cops = |ui: &mut Ui| {
                 if self.characters.len() > 1 {
                     let mut delete = None;
                     for (i, cop) in izip!(1.., &mut self.characters[1..]) {
@@ -618,6 +618,10 @@ impl State {
                         change = true;
                     }
                 }
+            };
+            ui.add_space(5.0);
+            ui.menu_button("alle Cops", |ui| {
+                egui::ScrollArea::vertical().show(ui, draw_cops);
             });
             ui.add_space(8.0);
             ui.checkbox(&mut self.show_allowed_next_steps, "zeige Zugoptionen")
