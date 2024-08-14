@@ -594,14 +594,17 @@ impl BruteforceComputationState {
                             WorkTask::Load | WorkTask::LoadStrat => "lade ",
                             WorkTask::Store | WorkTask::StoreStrat => "speichere ",
                         };
-                        ui.label(format!(
-                            "{} {}",
-                            task_str,
-                            worker.game_type.as_tuple_string()
-                        ));
+                        ui.add(
+                            Label::new(format!(
+                                "{} {}",
+                                task_str,
+                                worker.game_type.as_tuple_string()
+                            ))
+                            .wrap(false),
+                        );
                     });
                     if let Some(msg) = &worker.status {
-                        ui.label(msg);
+                        ui.add(Label::new(msg).wrap(false));
                     }
                     ui.add_space(5.0);
                 }

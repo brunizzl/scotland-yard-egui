@@ -257,7 +257,7 @@ impl Options {
             ui.add(Checkbox::new(&mut self.show_cop_strat, "zeige Polizeistrategie"))
                 .on_hover_text(
                     "Wenn für aktuelle Anzahl Cops & aktuellen Graphen Bruteforce \
-                Polizeistrategie berechnet wurde und anktueller Spielstate von Cops \
+                Polizeistrategie berechnet wurde und aktueller Spielstate von Cops \
                 gewonnen wird, werden alle idealen Züge angezeigt."
                 );
 
