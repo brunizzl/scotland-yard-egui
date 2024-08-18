@@ -464,7 +464,7 @@ impl EscapeableNodes {
     /// ignores cops in interior of hull, computes safe regions only with respect to boundary cops
     fn consider_boundary_cops(
         &mut self,
-        shape: Shape,
+        _shape: Shape,
         cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
@@ -545,9 +545,6 @@ impl EscapeableNodes {
                 queue.push_back(last_v);
                 self.escapable[last_v] |= marker;
                 self.add_region_to_escapable(v_owner, marker, edges, queue);
-            } else {
-                use Shape::{SquareTorus, TriangTorus};
-                debug_assert!(matches!(shape, TriangTorus | SquareTorus));
             }
             for &v in safe_outher {
                 self.escapable[v] |= marker;

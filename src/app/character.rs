@@ -251,7 +251,7 @@ impl Character {
         };
         let to_plane = con.cam().to_screen().to_plane;
         let mut best_dist_sq = f32::MAX;
-        let mut best_vertex = usize::MAX;
+        let mut best_vertex = 0; //start at valid position in case no vertices are visible
         for (v, &vis, &pos) in izip!(0.., con.visible, con.positions) {
             if vis {
                 let new_dist_sq = (to_plane.project_pos(pos) - pos2).length_sq();

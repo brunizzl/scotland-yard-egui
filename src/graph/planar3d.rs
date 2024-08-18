@@ -638,6 +638,8 @@ impl Embedding3D {
             debug_assert!(res.surface.edges.has_path(&face));
             debug_assert!(res.surface.edges.has_edge(v1, v4));
             if divisions == 0 {
+                let nr = res.nr_vertices();
+                res.inner_vertices.push(nr..nr);
                 continue;
             }
             let corner = res.vertices[v1];

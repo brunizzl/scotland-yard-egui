@@ -475,22 +475,20 @@ impl BruteforceComputationState {
             game_type.nr_cops.to_string() + " Cops"
         };
 
+        let confidence_str = match &outcome.confidence {
+            Confidence::Both => "(verifiziert)".to_string(),
+            Confidence::NoSymmetry => "(Algo ohne Symmetrie)".to_string(),
+            Confidence::SymmetryOnly => "(Algo mit Symmetrie)".to_string(),
+            Confidence::Err(err) => format!("Validierungsfehler: {err}"),
+        };
         ui.add(
             Label::new(format!(
-                "Räuber {} gegen {} auf {} mit Auflösung {}",
-                outcome_str,
-                cops_str,
+                "Räuber {outcome_str} gegen {cops_str} auf {} mit Auflösung {} {confidence_str}",
                 game_type.shape.to_sting(),
                 game_type.resolution
             ))
             .wrap(false),
         );
-        ui.label(match &outcome.confidence {
-            Confidence::Both => "(verifiziert)".to_string(),
-            Confidence::NoSymmetry => "(Algo ohne Symmetrie)".to_string(),
-            Confidence::SymmetryOnly => "(Algo mit Symmetrie)".to_string(),
-            Confidence::Err(err) => format!("Validierungsfehler: {err}"),
-        });
     }
 
     fn draw_strat(ui: &mut Ui, game_type: &GameType, strat: &bf::CopStrategy) {
@@ -570,6 +568,32 @@ impl BruteforceComputationState {
         }
     }
 
+    fn draw_workers(&self, ui: &mut Ui) {
+        for worker in &self.workers {
+            ui.horizontal(|ui| {
+                ui.add(egui::widgets::Spinner::new());
+                let task_str = match worker.task {
+                    WorkTask::Compute | WorkTask::ComputeStrat => "rechne ",
+                    WorkTask::Verify => "verifiziere ",
+                    WorkTask::Load | WorkTask::LoadStrat => "lade ",
+                    WorkTask::Store | WorkTask::StoreStrat => "speichere ",
+                };
+                ui.add(
+                    Label::new(format!(
+                        "{} {}",
+                        task_str,
+                        worker.game_type.as_tuple_string()
+                    ))
+                    .wrap(false),
+                );
+            });
+            if let Some(msg) = &worker.status {
+                ui.add(Label::new(msg).wrap(false));
+            }
+            ui.add_space(5.0);
+        }
+    }
+
     pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map) {
         ui.collapsing("Bruteforce", |ui| {
             self.check_on_workers();
@@ -584,53 +608,30 @@ impl BruteforceComputationState {
                 self.cops_strat_stored =
                     NATIVE && game_type.file_name("bruteforce-police").exists();
             }
-            let draw_workers = |ui: &mut Ui| {
-                for worker in &self.workers {
-                    ui.horizontal(|ui| {
-                        ui.add(egui::widgets::Spinner::new());
-                        let task_str = match worker.task {
-                            WorkTask::Compute | WorkTask::ComputeStrat => "rechne ",
-                            WorkTask::Verify => "verifiziere ",
-                            WorkTask::Load | WorkTask::LoadStrat => "lade ",
-                            WorkTask::Store | WorkTask::StoreStrat => "speichere ",
-                        };
-                        ui.add(
-                            Label::new(format!(
-                                "{} {}",
-                                task_str,
-                                worker.game_type.as_tuple_string()
-                            ))
-                            .wrap(false),
-                        );
+
+            ui.horizontal(|ui| {
+                let nr_active = self.workers.len();
+                if NATIVE && nr_active > 0 {
+                    let end = if nr_active == 1 { "" } else { "en" };
+                    let msg = format!("{} Rechnung{}", nr_active, end);
+                    ui.menu_button(msg, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| self.draw_workers(ui));
                     });
-                    if let Some(msg) = &worker.status {
-                        ui.add(Label::new(msg).wrap(false));
-                    }
-                    ui.add_space(5.0);
+                } else if NATIVE {
+                    ui.add_enabled(false, Button::new("0 Rechnungen"));
                 }
-            };
 
-            let nr_active = self.workers.len();
-            if nr_active > 0 {
-                let end = if nr_active == 1 { "" } else { "en" };
-                let msg = format!("{} aktive Rechnung{}", nr_active, end);
-                ui.menu_button(msg, |ui| {
-                    egui::ScrollArea::vertical().show(ui, draw_workers);
-                });
-            } else {
-                ui.add_enabled(false, Button::new("0 aktive Rechnungen"));
-            }
-
-            let nr_done = self.results.len() + self.cop_strats.len();
-            if nr_done > 0 {
-                let end = if nr_done == 1 { "" } else { "se" };
-                let msg = format!("{} Ergebnis{}", nr_done, end);
-                ui.menu_button(msg, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| self.draw_results(ui));
-                });
-            } else {
-                ui.add_enabled(false, Button::new("0 Ergebnisse"));
-            }
+                let nr_done = self.results.len() + self.cop_strats.len();
+                if nr_done > 0 {
+                    let end = if nr_done == 1 { "" } else { "se" };
+                    let msg = format!("{} Ergebnis{}", nr_done, end);
+                    ui.menu_button(msg, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| self.draw_results(ui));
+                    });
+                } else {
+                    ui.add_enabled(false, Button::new("0 Ergebnisse"));
+                }
+            });
             ui.add_space(5.0);
 
             let disclaimer = "WARNUNG: weil WASM keine Threads mag, blockt \

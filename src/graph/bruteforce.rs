@@ -574,7 +574,7 @@ where
             debug_assert!(cop_moves
                 .lazy_cop_moves_from(&edges, &sym, rotated_neigh_cop_positions)
                 .any(|(_, pos)| pos == curr_cop_positions));
-            debug_assert!(!neigh_rotations.clone().into_iter().count() > 0);
+            debug_assert!(neigh_rotations.clone().into_iter().count() > 0);
 
             let mut f_neighbor_changed_some_rotation = false;
             for neigh_rotate in neigh_rotations {
