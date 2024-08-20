@@ -121,15 +121,14 @@ impl From<Result<bf::CopStrategy, String>> for WorkResult {
     }
 }
 
-use std::sync::mpsc;
-type RcvStr = mpsc::Receiver<String>;
+use bf::thread_manager::Command;
+use bf::thread_manager::ExternManager as Manager;
 struct Worker {
     game_type: GameType,
     task: WorkTask,
     handle: thread::JoinHandle<WorkResult>,
 
-    reciever: Option<RcvStr>,
-    status: Option<String>,
+    manager: Option<Manager>,
 }
 
 /// the bruteforce algorithm is quite large to ensure correctness from just looking at the results
@@ -210,7 +209,7 @@ impl BruteforceComputationState {
         &mut self,
         game_type: GameType,
         work: F,
-        reciever: Option<RcvStr>,
+        reciever: Option<Manager>,
         task: WorkTask,
     ) where
         F: FnOnce() -> WorkResult + Send + 'static,
@@ -221,8 +220,7 @@ impl BruteforceComputationState {
                 game_type,
                 task,
                 handle: thread::spawn(work),
-                reciever,
-                status: None,
+                manager: reciever,
             });
         } else {
             //wasm doesn't like threads -> just block gui
@@ -236,10 +234,8 @@ impl BruteforceComputationState {
             if worker.handle.is_finished() {
                 done = Some(i);
             }
-            if let Some(rcv) = &worker.reciever {
-                while let Ok(msg) = rcv.try_recv() {
-                    worker.status = Some(msg);
-                }
+            if let Some(r) = worker.manager.as_mut() {
+                r.update();
             }
         }
         if let Some(i) = done {
@@ -257,40 +253,40 @@ impl BruteforceComputationState {
             shape: map.shape(),
         };
         let edges = map.edges().clone();
-        let (send, recieve) = mpsc::channel();
-        let (send, recieve) = (Some(send), Some(recieve));
+        let (here, mut there) = bf::thread_manager::build_managers();
+        let here = Some(here);
         match map.data().sym_group() {
             SymGroup::Explicit(equiv) => {
                 let sym = equiv.clone();
                 let work = move || {
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, send);
+                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
                     (res, Confidence::SymmetryOnly).into()
                 };
-                self.employ_worker(game_type, work, recieve, WorkTask::Compute);
+                self.employ_worker(game_type, work, here, WorkTask::Compute);
             },
             SymGroup::Torus6(torus) => {
                 let sym = torus.clone();
                 let work = move || {
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, send);
+                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
                     (res, Confidence::SymmetryOnly).into()
                 };
-                self.employ_worker(game_type, work, recieve, WorkTask::Compute);
+                self.employ_worker(game_type, work, here, WorkTask::Compute);
             },
             SymGroup::Torus4(torus) => {
                 let sym = torus.clone();
                 let work = move || {
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, send);
+                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
                     (res, Confidence::SymmetryOnly).into()
                 };
-                self.employ_worker(game_type, work, recieve, WorkTask::Compute);
+                self.employ_worker(game_type, work, here, WorkTask::Compute);
             },
             SymGroup::None(none) => {
                 let sym = *none;
                 let work = move || {
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, send);
+                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
                     (res, Confidence::NoSymmetry).into()
                 };
-                self.employ_worker(game_type, work, recieve, WorkTask::Compute);
+                self.employ_worker(game_type, work, here, WorkTask::Compute);
             },
         }
     }
@@ -302,28 +298,28 @@ impl BruteforceComputationState {
             shape: map.shape(),
         };
         let edges = map.edges().clone();
-        let (send, recieve) = mpsc::channel();
-        let (send, recieve) = (Some(send), Some(recieve));
+        let (here, mut there) = bf::thread_manager::build_managers();
+        let here = Some(here);
         match map.data().sym_group() {
             SymGroup::Explicit(equiv) => {
                 let sym = equiv.clone();
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, send).into();
-                self.employ_worker(game_type, work, recieve, WorkTask::ComputeStrat);
+                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
+                self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::Torus6(torus) => {
                 let sym = torus.clone();
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, send).into();
-                self.employ_worker(game_type, work, recieve, WorkTask::ComputeStrat);
+                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
+                self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::Torus4(torus) => {
                 let sym = torus.clone();
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, send).into();
-                self.employ_worker(game_type, work, recieve, WorkTask::ComputeStrat);
+                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
+                self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::None(none) => {
                 let sym = *none;
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, send).into();
-                self.employ_worker(game_type, work, recieve, WorkTask::ComputeStrat);
+                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
+                self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
         }
     }
@@ -365,22 +361,19 @@ impl BruteforceComputationState {
     }
 
     fn verify_result(&mut self, game_type: GameType, mut outcome: GameOutcome) {
-        let (send, recieve) = mpsc::channel();
+        let (here, mut there) = bf::thread_manager::build_managers();
+        let here = Some(here);
         let work = move || {
             let edges = game_type.create_edges();
             let nr_map_vertices = edges.nr_vertices();
             let sym = NoSymmetry::new(nr_map_vertices);
-            let res_without = bf::compute_safe_robber_positions(
-                game_type.nr_cops,
-                edges,
-                sym,
-                Some(send.clone()),
-            );
+            let res_without =
+                bf::compute_safe_robber_positions(game_type.nr_cops, edges, sym, &mut there);
             let outcome_without = match res_without {
                 Ok(ok) => ok,
                 Err(err) => return WorkResult::new_res_err(outcome, err),
             };
-            send.send("vergleiche Ergebnisse".into()).ok();
+            there.update("vergleiche Ergebnisse").ok();
             use bf::Outcome::*;
             outcome.confidence = match (&outcome.outcome, &outcome_without) {
                 (CopsWin, CopsWin) => Confidence::Both,
@@ -390,7 +383,7 @@ impl BruteforceComputationState {
             };
             WorkResult::new_res(outcome)
         };
-        self.employ_worker(game_type, work, Some(recieve), WorkTask::Verify);
+        self.employ_worker(game_type, work, here, WorkTask::Verify);
     }
 
     fn save_result(&mut self, game_type: GameType, outcome: GameOutcome) {
@@ -568,27 +561,60 @@ impl BruteforceComputationState {
         }
     }
 
-    fn draw_workers(&self, ui: &mut Ui) {
-        for worker in &self.workers {
-            ui.horizontal(|ui| {
-                ui.add(egui::widgets::Spinner::new());
-                let task_str = match worker.task {
-                    WorkTask::Compute | WorkTask::ComputeStrat => "rechne ",
-                    WorkTask::Verify => "verifiziere ",
-                    WorkTask::Load | WorkTask::LoadStrat => "lade ",
-                    WorkTask::Store | WorkTask::StoreStrat => "speichere ",
-                };
-                ui.add(
-                    Label::new(format!(
-                        "{} {}",
-                        task_str,
-                        worker.game_type.as_tuple_string()
-                    ))
-                    .wrap(false),
-                );
-            });
-            if let Some(msg) = &worker.status {
-                ui.add(Label::new(msg).wrap(false));
+    fn draw_workers(&mut self, ui: &mut Ui) {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        for worker in &mut self.workers {
+            let paused = worker.manager.as_ref().map_or(false, |m| m.is_paused());
+            let animation = match (ui.input(|i| i.time) * 5.0) as isize % 5 {
+                _ if paused => ".... ",
+                0 => "     ",
+                1 => ".    ",
+                2 => "..   ",
+                3 => "...  ",
+                _ => ".... ",
+            };
+
+            let task_str = match worker.task {
+                WorkTask::Compute | WorkTask::ComputeStrat => "rechne ",
+                WorkTask::Verify => "verifiziere ",
+                WorkTask::Load | WorkTask::LoadStrat => "lade ",
+                WorkTask::Store | WorkTask::StoreStrat => "speichere ",
+            };
+
+            ui.add(
+                Label::new(format!(
+                    "{} {} {}",
+                    animation,
+                    task_str,
+                    worker.game_type.as_tuple_string()
+                ))
+                .wrap(false),
+            );
+
+            if let Some(r) = &mut worker.manager {
+                ui.add(Label::new(r.last_log()).wrap(false));
+                ui.horizontal(|ui| {
+                    let (label, cmd) = if paused {
+                        (" ▶ ", Command::Work)
+                    } else {
+                        (" ⏸ ", Command::Pause)
+                    };
+                    if ui.button(label).clicked() {
+                        r.send_command(cmd).ok();
+                    }
+                    if ui.add_enabled(paused, Button::new("abbrechen")).contains_pointer()
+                        && ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary))
+                        && paused
+                    {
+                        let ratio = r.abort_after(std::time::Duration::from_secs(5));
+                        if ratio < 1.0 {
+                            let text = format!("{}%", (ratio * 100.0) as isize);
+                            egui::show_tooltip_text(ui.ctx(), egui::Id::new(r as *const _), text);
+                        }
+                    } else {
+                        r.abort_aborting();
+                    }
+                });
             }
             ui.add_space(5.0);
         }

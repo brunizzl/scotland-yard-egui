@@ -7,6 +7,8 @@ use smallvec::SmallVec;
 
 use super::*;
 
+pub mod thread_manager;
+
 pub const MAX_COPS: usize = 8;
 
 /// this corresponds to one entry in CopConfigurations:
@@ -84,7 +86,7 @@ impl CopConfigurations {
         edges: &EdgeList,
         sym: &S,
         nr_cops: usize,
-        log: impl Fn(String),
+        manager: &mut thread_manager::LocalManager,
     ) -> Result<Self, String> {
         let nr_map_vertices = edges.nr_vertices();
         let curr_rest_config_size = 0.max(nr_cops as isize - 1) as usize;
@@ -120,10 +122,10 @@ impl CopConfigurations {
                 loop {
                     time_until_log_refresh -= 1;
                     if time_until_log_refresh == 0 {
-                        log(format!(
+                        manager.update(format!(
                             "liste Coppositionen, aktuell \n[{fst_cop}] + {:?}",
                             curr_rest_config
-                        ));
+                        ))?;
                         time_until_log_refresh = 50000;
                     }
 
@@ -469,20 +471,15 @@ impl RobberStratQueue {
 ///
 /// the whole thing is somewhat more complicated by the fact, that neighboring cop states `c` and `c'` may not both be stored in the same
 /// rotation. therefore one needs to constantly rotate between the two.
-use std::sync::mpsc;
 pub fn compute_safe_robber_positions<S>(
     nr_cops: usize,
     edges: EdgeList,
     sym: S,
-    log_sender: Option<mpsc::Sender<String>>,
+    manager: &mut thread_manager::LocalManager,
 ) -> Result<Outcome, String>
 where
     S: SymmetryGroup + Serialize,
 {
-    let log = |msg| {
-        log_sender.as_ref().map(|s| s.send(msg).ok());
-    };
-
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
     }
@@ -492,15 +489,15 @@ where
         ));
     }
 
-    log("liste Polizeipositionen".into());
-    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, log)?;
+    manager.update("liste Polizeipositionen")?;
+    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
 
-    log("initialisiere Räubergewinnfunktion".into());
+    manager.update("initialisiere Räubergewinnfunktion")?;
     let Some(mut f) = SafeRobberPositions::new(edges.nr_vertices(), &cop_moves) else {
         return Err("Zu wenig Speicherplatz (Räubergewinnfunktion zu groß)".to_owned());
     };
 
-    log("initialisiere Queue".into());
+    manager.update("initialisiere Queue")?;
     let Some(mut queue) = RobberStratQueue::new(&cop_moves) else {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
     };
@@ -542,11 +539,11 @@ where
     while let Some(curr_cop_positions) = queue.pop() {
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
-            log(format!(
+            manager.update(format!(
                 "berechne Räuberstrategie:\n{:.2}% in Queue ({})",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len()
-            ));
+            ))?;
             time_until_log_refresh = 2000;
         }
 
@@ -836,15 +833,11 @@ pub fn compute_cop_strategy<S>(
     nr_cops: usize,
     edges: EdgeList,
     sym: S,
-    log_sender: Option<mpsc::Sender<String>>,
+    manager: &mut thread_manager::LocalManager,
 ) -> Result<CopStrategy, String>
 where
     S: SymmetryGroup + Serialize,
 {
-    let log = |msg| {
-        log_sender.as_ref().map(|s| s.send(msg).ok());
-    };
-
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
     }
@@ -854,15 +847,15 @@ where
         ));
     }
 
-    log("liste Polizeipositionen".into());
-    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, log)?;
+    manager.update("liste Polizeipositionen")?;
+    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
 
-    log("initialisiere Cop Startegie".into());
+    manager.update("initialisiere Cop Startegie")?;
     let Some(mut f) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
         return Err("Zu wenig Speicherplatz (Copstrat zu groß)".to_owned());
     };
 
-    log("initialisiere Queue".into());
+    manager.update("initialisiere Queue")?;
     let Some(mut queue) = CopStratQueue::new(&cop_moves) else {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
     };
@@ -892,12 +885,12 @@ where
     while let Some(curr_cop_positions) = queue.pop() {
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
-            log(format!(
+            manager.update(format!(
                 "berechne Copstrategie:\n{:.2}% in Queue ({}), max {}",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len(),
                 queue.curr_max()
-            ));
+            ))?;
             time_until_log_refresh = 2000;
         }
 
@@ -948,7 +941,7 @@ where
         }
     }
 
-    log("berechne Fun Facts".into());
+    manager.update("berechne Fun Facts")?;
     let mut max_moves = 0;
     let mut cops_win = true;
     for vals in f.time.values() {
