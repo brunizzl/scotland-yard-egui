@@ -502,6 +502,8 @@ where
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
     };
 
+    let max_degree_less_than_nr_cops = edges.max_degree() < nr_cops;
+
     for (&fst_index, sub_configs) in &cop_moves.configurations {
         for (rest_index, _packed_rest_cops) in izip!(0.., sub_configs) {
             let index = CompactCopsIndex { fst_index, rest_index };
@@ -519,6 +521,22 @@ where
                 f.mark_robber_at(robber_range.at(cop_pos), false);
                 for n in edges.neighbors_of(cop_pos) {
                     f.mark_robber_at(robber_range.at(n), false);
+                }
+            }
+
+            // special case treatment: if nr cops is larger than nr neighbors of vertex,
+            // vertex is not marked cop win and all neighbors are marked, then the robber has lost.
+            // This is, because at least one cop is uninvolved in the current stalemate
+            // and can come and capture the robber.
+            // note: this is REALLY conservative and assumes no cop can guard two of
+            // the robber's neighbors at once. only in this case however will this procedure
+            // be of advantage.
+            if max_degree_less_than_nr_cops {
+                for (v, mut neighs) in izip!(0.., edges.neighbors()) {
+                    let safe_at = |v| f.robber_safe_at(robber_range.at(v));
+                    if safe_at(v) && neighs.all(|n| !safe_at(n)) {
+                        f.mark_robber_at(robber_range.at(v), false);
+                    }
                 }
             }
 

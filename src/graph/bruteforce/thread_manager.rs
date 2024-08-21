@@ -73,7 +73,7 @@ impl ExternManager {
             Some(start) => {
                 let now = std::time::Instant::now();
                 let passed = now - start;
-                let ratio = passed.div_duration_f32(dur);
+                let ratio = passed.as_secs_f32() / dur.as_secs_f32();
                 if ratio > 1.0 {
                     self.send_command(Command::Abort).ok();
                 }
