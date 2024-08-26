@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use bitvec::prelude as bv;
 use itertools::{izip, Itertools};
@@ -23,7 +23,7 @@ struct CompactCops {
 
 /// same structure as [`CompactCops`], except [`self.rest_index`] is an index into the [`CopConfigurations::configurations`] entry
 /// at key [`self.fst_index`]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct CompactCopsIndex {
     fst_index: usize,
     rest_index: usize,
@@ -34,7 +34,61 @@ pub struct CompactCopsIndex {
 pub struct CopConfigurations {
     nr_cops: usize, //stored in usize, but this can in praxis only be veeeery small
     nr_map_vertices: usize,
-    configurations: std::collections::BTreeMap<usize, Vec<usize>>,
+    configurations: BTreeMap<usize, Vec<usize>>,
+}
+
+/// same keys as [`CopConfigurations::configurations`], but values is just small fraction for better cash use
+/// in a value `.0` is configuration, `.1` is location in CopConfigurations.
+#[allow(dead_code)]
+struct CopConfigurationsSearchIndex {
+    locations: BTreeMap<usize, (Vec<usize>, Vec<usize>)>,
+}
+
+impl CopConfigurationsSearchIndex {
+    #[allow(dead_code)]
+    fn new(configs: &CopConfigurations) -> Result<Self, String> {
+        let mut locations = BTreeMap::new();
+        for (&key, values) in &configs.configurations {
+            const STRIDE: usize = 1000;
+            let lookup_len = values.len() / STRIDE;
+            let mut values_subset = Vec::new();
+            let mut index_subset = Vec::new();
+            values_subset
+                .try_reserve_exact(lookup_len + 1)
+                .map_err(|_| "zu wenig Speicher :(")?;
+            index_subset
+                .try_reserve_exact(lookup_len + 1)
+                .map_err(|_| "zu wenig Speicher :(")?;
+            for i in 0..lookup_len {
+                let i = i * STRIDE;
+                values_subset.push(values[i]);
+                index_subset.push(i);
+            }
+            values_subset.push(usize::MAX);
+            index_subset.push(values.len());
+            let old = locations.insert(key, (values_subset, index_subset));
+            assert!(old.is_none());
+        }
+        Ok(CopConfigurationsSearchIndex { locations })
+    }
+
+    #[allow(dead_code)]
+    fn find_index(
+        &self,
+        fst_cop: usize,
+        packed: usize,
+        configurations: &BTreeMap<usize, Vec<usize>>,
+    ) -> CompactCopsIndex {
+        let configs_part = configurations.get(&fst_cop).unwrap();
+        let (search_values, indices) = self.locations.get(&fst_cop).unwrap();
+        let start = match search_values.binary_search(&packed) {
+            Ok(i) => i,
+            Err(i) => i,
+        };
+        let search_range = indices[start]..indices[start + 1];
+        let rest_index = configs_part[search_range].binary_search(&packed).unwrap();
+        CompactCopsIndex { fst_index: fst_cop, rest_index }
+    }
 }
 
 /// fits whole tuple `other_cops` in integer, assuming all entries are always smaller than `nr_vertices`
@@ -112,7 +166,7 @@ impl CopConfigurations {
             true
         };
 
-        let mut configurations = std::collections::BTreeMap::new();
+        let mut configurations = BTreeMap::new();
 
         let mut time_until_log_refresh: usize = 1;
         let mut add_configs_for_first = |fst_cop: usize| {
@@ -306,7 +360,7 @@ impl CopConfigurations {
 /// wether that vertex is safe for the robber to stand on or not.
 #[derive(Serialize, Deserialize)]
 pub struct SafeRobberPositions {
-    safe: std::collections::BTreeMap<usize, bv::BitVec<u32>>,
+    safe: BTreeMap<usize, bv::BitVec<u32>>,
     nr_map_vertices: usize,
 }
 
@@ -334,7 +388,7 @@ impl RobberPosRange {
 impl SafeRobberPositions {
     /// returns [`Self`] if enough memory is available
     fn new(nr_map_vertices: usize, cop_moves: &CopConfigurations) -> Option<Self> {
-        let mut safe = std::collections::BTreeMap::new();
+        let mut safe = BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
             let nr_entries = indices.len().checked_mul(nr_map_vertices)?;
 
@@ -408,12 +462,13 @@ pub enum Outcome {
 }
 struct RobberStratQueue {
     queue: VecDeque<CompactCopsIndex>,
-    contained: std::collections::BTreeMap<usize, Vec<bool>>,
+    contained: BTreeMap<usize, Vec<bool>>,
+    pops_until_sorting: usize,
 }
 
 impl RobberStratQueue {
     pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
-        let mut contained = std::collections::BTreeMap::new();
+        let mut contained = BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
             let nr_entries = indices.len();
 
@@ -425,8 +480,13 @@ impl RobberStratQueue {
         }
 
         let mut queue = VecDeque::new();
-        queue.try_reserve(cop_moves.nr_configurations()).ok()?;
-        Some(Self { queue, contained })
+        let pops_until_sorting = cop_moves.nr_configurations();
+        queue.try_reserve(pops_until_sorting).ok()?;
+        Some(Self {
+            queue,
+            contained,
+            pops_until_sorting,
+        })
     }
 
     pub fn push(&mut self, entry: CompactCopsIndex) {
@@ -440,6 +500,17 @@ impl RobberStratQueue {
     pub fn pop(&mut self) -> Option<CompactCopsIndex> {
         let res = self.queue.pop_front();
         if let Some(i) = res {
+            if self.pops_until_sorting == 0 {
+                // to get better cash performance, we sort the queue.
+                // this may not be done too often, as sorting itself is not free.
+                // our approach is to only unqueue things that have been sorted once.
+                // thus: after every entry present in the current mem was popped, we sort again.
+                let mem = self.queue.make_contiguous();
+                mem.sort_unstable();
+                self.pops_until_sorting = mem.len();
+            } else {
+                self.pops_until_sorting -= 1;
+            }
             self.contained.get_mut(&i.fst_index).unwrap()[i.rest_index] = false;
         }
         res
@@ -551,6 +622,21 @@ where
     let mut safe_should_cops_move_to_curr = vec![false; nr_map_vertices];
     //intersection of `safe_should_cops_move_to_curr` and the vertices previously marked as safe for gamestate bevor curr
     let mut f_temp = vec![false; nr_map_vertices];
+
+    let start = std::time::Instant::now();
+    struct OnDrop<F: Fn()>(F);
+    impl<F: Fn()> Drop for OnDrop<F> {
+        fn drop(&mut self) {
+            self.0()
+        }
+    }
+    let _on_return = OnDrop(|| {
+        let end = std::time::Instant::now();
+        println!(
+            "beende rechnung nach {:?} fuer {nr_cops} cops auf {nr_map_vertices} knoten",
+            end - start
+        );
+    });
 
     //lines 4 + 5
     let mut time_until_log_refresh: usize = 1;
@@ -675,14 +761,14 @@ pub type UTime = u8;
 /// how many more moves the police need at most to catch the robber.
 #[derive(Serialize, Deserialize)]
 pub struct TimeToWin {
-    time: std::collections::BTreeMap<usize, Vec<UTime>>,
+    time: BTreeMap<usize, Vec<UTime>>,
     nr_map_vertices: usize,
 }
 
 impl TimeToWin {
     /// returns [`Self`] if enough memory is available
     fn new(nr_map_vertices: usize, cop_moves: &CopConfigurations) -> Option<Self> {
-        let mut time = std::collections::BTreeMap::new();
+        let mut time = BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
             let nr_entries = indices.len().checked_mul(nr_map_vertices)?;
 
@@ -743,13 +829,13 @@ enum InQueue {
 
 struct CopStratQueue {
     queue: VecDeque<CompactCopsIndex>,
-    status: std::collections::BTreeMap<usize, Vec<InQueue>>,
+    status: BTreeMap<usize, Vec<InQueue>>,
     curr_max_nr_moves: UTime,
 }
 
 impl CopStratQueue {
     pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
-        let mut contained = std::collections::BTreeMap::new();
+        let mut contained = BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {
             let nr_entries = indices.len();
 

@@ -36,13 +36,41 @@ mod ordered_colwise {
             self.len * self.len
         }
 
-        pub fn pack_coordinates(&self, x: isize, y: isize) -> SquareCoords {
+        pub fn pack_tiny_coordinates(&self, mut x: isize, mut y: isize) -> SquareCoords {
+            // computing modulo is way faster this way for values in this range
             let ilen = self.len as isize;
-            let quad_ilen = 4 * ilen;
-            debug_assert!(x >= -quad_ilen);
-            debug_assert!(y >= -quad_ilen);
-            let x = (x + quad_ilen) % ilen;
-            let y = (y + quad_ilen) % ilen;
+            debug_assert!(((-ilen)..(2 * ilen)).contains(&x));
+            debug_assert!(((-ilen)..(2 * ilen)).contains(&y));
+            if x < 0 {
+                x += ilen;
+            } else if x >= ilen {
+                x -= ilen;
+            }
+            if y < 0 {
+                y += ilen;
+            } else if y >= ilen {
+                y -= ilen;
+            }
+            debug_assert!((0..ilen).contains(&x));
+            debug_assert!((0..ilen).contains(&y));
+            SquareCoords { x, y }
+        }
+
+        pub fn pack_small_coordinates(&self, mut x: isize, mut y: isize) -> SquareCoords {
+            // computing modulo is faster this way for values just outside len (as is the case for x and y)
+            let ilen = self.len as isize;
+            while x < 0 {
+                x += ilen;
+            }
+            while y < 0 {
+                y += ilen;
+            }
+            while x >= ilen {
+                x -= ilen;
+            }
+            while y >= ilen {
+                y -= ilen;
+            }
             SquareCoords { x, y }
         }
 
@@ -69,6 +97,9 @@ where
     fn rotate_backward(self, x: isize, y: isize) -> (isize, isize);
 
     const ALL: [Self; COUNT];
+
+    /// if true, inf-norm is kept by rotation.
+    const KEEP_SIZE: bool;
 }
 
 /// there are 6 possible turns of triangulated torus embedded in [0, 1]^2.
@@ -128,6 +159,8 @@ impl Rotation<6> for Turn6 {
         Turn6::Skewed240,
         Turn6::Skewed300,
     ];
+
+    const KEEP_SIZE: bool = false;
 }
 
 /// there are 4 possible turns of torus with squares embedded in [0, 1]^2.
@@ -161,6 +194,8 @@ impl Rotation<4> for Turn4 {
     }
 
     const ALL: [Self; 4] = [Turn4::None, Turn4::Rot90, Turn4::Rot180, Turn4::Rot240];
+
+    const KEEP_SIZE: bool = true;
 }
 
 const BOOL: [bool; 2] = [false, true];
@@ -188,7 +223,11 @@ impl<const N: usize, R: Rotation<N>> Automorphism for TorusAutomorphism<N, R> {
             std::mem::swap(&mut x, &mut y);
         }
 
-        let new_coords = self.colwise.pack_coordinates(x, y);
+        let new_coords = if R::KEEP_SIZE {
+            self.colwise.pack_tiny_coordinates(x, y)
+        } else {
+            self.colwise.pack_small_coordinates(x, y)
+        };
         self.colwise.index_of(new_coords)
     }
 
@@ -209,7 +248,11 @@ impl<const N: usize, R: Rotation<N>> Automorphism for TorusAutomorphism<N, R> {
         x += self.new_origin.x();
         y += self.new_origin.y();
 
-        let new_coords = self.colwise.pack_coordinates(x, y);
+        let new_coords = if R::KEEP_SIZE {
+            self.colwise.pack_tiny_coordinates(x, y)
+        } else {
+            self.colwise.pack_small_coordinates(x, y)
+        };
         self.colwise.index_of(new_coords)
     }
 
@@ -261,52 +304,43 @@ impl<const N: usize, R: Rotation<N>> TorusSymmetry<N, R> {
     fn to_representative_impl(
         &self,
         cops: &mut [usize],
-    ) -> SmallVec<[&'_ TorusAutomorphism<N, R>; 4]> {
+    ) -> SmallVec<[&'_ TorusAutomorphism<N, R>; 8]> {
         if cops.is_empty() {
             //the first entry in self.autos is always the identity
             debug_assert!(self.autos[0].forward().enumerate().take(20).all(|(i, j)| i == j));
             return smallvec![&self.autos[0]];
         }
-        //each configuration gets a value. the only important thing is that
-        //config_hash_value is injective, because we choose the configuration with lowest value.
-        //if multiple transformations yield the same (best) configuration,
-        //we have to return all these best transformations at once.
-        let config_hash_value = |rotated: &[_]| {
-            let mut acc = 0;
-            for &c in rotated.iter() {
-                debug_assert!(c < self.nr_vertices);
-                acc += c;
-                acc *= self.nr_vertices;
-            }
-            acc
-        };
-        let mut best_autos = SmallVec::<[&TorusAutomorphism<N, R>; 4]>::new();
-        let mut best_val = usize::MAX;
+
+        let mut best_autos = SmallVec::<[&TorusAutomorphism<N, R>; 8]>::new();
+        let mut best_storage = [usize::MAX; bruteforce::MAX_COPS];
+        let best_val = &mut best_storage[..cops.len()];
+
+        let mut new_storage = [usize::MAX; bruteforce::MAX_COPS];
+        let new_val = &mut new_storage[..cops.len()];
         for &cop in cops.iter() {
             for auto in self.autos_of(cop) {
-                let mut rotated = [0usize; bruteforce::MAX_COPS];
-                let rotated = &mut rotated[..cops.len()];
-                for (rc, &c) in izip!(rotated.iter_mut(), cops.iter()) {
-                    *rc = auto.apply_forward(c);
+                for (nv, &c) in izip!(new_val.iter_mut(), cops.iter()) {
+                    *nv = auto.apply_forward(c);
                 }
-                rotated.sort();
-                debug_assert_eq!(rotated[0], 0);
-                let new_val = config_hash_value(rotated);
-                if new_val == best_val {
-                    best_autos.push(auto);
-                }
-                if new_val < best_val {
-                    best_val = new_val;
-                    best_autos.clear();
-                    best_autos.push(auto);
+                new_val.sort_unstable();
+                debug_assert_eq!(new_val[0], 0);
+                match new_val.cmp(&best_val) {
+                    std::cmp::Ordering::Equal => {
+                        best_autos.push(auto);
+                    },
+                    std::cmp::Ordering::Less => {
+                        best_val.copy_from_slice(new_val);
+                        best_autos.clear();
+                        best_autos.push(auto);
+                    },
+                    std::cmp::Ordering::Greater => {
+                        //discard this automorphism
+                    },
                 }
             }
         }
-        assert!(!best_autos.is_empty());
-        for c in cops.iter_mut() {
-            *c = best_autos[0].apply_forward(*c);
-        }
-        cops.sort();
+        debug_assert!(!best_autos.is_empty());
+        cops.copy_from_slice(best_val);
 
         best_autos
     }
@@ -314,7 +348,7 @@ impl<const N: usize, R: Rotation<N>> TorusSymmetry<N, R> {
 
 impl SymmetryGroup for TorusSymmetry6 {
     type Auto = TorusAutomorphism6;
-    type AutoIter<'a> = SmallVec<[&'a TorusAutomorphism6; 4]>;
+    type AutoIter<'a> = SmallVec<[&'a TorusAutomorphism6; 8]>;
 
     fn all_automorphisms(&self) -> &[Self::Auto] {
         &self.autos
@@ -335,7 +369,7 @@ impl SymmetryGroup for TorusSymmetry6 {
 
 impl SymmetryGroup for TorusSymmetry4 {
     type Auto = TorusAutomorphism4;
-    type AutoIter<'a> = SmallVec<[&'a TorusAutomorphism4; 4]>;
+    type AutoIter<'a> = SmallVec<[&'a TorusAutomorphism4; 8]>;
 
     fn all_automorphisms(&self) -> &[Self::Auto] {
         &self.autos

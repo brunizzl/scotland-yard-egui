@@ -114,13 +114,6 @@ pub struct ExplicitClasses {
 }
 
 impl ExplicitClasses {
-    pub fn nr_vertices(&self) -> usize {
-        let len = self.class.len();
-        debug_assert_eq!(len, self.vertex_representative.len());
-        debug_assert_eq!(len, self.to_representative.nr_rows());
-        len
-    }
-
     pub fn enumerate_platonic_symmetry_transforms(plat: &ConvexHull) -> Vec<Matrix3x3> {
         //indicator for platonic, not guarantee
         let degree = plat.edges.max_degree();
@@ -413,77 +406,43 @@ impl ExplicitClasses {
 
         cops.sort_by_key(|&c| self.class[c]);
         let rotate_class = self.class[cops[0]];
-        let mut all_autos = cops
+        let all_autos = cops
             .iter()
             .take_while(|&&c| self.class[c] == rotate_class)
             .flat_map(|&c| self.transforms_of(c));
 
-        if cops.len() == 1 {
-            let rot = all_autos.next().unwrap();
-            cops[0] = rot.forward[cops[0]];
-            return smallvec::smallvec![rot];
-        }
-
-        //each configuration gets a value. the only important thing is that
-        //config_hash_value is injective, because we choose the configuration with lowest value.
-        //if multiple transformations yield the same (best) configuration,
-        //we have to return all these best transformations at once.
-        let config_hash_value = |rotated: &[_]| {
-            let mut acc = 0;
-            for &c in rotated.iter().rev() {
-                debug_assert!(c < self.nr_vertices());
-                acc += c;
-                acc *= self.nr_vertices();
-            }
-            acc
-        };
         let mut best_autos = SmallVec::<[&ExplicitAutomorphism; 4]>::new();
-        let mut best_val = usize::MAX;
+        let mut best_storage = [usize::MAX; bruteforce::MAX_COPS];
+        let best_val = &mut best_storage[..cops.len()];
+
+        let mut new_storage = [usize::MAX; bruteforce::MAX_COPS];
+        let new_val = &mut new_storage[..cops.len()];
+
         for auto in all_autos {
-            let mut rotated = [0usize; bruteforce::MAX_COPS];
-            let rotated = &mut rotated[..cops.len()];
-            for (rc, &c) in izip!(rotated.iter_mut(), cops.iter()) {
-                *rc = auto.forward[c];
+            for (nv, &c) in izip!(new_val.iter_mut(), cops.iter()) {
+                *nv = auto.forward[c];
             }
-            rotated.sort();
+            new_val.sort_unstable();
             //this relies on the classes beeing sorted by what the smallest vertex appearing in one is.
-            debug_assert_eq!(self.class[rotated[0]], rotate_class);
+            debug_assert_eq!(self.class[new_val[0]], rotate_class);
 
-            let new_val = config_hash_value(rotated);
-            if new_val == best_val {
-                debug_assert!({
-                    //two transformations yielding the same function value is only expected to
-                    //happen, if both also yield the same configuration.
-                    let prev_best_rot = best_autos[0];
-                    let mut hit = [false; bruteforce::MAX_COPS];
-                    for &c in cops.iter() {
-                        let prev_rotated = prev_best_rot.forward[c];
-                        if let Some(j) = rotated
-                            .iter()
-                            .enumerate()
-                            .position(|(j, &cc)| !hit[j] && cc == prev_rotated)
-                        {
-                            hit[j] = true;
-                        } else {
-                            panic!()
-                        }
-                    }
-                    hit[..rotated.len()].iter().all(|&x| x)
-                });
-                best_autos.push(auto);
-            }
-            if new_val < best_val {
-                best_val = new_val;
-                best_autos.clear();
-                best_autos.push(auto);
+            match new_val.cmp(&best_val) {
+                std::cmp::Ordering::Equal => {
+                    best_autos.push(auto);
+                },
+                std::cmp::Ordering::Less => {
+                    best_val.copy_from_slice(new_val);
+                    best_autos.clear();
+                    best_autos.push(auto);
+                },
+                std::cmp::Ordering::Greater => {
+                    //discard this automorphism
+                },
             }
         }
+        debug_assert!(!best_autos.is_empty());
+        cops.copy_from_slice(best_val);
 
-        assert!(!best_autos.is_empty());
-        for c in cops.iter_mut() {
-            *c = best_autos[0].forward[*c];
-        }
-        cops.sort();
         best_autos
     }
 }
