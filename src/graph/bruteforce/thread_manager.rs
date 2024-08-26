@@ -7,7 +7,7 @@ pub enum Command {
     Abort,
 }
 
-pub const PAUSE_LOG: &str = "pausiert";
+pub const PAUSE_LOG: &str = "##**PAUSED**##";
 
 pub struct LocalManager {
     commands: mpsc::Receiver<Command>,
@@ -52,7 +52,6 @@ pub struct ExternManager {
     commands: mpsc::Sender<Command>,
     log: mpsc::Receiver<String>,
     last_log: String,
-    abort_since: Option<std::time::Instant>,
     paused: bool,
 }
 
@@ -62,28 +61,6 @@ impl ExternManager {
             self.paused = false;
         }
         self.commands.send(cmd)
-    }
-
-    pub fn abort_after(&mut self, dur: std::time::Duration) -> f32 {
-        match self.abort_since {
-            None => {
-                self.abort_since = Some(std::time::Instant::now());
-                0.0
-            },
-            Some(start) => {
-                let now = std::time::Instant::now();
-                let passed = now - start;
-                let ratio = passed.as_secs_f32() / dur.as_secs_f32();
-                if ratio > 1.0 {
-                    self.send_command(Command::Abort).ok();
-                }
-                ratio
-            },
-        }
-    }
-
-    pub fn abort_aborting(&mut self) {
-        self.abort_since = None;
     }
 
     pub fn update(&mut self) {
@@ -116,7 +93,6 @@ pub fn build_managers() -> (ExternManager, LocalManager) {
         commands: cmd_send,
         log: log_rcv,
         last_log: String::new(),
-        abort_since: None,
         paused: false,
     };
     (extrn, local)

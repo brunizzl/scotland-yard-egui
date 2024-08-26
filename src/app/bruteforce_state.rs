@@ -1,4 +1,4 @@
-use std::{fs, io::Write, path::PathBuf, thread};
+use std::{fs, io::Write, path::PathBuf, thread, time::Instant};
 
 use itertools::izip;
 use serde::{Deserialize, Serialize};
@@ -157,6 +157,7 @@ struct GameOutcome {
 use std::collections::BTreeMap;
 pub struct BruteforceComputationState {
     workers: Vec<Worker>,
+    abort_worker: Option<(GameType, WorkTask, Instant)>,
     curr_game_type: GameType,
     robber_strat_stored: bool,
     cops_strat_stored: bool,
@@ -169,6 +170,7 @@ impl BruteforceComputationState {
     pub fn new() -> Self {
         Self {
             workers: Vec::new(),
+            abort_worker: None,
             curr_game_type: GameType {
                 nr_cops: usize::MAX,
                 resolution: 0,
@@ -563,19 +565,25 @@ impl BruteforceComputationState {
 
     fn draw_workers(&mut self, ui: &mut Ui) {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        let mouse_down = ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
+
         for worker in &mut self.workers {
             let paused = worker.manager.as_ref().map_or(false, |m| m.is_paused());
-            let animation = match (ui.input(|i| i.time) * 5.0) as isize % 5 {
-                _ if paused => ".... ",
-                0 => "     ",
-                1 => ".    ",
-                2 => "..   ",
-                3 => "...  ",
-                _ => ".... ",
+            let animation = match (ui.input(|i| i.time) * 5.0) as isize % 9 {
+                _ if paused => " . . ",
+                0 => ".    ",
+                1 => "..   ",
+                2 => "...  ",
+                3 => ".... ",
+                4 => " ... ",
+                5 => "  .. ",
+                6 => "   . ",
+                _ => "     ",
             };
 
             let task_str = match worker.task {
-                WorkTask::Compute | WorkTask::ComputeStrat => "rechne ",
+                WorkTask::Compute => "rechne (R) ",
+                WorkTask::ComputeStrat => "rechne (C) ",
                 WorkTask::Verify => "verifiziere ",
                 WorkTask::Load | WorkTask::LoadStrat => "lade ",
                 WorkTask::Store | WorkTask::StoreStrat => "speichere ",
@@ -602,21 +610,35 @@ impl BruteforceComputationState {
                     if ui.button(label).clicked() {
                         r.send_command(cmd).ok();
                     }
-                    if ui.add_enabled(paused, Button::new("abbrechen")).contains_pointer()
-                        && ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary))
-                        && paused
-                    {
-                        let ratio = r.abort_after(std::time::Duration::from_secs(5));
-                        if ratio < 1.0 {
-                            let text = format!("{}%", (ratio * 100.0) as isize);
-                            egui::show_tooltip_text(ui.ctx(), egui::Id::new(r as *const _), text);
+                    let abort_button = ui.add_enabled(paused, Button::new("abbrechen"));
+                    if abort_button.contains_pointer() && paused && mouse_down {
+                        if let Some((gt, t, start)) = self.abort_worker {
+                            if gt == worker.game_type && t == worker.task {
+                                let time_since_click = Instant::now() - start;
+                                let ratio = time_since_click.as_secs_f32() / 5.0;
+                                if ratio < 1.0 {
+                                    let text = format!("{}%", (ratio * 100.0) as isize);
+                                    let id = egui::Id::new(r as *const _);
+                                    egui::show_tooltip_text(ui.ctx(), id, text);
+                                } else {
+                                    r.send_command(Command::Abort).ok();
+                                }
+                            }
+                        } else {
+                            // only set to this if mouse was released after last abort
+                            assert!(self.abort_worker.is_none());
+                            self.abort_worker =
+                                Some((worker.game_type, worker.task, Instant::now()));
                         }
-                    } else {
-                        r.abort_aborting();
                     }
                 });
             }
             ui.add_space(5.0);
+        }
+        if !mouse_down {
+            // only set to none if mouse is no longer pressed
+            // -> require mouse release to abort multiple workers
+            self.abort_worker = None;
         }
     }
 
