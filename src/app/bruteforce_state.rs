@@ -163,7 +163,7 @@ pub struct BruteforceComputationState {
     cops_strat_stored: bool,
     results: BTreeMap<GameType, GameOutcome>,
     cop_strats: BTreeMap<GameType, bf::CopStrategy>,
-    error: Option<(GameType, String)>,
+    errors: Vec<(GameType, String)>,
 }
 
 impl BruteforceComputationState {
@@ -180,7 +180,7 @@ impl BruteforceComputationState {
             cops_strat_stored: false,
             results: BTreeMap::new(),
             cop_strats: BTreeMap::new(),
-            error: None,
+            errors: Vec::new(),
         }
     }
 
@@ -194,9 +194,7 @@ impl BruteforceComputationState {
 
     fn process_result(&mut self, game_type: GameType, res: WorkResult) {
         if let Some(err) = res.error {
-            self.error = Some((game_type, err));
-        } else if res.result.is_some() || res.cop_strat.is_some() {
-            self.error = None;
+            self.errors.push((game_type, err));
         }
 
         if let Some(outcome) = res.result {
@@ -450,8 +448,11 @@ impl BruteforceComputationState {
                 Err(err) => return WorkResult::new_err(err),
             };
             let buff_reader = std::io::BufReader::new(file);
-            match rmp_serde::decode::from_read(buff_reader) {
-                Ok(res) => WorkResult::new_strat(res),
+            match rmp_serde::decode::from_read::<_, bf::CopStrategy>(buff_reader) {
+                Ok(mut res) => {
+                    res.compute_serde_skipped();
+                    WorkResult::new_strat(res)
+                },
                 Err(err) => WorkResult::new_err(err),
             }
         };
@@ -551,6 +552,11 @@ impl BruteforceComputationState {
                 } else if ui.button("löschen").clicked() {
                     action = Some((Action::Delete, *game_type));
                 }
+                ui.menu_button("meiste Züge", |ui| {
+                    for extreme_pos in &strat.extreme_positions {
+                        ui.label(format!("{extreme_pos:?}"));
+                    }
+                });
             });
             ui.add_space(5.0);
         }
@@ -642,6 +648,27 @@ impl BruteforceComputationState {
         }
     }
 
+    fn draw_errors(&mut self, ui: &mut Ui) {
+        let mut delete = None;
+        for (i, (game_type, err)) in izip!(0.., &self.errors) {
+            ui.add_space(5.0);
+            ui.add(
+                Label::new(format!(
+                    "Fehler für {}:\n{}",
+                    game_type.as_tuple_string(),
+                    err
+                ))
+                .wrap(false),
+            );
+            if ui.button("löschen").clicked() {
+                delete = Some(i);
+            }
+        }
+        if let Some(i) = delete {
+            self.errors.remove(i);
+        }
+    }
+
     pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map) {
         ui.collapsing("Bruteforce", |ui| {
             self.check_on_workers();
@@ -660,24 +687,29 @@ impl BruteforceComputationState {
             ui.horizontal(|ui| {
                 let nr_active = self.workers.len();
                 if NATIVE && nr_active > 0 {
-                    let end = if nr_active == 1 { "" } else { "en" };
-                    let msg = format!("{} Rechnung{}", nr_active, end);
-                    ui.menu_button(msg, |ui| {
+                    ui.menu_button(format!("{nr_active} aktiv"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_workers(ui));
                     });
                 } else if NATIVE {
-                    ui.add_enabled(false, Button::new("0 Rechnungen"));
+                    ui.add_enabled(false, Button::new("0 aktiv"));
                 }
 
                 let nr_done = self.results.len() + self.cop_strats.len();
                 if nr_done > 0 {
-                    let end = if nr_done == 1 { "" } else { "se" };
-                    let msg = format!("{} Ergebnis{}", nr_done, end);
-                    ui.menu_button(msg, |ui| {
+                    ui.menu_button(format!("{nr_done} fertig"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_results(ui));
                     });
                 } else {
-                    ui.add_enabled(false, Button::new("0 Ergebnisse"));
+                    ui.add_enabled(false, Button::new("0 fertig"));
+                }
+
+                let nr_errs = self.errors.len();
+                if nr_errs > 0 {
+                    ui.menu_button(format!("{nr_errs} 💥"), |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| self.draw_errors(ui));
+                    });
+                } else {
+                    ui.add_enabled(false, Button::new("0 💥"));
                 }
             });
             ui.add_space(5.0);
@@ -694,7 +726,7 @@ impl BruteforceComputationState {
             ui.horizontal(|ui| {
                 let curr_known = self.results.contains_key(&game_type);
                 let enable_compute = !computing_robber_strat && !curr_known;
-                let compute_button = Button::new("Berechnen");
+                let compute_button = Button::new("berechnen");
                 if ui
                     .add_enabled(enable_compute, compute_button)
                     .on_hover_text(disclaimer)
@@ -716,7 +748,7 @@ impl BruteforceComputationState {
             ui.horizontal(|ui| {
                 let curr_known = self.cop_strats.contains_key(&game_type);
                 let enable_compute = !computing_cop_strat && !curr_known;
-                let compute_button = Button::new("Berechnen");
+                let compute_button = Button::new("berechnen");
                 if ui
                     .add_enabled(enable_compute, compute_button)
                     .on_hover_text(disclaimer)
@@ -730,15 +762,6 @@ impl BruteforceComputationState {
                     self.load_strat_from(game_type);
                 }
             });
-
-            if let Some((game_type, err)) = &self.error {
-                ui.add_space(5.0);
-                ui.label(format!(
-                    "Fehler für {}:\n{}",
-                    game_type.as_tuple_string(),
-                    err
-                ));
-            }
         });
     }
 }

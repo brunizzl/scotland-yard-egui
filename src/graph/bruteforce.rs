@@ -348,11 +348,14 @@ impl CopConfigurations {
         })
     }
 
-    pub fn all_positions_unpacked(&self) -> impl Iterator<Item = [usize; MAX_COPS]> + '_ {
+    fn all_positions(&self) -> impl Iterator<Item = CompactCopsIndex> + '_ {
         self.configurations.iter().flat_map(move |(&k, configs_part)| {
-            (0..configs_part.len())
-                .map(move |i| self.eager_unpack(CompactCopsIndex { fst_index: k, rest_index: i }))
+            (0..configs_part.len()).map(move |i| CompactCopsIndex { fst_index: k, rest_index: i })
         })
+    }
+
+    pub fn all_positions_unpacked(&self) -> impl Iterator<Item = [usize; MAX_COPS]> + '_ {
+        self.all_positions().map(|index| self.eager_unpack(index))
     }
 }
 
@@ -464,6 +467,7 @@ struct RobberStratQueue {
     queue: VecDeque<CompactCopsIndex>,
     contained: BTreeMap<usize, Vec<bool>>,
     pops_until_sorting: usize,
+    times_sorted: usize,
 }
 
 impl RobberStratQueue {
@@ -486,6 +490,7 @@ impl RobberStratQueue {
             queue,
             contained,
             pops_until_sorting,
+            times_sorted: 0,
         })
     }
 
@@ -508,6 +513,7 @@ impl RobberStratQueue {
                 let mem = self.queue.make_contiguous();
                 mem.sort_unstable();
                 self.pops_until_sorting = mem.len();
+                self.times_sorted += 1;
             } else {
                 self.pops_until_sorting -= 1;
             }
@@ -518,6 +524,10 @@ impl RobberStratQueue {
 
     pub fn len(&self) -> usize {
         self.queue.len()
+    }
+
+    pub fn times_sorted(&self) -> usize {
+        self.times_sorted
     }
 }
 
@@ -644,9 +654,10 @@ where
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
             manager.update(format!(
-                "berechne Räuberstrategie:\n{:.2}% in Queue ({})",
+                "berechne Räuberstrategie:\n{:.2}% in Queue ({}), Runde {}",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
-                queue.len()
+                queue.len(),
+                queue.times_sorted(),
             ))?;
             time_until_log_refresh = 2000;
         }
@@ -807,6 +818,10 @@ pub struct CopStrategy {
     pub time_to_win: TimeToWin,
     pub cop_moves: CopConfigurations,
     pub max_moves: usize,
+    /// selection of at most 20 cop configurations
+    /// where there is a vertex which let's the robber loose in maximal many moves
+    #[serde(skip)] // marked skip to stay backwards compatible.
+    pub extreme_positions: Vec<Vec<usize>>,
     pub cops_win: bool,
 }
 
@@ -816,6 +831,21 @@ impl CopStrategy {
         cops: impl Iterator<Item = usize>,
     ) -> (SmallVec<[&dyn DynAutomorphism; 4]>, CompactCopsIndex) {
         self.cop_moves.pack_dyn(self.symmetry.to_dyn(), cops)
+    }
+
+    /// values not stored because that would break the format are computed here
+    pub fn compute_serde_skipped(&mut self) {
+        if self.extreme_positions.is_empty() {
+            let max_moves = self.max_moves as UTime;
+            for index in self.cop_moves.all_positions() {
+                if self.time_to_win.nr_moves_left(index).contains(&max_moves) {
+                    self.extreme_positions.push(self.cop_moves.unpack(index).collect_vec());
+                    if self.extreme_positions.len() == 20 {
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1058,11 +1088,15 @@ where
         }
     }
 
-    Ok(CopStrategy {
+    let mut res = CopStrategy {
         symmetry: sym.into_enum(),
         time_to_win: f,
         cop_moves,
         max_moves: max_moves as usize,
+        extreme_positions: Vec::new(),
         cops_win,
-    })
+    };
+    res.compute_serde_skipped();
+
+    Ok(res)
 }
