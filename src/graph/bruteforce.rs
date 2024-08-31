@@ -9,6 +9,9 @@ use super::*;
 
 pub mod thread_manager;
 
+mod queues;
+use queues::{CopStratQueue, RobberStratQueue};
+
 pub const MAX_COPS: usize = 8;
 
 /// this corresponds to one entry in CopConfigurations:
@@ -35,60 +38,6 @@ pub struct CopConfigurations {
     nr_cops: usize, //stored in usize, but this can in praxis only be veeeery small
     nr_map_vertices: usize,
     configurations: BTreeMap<usize, Vec<usize>>,
-}
-
-/// same keys as [`CopConfigurations::configurations`], but values is just small fraction for better cash use
-/// in a value `.0` is configuration, `.1` is location in CopConfigurations.
-#[allow(dead_code)]
-struct CopConfigurationsSearchIndex {
-    locations: BTreeMap<usize, (Vec<usize>, Vec<usize>)>,
-}
-
-impl CopConfigurationsSearchIndex {
-    #[allow(dead_code)]
-    fn new(configs: &CopConfigurations) -> Result<Self, String> {
-        let mut locations = BTreeMap::new();
-        for (&key, values) in &configs.configurations {
-            const STRIDE: usize = 1000;
-            let lookup_len = values.len() / STRIDE;
-            let mut values_subset = Vec::new();
-            let mut index_subset = Vec::new();
-            values_subset
-                .try_reserve_exact(lookup_len + 1)
-                .map_err(|_| "zu wenig Speicher :(")?;
-            index_subset
-                .try_reserve_exact(lookup_len + 1)
-                .map_err(|_| "zu wenig Speicher :(")?;
-            for i in 0..lookup_len {
-                let i = i * STRIDE;
-                values_subset.push(values[i]);
-                index_subset.push(i);
-            }
-            values_subset.push(usize::MAX);
-            index_subset.push(values.len());
-            let old = locations.insert(key, (values_subset, index_subset));
-            assert!(old.is_none());
-        }
-        Ok(CopConfigurationsSearchIndex { locations })
-    }
-
-    #[allow(dead_code)]
-    fn find_index(
-        &self,
-        fst_cop: usize,
-        packed: usize,
-        configurations: &BTreeMap<usize, Vec<usize>>,
-    ) -> CompactCopsIndex {
-        let configs_part = configurations.get(&fst_cop).unwrap();
-        let (search_values, indices) = self.locations.get(&fst_cop).unwrap();
-        let start = match search_values.binary_search(&packed) {
-            Ok(i) => i,
-            Err(i) => i,
-        };
-        let search_range = indices[start]..indices[start + 1];
-        let rest_index = configs_part[search_range].binary_search(&packed).unwrap();
-        CompactCopsIndex { fst_index: fst_cop, rest_index }
-    }
 }
 
 /// fits whole tuple `other_cops` in integer, assuming all entries are always smaller than `nr_vertices`
@@ -463,73 +412,6 @@ pub enum Outcome {
     CopsWin,
     RobberWins(RobberWinData),
 }
-struct RobberStratQueue {
-    queue: VecDeque<CompactCopsIndex>,
-    contained: BTreeMap<usize, Vec<bool>>,
-    pops_until_sorting: usize,
-    times_sorted: usize,
-}
-
-impl RobberStratQueue {
-    pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
-        let mut contained = BTreeMap::new();
-        for (&fst_index, indices) in &cop_moves.configurations {
-            let nr_entries = indices.len();
-
-            let mut data = Vec::new();
-            data.try_reserve(nr_entries).ok()?;
-            data.resize(nr_entries, false);
-            let old = contained.insert(fst_index, data);
-            debug_assert!(old.is_none());
-        }
-
-        let mut queue = VecDeque::new();
-        let pops_until_sorting = cop_moves.nr_configurations();
-        queue.try_reserve(pops_until_sorting).ok()?;
-        Some(Self {
-            queue,
-            contained,
-            pops_until_sorting,
-            times_sorted: 0,
-        })
-    }
-
-    pub fn push(&mut self, entry: CompactCopsIndex) {
-        let is_there = &mut self.contained.get_mut(&entry.fst_index).unwrap()[entry.rest_index];
-        if !*is_there {
-            self.queue.push_back(entry);
-            *is_there = true;
-        }
-    }
-
-    pub fn pop(&mut self) -> Option<CompactCopsIndex> {
-        let res = self.queue.pop_front();
-        if let Some(i) = res {
-            if self.pops_until_sorting == 0 {
-                // to get better cash performance, we sort the queue.
-                // this may not be done too often, as sorting itself is not free.
-                // our approach is to only unqueue things that have been sorted once.
-                // thus: after every entry present in the current mem was popped, we sort again.
-                let mem = self.queue.make_contiguous();
-                mem.sort_unstable();
-                self.pops_until_sorting = mem.len();
-                self.times_sorted += 1;
-            } else {
-                self.pops_until_sorting -= 1;
-            }
-            self.contained.get_mut(&i.fst_index).unwrap()[i.rest_index] = false;
-        }
-        res
-    }
-
-    pub fn len(&self) -> usize {
-        self.queue.len()
-    }
-
-    pub fn times_sorted(&self) -> usize {
-        self.times_sorted
-    }
-}
 
 /// algorithm 2.2 of Fabian Hamann's masters thesis.
 ///
@@ -657,7 +539,7 @@ where
                 "berechne Räuberstrategie:\n{:.2}% in Queue ({}), Runde {}",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len(),
-                queue.times_sorted(),
+                queue.rounds_complete(),
             ))?;
             time_until_log_refresh = 2000;
         }
@@ -846,119 +728,6 @@ impl CopStrategy {
                 }
             }
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InQueue {
-    No,
-    Yes,
-    NoAndAtMax,
-    YesAndAtMax,
-}
-
-struct CopStratQueue {
-    queue: VecDeque<CompactCopsIndex>,
-    status: BTreeMap<usize, Vec<InQueue>>,
-    curr_max_nr_moves: UTime,
-}
-
-impl CopStratQueue {
-    pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
-        let mut contained = BTreeMap::new();
-        for (&fst_index, indices) in &cop_moves.configurations {
-            let nr_entries = indices.len();
-
-            let mut data = Vec::new();
-            data.try_reserve(nr_entries).ok()?;
-            data.resize(nr_entries, InQueue::No);
-            let old = contained.insert(fst_index, data);
-            debug_assert!(old.is_none());
-        }
-
-        let mut queue = VecDeque::new();
-        queue.try_reserve(cop_moves.nr_configurations()).ok()?;
-        Some(Self {
-            queue,
-            status: contained,
-            curr_max_nr_moves: 1,
-        })
-    }
-
-    fn status_mut_of(&mut self, entry: CompactCopsIndex) -> &mut InQueue {
-        &mut self.status.get_mut(&entry.fst_index).unwrap()[entry.rest_index]
-    }
-
-    pub fn push(&mut self, entry: CompactCopsIndex) {
-        let entry_status = self.status_mut_of(entry);
-
-        let enqueue = match *entry_status {
-            InQueue::No => {
-                *entry_status = InQueue::Yes;
-                true
-            },
-            InQueue::NoAndAtMax => {
-                *entry_status = InQueue::YesAndAtMax;
-                true
-            },
-            _ => false,
-        };
-        if enqueue {
-            self.queue.push_back(entry);
-        }
-    }
-
-    pub fn mark_as_at_max(&mut self, entry: CompactCopsIndex) {
-        let entry_status = self.status_mut_of(entry);
-        match *entry_status {
-            InQueue::No => {
-                *entry_status = InQueue::NoAndAtMax;
-            },
-            InQueue::Yes => {
-                *entry_status = InQueue::YesAndAtMax;
-            },
-            _ => {},
-        }
-    }
-
-    fn pop_and_mark_popped(&mut self) -> Option<CompactCopsIndex> {
-        let res = self.queue.pop_front();
-        if let Some(entry) = res {
-            let entry_status = self.status_mut_of(entry);
-            match *entry_status {
-                InQueue::Yes => *entry_status = InQueue::No,
-                InQueue::YesAndAtMax => *entry_status = InQueue::NoAndAtMax,
-                _ => panic!(),
-            }
-        }
-        res
-    }
-
-    pub fn pop(&mut self) -> Option<CompactCopsIndex> {
-        if let Some(entry) = self.pop_and_mark_popped() {
-            return Some(entry);
-        }
-        self.curr_max_nr_moves += 1;
-        for (&fst_index, part) in &mut self.status {
-            for (rest_index, entry_status) in part.iter_mut().enumerate() {
-                if *entry_status == InQueue::NoAndAtMax {
-                    *entry_status = InQueue::Yes;
-                    self.queue.push_back(CompactCopsIndex { fst_index, rest_index });
-                }
-                if *entry_status == InQueue::YesAndAtMax {
-                    *entry_status = InQueue::Yes;
-                }
-            }
-        }
-        self.pop_and_mark_popped()
-    }
-
-    pub fn len(&self) -> usize {
-        self.queue.len()
-    }
-
-    pub fn curr_max(&self) -> UTime {
-        self.curr_max_nr_moves
     }
 }
 
