@@ -76,7 +76,7 @@ pub trait SymmetryGroup {
 
     /// enumerates one vertex of each vertex class. this vertex will be result of [`Self::to_representative`]
     /// if a vertex of it's class is passed as only vertex.
-    fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone;
+    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone;
 
     /// assumes identity at beginning
     fn all_automorphisms(&self) -> &[Self::Auto];
@@ -84,6 +84,8 @@ pub trait SymmetryGroup {
     const HAS_SYMMETRY: bool = true;
 
     fn into_enum(self) -> SymGroup;
+
+    fn nr_vertices(&self) -> usize;
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -108,7 +110,7 @@ impl SymmetryGroup for NoSymmetry {
         std::iter::once(&self.identity[0])
     }
 
-    fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
+    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
         self.identity[0].forward()
     }
 
@@ -118,6 +120,10 @@ impl SymmetryGroup for NoSymmetry {
 
     fn into_enum(self) -> SymGroup {
         SymGroup::None(self)
+    }
+
+    fn nr_vertices(&self) -> usize {
+        self.identity[0].nr_vertices
     }
 
     const HAS_SYMMETRY: bool = false;
@@ -186,25 +192,25 @@ impl SymGroup {
     }
 }
 
+pub fn compare<I, J>(f: I, g: J) -> std::cmp::Ordering
+where
+    I: ExactSizeIterator<Item = usize>,
+    J: ExactSizeIterator<Item = usize>,
+{
+    assert_eq!(f.len(), g.len());
+    for (fx, gx) in izip!(f, g) {
+        match fx.cmp(&gx) {
+            std::cmp::Ordering::Equal => {},
+            c => return c,
+        };
+    }
+    std::cmp::Ordering::Equal
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
     use std::cmp::Ordering;
-
-    pub fn compare<I, J>(f: I, g: J) -> Ordering
-    where
-        I: ExactSizeIterator<Item = usize>,
-        J: ExactSizeIterator<Item = usize>,
-    {
-        assert_eq!(f.len(), g.len());
-        for (fx, gx) in izip!(f, g) {
-            match fx.cmp(&gx) {
-                Ordering::Equal => {},
-                c => return c,
-            };
-        }
-        Ordering::Equal
-    }
 
     /// also returns false if any duplicates exist, but that would be weird to have anyway.
     fn is_sorted(autos: &[impl Automorphism]) -> bool {
@@ -286,6 +292,15 @@ pub mod test {
         is_group(g2.sym_group());
 
         let g10 = Embedding3D::new_subdivided_tetrahedron(10);
+        is_group(g10.sym_group());
+    }
+
+    #[test]
+    fn cube_automorphisms_are_group() {
+        let g2 = Embedding3D::new_subdivided_cube(2);
+        is_group(g2.sym_group());
+
+        let g10 = Embedding3D::new_subdivided_cube(10);
         is_group(g10.sym_group());
     }
 

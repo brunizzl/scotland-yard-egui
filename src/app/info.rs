@@ -1123,10 +1123,12 @@ impl Info {
             },
             VertexColorInfo::VertexEquivalenceClasses => {
                 if let SymGroup::Explicit(equiv) = con.sym_group() {
-                    for (&class, &pos, &vis) in izip!(equiv.classes(), con.positions, con.visible) {
+                    for (&repr, &pos, &vis) in
+                        izip!(equiv.vertex_representatives(), con.positions, con.visible)
+                    {
                         if vis {
                             //every (visible) vertex is marked, no need to record this.
-                            let color = colors[class as usize % colors.len()].into();
+                            let color = colors[repr % colors.len()].into();
                             draw_circle_at(pos, color);
                         }
                     }
@@ -1326,7 +1328,7 @@ impl Info {
             },
             VertexNumberInfo::VertexEquivalenceClass => {
                 if let SymGroup::Explicit(e) = con.sym_group() {
-                    draw!(e.classes());
+                    draw!(e.vertex_representatives());
                 }
             },
             VertexNumberInfo::None => {},

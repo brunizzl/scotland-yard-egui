@@ -96,14 +96,8 @@ impl ExplicitAutomorphism {
 /// stores every automorphism explicitly
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ExplicitClasses {
-    /// one entry per vertex, stores to which class vertex belongs
-    class: Vec<u16>,
-
     /// one entry per vertex, logs to which vertex each vertex is mapped to
     vertex_representative: Vec<usize>,
-
-    /// one entry per class, keeps track which vertex represents a class
-    class_representative: Vec<usize>,
 
     //one entry per element in symmetry group, starting with the identity
     symmetry_transforms: Vec<ExplicitAutomorphism>,
@@ -356,26 +350,14 @@ impl ExplicitClasses {
         });
 
         Some(Self {
-            class,
             vertex_representative,
-            class_representative,
             symmetry_transforms,
             to_representative,
         })
     }
 
-    pub fn classes(&self) -> &[u16] {
-        &self.class
-    }
-
-    #[allow(dead_code)]
     pub fn vertex_representatives(&self) -> &[usize] {
         &self.vertex_representative
-    }
-
-    #[allow(dead_code)]
-    pub fn nr_classes(&self) -> usize {
-        self.class_representative.len()
     }
 
     /// returns all transforms mapping vertex v to it's class' representative
@@ -404,11 +386,11 @@ impl ExplicitClasses {
             return smallvec::smallvec![&self.symmetry_transforms[0]];
         }
 
-        cops.sort_by_key(|&c| self.class[c]);
-        let rotate_class = self.class[cops[0]];
+        cops.sort_by_key(|&c| self.vertex_representative[c]);
+        let rotate_class = self.vertex_representative[cops[0]];
         let all_autos = cops
             .iter()
-            .take_while(|&&c| self.class[c] == rotate_class)
+            .take_while(|&&c| self.vertex_representative[c] == rotate_class)
             .flat_map(|&c| self.transforms_of(c));
 
         let mut best_autos = SmallVec::<[&ExplicitAutomorphism; 4]>::new();
@@ -424,7 +406,7 @@ impl ExplicitClasses {
             }
             new_val.sort_unstable();
             //this relies on the classes beeing sorted by what the smallest vertex appearing in one is.
-            debug_assert_eq!(self.class[new_val[0]], rotate_class);
+            debug_assert_eq!(self.vertex_representative[new_val[0]], rotate_class);
 
             match new_val.cmp(&best_val) {
                 std::cmp::Ordering::Equal => {
@@ -455,8 +437,8 @@ impl SymmetryGroup for ExplicitClasses {
         self.transform_all(vertices)
     }
 
-    fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
-        self.class_representative.iter().copied()
+    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
+        self.vertex_representative.iter().copied().unique()
     }
 
     fn all_automorphisms(&self) -> &[Self::Auto] {
@@ -465,5 +447,116 @@ impl SymmetryGroup for ExplicitClasses {
 
     fn into_enum(self) -> SymGroup {
         SymGroup::Explicit(self)
+    }
+
+    fn nr_vertices(&self) -> usize {
+        self.vertex_representative.len()
+    }
+}
+
+impl<S: SymmetryGroup> From<&S> for ExplicitClasses {
+    fn from(sym: &S) -> Self {
+        let symmetry_transforms = {
+            let mut vec = sym
+                .all_automorphisms()
+                .iter()
+                .map(ExplicitAutomorphism::from)
+                .collect_vec();
+            vec.sort_by(|a, b| compare(a.forward(), b.forward()));
+            vec
+        };
+
+        let mut vertex_representative = Vec::new();
+        let mut to_representative = BoolCSR::new();
+        for v in 0..sym.nr_vertices() {
+            let mut v_array = [v; 1];
+            let autos = sym.to_representative(&mut v_array);
+            vertex_representative.push(v_array[0]);
+            to_representative.add_row(autos.into_iter().map(|auto| {
+                symmetry_transforms
+                    .binary_search_by(|a| compare(a.forward(), auto.forward()))
+                    .unwrap()
+            }));
+        }
+
+        Self {
+            vertex_representative,
+            symmetry_transforms,
+            to_representative,
+        }
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+
+    fn sym_converts_to_explicit(s: &SymGroup) {
+        fn converts_impl(s: &impl SymmetryGroup) {
+            use std::collections::BTreeSet;
+            let expl = ExplicitClasses::from(s);
+            assert_eq!(s.all_automorphisms().len(), expl.all_automorphisms().len());
+            assert_eq!(s.nr_vertices(), expl.nr_vertices());
+            assert_eq!(
+                s.class_representatives().collect::<BTreeSet<_>>(),
+                expl.class_representatives().collect::<BTreeSet<_>>()
+            );
+            for v in 0..s.nr_vertices() {
+                let mut s_v = [v; 1];
+                let mut e_v = [v; 1];
+                let mut s_autos = s.to_representative(&mut s_v).into_iter().collect_vec();
+                let mut e_autos = s.to_representative(&mut e_v).into_iter().collect_vec();
+                assert_eq!(s_v[0], e_v[0]);
+                s_autos.sort_by(|a, b| compare(a.forward(), b.forward()));
+                e_autos.sort_by(|a, b| compare(a.forward(), b.forward()));
+                assert_eq!(s_autos.len(), e_autos.len());
+                for (s_a, e_a) in izip!(s_autos, e_autos) {
+                    assert!(compare(s_a.forward(), e_a.forward()).is_eq());
+                }
+            }
+        }
+
+        match s {
+            SymGroup::Explicit(e) => converts_impl(e),
+            SymGroup::None(n) => converts_impl(n),
+            SymGroup::Torus4(t4) => converts_impl(t4),
+            SymGroup::Torus6(t6) => converts_impl(t6),
+        }
+    }
+
+    #[test]
+    fn torus4_converts_to_explicit() {
+        let g3 = Embedding3D::new_subdivided_squares_torus(3);
+        sym_converts_to_explicit(g3.sym_group());
+
+        let g5 = Embedding3D::new_subdivided_squares_torus(6);
+        sym_converts_to_explicit(g5.sym_group());
+
+        let g9 = Embedding3D::new_subdivided_squares_torus(9);
+        sym_converts_to_explicit(g9.sym_group());
+    }
+
+    #[test]
+    fn torus6_converts_to_explicit() {
+        let g3 = Embedding3D::new_subdivided_triangle_torus(3);
+        sym_converts_to_explicit(g3.sym_group());
+
+        let g5 = Embedding3D::new_subdivided_triangle_torus(6);
+        sym_converts_to_explicit(g5.sym_group());
+
+        let g9 = Embedding3D::new_subdivided_triangle_torus(9);
+        sym_converts_to_explicit(g9.sym_group());
+    }
+
+    #[test]
+    fn expicit_converts_to_explicit() {
+        let i10 = Embedding3D::new_subdivided_icosahedron(10);
+        sym_converts_to_explicit(i10.sym_group());
+
+        let o10 = Embedding3D::new_subdivided_octahedron(10);
+        sym_converts_to_explicit(o10.sym_group());
+
+        let c10 = Embedding3D::new_subdivided_cube(10);
+        sym_converts_to_explicit(c10.sym_group());
     }
 }

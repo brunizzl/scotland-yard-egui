@@ -4,7 +4,7 @@ use itertools::izip;
 use serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::graph::bruteforce as bf;
+use crate::graph::{bruteforce as bf, ExplicitClasses};
 use crate::graph::{Embedding3D, NoSymmetry};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -255,38 +255,28 @@ impl BruteforceComputationState {
         let edges = map.edges().clone();
         let (here, mut there) = bf::thread_manager::build_managers();
         let here = Some(here);
+        macro_rules! employ {
+            ($sym: expr) => {
+                let sym = $sym;
+                let work = move || {
+                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
+                    (res, Confidence::SymmetryOnly).into()
+                };
+                self.employ_worker(game_type, work, here, WorkTask::Compute);
+            };
+        }
         match map.data().sym_group() {
             SymGroup::Explicit(equiv) => {
-                let sym = equiv.clone();
-                let work = move || {
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
-                    (res, Confidence::SymmetryOnly).into()
-                };
-                self.employ_worker(game_type, work, here, WorkTask::Compute);
+                employ!(equiv.clone());
             },
             SymGroup::Torus6(torus) => {
-                let sym = torus.clone();
-                let work = move || {
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
-                    (res, Confidence::SymmetryOnly).into()
-                };
-                self.employ_worker(game_type, work, here, WorkTask::Compute);
+                employ!(ExplicitClasses::from(torus));
             },
             SymGroup::Torus4(torus) => {
-                let sym = torus.clone();
-                let work = move || {
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
-                    (res, Confidence::SymmetryOnly).into()
-                };
-                self.employ_worker(game_type, work, here, WorkTask::Compute);
+                employ!(ExplicitClasses::from(torus));
             },
             SymGroup::None(none) => {
-                let sym = *none;
-                let work = move || {
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
-                    (res, Confidence::NoSymmetry).into()
-                };
-                self.employ_worker(game_type, work, here, WorkTask::Compute);
+                employ!(*none);
             },
         }
     }

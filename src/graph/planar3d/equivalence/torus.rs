@@ -354,7 +354,7 @@ impl SymmetryGroup for TorusSymmetry6 {
         &self.autos
     }
 
-    fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
+    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
         std::iter::once(0)
     }
 
@@ -364,6 +364,10 @@ impl SymmetryGroup for TorusSymmetry6 {
 
     fn into_enum(self) -> SymGroup {
         SymGroup::Torus6(self)
+    }
+
+    fn nr_vertices(&self) -> usize {
+        self.nr_vertices
     }
 }
 
@@ -375,7 +379,7 @@ impl SymmetryGroup for TorusSymmetry4 {
         &self.autos
     }
 
-    fn class_representatives(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
+    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
         std::iter::once(0)
     }
 
@@ -385,6 +389,10 @@ impl SymmetryGroup for TorusSymmetry4 {
 
     fn into_enum(self) -> SymGroup {
         SymGroup::Torus4(self)
+    }
+
+    fn nr_vertices(&self) -> usize {
+        self.nr_vertices
     }
 }
 
