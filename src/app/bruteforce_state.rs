@@ -297,12 +297,12 @@ impl BruteforceComputationState {
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::Torus6(torus) => {
-                let sym = torus.clone();
+                let sym = ExplicitClasses::from(torus);
                 let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::Torus4(torus) => {
-                let sym = torus.clone();
+                let sym = ExplicitClasses::from(torus);
                 let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },

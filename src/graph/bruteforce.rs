@@ -502,9 +502,6 @@ where
                     }
                 }
             }
-
-            //line 3
-            queue.push(index);
         }
     }
 
@@ -774,8 +771,6 @@ where
                     robber_positions[n] = 0;
                 }
             }
-
-            queue.push(index);
         }
     }
 

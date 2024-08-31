@@ -1,21 +1,31 @@
 use super::*;
 
+/// BitVec-like structure, but specialized for use in [`RobberStratQueue`].
 struct BitQueue {
+    /// can't grow, acts like bitset
     data: Vec<usize>,
+    /// logical maximum number of entries
     capacity: usize,
 
+    /// current index in [`Self::data`]
     data_iter: usize,
+    /// copy of [`Self::data`] at [`Self::data_iter`], except just inserted items are missing
     data_curr: usize,
 }
 
+/// number of bits contained in single value of usize
 const BITS: usize = usize::BITS as usize;
 
 impl BitQueue {
+    /// fails if not enough memory is available
     pub fn new(length: usize) -> Option<Self> {
         let mut data = Vec::new();
+        // guarantee data is nonempty to simplify access
         let data_len = (length + BITS - 1) / BITS;
-        data.try_reserve_exact(data_len).ok()?;
+        let data_cap = usize::max(data_len, 1);
+        data.try_reserve_exact(data_cap).ok()?;
         data.resize(data_len, usize::MAX);
+        data.resize(data_cap, 0);
 
         let last_count = length % BITS;
         if last_count != 0 {
@@ -27,7 +37,7 @@ impl BitQueue {
             length
         );
 
-        let data_curr = *data.first().unwrap_or(&0);
+        let data_curr = data[0];
         Some(Self {
             data,
             capacity: length,
@@ -36,9 +46,11 @@ impl BitQueue {
         })
     }
 
+    /// [`Self::pop_next_one`] only walks forwards by itself.
+    /// this method resets the internal iteration state to again search entries from the start.
     pub fn wrap_back(&mut self) {
         self.data_iter = 0;
-        self.data_curr = *self.data.first().unwrap_or(&0);
+        self.data_curr = self.data[0];
     }
 
     pub fn pop_next_one(&mut self) -> Option<usize> {
@@ -72,15 +84,30 @@ impl BitQueue {
     }
 }
 
+/// this is special, as we know exactly what entries could possibly be enqueued.
+/// also: initially, all entries must be present.
+/// we thus don't actually use a queue, but store one bit for each
+/// [`CompactCops`] configuration held in [`CopConfigurations`].
+///
+/// we then remember what the last unqueued [`CompactCops`] value was
+/// and search the next one to unqueue in the following bits.
+/// if all bits are visited, we start anew at bit 0, until no bits are set.
 pub struct RobberStratQueue {
+    /// stores which values are enqueued
     bit_queues: Vec<queues::BitQueue>,
+    /// maps each of [`Self::bit_queues`] to their representative vertex
     firsts: Vec<usize>,
+
+    /// iteration state: index in both [`Self::bit_queues`] and [`Self::firsts`]
     first_index: usize,
+    /// iteration state: how many items are currently enqueued
     length: usize,
+    /// statistics: how many times have we checked each bit of [`Self::bit_queues`]
     rounds_complete: usize,
 }
 
 impl RobberStratQueue {
+    /// fails if not enough memory is available
     pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
         let mut bit_queues = Vec::new();
         let mut firsts = Vec::new();
@@ -157,13 +184,14 @@ impl CopStratQueue {
 
             let mut data = Vec::new();
             data.try_reserve(nr_entries).ok()?;
-            data.resize(nr_entries, InQueue::No);
+            data.resize(nr_entries, InQueue::Yes);
             let old = contained.insert(fst_index, data);
             debug_assert!(old.is_none());
         }
 
         let mut queue = VecDeque::new();
         queue.try_reserve(cop_moves.nr_configurations()).ok()?;
+        queue.extend(cop_moves.all_positions());
         Some(Self {
             queue,
             status: contained,
@@ -245,5 +273,60 @@ impl CopStratQueue {
 
     pub fn curr_max(&self) -> UTime {
         self.curr_max_nr_moves
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+
+    #[test]
+    fn bit_queue() {
+        for length in 0..(2 * BITS) {
+            let mut q = BitQueue::new(length).unwrap();
+            {
+                let mut i = 0;
+                while q.pop_next_one().is_some() {
+                    i += 1;
+                }
+                assert_eq!(length, i);
+            }
+
+            let is = [0, 1, 2, 4, 8, 16, 20, 30, 40, 50, 77, 127];
+            for &i in is.iter().take_while(|&&i| i < length) {
+                assert_eq!(false, q.set(i));
+            }
+            q.wrap_back();
+            for &i in is.iter().take_while(|&&i| i < length) {
+                assert_eq!(Some(i), q.pop_next_one());
+            }
+            assert_eq!(None, q.pop_next_one());
+            q.wrap_back();
+            assert_eq!(None, q.pop_next_one());
+        }
+    }
+
+    #[test]
+    fn robber_vs_cop_queue() {
+        let cop_moves = CopConfigurations {
+            nr_cops: 3,
+            nr_map_vertices: 100,
+            configurations: BTreeMap::from_iter([
+                (0, (0..100).collect_vec()),
+                (10, (10..100).collect_vec()),
+                (90, (90..100).collect_vec()),
+            ]),
+        };
+        let mut robber_queue = RobberStratQueue::new(&cop_moves).unwrap();
+        let mut cops_queue = CopStratQueue::new(&cop_moves).unwrap();
+        assert_eq!(robber_queue.len(), cops_queue.len());
+        loop {
+            let r_next = robber_queue.pop();
+            let c_next = cops_queue.pop();
+            assert_eq!(r_next, c_next);
+            if r_next.is_none() {
+                break;
+            }
+        }
     }
 }

@@ -36,26 +36,6 @@ mod ordered_colwise {
             self.len * self.len
         }
 
-        pub fn pack_tiny_coordinates(&self, mut x: isize, mut y: isize) -> SquareCoords {
-            // computing modulo is way faster this way for values in this range
-            let ilen = self.len as isize;
-            debug_assert!(((-ilen)..(2 * ilen)).contains(&x));
-            debug_assert!(((-ilen)..(2 * ilen)).contains(&y));
-            if x < 0 {
-                x += ilen;
-            } else if x >= ilen {
-                x -= ilen;
-            }
-            if y < 0 {
-                y += ilen;
-            } else if y >= ilen {
-                y -= ilen;
-            }
-            debug_assert!((0..ilen).contains(&x));
-            debug_assert!((0..ilen).contains(&y));
-            SquareCoords { x, y }
-        }
-
         pub fn pack_small_coordinates(&self, mut x: isize, mut y: isize) -> SquareCoords {
             // computing modulo is faster this way for values just outside len (as is the case for x and y)
             let ilen = self.len as isize;
@@ -97,9 +77,6 @@ where
     fn rotate_backward(self, x: isize, y: isize) -> (isize, isize);
 
     const ALL: [Self; COUNT];
-
-    /// if true, inf-norm is kept by rotation.
-    const KEEP_SIZE: bool;
 }
 
 /// there are 6 possible turns of triangulated torus embedded in [0, 1]^2.
@@ -159,8 +136,6 @@ impl Rotation<6> for Turn6 {
         Turn6::Skewed240,
         Turn6::Skewed300,
     ];
-
-    const KEEP_SIZE: bool = false;
 }
 
 /// there are 4 possible turns of torus with squares embedded in [0, 1]^2.
@@ -194,8 +169,6 @@ impl Rotation<4> for Turn4 {
     }
 
     const ALL: [Self; 4] = [Turn4::None, Turn4::Rot90, Turn4::Rot180, Turn4::Rot240];
-
-    const KEEP_SIZE: bool = true;
 }
 
 const BOOL: [bool; 2] = [false, true];
@@ -223,11 +196,7 @@ impl<const N: usize, R: Rotation<N>> Automorphism for TorusAutomorphism<N, R> {
             std::mem::swap(&mut x, &mut y);
         }
 
-        let new_coords = if R::KEEP_SIZE {
-            self.colwise.pack_tiny_coordinates(x, y)
-        } else {
-            self.colwise.pack_small_coordinates(x, y)
-        };
+        let new_coords = self.colwise.pack_small_coordinates(x, y);
         self.colwise.index_of(new_coords)
     }
 
@@ -248,11 +217,7 @@ impl<const N: usize, R: Rotation<N>> Automorphism for TorusAutomorphism<N, R> {
         x += self.new_origin.x();
         y += self.new_origin.y();
 
-        let new_coords = if R::KEEP_SIZE {
-            self.colwise.pack_tiny_coordinates(x, y)
-        } else {
-            self.colwise.pack_small_coordinates(x, y)
-        };
+        let new_coords = self.colwise.pack_small_coordinates(x, y);
         self.colwise.index_of(new_coords)
     }
 
