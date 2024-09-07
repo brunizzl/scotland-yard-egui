@@ -1,10 +1,10 @@
 use std::{fs, io::Write, path::PathBuf, thread, time::Instant};
 
-use itertools::izip;
+use itertools::{izip, Itertools};
 use serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::graph::{bruteforce as bf, ExplicitClasses};
+use crate::graph::{bruteforce as bf, Automorphism, ExplicitClasses, SymmetryGroup};
 use crate::graph::{Embedding3D, NoSymmetry};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,48 +54,48 @@ enum WorkTask {
 /// sometimes, e.g. when storing or when verifying, we both have a result and could encounter an error.
 /// thus: this is not eighter / or, but can be both.
 struct WorkResult {
-    result: Option<GameOutcome>,
-    cop_strat: Option<bf::CopStrategy>,
+    robber_strat: Option<GameOutcome>,
+    police_strat: Option<bf::CopStrategy>,
     error: Option<String>,
 }
 
 impl WorkResult {
     fn new_err<E: ToString>(err: E) -> Self {
         Self {
-            result: None,
-            cop_strat: None,
+            robber_strat: None,
+            police_strat: None,
             error: Some(err.to_string()),
         }
     }
 
     fn new_res_err<E: ToString>(outcome: GameOutcome, err: E) -> Self {
         Self {
-            result: Some(outcome),
-            cop_strat: None,
+            robber_strat: Some(outcome),
+            police_strat: None,
             error: Some(err.to_string()),
         }
     }
 
     fn new_strat_err<E: ToString>(strat: bf::CopStrategy, err: E) -> Self {
         Self {
-            result: None,
-            cop_strat: Some(strat),
+            robber_strat: None,
+            police_strat: Some(strat),
             error: Some(err.to_string()),
         }
     }
 
     fn new_strat(strat: bf::CopStrategy) -> Self {
         Self {
-            result: None,
-            cop_strat: Some(strat),
+            robber_strat: None,
+            police_strat: Some(strat),
             error: None,
         }
     }
 
     fn new_res(outcome: GameOutcome) -> Self {
         Self {
-            result: Some(outcome),
-            cop_strat: None,
+            robber_strat: Some(outcome),
+            police_strat: None,
             error: None,
         }
     }
@@ -107,7 +107,11 @@ impl From<(Result<bf::Outcome, String>, Confidence)> for WorkResult {
             Ok(outcome) => (Some(GameOutcome { confidence, outcome }), None),
             Err(err) => (None, Some(err)),
         };
-        Self { result, cop_strat: None, error }
+        Self {
+            robber_strat: result,
+            police_strat: None,
+            error,
+        }
     }
 }
 
@@ -117,7 +121,11 @@ impl From<Result<bf::CopStrategy, String>> for WorkResult {
             Ok(strat) => (Some(strat), None),
             Err(err) => (None, Some(err)),
         };
-        Self { result: None, cop_strat, error }
+        Self {
+            robber_strat: None,
+            police_strat: cop_strat,
+            error,
+        }
     }
 }
 
@@ -161,7 +169,7 @@ pub struct BruteforceComputationState {
     curr_game_type: GameType,
     robber_strat_stored: bool,
     cops_strat_stored: bool,
-    results: BTreeMap<GameType, GameOutcome>,
+    robber_strats: BTreeMap<GameType, GameOutcome>,
     cop_strats: BTreeMap<GameType, bf::CopStrategy>,
     errors: Vec<(GameType, String)>,
 }
@@ -178,14 +186,14 @@ impl BruteforceComputationState {
             },
             robber_strat_stored: false,
             cops_strat_stored: false,
-            results: BTreeMap::new(),
+            robber_strats: BTreeMap::new(),
             cop_strats: BTreeMap::new(),
             errors: Vec::new(),
         }
     }
 
     pub fn result_for(&self, game_type: &GameType) -> Option<&bf::Outcome> {
-        self.results.get(game_type).map(|o| &o.outcome)
+        self.robber_strats.get(game_type).map(|o| &o.outcome)
     }
 
     pub fn strats_for(&self, game_type: &GameType) -> Option<&bf::CopStrategy> {
@@ -197,10 +205,10 @@ impl BruteforceComputationState {
             self.errors.push((game_type, err));
         }
 
-        if let Some(outcome) = res.result {
-            self.results.insert(game_type, outcome);
+        if let Some(strat) = res.robber_strat {
+            self.robber_strats.insert(game_type, strat);
         }
-        if let Some(strat) = res.cop_strat {
+        if let Some(strat) = res.police_strat {
             self.cop_strats.insert(game_type, strat);
         }
     }
@@ -288,77 +296,68 @@ impl BruteforceComputationState {
             shape: map.shape(),
         };
         let edges = map.edges().clone();
-        let (here, mut there) = bf::thread_manager::build_managers();
+        let (here, there) = bf::thread_manager::build_managers();
         let here = Some(here);
         match map.data().sym_group() {
             SymGroup::Explicit(equiv) => {
                 let sym = equiv.clone();
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
+                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::Torus6(torus) => {
                 let sym = ExplicitClasses::from(torus);
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
+                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::Torus4(torus) => {
                 let sym = ExplicitClasses::from(torus);
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
+                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::None(none) => {
                 let sym = *none;
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &mut there).into();
+                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
         }
     }
 
-    fn verify_robber_win(sym: &bf::RobberWinData, no_sym: &bf::RobberWinData) -> Confidence {
+    fn verify_robber_win_eq(sym: &bf::RobberWinData, no_sym: &bf::RobberWinData) -> Confidence {
         debug_assert_eq!(sym.cop_moves.nr_cops(), no_sym.cop_moves.nr_cops());
         debug_assert_eq!(
             sym.cop_moves.nr_map_vertices(),
             no_sym.cop_moves.nr_map_vertices()
         );
         let nr_cops = sym.cop_moves.nr_cops();
-        let nr_map_vertices = sym.cop_moves.nr_map_vertices();
-
-        let mut confidence = Confidence::SymmetryOnly;
-        for cop_config in no_sym.cop_moves.all_positions_unpacked() {
-            let cop_config = &cop_config[..nr_cops];
-            let (_, all_index) = no_sym.pack(cop_config.iter().copied());
-            let (autos, sym_index) = sym.pack(cop_config.iter().copied());
-            for auto in autos {
-                let sym_robber_range = sym.safe.robber_indices_at(sym_index);
-                let all_robber_range = no_sym.safe.robber_indices_at(all_index);
-                for v in 0..nr_map_vertices {
-                    let v_rot = auto.dyn_apply_forward(v);
-                    if sym.safe.robber_safe_at(sym_robber_range.at(v_rot))
-                        != no_sym.safe.robber_safe_at(all_robber_range.at(v))
-                    {
-                        confidence = Confidence::Err(format!(
-                            "Fehler: Konfig {:?} uneinig in Knoten {} (rotiert = {})",
-                            cop_config, v, v_rot
-                        ));
-                    }
+        for cops_index in no_sym.cop_moves.all_positions() {
+            let mut raw_cops = no_sym.cop_moves.eager_unpack(cops_index);
+            let cops = &mut raw_cops[..nr_cops];
+            let safe_with_sym = sym.safe_vertices(cops);
+            let safe_without_sym = no_sym.safe_vertices(cops);
+            for (v, s1, s2) in izip!(0.., safe_with_sym, safe_without_sym) {
+                if s1 != s2 {
+                    let original_cops = cops.iter().copied().collect_vec();
+                    let autos = sym.symmetry.to_representative(cops);
+                    let v_rot = autos[0].apply_forward(v);
+                    return Confidence::Err(format!(
+                        "Fehler: Konfigs {:?} uneinig in Knoten {} (rotiert = {})",
+                        original_cops, v, v_rot
+                    ));
                 }
             }
         }
-        if confidence == Confidence::SymmetryOnly {
-            confidence = Confidence::Both;
-        }
-        confidence
+        Confidence::Both
     }
 
     fn verify_result(&mut self, game_type: GameType, mut outcome: GameOutcome) {
-        let (here, mut there) = bf::thread_manager::build_managers();
+        let (here, there) = bf::thread_manager::build_managers();
         let here = Some(here);
         let work = move || {
             let edges = game_type.create_edges();
             let nr_map_vertices = edges.nr_vertices();
             let sym = NoSymmetry::new(nr_map_vertices);
             let res_without =
-                bf::compute_safe_robber_positions(game_type.nr_cops, edges, sym, &mut there);
+                bf::compute_safe_robber_positions(game_type.nr_cops, edges, sym, &there);
             let outcome_without = match res_without {
                 Ok(ok) => ok,
                 Err(err) => return WorkResult::new_res_err(outcome, err),
@@ -369,7 +368,7 @@ impl BruteforceComputationState {
                 (CopsWin, CopsWin) => Confidence::Both,
                 (CopsWin, RobberWins(_)) => Confidence::new_err("Ohne sym. gewinnt Räuber"),
                 (RobberWins(_), CopsWin) => Confidence::new_err("Ohne sym. gewinnen Cops"),
-                (RobberWins(sym), RobberWins(no_sym)) => Self::verify_robber_win(sym, no_sym),
+                (RobberWins(sym), RobberWins(no_sym)) => Self::verify_robber_win_eq(sym, no_sym),
             };
             WorkResult::new_res(outcome)
         };
@@ -415,6 +414,7 @@ impl BruteforceComputationState {
     }
 
     fn load_result_from(&mut self, game_type: GameType) {
+        let (here, there) = bf::thread_manager::build_managers();
         let work = move || {
             let path = game_type.file_name("bruteforce");
             let file = match fs::File::open(path) {
@@ -422,12 +422,25 @@ impl BruteforceComputationState {
                 Err(err) => return WorkResult::new_err(err),
             };
             let buff_reader = std::io::BufReader::new(file);
-            match rmp_serde::decode::from_read(buff_reader) {
-                Ok(res) => WorkResult::new_res(res),
+            there.log.send("deserialisiere".into()).ok();
+            match rmp_serde::decode::from_read::<_, GameOutcome>(buff_reader) {
+                Ok(res) => {
+                    let error = if let bf::Outcome::RobberWins(data) = &res.outcome {
+                        let edges = game_type.create_edges();
+                        bf::verify_continuity(data, &edges, &there).err()
+                    } else {
+                        None
+                    };
+                    WorkResult {
+                        robber_strat: Some(res),
+                        police_strat: None,
+                        error,
+                    }
+                },
                 Err(err) => WorkResult::new_err(err),
             }
         };
-        self.employ_worker(game_type, work, None, WorkTask::Load);
+        self.employ_worker(game_type, work, Some(here), WorkTask::Load);
     }
 
     fn load_strat_from(&mut self, game_type: GameType) {
@@ -509,7 +522,7 @@ impl BruteforceComputationState {
         }
         ui.add_space(5.0);
         let mut action = None;
-        for (game_type, outcome) in &self.results {
+        for (game_type, outcome) in &self.robber_strats {
             Self::draw_result(ui, game_type, outcome);
             ui.horizontal(|ui| {
                 if NATIVE && ui.button("speichern").clicked() {
@@ -525,7 +538,7 @@ impl BruteforceComputationState {
             ui.add_space(5.0);
         }
         if let Some((a, game_type)) = action {
-            let outcome = self.results.remove(&game_type).unwrap();
+            let outcome = self.robber_strats.remove(&game_type).unwrap();
             match a {
                 Action::Delete => {},
                 Action::Store => self.save_result(game_type, outcome),
@@ -684,7 +697,7 @@ impl BruteforceComputationState {
                     ui.add_enabled(false, Button::new("0 aktiv"));
                 }
 
-                let nr_done = self.results.len() + self.cop_strats.len();
+                let nr_done = self.robber_strats.len() + self.cop_strats.len();
                 if nr_done > 0 {
                     ui.menu_button(format!("{nr_done} fertig"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_results(ui));
@@ -714,7 +727,7 @@ impl BruteforceComputationState {
                 w.game_type == game_type && matches!(w.task, WorkTask::Compute | WorkTask::Load)
             });
             ui.horizontal(|ui| {
-                let curr_known = self.results.contains_key(&game_type);
+                let curr_known = self.robber_strats.contains_key(&game_type);
                 let enable_compute = !computing_robber_strat && !curr_known;
                 let compute_button = Button::new("berechnen");
                 if ui

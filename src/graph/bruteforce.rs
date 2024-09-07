@@ -111,7 +111,7 @@ impl CopConfigurations {
         edges: &EdgeList,
         sym: &S,
         nr_cops: usize,
-        manager: &mut thread_manager::LocalManager,
+        manager: &thread_manager::LocalManager,
     ) -> Result<Self, String> {
         let nr_map_vertices = edges.nr_vertices();
         if nr_cops <= 1 {
@@ -211,7 +211,7 @@ impl CopConfigurations {
         }))
     }
 
-    fn eager_unpack(&self, index: CompactCopsIndex) -> [usize; MAX_COPS] {
+    pub fn eager_unpack(&self, index: CompactCopsIndex) -> [usize; MAX_COPS] {
         let mut unpacked = [usize::MAX; MAX_COPS];
         for (i, c) in self.unpack(index).enumerate() {
             unpacked[i] = c;
@@ -221,24 +221,13 @@ impl CopConfigurations {
 
     /// returns the index where the (rotated / mirrored) configuration represented by cops is stored as `_.1`
     /// and returns the transformation that rotated and / or mirrored the input in order to find it in [`self.configurations`]
-    fn pack_impl<'a, A, AIter>(
+    pub fn pack<'a, S: SymmetryGroup>(
         &self,
-        mut to_representative: impl FnMut(&mut [usize]) -> AIter + 'a,
-        cops: impl Iterator<Item = usize>,
-    ) -> (AIter, CompactCopsIndex)
-    where
-        A: ?Sized + 'a,
-        AIter: IntoIterator<Item = &'a A>,
-    {
-        assert!(self.nr_cops <= MAX_COPS);
-        let mut unpacked = [0usize; MAX_COPS];
-        for (i, pos) in cops.enumerate() {
-            debug_assert!(pos < self.nr_map_vertices());
-            debug_assert_ne!(i, self.nr_cops);
-            unpacked[i] = pos;
-        }
-        let unpacked = &mut unpacked[..self.nr_cops];
-        let rotation = to_representative(unpacked);
+        symmetry: &'a S,
+        mut raw_unpacked: [usize; MAX_COPS],
+    ) -> (S::AutoIter<'a>, CompactCopsIndex) {
+        let unpacked = &mut raw_unpacked[..self.nr_cops];
+        let rotation = symmetry.to_representative(unpacked);
         debug_assert!(unpacked.iter().tuple_windows().all(|(a, b)| a <= b));
 
         let fst_cop = unpacked[0];
@@ -257,26 +246,27 @@ impl CopConfigurations {
         )
     }
 
-    pub fn pack<'a, S: SymmetryGroup>(
-        &self,
-        symmetry: &'a S,
-        cops: impl Iterator<Item = usize>,
-    ) -> (S::AutoIter<'a>, CompactCopsIndex) {
-        self.pack_impl(
-            |vertices: &mut [usize]| symmetry.to_representative(vertices),
-            cops,
-        )
-    }
+    /// returns all cop configurations reachable in a single lazy-cop move from [`positions`],
+    /// except the do-nothing move.
+    /// the resulting iterator will not yield configurations as stored, but as they are actually reachable.
+    pub fn raw_lazy_cop_moves_from<'a>(
+        &'a self,
+        edges: &'a EdgeList,
+        cops: &[usize],
+    ) -> impl Iterator<Item = [usize; MAX_COPS]> + 'a + Clone {
+        debug_assert!(cops.len() >= self.nr_cops);
+        debug_assert!(cops[self.nr_cops..].iter().all(|&c| c == usize::MAX));
 
-    fn pack_dyn<'a>(
-        &self,
-        symmetry: &'a dyn DynSymmetryGroup,
-        cops: impl Iterator<Item = usize>,
-    ) -> (SmallVec<[&'a dyn DynAutomorphism; 4]>, CompactCopsIndex) {
-        self.pack_impl(
-            |vertices: &mut [usize]| symmetry.dyn_to_representative(vertices),
-            cops,
-        )
+        let mut cops_storage = [usize::MAX; MAX_COPS];
+        cops_storage[..cops.len()].copy_from_slice(cops);
+        (0..self.nr_cops).flat_map(move |i| {
+            let cop_i_pos = cops_storage[i];
+            edges.neighbors_of(cop_i_pos).map(move |n| {
+                let mut unpacked_neigh = cops_storage;
+                unpacked_neigh[i] = n;
+                unpacked_neigh
+            })
+        })
     }
 
     /// returns all cop positions reachable in a single lazy-cop move from positions, except the do-nothing move.
@@ -288,55 +278,15 @@ impl CopConfigurations {
         sym: &'a S,
         positions: CompactCopsIndex,
     ) -> impl Iterator<Item = (S::AutoIter<'a>, CompactCopsIndex)> + 'a + Clone {
-        assert!(self.nr_cops <= MAX_COPS);
-        let unpacked = self.eager_unpack(positions);
-
-        let iter = (0..self.nr_cops).flat_map(move |i| {
-            let cop_i_pos = unpacked[i];
-            edges.neighbors_of(cop_i_pos).map(move |n| {
-                let swap_i = |j| if j == i { n } else { unpacked[j] };
-                self.pack(sym, (0..self.nr_cops).map(swap_i))
-            })
-        });
-
-        iter
+        let raw_cops = self.eager_unpack(positions);
+        self.raw_lazy_cop_moves_from(edges, &raw_cops)
+            .map(|cops| self.pack(sym, cops))
     }
 
-    pub fn dyn_lazy_cop_moves_from<'a>(
-        &'a self,
-        edges: &'a EdgeList,
-        sym: &'a dyn DynSymmetryGroup,
-        positions: CompactCopsIndex,
-    ) -> impl Iterator<
-        Item = (
-            SmallVec<[&'a dyn DynAutomorphism; 4]>,
-            CompactCopsIndex,
-            [usize; MAX_COPS],
-        ),
-    > {
-        let mut unpacked = self.eager_unpack(positions);
-        unpacked[..self.nr_cops].sort();
-
-        (0..self.nr_cops).flat_map(move |i| {
-            let cop_i_pos = unpacked[i];
-            edges.neighbors_of(cop_i_pos).map(move |n| {
-                let swap_i = |j| if j == i { n } else { unpacked[j] };
-                let (vec, index) = self.pack_dyn(sym, (0..self.nr_cops).map(swap_i));
-                let mut unpacked_neigh = unpacked;
-                unpacked_neigh[i] = n;
-                (vec, index, unpacked_neigh)
-            })
-        })
-    }
-
-    fn all_positions(&self) -> impl Iterator<Item = CompactCopsIndex> + '_ {
+    pub fn all_positions(&self) -> impl Iterator<Item = CompactCopsIndex> + '_ {
         self.configurations.iter().flat_map(move |(&k, configs_part)| {
             (0..configs_part.len()).map(move |i| CompactCopsIndex { fst_index: k, rest_index: i })
         })
-    }
-
-    pub fn all_positions_unpacked(&self) -> impl Iterator<Item = [usize; MAX_COPS]> + '_ {
-        self.all_positions().map(|index| self.eager_unpack(index))
     }
 }
 
@@ -402,13 +352,10 @@ impl SafeRobberPositions {
         }
     }
 
-    pub fn robber_safe_when(
-        &self,
-        index: CompactCopsIndex,
-    ) -> impl ExactSizeIterator<Item = bool> + '_ + Clone {
+    pub fn robber_safe_when(&self, index: CompactCopsIndex) -> &bv::BitSlice<u32> {
         let RobberPosRange { fst_index, range } = self.robber_indices_at(index);
         let safe_part = self.safe.get(&fst_index).unwrap();
-        range.map(move |i| safe_part[i])
+        &safe_part[range]
     }
 
     fn mark_robber_at(&mut self, index: RobberPosIndex, value: bool) {
@@ -424,17 +371,38 @@ impl SafeRobberPositions {
 
 #[derive(Serialize, Deserialize)]
 pub struct RobberWinData {
-    pub symmetry: SymGroup,
+    #[serde(deserialize_with = "deserialize_explicit")]
+    pub symmetry: ExplicitClasses,
     pub safe: SafeRobberPositions,
     pub cop_moves: CopConfigurations,
 }
 
+/// the field [`RobberWinData::symmetry`] changed type to [`ExplicitClasses`] from [`SymGroup`].
+/// we thus want both versions to be correctly deserialized.
+fn deserialize_explicit<'de, D>(deserializer: D) -> Result<ExplicitClasses, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum AnyType {
+        Enum(SymGroup),
+        Direct(ExplicitClasses),
+    }
+
+    Ok(match AnyType::deserialize(deserializer)? {
+        AnyType::Enum(e) => e.into(),
+        AnyType::Direct(expl) => expl,
+    })
+}
+
 impl RobberWinData {
-    pub fn pack(
-        &self,
-        cops: impl Iterator<Item = usize>,
-    ) -> (SmallVec<[&dyn DynAutomorphism; 4]>, CompactCopsIndex) {
-        self.cop_moves.pack_dyn(self.symmetry.to_dyn(), cops)
+    pub fn safe_vertices(&self, cops: &[usize]) -> impl ExactSizeIterator<Item = bool> + '_ {
+        let mut raw_cops = [usize::MAX; MAX_COPS];
+        raw_cops[..cops.len()].copy_from_slice(cops);
+        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, raw_cops);
+        let safe_vertices = self.safe.robber_safe_when(cop_positions);
+        autos[0].forward().map(|v| safe_vertices[v])
     }
 }
 
@@ -470,7 +438,7 @@ pub fn compute_safe_robber_positions<S>(
     nr_cops: usize,
     edges: EdgeList,
     sym: S,
-    manager: &mut thread_manager::LocalManager,
+    manager: &thread_manager::LocalManager,
 ) -> Result<Outcome, String>
 where
     S: SymmetryGroup + Serialize,
@@ -500,43 +468,40 @@ where
     let max_degree_less_than_nr_cops = edges.max_degree() < nr_cops;
 
     manager.update("initialisiere Räuberstrategiefunktion")?;
-    for (&fst_index, sub_configs) in &cop_moves.configurations {
-        for (rest_index, _packed_rest_cops) in izip!(0.., sub_configs) {
-            if rest_index % 4096 == 0 {
-                manager.recieve()?;
+    for (i, index) in izip!(0.., cop_moves.all_positions()) {
+        if i % 4096 == 0 {
+            manager.recieve()?;
+        }
+
+        // test round trip
+        debug_assert!({
+            let unpacked = cop_moves.eager_unpack(index);
+            let (_, packed) = cop_moves.pack(&sym, unpacked);
+            debug_assert_eq!(index, packed);
+            true
+        });
+
+        //line 2
+        let robber_range = f.robber_indices_at(index);
+        for cop_pos in cop_moves.unpack(index) {
+            f.mark_robber_at(robber_range.at(cop_pos), false);
+            for n in edges.neighbors_of(cop_pos) {
+                f.mark_robber_at(robber_range.at(n), false);
             }
+        }
 
-            let index = CompactCopsIndex { fst_index, rest_index };
-
-            debug_assert!({
-                let unpacked = cop_moves.unpack(index);
-                let (_, packed) = cop_moves.pack(&sym, unpacked);
-                debug_assert_eq!(index, packed);
-                true
-            });
-
-            //line 2
-            let robber_range = f.robber_indices_at(index);
-            for cop_pos in cop_moves.unpack(index) {
-                f.mark_robber_at(robber_range.at(cop_pos), false);
-                for n in edges.neighbors_of(cop_pos) {
-                    f.mark_robber_at(robber_range.at(n), false);
-                }
-            }
-
-            // special case treatment: if nr cops is larger than nr neighbors of vertex,
-            // vertex is not marked cop win and all neighbors are marked, then the robber has lost.
-            // This is, because at least one cop is uninvolved in the current stalemate
-            // and can come and capture the robber.
-            // note: this is REALLY conservative and assumes no cop can guard two of
-            // the robber's neighbors at once. only in this case however will this procedure
-            // be of advantage.
-            if max_degree_less_than_nr_cops {
-                for (v, mut neighs) in izip!(0.., edges.neighbors()) {
-                    let safe_at = |v| f.robber_safe_at(robber_range.at(v));
-                    if safe_at(v) && neighs.all(|n| !safe_at(n)) {
-                        f.mark_robber_at(robber_range.at(v), false);
-                    }
+        // special case treatment: if nr cops is larger than nr neighbors of vertex,
+        // vertex is not marked cop win and all neighbors are marked, then the robber has lost.
+        // This is, because at least one cop is uninvolved in the current stalemate
+        // and can come and capture the robber.
+        // note: this is REALLY conservative and assumes no cop can guard two of
+        // the robber's neighbors at once. only in this case however will this procedure
+        // be of advantage.
+        if max_degree_less_than_nr_cops {
+            for (v, mut neighs) in izip!(0.., edges.neighbors()) {
+                let safe_at = |v| f.robber_safe_at(robber_range.at(v));
+                if safe_at(v) && neighs.all(|n| !safe_at(n)) {
+                    f.mark_robber_at(robber_range.at(v), false);
                 }
             }
         }
@@ -583,10 +548,10 @@ where
             &mut safe_should_cops_move_to_curr,
             f.robber_safe_when(curr_cop_positions)
         ) {
-            *safe_before = safe_now;
+            *safe_before = *safe_now;
         }
-        for (v, safe_now) in f.robber_safe_when(curr_cop_positions).enumerate() {
-            if safe_now {
+        for (v, safe_now) in izip!(0.., f.robber_safe_when(curr_cop_positions)) {
+            if *safe_now {
                 for n in edges.neighbors_of(v) {
                     safe_should_cops_move_to_curr[n] = true;
                 }
@@ -646,8 +611,8 @@ where
                     f.robber_safe_when(rotated_neigh_cop_positions)
                 ) {
                     f_neighbor_changed_this_rotation |=
-                        marked_safe_for_neigh && !safe_should_cops_move_to_curr[v];
-                    f_temp[v] = marked_safe_for_neigh && safe_should_cops_move_to_curr[v];
+                        *marked_safe_for_neigh && !safe_should_cops_move_to_curr[v];
+                    f_temp[v] = *marked_safe_for_neigh && safe_should_cops_move_to_curr[v];
                 }
 
                 //line 9
@@ -668,7 +633,7 @@ where
             }
 
             //lines 13 + 14 + 15
-            if f.robber_safe_when(rotated_neigh_cop_positions).all(|x| !x) {
+            if f.robber_safe_when(rotated_neigh_cop_positions).all() {
                 //it is redundant to return `f` (or `cop_moves`), because no vertex would be marked anyway.
                 return Ok(Outcome::CopsWin);
             }
@@ -676,10 +641,88 @@ where
     }
 
     Ok(Outcome::RobberWins(RobberWinData {
-        symmetry: sym.into_enum(),
+        symmetry: sym.into_enum().into(),
         safe: f,
         cop_moves,
     }))
+}
+
+/// [`data.safe`] is called continuous, if it is Lipschitz-continuous with constant 1,
+/// where the distance measurement is the Haussdorff distance induced by the graph distance function.
+///
+/// Said differently: for every move the police can take, if the robber's vertex is currently marked safe,
+/// the robber must be neighboring a safe vertex next move.
+/// Further: there must exist a safe vertex for every police arrangement.
+pub fn verify_continuity(
+    data: &RobberWinData,
+    edges: &EdgeList,
+    manager: &thread_manager::LocalManager,
+) -> Result<(), String> {
+    // logging things
+    let nr_configs = data.cop_moves.nr_configurations();
+    let mut i_config = 0;
+    let mut time_until_log_refresh = 1;
+    let log_refresh_interval = (nr_configs / 10_000).clamp(1000, 100_000);
+
+    let nr_cops = data.cop_moves.nr_cops;
+    let nr_map_vertices = data.cop_moves.nr_map_vertices();
+    let mut safe_should_cops_move_to_curr = vec![false; nr_map_vertices];
+    for cops_index in data.cop_moves.all_positions() {
+        let raw_cops = data.cop_moves.eager_unpack(cops_index);
+        // logging things
+        time_until_log_refresh -= 1;
+        i_config += 1;
+        if time_until_log_refresh == 0 {
+            let done_percent = (i_config as f64) / (nr_configs as f64) * 100.0;
+            manager.update(format!("verifiziere Kontinuität: {done_percent:.2}%"))?;
+            time_until_log_refresh = log_refresh_interval;
+        }
+
+        let mut some_safe = false;
+        safe_should_cops_move_to_curr.fill(false);
+        for (v, neighs, safe) in izip!(
+            0..,
+            edges.neighbors(),
+            data.safe.robber_safe_when(cops_index)
+        ) {
+            if *safe {
+                some_safe = true;
+                safe_should_cops_move_to_curr[v] = true;
+                for n in neighs {
+                    safe_should_cops_move_to_curr[n] = true;
+                }
+            }
+        }
+
+        // verify some safe vertex exists for every cop arrangement
+        if !some_safe {
+            return Err(format!(
+                "Räuber ist nicht sicher, wenn Cops {:?} besetzen.",
+                &raw_cops[..nr_cops]
+            ));
+        }
+
+        // verify for every possible previous cop arrangement,
+        // a vertex marked safe there still has a safe neighbor here (safe neighbors precomputed).
+        for raw_cops_neighs in data.cop_moves.raw_lazy_cop_moves_from(edges, &raw_cops) {
+            let cop_neighs = &raw_cops_neighs[..nr_cops];
+            for (v, &safe_before_curr, safe_last_move) in izip!(
+                0..,
+                &safe_should_cops_move_to_curr,
+                data.safe_vertices(cop_neighs)
+            ) {
+                if safe_last_move && !safe_before_curr {
+                    let curr_positions = data.cop_moves.unpack(cops_index).collect_vec();
+                    return Err(format!(
+                        "Räuberstrategie nicht kontinuierlich an Knoten {v},\
+                        wenn Cops von {cop_neighs:?} zu {curr_positions:?} ziehen."
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub type UTime = u8;
@@ -730,7 +773,8 @@ impl TimeToWin {
 
 #[derive(Serialize, Deserialize)]
 pub struct CopStrategy {
-    pub symmetry: SymGroup,
+    #[serde(deserialize_with = "deserialize_explicit")]
+    pub symmetry: ExplicitClasses,
     pub time_to_win: TimeToWin,
     pub cop_moves: CopConfigurations,
     pub max_moves: usize,
@@ -742,11 +786,10 @@ pub struct CopStrategy {
 }
 
 impl CopStrategy {
-    pub fn pack(
-        &self,
-        cops: impl Iterator<Item = usize>,
-    ) -> (SmallVec<[&dyn DynAutomorphism; 4]>, CompactCopsIndex) {
-        self.cop_moves.pack_dyn(self.symmetry.to_dyn(), cops)
+    pub fn pack(&self, cops: &[usize]) -> (SmallVec<[&ExplicitAutomorphism; 4]>, CompactCopsIndex) {
+        let mut raw_cops = [usize::MAX; MAX_COPS];
+        raw_cops[..cops.len()].copy_from_slice(cops);
+        self.cop_moves.pack(&self.symmetry, raw_cops)
     }
 
     /// values not stored because that would break the format are computed here
@@ -770,7 +813,7 @@ pub fn compute_cop_strategy<S>(
     nr_cops: usize,
     edges: EdgeList,
     sym: S,
-    manager: &mut thread_manager::LocalManager,
+    manager: &thread_manager::LocalManager,
 ) -> Result<CopStrategy, String>
 where
     S: SymmetryGroup + Serialize,
@@ -787,26 +830,27 @@ where
     manager.update("liste Polizeipositionen")?;
     let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
 
-    manager.update("initialisiere Cop Startegie")?;
+    manager.update("reserviere Speicher für Cop Startegie")?;
     let Some(mut f) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
         return Err("Zu wenig Speicherplatz (Copstrat zu groß)".to_owned());
     };
 
-    manager.update("initialisiere Queue")?;
+    manager.update("reserviere Speicher für Queue")?;
     let Some(mut queue) = CopStratQueue::new(&cop_moves) else {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
     };
 
-    for (&fst_index, sub_configs) in &cop_moves.configurations {
-        for (rest_index, _packed_rest_cops) in izip!(0.., sub_configs) {
-            let index = CompactCopsIndex { fst_index, rest_index };
+    manager.update("initialisiere Queue")?;
+    for (i, index) in izip!(0.., cop_moves.all_positions()) {
+        if i % 4096 == 0 {
+            manager.recieve()?;
+        }
 
-            let robber_positions = f.nr_moves_left_mut(index);
-            for cop_pos in cop_moves.unpack(index) {
-                robber_positions[cop_pos] = 0;
-                for n in edges.neighbors_of(cop_pos) {
-                    robber_positions[n] = 0;
-                }
+        let robber_positions = f.nr_moves_left_mut(index);
+        for cop_pos in cop_moves.unpack(index) {
+            robber_positions[cop_pos] = 0;
+            for n in edges.neighbors_of(cop_pos) {
+                robber_positions[n] = 0;
             }
         }
     }
@@ -890,7 +934,7 @@ where
     }
 
     let mut res = CopStrategy {
-        symmetry: sym.into_enum(),
+        symmetry: sym.into_enum().into(),
         time_to_win: f,
         cop_moves,
         max_moves: max_moves as usize,

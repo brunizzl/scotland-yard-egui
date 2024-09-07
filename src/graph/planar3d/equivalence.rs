@@ -129,50 +129,6 @@ impl SymmetryGroup for NoSymmetry {
     const HAS_SYMMETRY: bool = false;
 }
 
-pub trait DynAutomorphism {
-    fn dyn_apply_forward(&self, v: usize) -> usize;
-    fn dyn_apply_backward(&self, v: usize) -> usize;
-}
-
-impl<T: Automorphism> DynAutomorphism for T {
-    fn dyn_apply_forward(&self, v: usize) -> usize {
-        <Self as Automorphism>::apply_forward(self, v)
-    }
-
-    fn dyn_apply_backward(&self, v: usize) -> usize {
-        <Self as Automorphism>::apply_backward(self, v)
-    }
-}
-
-pub trait DynSymmetryGroup {
-    fn dyn_to_representative<'a>(
-        &'a self,
-        vertices: &mut [usize],
-    ) -> SmallVec<[&'a dyn DynAutomorphism; 4]>;
-
-    fn for_each_transform(&self, f: &mut dyn FnMut(&dyn DynAutomorphism));
-}
-
-impl<T: SymmetryGroup> DynSymmetryGroup for T {
-    fn dyn_to_representative<'a>(
-        &'a self,
-        vertices: &mut [usize],
-    ) -> SmallVec<[&'a dyn DynAutomorphism; 4]> {
-        let mut res = SmallVec::new();
-        let iter = <Self as SymmetryGroup>::to_representative(self, vertices);
-        for auto in iter {
-            res.push(auto as &dyn DynAutomorphism);
-        }
-        res
-    }
-
-    fn for_each_transform(&self, f: &mut dyn FnMut(&dyn DynAutomorphism)) {
-        for auto in self.all_automorphisms() {
-            f(auto as &dyn DynAutomorphism);
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub enum SymGroup {
     Explicit(ExplicitClasses),
@@ -182,12 +138,20 @@ pub enum SymGroup {
 }
 
 impl SymGroup {
-    pub fn to_dyn(&self) -> &dyn DynSymmetryGroup {
+    pub fn to_representative(&self, vertices: &mut [usize]) {
         match self {
-            Self::Explicit(e) => e as &dyn DynSymmetryGroup,
-            Self::Torus6(t) => t as &dyn DynSymmetryGroup,
-            Self::Torus4(t) => t as &dyn DynSymmetryGroup,
-            Self::None(n) => n as &dyn DynSymmetryGroup,
+            Self::Explicit(e) => {
+                e.to_representative(vertices);
+            },
+            Self::Torus6(t) => {
+                t.to_representative(vertices);
+            },
+            Self::Torus4(t) => {
+                t.to_representative(vertices);
+            },
+            Self::None(n) => {
+                n.to_representative(vertices);
+            },
         }
     }
 }

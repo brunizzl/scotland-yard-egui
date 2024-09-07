@@ -487,6 +487,17 @@ impl<S: SymmetryGroup> From<&S> for ExplicitClasses {
     }
 }
 
+impl From<SymGroup> for ExplicitClasses {
+    fn from(value: SymGroup) -> Self {
+        match value {
+            SymGroup::Explicit(e) => e,
+            SymGroup::Torus6(t) => ExplicitClasses::from(&t),
+            SymGroup::Torus4(t) => ExplicitClasses::from(&t),
+            SymGroup::None(n) => ExplicitClasses::from(&n),
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;

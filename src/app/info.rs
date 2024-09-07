@@ -4,9 +4,9 @@ use itertools::{izip, Itertools};
 
 use strum::IntoEnumIterator;
 
-use crate::graph::{self, bruteforce as bf};
+use crate::graph::{self, bruteforce as bf, Automorphism, SymmetryGroup};
 
-use self::bruteforce_state::{BruteforceComputationState, GameType};
+use self::bruteforce_state::BruteforceComputationState;
 use self::character::Character;
 
 use super::{color, *};
@@ -1000,16 +1000,6 @@ impl Info {
         }
     }
 
-    fn police_state(&self, con: &DrawContext<'_>) -> (smallvec::SmallVec<[usize; 8]>, GameType) {
-        let active_cops = self.characters.active_cop_vertices();
-        let game_type = GameType {
-            nr_cops: active_cops.len(),
-            resolution: con.map.resolution(),
-            shape: con.map.shape(),
-        };
-        (active_cops, game_type)
-    }
-
     fn draw_green_circles(&mut self, ui: &Ui, con: &DrawContext<'_>) {
         let colors = if ui.ctx().style().visuals.dark_mode {
             &color::DARK_MARKER_COLORS_F32
@@ -1104,19 +1094,10 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
-                let (mut active_cops, game_type) = self.police_state(con);
+                let (active_cops, game_type) = self.characters.police_state(con);
                 if let Some(bf::Outcome::RobberWins(data)) = &self.worker.result_for(&game_type) {
-                    let (_, cop_positions) = data.pack(active_cops.iter().copied());
-                    let safe_vertices = data.safe.robber_safe_when(cop_positions);
-                    let sym_group = data.symmetry.to_dyn();
-                    let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
-                    for (v, safe) in izip!(0.., safe_vertices) {
-                        let v_rot = transform.dyn_apply_backward(v);
-                        let util = (
-                            &mut self.currently_marked[v_rot],
-                            &con.positions[v_rot],
-                            &con.visible[v_rot],
-                        );
+                    let safe_vertices = data.safe_vertices(&active_cops);
+                    for (safe, util) in izip!(safe_vertices, utils_iter) {
                         draw_if!(safe, util);
                     }
                 }
@@ -1135,19 +1116,18 @@ impl Info {
                 }
             },
             VertexColorInfo::RobberVertexClass => {
-                if let Some(r) = self.characters.robber() {
-                    let sym_group = con.sym_group().to_dyn();
+                if let (Some(r), SymGroup::Explicit(sym)) =
+                    (self.characters.robber(), con.sym_group())
+                {
                     let v0 = r.vertex();
-                    let mut f = |transform: &dyn graph::DynAutomorphism| {
-                        let sym_v = transform.dyn_apply_forward(v0);
+                    for auto in sym.all_automorphisms() {
+                        let sym_v = auto.apply_forward(v0);
                         self.currently_marked[sym_v] = true;
                         if con.visible[sym_v] {
                             let sym_pos = con.positions[sym_v];
                             draw_circle_at(sym_pos, self.options.automatic_marker_color);
                         }
-                    };
-                    sym_group
-                        .for_each_transform(&mut f as &mut dyn FnMut(&dyn graph::DynAutomorphism));
+                    }
                 }
             },
             VertexColorInfo::CopsRotatedToEquivalence => {
@@ -1155,8 +1135,7 @@ impl Info {
                 if active_cops.len() > bf::MAX_COPS {
                     return;
                 }
-                let sym_group = con.sym_group().to_dyn();
-                sym_group.dyn_to_representative(&mut active_cops);
+                con.sym_group().to_representative(&mut active_cops);
                 for v in active_cops {
                     self.currently_marked[v] = true;
                     let pos = con.positions[v];
@@ -1286,15 +1265,13 @@ impl Info {
                 draw!(0..);
             },
             VertexNumberInfo::BruteforceCopMoves => {
-                let (mut active_cops, game_type) = self.police_state(con);
+                let (active_cops, game_type) = self.characters.police_state(con);
                 if let Some(strat) = self.worker.strats_for(&game_type) {
-                    let (_, cop_positions) = strat.pack(active_cops.iter().copied());
+                    let (autos, cop_positions) = strat.pack(&active_cops);
                     let nr_moves_left = strat.time_to_win.nr_moves_left(cop_positions);
-                    let sym_group = strat.symmetry.to_dyn();
-                    let transform = sym_group.dyn_to_representative(&mut active_cops)[0];
-                    let transformed_nr = |v| nr_moves_left[transform.dyn_apply_forward(v)];
+                    let auto = autos[0];
                     let show = |&m: &_| m != bf::UTime::MAX;
-                    draw!((0..con.positions.len()).map(transformed_nr), show);
+                    draw!(auto.forward().map(|v| nr_moves_left[v]), show);
                 }
             },
             VertexNumberInfo::Debugging => {
@@ -1343,16 +1320,15 @@ impl Info {
             return;
         };
         let robber_v = robber.vertex();
-        let (mut active_cops, game_type) = self.police_state(con);
+        let (mut active_cops, game_type) = self.characters.police_state(con);
         let Some(strat) = self.worker.strats_for(&game_type) else {
             return;
         };
 
-        let (_, curr_cop_positions) = strat.pack(active_cops.iter().copied());
-        let sym = strat.symmetry.to_dyn();
-        let curr_transforms = sym.dyn_to_representative(&mut active_cops);
-        let to_curr = |v| curr_transforms[0].dyn_apply_forward(v);
-        let from_curr = |v| curr_transforms[0].dyn_apply_backward(v);
+        let (_, curr_cop_positions) = strat.pack(&active_cops);
+        let curr_transforms = strat.symmetry.to_representative(&mut active_cops);
+        let to_curr = |v| curr_transforms[0].apply_forward(v);
+        let from_curr = |v| curr_transforms[0].apply_backward(v);
 
         debug_assert!(self
             .characters
@@ -1366,9 +1342,11 @@ impl Info {
             return;
         }
 
-        let iter = strat.cop_moves.dyn_lazy_cop_moves_from(con.edges, sym, curr_cop_positions);
-        for (neigh_transforms, neigh_index, unpacked_neigh) in iter {
-            let transformed_robber_v = neigh_transforms[0].dyn_apply_forward(robber_v_in_curr);
+        let iter = strat.cop_moves.raw_lazy_cop_moves_from(con.edges, &active_cops);
+        for raw_neigh_cops in iter {
+            let neigh_cops = &raw_neigh_cops[..game_type.nr_cops];
+            let (neigh_transforms, neigh_index) = strat.pack(neigh_cops);
+            let transformed_robber_v = neigh_transforms[0].apply_forward(robber_v_in_curr);
             let nr_moves_left = strat.time_to_win.nr_moves_left(neigh_index);
             let neigh_chances = con
                 .edges
@@ -1377,9 +1355,9 @@ impl Info {
                 .fold(nr_moves_left[transformed_robber_v], bf::UTime::max);
 
             if neigh_chances == curr_nr_moves_left - 1 {
-                let i = izip!(&active_cops, &unpacked_neigh).position(|(a, b)| a != b).unwrap();
+                let i = izip!(&active_cops, neigh_cops).position(|(a, b)| a != b).unwrap();
                 let curr_v = from_curr(active_cops[i]);
-                let next_v = from_curr(unpacked_neigh[i]);
+                let next_v = from_curr(neigh_cops[i]);
                 debug_assert!(con.edges.has_edge(curr_v, next_v));
                 debug_assert!(self.characters.active_cops().any(|c| c.vertex() == curr_v));
                 if !con.visible[curr_v] || !con.visible[next_v] {

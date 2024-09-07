@@ -6,6 +6,7 @@ use std::{
 use itertools::{izip, Itertools};
 
 use crate::{
+    app::bruteforce_state::GameType,
     geo::{Pos3, Vec3},
     graph::{EdgeList, Embedding3D},
 };
@@ -779,5 +780,18 @@ impl State {
 
             ..*self
         }
+    }
+
+    pub fn police_state(
+        &self,
+        con: &DrawContext<'_>,
+    ) -> (smallvec::SmallVec<[usize; 8]>, GameType) {
+        let active_cops = self.active_cop_vertices();
+        let game_type = GameType {
+            nr_cops: active_cops.len(),
+            resolution: con.map.resolution(),
+            shape: con.map.shape(),
+        };
+        (active_cops, game_type)
     }
 }

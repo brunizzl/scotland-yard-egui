@@ -11,11 +11,11 @@ pub const PAUSE_LOG: &str = "##**PAUSED**##";
 
 pub struct LocalManager {
     commands: mpsc::Receiver<Command>,
-    log: mpsc::Sender<String>,
+    pub log: mpsc::Sender<String>,
 }
 
 impl LocalManager {
-    pub fn recieve(&mut self) -> Result<(), String> {
+    pub fn recieve(&self) -> Result<(), String> {
         let mut new_command = None;
         loop {
             while let Ok(cmd) = self.commands.try_recv() {
@@ -41,7 +41,7 @@ impl LocalManager {
         }
     }
 
-    pub fn update(&mut self, msg: impl Into<String>) -> Result<(), String> {
+    pub fn update(&self, msg: impl Into<String>) -> Result<(), String> {
         self.log.send(msg.into()).ok();
         self.recieve()
     }
