@@ -15,9 +15,7 @@ pub struct LocalManager {
 }
 
 impl LocalManager {
-    fn update_impl(&mut self, log_msg: String) -> Result<(), String> {
-        self.log.send(log_msg).ok();
-
+    pub fn recieve(&mut self) -> Result<(), String> {
         let mut new_command = None;
         loop {
             while let Ok(cmd) = self.commands.try_recv() {
@@ -44,7 +42,8 @@ impl LocalManager {
     }
 
     pub fn update(&mut self, msg: impl Into<String>) -> Result<(), String> {
-        self.update_impl(msg.into())
+        self.log.send(msg.into()).ok();
+        self.recieve()
     }
 }
 

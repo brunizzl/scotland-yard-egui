@@ -14,6 +14,28 @@ use queues::{CopStratQueue, RobberStratQueue};
 
 pub const MAX_COPS: usize = 8;
 
+/// returns the number of distinct mutlisets with [`cardinality`] many elements
+/// chosen from a set with [`universe_size`] many elements.
+fn multiset_count(universe_size: usize, cardinality: usize) -> Option<usize> {
+    fn binomial_coefficient(n: usize, k: usize) -> Option<usize> {
+        if k == 0 {
+            return Some(0);
+        }
+        let mut res: usize = 1;
+        for i in 1..=k {
+            res = res.checked_mul(n + 1 - i)?;
+            debug_assert_eq!(res % i, 0);
+            res /= i;
+        }
+        Some(res)
+    }
+    debug_assert_eq!(binomial_coefficient(10, 3), Some(120));
+    debug_assert_eq!(binomial_coefficient(20, 10), Some(184756));
+    debug_assert_eq!(binomial_coefficient(8, 6), Some(28));
+
+    binomial_coefficient(universe_size + cardinality - 1, cardinality)
+}
+
 /// this corresponds to one entry in CopConfigurations:
 /// [`self.fst_cop`] is expected to be a vertex symmetry class representative and the (rotated / mirrored) position of one of the cops.
 /// [`self.rest_cops`] represents the compacted sorted tuple of the other cops positions (obv. rotated the same as fst_cop).
@@ -92,68 +114,78 @@ impl CopConfigurations {
         manager: &mut thread_manager::LocalManager,
     ) -> Result<Self, String> {
         let nr_map_vertices = edges.nr_vertices();
-        let curr_rest_config_size = 0.max(nr_cops as isize - 1) as usize;
-        if (nr_map_vertices - 1).checked_pow(curr_rest_config_size as u32).is_none() {
+        if nr_cops <= 1 {
+            let sections = sym.class_representatives().map(|r| (r, vec![0]));
+            return Ok(Self {
+                nr_cops,
+                nr_map_vertices,
+                configurations: BTreeMap::from_iter(sections),
+            });
+        }
+
+        if (nr_map_vertices - 1).checked_pow((nr_cops - 1) as u32).is_none() {
             return Err("Polizeipositionen passen nicht in usize".to_string());
         }
-        let mut curr_rest_config = vec![0usize; curr_rest_config_size];
-        let advance = |rest_config: &mut [_]| -> bool {
-            let mut fst_change = rest_config.len() - 1;
-            loop {
-                if rest_config[fst_change] + 1 < nr_map_vertices {
-                    rest_config[fst_change] += 1;
-                    break;
-                }
-                if fst_change == 0 {
-                    return false;
-                }
-                fst_change -= 1;
-            }
-            for i in fst_change..rest_config.len() {
-                rest_config[i] = rest_config[fst_change];
-            }
-            true
-        };
+
+        // logging info + management
+        let nr_configurations: usize = sym
+            .class_representatives()
+            .map(|r| multiset_count(nr_map_vertices - r, nr_cops - 1).unwrap())
+            .sum();
+        let mut i_configuration = 0;
+        let mut time_until_log_refresh: usize = 1;
+        let log_refresh_interval = (nr_configurations / 10_000).clamp(1000, 100_000);
 
         let mut configurations = BTreeMap::new();
+        for fst_cop in sym.class_representatives() {
+            let mut config_storage = [fst_cop; MAX_COPS - 1];
+            let curr_config = &mut config_storage[..(nr_cops - 1)];
 
-        let mut time_until_log_refresh: usize = 1;
-        let mut add_configs_for_first = |fst_cop: usize| {
-            curr_rest_config.iter_mut().for_each(|c| *c = fst_cop);
-            let mut new_configuration = Vec::new();
-            if nr_cops > 1 {
-                loop {
-                    time_until_log_refresh -= 1;
-                    if time_until_log_refresh == 0 {
-                        manager.update(format!(
-                            "liste Coppositionen, aktuell \n[{fst_cop}] + {:?}",
-                            curr_rest_config
-                        ))?;
-                        time_until_log_refresh = 50000;
+            let mut configurations_section = Vec::new();
+            'try_add_curr_config: loop {
+                debug_assert!(curr_config.iter().tuple_windows().all(|(a, b)| a <= b));
+
+                // update logs
+                i_configuration += 1;
+                time_until_log_refresh -= 1;
+                if time_until_log_refresh == 0 {
+                    manager.update(format!(
+                        "liste Coppositionen:\n{:.2}%, aktuell [{fst_cop}] + {:?}",
+                        (i_configuration as f64) / (nr_configurations as f64) * 100.0,
+                        curr_config
+                    ))?;
+                    time_until_log_refresh = log_refresh_interval;
+                }
+
+                // test if `curr_config` is representant of equivalency class. if so, add to configs
+                if is_stored_config(sym, fst_cop, curr_config) {
+                    let packed = pack_rest(nr_map_vertices, curr_config);
+                    if configurations_section.try_reserve(1).is_err() {
+                        return Err("Zu wenig Speicherplatz für Polizeipositionen".to_string());
                     }
+                    configurations_section.push(packed);
+                }
 
-                    debug_assert!(curr_rest_config.iter().tuple_windows().all(|(a, b)| a <= b));
-                    if is_stored_config(sym, fst_cop, &curr_rest_config) {
-                        let packed = pack_rest(nr_map_vertices, &curr_rest_config);
-                        if new_configuration.try_reserve(1).is_err() {
-                            return Err("Zu wenig Speicherplatz für Polizeipositionen".to_string());
+                // advance `curr_config` to next config.
+                // skip configs which aren't sorted.
+                for fst_change in (0..curr_config.len()).rev() {
+                    let new_val = curr_config[fst_change] + 1;
+                    if new_val < nr_map_vertices {
+                        for old in &mut curr_config[fst_change..] {
+                            *old = new_val;
                         }
-                        new_configuration.push(packed);
-                    }
-                    if !advance(&mut curr_rest_config) {
-                        break;
+                        continue 'try_add_curr_config;
                     }
                 }
-            } else {
-                new_configuration.push(0);
+                // all entries in `curr_config` have value `nr_map_vertices - 1`
+                // -> all cops stand on the very last vertex
+                // -> there is no config after this one.
+                break 'try_add_curr_config;
             }
-            let old = configurations.insert(fst_cop, new_configuration);
+            let old = configurations.insert(fst_cop, configurations_section);
             debug_assert!(old.is_none());
-            Ok(())
-        };
-        for fst_cop in sym.class_representatives() {
-            add_configs_for_first(fst_cop)?;
         }
+        debug_assert_eq!(nr_configurations, i_configuration);
 
         Ok(Self {
             nr_cops,
@@ -455,20 +487,25 @@ where
     manager.update("liste Polizeipositionen")?;
     let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
 
-    manager.update("initialisiere Räubergewinnfunktion")?;
+    manager.update("reserviere Speicher für Räuberstrategiefunktion")?;
     let Some(mut f) = SafeRobberPositions::new(edges.nr_vertices(), &cop_moves) else {
-        return Err("Zu wenig Speicherplatz (Räubergewinnfunktion zu groß)".to_owned());
+        return Err("Zu wenig Speicherplatz (Räuberstrategiefunktion zu groß)".to_owned());
     };
 
-    manager.update("initialisiere Queue")?;
+    manager.update("reserviere Speicher für Queue")?;
     let Some(mut queue) = RobberStratQueue::new(&cop_moves) else {
         return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
     };
 
     let max_degree_less_than_nr_cops = edges.max_degree() < nr_cops;
 
+    manager.update("initialisiere Räuberstrategiefunktion")?;
     for (&fst_index, sub_configs) in &cop_moves.configurations {
         for (rest_index, _packed_rest_cops) in izip!(0.., sub_configs) {
+            if rest_index % 4096 == 0 {
+                manager.recieve()?;
+            }
+
             let index = CompactCopsIndex { fst_index, rest_index };
 
             debug_assert!({
@@ -538,7 +575,7 @@ where
                 queue.len(),
                 queue.rounds_complete(),
             ))?;
-            time_until_log_refresh = 2000;
+            time_until_log_refresh = 1000;
         }
 
         //line 6
