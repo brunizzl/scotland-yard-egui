@@ -20,10 +20,10 @@ impl<F: Fn()> Drop for OnDrop<F> {
 }
 
 /// maximum number of cops for which a bruteforce computation can be started.
-/// is not too detrimental, that this number is small, 
-/// because the computation is ungodly expensive anyway. 
+/// is not too detrimental, that this number is small,
+/// because the computation is ungodly expensive anyway.
 /// (exponential in complexity, with this in the exponent and nr of graph vertices as base).
-/// 
+///
 /// Keeping the number of cops at this limit allows us to not use the heap as much.
 pub const MAX_COPS: usize = 7;
 

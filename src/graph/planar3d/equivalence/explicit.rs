@@ -108,7 +108,7 @@ pub struct ExplicitClasses {
 }
 
 impl ExplicitClasses {
-    pub fn enumerate_platonic_symmetry_transforms(plat: &ConvexHull) -> Vec<Matrix3x3> {
+    fn enumerate_platonic_symmetry_transforms(plat: &ConvexHull) -> Vec<Matrix3x3> {
         //indicator for platonic, not guarantee
         let degree = plat.edges.max_degree();
         debug_assert_eq!(degree, plat.edges.min_degree());
@@ -411,6 +411,9 @@ impl<S: SymmetryGroup> From<&S> for ExplicitClasses {
                 .map(ExplicitAutomorphism::from)
                 .collect_vec();
             vec.sort_by(|a, b| compare(a.forward(), b.forward()));
+            // a symmetry group invariant is to have the identity as first element.
+            // this is always the case after sorting, because the identity has smallest lexicografic order.
+            debug_assert!(compare(vec[0].forward(), 0..sym.nr_vertices()).is_eq());
             vec
         };
 

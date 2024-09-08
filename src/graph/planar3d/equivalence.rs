@@ -217,14 +217,13 @@ where
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use std::cmp::Ordering;
 
     /// also returns false if any duplicates exist, but that would be weird to have anyway.
     fn is_sorted(autos: &[impl Automorphism]) -> bool {
         autos
             .iter()
             .tuple_windows()
-            .all(|(f, g)| compare(f.forward(), g.forward()) == Ordering::Less)
+            .all(|(f, g)| compare(f.forward(), g.forward()).is_lt())
     }
 
     fn contains_forward(
@@ -276,7 +275,7 @@ pub mod test {
             let mut autos = Vec::from(autos.all_automorphisms());
             //identity is not required to be stored first for this to be a group, but still.
             let n = autos[0].nr_vertices();
-            assert!(compare(autos[0].forward(), 0..n) == Ordering::Equal);
+            assert!(compare(autos[0].forward(), 0..n).is_eq());
 
             autos.sort_by(|f, g| compare(f.forward(), g.forward()));
             closed_under_inverse(&autos);
@@ -293,57 +292,101 @@ pub mod test {
         }
     }
 
+    fn automorphisms_respect_edges(graph: &planar3d::Embedding3D) {
+        fn text_impl<A: Automorphism>(autos: &[A], edges: &EdgeList) {
+            let mut mapped_neighs = Vec::new();
+            let mut neighs_mapped = Vec::new();
+            for auto in autos {
+                let fw = |v| auto.apply_forward(v);
+                let bw = |v| auto.apply_backward(v);
+                for v in 0..edges.nr_vertices() {
+                    let mapped = fw(v);
+                    mapped_neighs.clear();
+                    mapped_neighs.extend(edges.neighbors_of(mapped));
+                    mapped_neighs.sort();
+
+                    neighs_mapped.clear();
+                    neighs_mapped.extend(edges.neighbors_of(v).map(fw));
+                    neighs_mapped.sort();
+
+                    assert_eq!(mapped_neighs, neighs_mapped);
+                    assert_eq!(bw(mapped), v);
+                }
+            }
+        }
+
+        let edges = graph.edges();
+        match graph.sym_group() {
+            SymGroup::Explicit(e) => text_impl(e.all_automorphisms(), edges),
+            SymGroup::Torus4(t) => text_impl(t.all_automorphisms(), edges),
+            SymGroup::Torus6(t) => text_impl(t.all_automorphisms(), edges),
+            SymGroup::None(n) => text_impl(n.all_automorphisms(), edges),
+        }
+    }
+
     #[test]
     fn tetrahedron_automorphisms_are_group() {
         let g2 = Embedding3D::new_subdivided_tetrahedron(2);
         is_group(g2.sym_group());
+        automorphisms_respect_edges(&g2);
 
         let g10 = Embedding3D::new_subdivided_tetrahedron(10);
         is_group(g10.sym_group());
+        automorphisms_respect_edges(&g10);
     }
 
     #[test]
     fn cube_automorphisms_are_group() {
         let g2 = Embedding3D::new_subdivided_cube(2);
         is_group(g2.sym_group());
+        automorphisms_respect_edges(&g2);
 
         let g10 = Embedding3D::new_subdivided_cube(10);
         is_group(g10.sym_group());
+        automorphisms_respect_edges(&g10);
     }
 
     #[test]
     fn octahedron_automorphisms_are_group() {
         let g2 = Embedding3D::new_subdivided_octahedron(2);
         is_group(g2.sym_group());
+        automorphisms_respect_edges(&g2);
 
         let g10 = Embedding3D::new_subdivided_octahedron(10);
         is_group(g10.sym_group());
+        automorphisms_respect_edges(&g10);
     }
 
     #[test]
     fn icosahedron_automorphisms_are_group() {
         let g2 = Embedding3D::new_subdivided_icosahedron(2);
         is_group(g2.sym_group());
+        automorphisms_respect_edges(&g2);
 
         let g10 = Embedding3D::new_subdivided_icosahedron(10);
         is_group(g10.sym_group());
+        automorphisms_respect_edges(&g10);
     }
 
     #[test]
     fn torus6_automorphisms_are_group() {
         let g3 = Embedding3D::new_subdivided_triangle_torus(3);
         is_group(g3.sym_group());
+        automorphisms_respect_edges(&g3);
 
         let g5 = Embedding3D::new_subdivided_triangle_torus(6);
         is_group(g5.sym_group());
+        automorphisms_respect_edges(&g5);
     }
 
     #[test]
     fn torus4_automorphisms_are_group() {
         let g3 = Embedding3D::new_subdivided_squares_torus(3);
         is_group(g3.sym_group());
+        automorphisms_respect_edges(&g3);
 
         let g5 = Embedding3D::new_subdivided_squares_torus(6);
         is_group(g5.sym_group());
+        automorphisms_respect_edges(&g5);
     }
 }
