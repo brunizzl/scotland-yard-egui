@@ -293,7 +293,7 @@ pub mod test {
     }
 
     fn automorphisms_respect_edges(graph: &planar3d::Embedding3D) {
-        fn text_impl<A: Automorphism>(autos: &[A], edges: &EdgeList) {
+        fn test_impl<A: Automorphism>(autos: &[A], edges: &EdgeList) {
             let mut mapped_neighs = Vec::new();
             let mut neighs_mapped = Vec::new();
             for auto in autos {
@@ -317,10 +317,10 @@ pub mod test {
 
         let edges = graph.edges();
         match graph.sym_group() {
-            SymGroup::Explicit(e) => text_impl(e.all_automorphisms(), edges),
-            SymGroup::Torus4(t) => text_impl(t.all_automorphisms(), edges),
-            SymGroup::Torus6(t) => text_impl(t.all_automorphisms(), edges),
-            SymGroup::None(n) => text_impl(n.all_automorphisms(), edges),
+            SymGroup::Explicit(e) => test_impl(e.all_automorphisms(), edges),
+            SymGroup::Torus4(t) => test_impl(t.all_automorphisms(), edges),
+            SymGroup::Torus6(t) => test_impl(t.all_automorphisms(), edges),
+            SymGroup::None(n) => test_impl(n.all_automorphisms(), edges),
         }
     }
 
