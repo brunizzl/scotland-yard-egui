@@ -1094,9 +1094,9 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
-                let (active_cops, game_type) = self.characters.police_state(con);
+                let (mut active_cops, game_type) = self.characters.police_state(con);
                 if let Some(bf::Outcome::RobberWins(data)) = &self.worker.result_for(&game_type) {
-                    let safe_vertices = data.safe_vertices(&active_cops);
+                    let safe_vertices = data.safe_vertices(&mut active_cops);
                     for (safe, util) in izip!(safe_vertices, utils_iter) {
                         draw_if!(safe, util);
                     }
@@ -1131,12 +1131,12 @@ impl Info {
                 }
             },
             VertexColorInfo::CopsRotatedToEquivalence => {
-                let mut active_cops = self.characters.active_cop_vertices();
-                if active_cops.len() > bf::MAX_COPS {
+                let (mut active_cops, game_type) = self.characters.police_state(con);
+                if game_type.nr_cops > bf::MAX_COPS {
                     return;
                 }
-                con.sym_group().to_representative(&mut active_cops);
-                for v in active_cops {
+                let rotated = con.sym_group().to_representative(&mut active_cops);
+                for &v in &rotated[..] {
                     self.currently_marked[v] = true;
                     let pos = con.positions[v];
                     if con.visible[v] {
@@ -1326,14 +1326,11 @@ impl Info {
         };
 
         let (_, curr_cop_positions) = strat.pack(&active_cops);
-        let curr_transforms = strat.symmetry.to_representative(&mut active_cops);
-        let to_curr = |v| curr_transforms[0].apply_forward(v);
-        let from_curr = |v| curr_transforms[0].apply_backward(v);
+        let (curr_autos, curr_repr) = strat.symmetry.power_repr(&mut active_cops);
+        let to_curr = |v| curr_autos[0].apply_forward(v);
+        let from_curr = |v| curr_autos[0].apply_backward(v);
 
-        debug_assert!(self
-            .characters
-            .active_cops()
-            .all(|c| active_cops.contains(&to_curr(c.vertex()))));
+        debug_assert!(active_cops[..].iter().all(|&c| curr_repr.contains(&to_curr(c))));
 
         let robber_v_in_curr = to_curr(robber_v);
         let curr_nr_moves_left =
@@ -1342,10 +1339,8 @@ impl Info {
             return;
         }
 
-        let iter = strat.cop_moves.raw_lazy_cop_moves_from(con.edges, &active_cops);
-        for raw_neigh_cops in iter {
-            let neigh_cops = &raw_neigh_cops[..game_type.nr_cops];
-            let (neigh_transforms, neigh_index) = strat.pack(neigh_cops);
+        for neigh_cops in strat.cop_moves.raw_lazy_cop_moves_from(con.edges, curr_repr) {
+            let (neigh_transforms, neigh_index) = strat.pack(&neigh_cops);
             let transformed_robber_v = neigh_transforms[0].apply_forward(robber_v_in_curr);
             let nr_moves_left = strat.time_to_win.nr_moves_left(neigh_index);
             let neigh_chances = con
@@ -1355,8 +1350,8 @@ impl Info {
                 .fold(nr_moves_left[transformed_robber_v], bf::UTime::max);
 
             if neigh_chances == curr_nr_moves_left - 1 {
-                let i = izip!(&active_cops, neigh_cops).position(|(a, b)| a != b).unwrap();
-                let curr_v = from_curr(active_cops[i]);
+                let i = izip!(&curr_repr[..], &neigh_cops[..]).position(|(a, b)| a != b).unwrap();
+                let curr_v = from_curr(curr_repr[i]);
                 let next_v = from_curr(neigh_cops[i]);
                 debug_assert!(con.edges.has_edge(curr_v, next_v));
                 debug_assert!(self.characters.active_cops().any(|c| c.vertex() == curr_v));
@@ -1370,7 +1365,7 @@ impl Info {
                     curr_pos,
                     next_pos - curr_pos,
                     Stroke {
-                        width: con.scale * 1.2,
+                        width: con.scale * 1.6,
                         color: Color32::from_rgb(150, 150, 255),
                     },
                 );

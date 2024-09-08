@@ -8,7 +8,10 @@ use itertools::{izip, Itertools};
 use crate::{
     app::bruteforce_state::GameType,
     geo::{Pos3, Vec3},
-    graph::{EdgeList, Embedding3D},
+    graph::{
+        bruteforce::{RawCops, MAX_COPS},
+        EdgeList, Embedding3D,
+    },
 };
 
 use super::{color::*, *};
@@ -782,16 +785,18 @@ impl State {
         }
     }
 
-    pub fn police_state(
-        &self,
-        con: &DrawContext<'_>,
-    ) -> (smallvec::SmallVec<[usize; 8]>, GameType) {
+    /// this function is only really of use, when the [`GameType`] returned as `.1`
+    /// is computed as bruteforce thingy.
+    /// It is thus ok to return [`RawCops`], because bruteforce also needs to respect `MAX_COPS`.
+    pub fn police_state(&self, con: &DrawContext<'_>) -> (RawCops, GameType) {
         let active_cops = self.active_cop_vertices();
+        let raw_nr_cops = usize::min(active_cops.len(), MAX_COPS);
+        let raw_cops = RawCops::new(&active_cops[..raw_nr_cops]);
         let game_type = GameType {
             nr_cops: active_cops.len(),
             resolution: con.map.resolution(),
             shape: con.map.shape(),
         };
-        (active_cops, game_type)
+        (raw_cops, game_type)
     }
 }

@@ -6,6 +6,7 @@ use self::bool_csr::BoolCSR;
 use crate::geo::*;
 
 use super::*;
+use bruteforce::RawCops;
 
 pub mod explicit;
 pub use explicit::*;
@@ -62,17 +63,15 @@ impl Automorphism for Identity {
 /// representation of all [`Automorphism`]'s of a given graph
 pub trait SymmetryGroup {
     type Auto: Automorphism;
-    type AutoIter<'a>: IntoIterator<Item = &'a Self::Auto> + Clone
-    where
-        Self: 'a;
 
-    /// applies an authomorphism to vertices in place, returns all authomorphisms which
-    /// map original vertices to result.
-    /// order of vertices may be altered.
-    ///
-    /// this function must guarantee to find a unique representative of vertices and
-    /// ALL autos bringing them there.
-    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'a>;
+    /// returns all automorphisms that map the given vertex to the
+    /// representative of his equivalency class
+    fn repr_automorphisms(&self, v: usize) -> impl Iterator<Item = &Self::Auto> + '_ + Clone;
+
+    /// returns the representative of the vertices' equivalency class under the automorphism group.
+    /// the class representative MUST ALWAYS be the smallest vertex of the class.
+    /// thus the invariant `self.class_representatives(v) <= v` must hold for all vertices `v`.
+    fn repr_of(&self, v: usize) -> usize;
 
     /// enumerates one vertex of each vertex class. this vertex will be result of [`Self::to_representative`]
     /// if a vertex of it's class is passed as only vertex.
@@ -81,11 +80,58 @@ pub trait SymmetryGroup {
     /// assumes identity at beginning
     fn all_automorphisms(&self) -> &[Self::Auto];
 
-    const HAS_SYMMETRY: bool = true;
-
     fn into_enum(self) -> SymGroup;
 
     fn nr_vertices(&self) -> usize;
+
+    /// with `cops` beeing a vertex of the unordered graph power,
+    /// e.g. the graph with multisets of fixed size `cops.nr_cops`,
+    /// this function returns the representative vertex of `cops` under the group of
+    /// automorphisms of the original graph, but applied to every element of the multiset.
+    /// all such automorphisms mapping `cops` to it's representative are also returned.
+    ///
+    /// the input may be reordered, but nothing else.
+    /// `cops` must be nonempty.
+    /// the returned representative ist guaranteed to be sorted.
+    fn power_repr<'a>(&'a self, cops: &mut RawCops) -> (SmallVec<[&'a Self::Auto; 4]>, RawCops) {
+        debug_assert!(!cops.is_empty());
+
+        cops.sort_by_key(|&c| self.repr_of(c));
+        let rotate_class = self.repr_of(cops[0]);
+        let all_autos = cops
+            .iter()
+            .take_while(|&&c| self.repr_of(c) == rotate_class)
+            .flat_map(|&c| self.repr_automorphisms(c));
+
+        let mut best_autos = SmallVec::<[&Self::Auto; 4]>::new();
+        let mut best_val = RawCops::uninit(cops.nr_cops);
+        let mut new_val = RawCops::uninit(cops.nr_cops);
+
+        for auto in all_autos {
+            for (nv, &c) in izip!(&mut new_val[..], &cops[..]) {
+                *nv = auto.apply_forward(c);
+            }
+            new_val.sort_unstable();
+            //this relies on the classes beeing sorted by what the smallest vertex appearing in one is.
+            debug_assert_eq!(self.repr_of(new_val[0]), rotate_class);
+
+            match new_val.cmp(&best_val) {
+                std::cmp::Ordering::Equal => {
+                    best_autos.push(auto);
+                },
+                std::cmp::Ordering::Less => {
+                    best_val = new_val;
+                    best_autos.clear();
+                    best_autos.push(auto);
+                },
+                std::cmp::Ordering::Greater => {
+                    //discard this automorphism
+                },
+            }
+        }
+        debug_assert!(!best_autos.is_empty());
+        (best_autos, best_val)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -103,11 +149,18 @@ impl NoSymmetry {
 
 impl SymmetryGroup for NoSymmetry {
     type Auto = Identity;
-    type AutoIter<'a> = std::iter::Once<&'a Identity>;
 
-    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'a> {
-        vertices.sort();
+    fn repr_automorphisms(&self, _: usize) -> impl Iterator<Item = &Self::Auto> + '_ + Clone {
         std::iter::once(&self.identity[0])
+    }
+
+    fn repr_of(&self, v: usize) -> usize {
+        v
+    }
+
+    fn power_repr<'a>(&'a self, cops: &mut RawCops) -> (SmallVec<[&'a Self::Auto; 4]>, RawCops) {
+        cops.sort();
+        (smallvec::smallvec![&self.identity[0]], *cops)
     }
 
     fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
@@ -125,8 +178,6 @@ impl SymmetryGroup for NoSymmetry {
     fn nr_vertices(&self) -> usize {
         self.identity[0].nr_vertices
     }
-
-    const HAS_SYMMETRY: bool = false;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -138,20 +189,12 @@ pub enum SymGroup {
 }
 
 impl SymGroup {
-    pub fn to_representative(&self, vertices: &mut [usize]) {
+    pub fn to_representative(&self, cops: &mut RawCops) -> RawCops {
         match self {
-            Self::Explicit(e) => {
-                e.to_representative(vertices);
-            },
-            Self::Torus6(t) => {
-                t.to_representative(vertices);
-            },
-            Self::Torus4(t) => {
-                t.to_representative(vertices);
-            },
-            Self::None(n) => {
-                n.to_representative(vertices);
-            },
+            Self::Explicit(e) => e.power_repr(cops).1,
+            Self::Torus6(t) => t.power_repr(cops).1,
+            Self::Torus4(t) => t.power_repr(cops).1,
+            Self::None(n) => n.power_repr(cops).1,
         }
     }
 }

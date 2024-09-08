@@ -1,5 +1,4 @@
-use itertools::{iproduct, izip};
-use smallvec::SmallVec;
+use itertools::iproduct;
 
 use super::*;
 
@@ -265,66 +264,25 @@ impl<const N: usize, R: Rotation<N>> TorusSymmetry<N, R> {
         let end = start + N * 2;
         &self.autos[start..end]
     }
-
-    fn to_representative_impl(
-        &self,
-        cops: &mut [usize],
-    ) -> SmallVec<[&'_ TorusAutomorphism<N, R>; 8]> {
-        if cops.is_empty() {
-            //the first entry in self.autos is always the identity
-            debug_assert!(self.autos[0].forward().enumerate().take(20).all(|(i, j)| i == j));
-            return smallvec![&self.autos[0]];
-        }
-
-        let mut best_autos = SmallVec::<[&TorusAutomorphism<N, R>; 8]>::new();
-        let mut best_storage = [usize::MAX; bruteforce::MAX_COPS];
-        let best_val = &mut best_storage[..cops.len()];
-
-        let mut new_storage = [usize::MAX; bruteforce::MAX_COPS];
-        let new_val = &mut new_storage[..cops.len()];
-        for &cop in cops.iter() {
-            for auto in self.autos_of(cop) {
-                for (nv, &c) in izip!(new_val.iter_mut(), cops.iter()) {
-                    *nv = auto.apply_forward(c);
-                }
-                new_val.sort_unstable();
-                debug_assert_eq!(new_val[0], 0);
-                match new_val.cmp(&best_val) {
-                    std::cmp::Ordering::Equal => {
-                        best_autos.push(auto);
-                    },
-                    std::cmp::Ordering::Less => {
-                        best_val.copy_from_slice(new_val);
-                        best_autos.clear();
-                        best_autos.push(auto);
-                    },
-                    std::cmp::Ordering::Greater => {
-                        //discard this automorphism
-                    },
-                }
-            }
-        }
-        debug_assert!(!best_autos.is_empty());
-        cops.copy_from_slice(best_val);
-
-        best_autos
-    }
 }
 
 impl SymmetryGroup for TorusSymmetry6 {
     type Auto = TorusAutomorphism6;
-    type AutoIter<'a> = SmallVec<[&'a TorusAutomorphism6; 8]>;
 
     fn all_automorphisms(&self) -> &[Self::Auto] {
         &self.autos
     }
 
-    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
-        std::iter::once(0)
+    fn repr_automorphisms(&self, v: usize) -> impl Iterator<Item = &Self::Auto> + '_ + Clone {
+        self.autos_of(v).iter()
     }
 
-    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'a> {
-        self.to_representative_impl(vertices)
+    fn repr_of(&self, _: usize) -> usize {
+        0
+    }
+
+    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
+        std::iter::once(0)
     }
 
     fn into_enum(self) -> SymGroup {
@@ -338,18 +296,21 @@ impl SymmetryGroup for TorusSymmetry6 {
 
 impl SymmetryGroup for TorusSymmetry4 {
     type Auto = TorusAutomorphism4;
-    type AutoIter<'a> = SmallVec<[&'a TorusAutomorphism4; 8]>;
 
     fn all_automorphisms(&self) -> &[Self::Auto] {
         &self.autos
     }
 
-    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
-        std::iter::once(0)
+    fn repr_automorphisms(&self, v: usize) -> impl Iterator<Item = &Self::Auto> + '_ + Clone {
+        self.autos_of(v).iter()
     }
 
-    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'a> {
-        self.to_representative_impl(vertices)
+    fn repr_of(&self, _: usize) -> usize {
+        0
+    }
+
+    fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
+        std::iter::once(0)
     }
 
     fn into_enum(self) -> SymGroup {

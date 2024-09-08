@@ -372,69 +372,17 @@ impl ExplicitClasses {
         );
         transform_indices.iter().map(|&i| &self.symmetry_transforms[i])
     }
-
-    /// chooses the rotation, such that in the rotated result the cop defining the rotation is moved
-    /// to the smallest index.
-    fn transform_all(&self, cops: &mut [usize]) -> SmallVec<[&ExplicitAutomorphism; 4]> {
-        if cops.is_empty() {
-            //the first entry in self.symmetry_transforms is always the identity
-            debug_assert!(self.symmetry_transforms[0]
-                .forward()
-                .enumerate()
-                .take(20)
-                .all(|(i, j)| i == j));
-            return smallvec::smallvec![&self.symmetry_transforms[0]];
-        }
-
-        cops.sort_by_key(|&c| self.vertex_representative[c]);
-        let rotate_class = self.vertex_representative[cops[0]];
-        let all_autos = cops
-            .iter()
-            .take_while(|&&c| self.vertex_representative[c] == rotate_class)
-            .flat_map(|&c| self.transforms_of(c));
-
-        let mut best_autos = SmallVec::<[&ExplicitAutomorphism; 4]>::new();
-        let mut best_storage = [usize::MAX; bruteforce::MAX_COPS];
-        let best_val = &mut best_storage[..cops.len()];
-
-        let mut new_storage = [usize::MAX; bruteforce::MAX_COPS];
-        let new_val = &mut new_storage[..cops.len()];
-
-        for auto in all_autos {
-            for (nv, &c) in izip!(new_val.iter_mut(), cops.iter()) {
-                *nv = auto.forward[c];
-            }
-            new_val.sort_unstable();
-            //this relies on the classes beeing sorted by what the smallest vertex appearing in one is.
-            debug_assert_eq!(self.vertex_representative[new_val[0]], rotate_class);
-
-            match new_val.cmp(&best_val) {
-                std::cmp::Ordering::Equal => {
-                    best_autos.push(auto);
-                },
-                std::cmp::Ordering::Less => {
-                    best_val.copy_from_slice(new_val);
-                    best_autos.clear();
-                    best_autos.push(auto);
-                },
-                std::cmp::Ordering::Greater => {
-                    //discard this automorphism
-                },
-            }
-        }
-        debug_assert!(!best_autos.is_empty());
-        cops.copy_from_slice(best_val);
-
-        best_autos
-    }
 }
 
 impl SymmetryGroup for ExplicitClasses {
     type Auto = ExplicitAutomorphism;
-    type AutoIter<'a> = SmallVec<[&'a ExplicitAutomorphism; 4]>;
 
-    fn to_representative<'a>(&'a self, vertices: &mut [usize]) -> Self::AutoIter<'a> {
-        self.transform_all(vertices)
+    fn repr_automorphisms(&self, v: usize) -> impl Iterator<Item = &Self::Auto> + '_ + Clone {
+        self.transforms_of(v)
+    }
+
+    fn repr_of(&self, v: usize) -> usize {
+        self.vertex_representative[v]
     }
 
     fn class_representatives(&self) -> impl Iterator<Item = usize> + '_ + Clone {
@@ -469,9 +417,8 @@ impl<S: SymmetryGroup> From<&S> for ExplicitClasses {
         let mut vertex_representative = Vec::new();
         let mut to_representative = BoolCSR::new();
         for v in 0..sym.nr_vertices() {
-            let mut v_array = [v; 1];
-            let autos = sym.to_representative(&mut v_array);
-            vertex_representative.push(v_array[0]);
+            vertex_representative.push(sym.repr_of(v));
+            let autos = sym.repr_automorphisms(v);
             to_representative.add_row(autos.into_iter().map(|auto| {
                 symmetry_transforms
                     .binary_search_by(|a| compare(a.forward(), auto.forward()))
@@ -505,22 +452,20 @@ pub mod test {
     fn sym_converts_to_explicit(s: &SymGroup) {
         fn converts_impl(s: &impl SymmetryGroup) {
             use std::collections::BTreeSet;
-            let expl = ExplicitClasses::from(s);
-            assert_eq!(s.all_automorphisms().len(), expl.all_automorphisms().len());
-            assert_eq!(s.nr_vertices(), expl.nr_vertices());
+            let e = ExplicitClasses::from(s);
+            assert_eq!(s.all_automorphisms().len(), e.all_automorphisms().len());
+            assert_eq!(s.nr_vertices(), e.nr_vertices());
             assert_eq!(
                 s.class_representatives().collect::<BTreeSet<_>>(),
-                expl.class_representatives().collect::<BTreeSet<_>>()
+                e.class_representatives().collect::<BTreeSet<_>>()
             );
             for v in 0..s.nr_vertices() {
-                let mut s_v = [v; 1];
-                let mut e_v = [v; 1];
-                let mut s_autos = s.to_representative(&mut s_v).into_iter().collect_vec();
-                let mut e_autos = s.to_representative(&mut e_v).into_iter().collect_vec();
-                assert_eq!(s_v[0], e_v[0]);
+                assert_eq!(s.repr_of(v), e.repr_of(v));
+                let mut s_autos = s.repr_automorphisms(v).collect_vec();
+                let mut e_autos = e.repr_automorphisms(v).collect_vec();
+                assert_eq!(s_autos.len(), e_autos.len());
                 s_autos.sort_by(|a, b| compare(a.forward(), b.forward()));
                 e_autos.sort_by(|a, b| compare(a.forward(), b.forward()));
-                assert_eq!(s_autos.len(), e_autos.len());
                 for (s_a, e_a) in izip!(s_autos, e_autos) {
                     assert!(compare(s_a.forward(), e_a.forward()).is_eq());
                 }

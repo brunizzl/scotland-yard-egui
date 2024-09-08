@@ -11,8 +11,74 @@ pub mod thread_manager;
 
 mod queues;
 use queues::{CopStratQueue, RobberStratQueue};
+struct OnDrop<F: Fn()>(F);
 
-pub const MAX_COPS: usize = 8;
+impl<F: Fn()> Drop for OnDrop<F> {
+    fn drop(&mut self) {
+        self.0()
+    }
+}
+
+/// maximum number of cops for which a bruteforce computation can be started.
+/// is not too detrimental, that this number is small, 
+/// because the computation is ungodly expensive anyway. 
+/// (exponential in complexity, with this in the exponent and nr of graph vertices as base).
+/// 
+/// Keeping the number of cops at this limit allows us to not use the heap as much.
+pub const MAX_COPS: usize = 7;
+
+/// type to carry all cop positions on the stack.
+/// to make this thing fast, `MAX_COPS` is kept relatively small.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct RawCops {
+    /// only first `self.nr_cops` entries are active, the rest has value `usize::MAX`
+    pub cops: [usize; MAX_COPS],
+    pub nr_cops: usize,
+}
+
+impl RawCops {
+    pub fn new(cs: &[usize]) -> Self {
+        let mut cops = [usize::MAX; MAX_COPS];
+        let nr_cops = cs.len();
+        cops[..nr_cops].copy_from_slice(cs);
+        Self { cops, nr_cops }
+    }
+
+    pub fn uninit(nr_cops: usize) -> Self {
+        let cops = [usize::MAX; MAX_COPS];
+        Self { cops, nr_cops }
+    }
+
+    pub fn from_iter(it: impl Iterator<Item = usize>) -> Self {
+        let mut cops = [usize::MAX; MAX_COPS];
+        let mut nr_cops = 0;
+        for cop in it {
+            cops[nr_cops] = cop;
+            nr_cops += 1;
+        }
+        Self { cops, nr_cops }
+    }
+}
+
+impl std::ops::Deref for RawCops {
+    type Target = [usize];
+
+    fn deref(&self) -> &Self::Target {
+        &self.cops[..self.nr_cops]
+    }
+}
+
+impl std::ops::DerefMut for RawCops {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cops[..self.nr_cops]
+    }
+}
+
+impl std::fmt::Debug for RawCops {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", &self[..])
+    }
+}
 
 /// returns the number of distinct mutlisets with [`cardinality`] many elements
 /// chosen from a set with [`universe_size`] many elements.
@@ -73,16 +139,6 @@ fn pack_rest(nr_vertices: usize, other_cops: &[usize]) -> usize {
     positions
 }
 
-fn is_stored_config(sym: &impl SymmetryGroup, fst_cop: usize, rest_cops: &[usize]) -> bool {
-    let mut config_copy = [usize::MAX; MAX_COPS];
-    let config_copy = &mut config_copy[..(1 + rest_cops.len())];
-    config_copy[0] = fst_cop;
-    config_copy[1..].copy_from_slice(rest_cops);
-
-    sym.to_representative(config_copy);
-    config_copy[0] == fst_cop && config_copy[1..] == rest_cops[..]
-}
-
 impl CopConfigurations {
     fn nr_configurations(&self) -> usize {
         self.configurations.values().map(|c| c.len()).sum()
@@ -138,11 +194,11 @@ impl CopConfigurations {
 
         let mut configurations = BTreeMap::new();
         for fst_cop in sym.class_representatives() {
-            let mut config_storage = [fst_cop; MAX_COPS - 1];
-            let curr_config = &mut config_storage[..(nr_cops - 1)];
+            let mut curr_config = RawCops::uninit(nr_cops);
+            curr_config.fill(fst_cop);
 
             let mut configurations_section = Vec::new();
-            'try_add_curr_config: loop {
+            'fill_section: loop {
                 debug_assert!(curr_config.iter().tuple_windows().all(|(a, b)| a <= b));
 
                 // update logs
@@ -150,16 +206,17 @@ impl CopConfigurations {
                 time_until_log_refresh -= 1;
                 if time_until_log_refresh == 0 {
                     manager.update(format!(
-                        "liste Coppositionen:\n{:.2}%, aktuell [{fst_cop}] + {:?}",
-                        (i_configuration as f64) / (nr_configurations as f64) * 100.0,
-                        curr_config
+                        "liste Coppositionen:\n{:.2}%, aktuell {curr_config:?}",
+                        (i_configuration as f64) / (nr_configurations as f64) * 100.0
                     ))?;
                     time_until_log_refresh = log_refresh_interval;
                 }
 
                 // test if `curr_config` is representant of equivalency class. if so, add to configs
-                if is_stored_config(sym, fst_cop, curr_config) {
-                    let packed = pack_rest(nr_map_vertices, curr_config);
+                let mut config_copy = curr_config;
+                let (_, repr) = sym.power_repr(&mut config_copy);
+                if curr_config == repr {
+                    let packed = pack_rest(nr_map_vertices, &curr_config[1..]);
                     if configurations_section.try_reserve(1).is_err() {
                         return Err("Zu wenig Speicherplatz für Polizeipositionen".to_string());
                     }
@@ -168,19 +225,21 @@ impl CopConfigurations {
 
                 // advance `curr_config` to next config.
                 // skip configs which aren't sorted.
-                for fst_change in (0..curr_config.len()).rev() {
+                for fst_change in (1..curr_config.len()).rev() {
                     let new_val = curr_config[fst_change] + 1;
                     if new_val < nr_map_vertices {
                         for old in &mut curr_config[fst_change..] {
                             *old = new_val;
                         }
-                        continue 'try_add_curr_config;
+                        continue 'fill_section;
                     }
                 }
-                // all entries in `curr_config` have value `nr_map_vertices - 1`
-                // -> all cops stand on the very last vertex
-                // -> there is no config after this one.
-                break 'try_add_curr_config;
+                // all entries (except first) in `curr_config` have value `nr_map_vertices - 1`
+                // -> all cops but fst_cop stand on the very last vertex
+                // -> there is no config stored in this section after this one.
+                debug_assert_eq!(curr_config[0], fst_cop);
+                debug_assert!(curr_config[1..].iter().all(|&c| c + 1 == nr_map_vertices));
+                break 'fill_section;
             }
             let old = configurations.insert(fst_cop, configurations_section);
             debug_assert!(old.is_none());
@@ -211,12 +270,8 @@ impl CopConfigurations {
         }))
     }
 
-    pub fn eager_unpack(&self, index: CompactCopsIndex) -> [usize; MAX_COPS] {
-        let mut unpacked = [usize::MAX; MAX_COPS];
-        for (i, c) in self.unpack(index).enumerate() {
-            unpacked[i] = c;
-        }
-        unpacked
+    pub fn eager_unpack(&self, index: CompactCopsIndex) -> RawCops {
+        RawCops::from_iter(self.unpack(index))
     }
 
     /// returns the index where the (rotated / mirrored) configuration represented by cops is stored as `_.1`
@@ -224,21 +279,21 @@ impl CopConfigurations {
     pub fn pack<'a, S: SymmetryGroup>(
         &self,
         symmetry: &'a S,
-        mut raw_unpacked: [usize; MAX_COPS],
-    ) -> (S::AutoIter<'a>, CompactCopsIndex) {
-        let unpacked = &mut raw_unpacked[..self.nr_cops];
-        let rotation = symmetry.to_representative(unpacked);
-        debug_assert!(unpacked.iter().tuple_windows().all(|(a, b)| a <= b));
+        cops: &mut RawCops,
+    ) -> (SmallVec<[&'a S::Auto; 4]>, CompactCopsIndex) {
+        debug_assert_eq!(self.nr_cops, cops.nr_cops);
+        let (autos, repr) = symmetry.power_repr(cops);
+        debug_assert!(repr.iter().tuple_windows().all(|(a, b)| a <= b));
 
-        let fst_cop = unpacked[0];
-        let rest_cops = &unpacked[1..];
+        let fst_cop = repr[0];
+        let rest_cops = &repr[1..];
         debug_assert!(rest_cops.is_empty() || fst_cop <= rest_cops[0]);
 
         let packed = pack_rest(self.nr_map_vertices(), rest_cops);
         let configs_part = self.configurations.get(&fst_cop).unwrap();
         let rest_pos = configs_part.binary_search(&packed);
         (
-            rotation,
+            autos,
             CompactCopsIndex {
                 fst_index: fst_cop,
                 rest_index: rest_pos.unwrap(),
@@ -246,23 +301,18 @@ impl CopConfigurations {
         )
     }
 
-    /// returns all cop configurations reachable in a single lazy-cop move from [`positions`],
+    /// returns all cop configurations reachable in a single lazy-cop move from [`cops`],
     /// except the do-nothing move.
     /// the resulting iterator will not yield configurations as stored, but as they are actually reachable.
     pub fn raw_lazy_cop_moves_from<'a>(
         &'a self,
         edges: &'a EdgeList,
-        cops: &[usize],
-    ) -> impl Iterator<Item = [usize; MAX_COPS]> + 'a + Clone {
-        debug_assert!(cops.len() >= self.nr_cops);
-        debug_assert!(cops[self.nr_cops..].iter().all(|&c| c == usize::MAX));
-
-        let mut cops_storage = [usize::MAX; MAX_COPS];
-        cops_storage[..cops.len()].copy_from_slice(cops);
+        cops: RawCops,
+    ) -> impl Iterator<Item = RawCops> + 'a + Clone {
         (0..self.nr_cops).flat_map(move |i| {
-            let cop_i_pos = cops_storage[i];
+            let cop_i_pos = cops[i];
             edges.neighbors_of(cop_i_pos).map(move |n| {
-                let mut unpacked_neigh = cops_storage;
+                let mut unpacked_neigh = cops;
                 unpacked_neigh[i] = n;
                 unpacked_neigh
             })
@@ -277,10 +327,9 @@ impl CopConfigurations {
         edges: &'a EdgeList,
         sym: &'a S,
         positions: CompactCopsIndex,
-    ) -> impl Iterator<Item = (S::AutoIter<'a>, CompactCopsIndex)> + 'a + Clone {
-        let raw_cops = self.eager_unpack(positions);
-        self.raw_lazy_cop_moves_from(edges, &raw_cops)
-            .map(|cops| self.pack(sym, cops))
+    ) -> impl Iterator<Item = (SmallVec<[&'a S::Auto; 4]>, CompactCopsIndex)> + 'a + Clone {
+        self.raw_lazy_cop_moves_from(edges, self.eager_unpack(positions))
+            .map(|mut cops| self.pack(sym, &mut cops))
     }
 
     pub fn all_positions(&self) -> impl Iterator<Item = CompactCopsIndex> + '_ {
@@ -379,28 +428,27 @@ pub struct RobberWinData {
 
 /// the field [`RobberWinData::symmetry`] changed type to [`ExplicitClasses`] from [`SymGroup`].
 /// we thus want both versions to be correctly deserialized.
-fn deserialize_explicit<'de, D>(deserializer: D) -> Result<ExplicitClasses, D::Error>
+pub fn deserialize_explicit<'de, D>(deserializer: D) -> Result<ExplicitClasses, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
+    //SymGroup::deserialize(deserializer).map(|s| ExplicitClasses::from(s))
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum AnyType {
+    enum ExplicitAsMaybeEnum {
         Enum(SymGroup),
         Direct(ExplicitClasses),
     }
 
-    Ok(match AnyType::deserialize(deserializer)? {
-        AnyType::Enum(e) => e.into(),
-        AnyType::Direct(expl) => expl,
+    Ok(match ExplicitAsMaybeEnum::deserialize(deserializer)? {
+        ExplicitAsMaybeEnum::Enum(e) => e.into(),
+        ExplicitAsMaybeEnum::Direct(expl) => expl,
     })
 }
 
 impl RobberWinData {
-    pub fn safe_vertices(&self, cops: &[usize]) -> impl ExactSizeIterator<Item = bool> + '_ {
-        let mut raw_cops = [usize::MAX; MAX_COPS];
-        raw_cops[..cops.len()].copy_from_slice(cops);
-        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, raw_cops);
+    pub fn safe_vertices(&self, cops: &mut RawCops) -> impl ExactSizeIterator<Item = bool> + '_ {
+        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, cops);
         let safe_vertices = self.safe.robber_safe_when(cop_positions);
         autos[0].forward().map(|v| safe_vertices[v])
     }
@@ -475,8 +523,8 @@ where
 
         // test round trip
         debug_assert!({
-            let unpacked = cop_moves.eager_unpack(index);
-            let (_, packed) = cop_moves.pack(&sym, unpacked);
+            let mut unpacked = cop_moves.eager_unpack(index);
+            let (_, packed) = cop_moves.pack(&sym, &mut unpacked);
             debug_assert_eq!(index, packed);
             true
         });
@@ -515,17 +563,10 @@ where
     let mut f_temp = vec![false; nr_map_vertices];
 
     let start = std::time::Instant::now();
-    struct OnDrop<F: Fn()>(F);
-    impl<F: Fn()> Drop for OnDrop<F> {
-        fn drop(&mut self) {
-            self.0()
-        }
-    }
     let _on_return = OnDrop(|| {
-        let end = std::time::Instant::now();
         println!(
             "beende rechnung nach {:?} fuer {nr_cops} cops auf {nr_map_vertices} knoten",
-            end - start
+            std::time::Instant::now() - start
         );
     });
 
@@ -567,7 +608,7 @@ where
             debug_assert!(cop_moves
                 .lazy_cop_moves_from(&edges, &sym, rotated_neigh_cop_positions)
                 .any(|(_, pos)| pos == curr_cop_positions));
-            debug_assert!(neigh_rotations.clone().into_iter().count() > 0);
+            debug_assert!(!neigh_rotations.is_empty());
 
             let mut f_neighbor_changed_some_rotation = false;
             for neigh_rotate in neigh_rotations {
@@ -575,14 +616,8 @@ where
                 let mut f_neighbor_changed_this_rotation = false;
                 //guarantee that rotations do the right thing
                 debug_assert!({
-                    let mut unpacked_curr = [0usize; MAX_COPS];
-                    for (storage, pos) in
-                        izip!(&mut unpacked_curr, cop_moves.unpack(curr_cop_positions))
-                    {
-                        *storage = pos;
-                    }
+                    let mut unpacked_curr = cop_moves.eager_unpack(curr_cop_positions);
                     //all positions of current cop configuration.
-                    let unpacked_curr = &mut unpacked_curr[..cop_moves.nr_cops];
                     let mut moved_cop_pos = usize::MAX;
                     for rotated_neigh_pos in cop_moves.unpack(rotated_neigh_cop_positions) {
                         let unrotated = neigh_rotate.apply_backward(rotated_neigh_pos);
@@ -633,18 +668,21 @@ where
             }
 
             //lines 13 + 14 + 15
-            if f.robber_safe_when(rotated_neigh_cop_positions).all() {
+            if f.robber_safe_when(rotated_neigh_cop_positions).not_any() {
                 //it is redundant to return `f` (or `cop_moves`), because no vertex would be marked anyway.
                 return Ok(Outcome::CopsWin);
             }
         }
     }
 
-    Ok(Outcome::RobberWins(RobberWinData {
+    let result = RobberWinData {
         symmetry: sym.into_enum().into(),
         safe: f,
         cop_moves,
-    }))
+    };
+    debug_assert!(verify_continuity(&result, &edges, manager).is_ok());
+
+    Ok(Outcome::RobberWins(result))
 }
 
 /// [`data.safe`] is called continuous, if it is Lipschitz-continuous with constant 1,
@@ -664,11 +702,10 @@ pub fn verify_continuity(
     let mut time_until_log_refresh = 1;
     let log_refresh_interval = (nr_configs / 10_000).clamp(1000, 100_000);
 
-    let nr_cops = data.cop_moves.nr_cops;
     let nr_map_vertices = data.cop_moves.nr_map_vertices();
     let mut safe_should_cops_move_to_curr = vec![false; nr_map_vertices];
     for cops_index in data.cop_moves.all_positions() {
-        let raw_cops = data.cop_moves.eager_unpack(cops_index);
+        let cops = data.cop_moves.eager_unpack(cops_index);
         // logging things
         time_until_log_refresh -= 1;
         i_config += 1;
@@ -697,25 +734,22 @@ pub fn verify_continuity(
         // verify some safe vertex exists for every cop arrangement
         if !some_safe {
             return Err(format!(
-                "Räuber ist nicht sicher, wenn Cops {:?} besetzen.",
-                &raw_cops[..nr_cops]
+                "Räuber ist nicht sicher, wenn Cops {cops:?} besetzen.",
             ));
         }
 
         // verify for every possible previous cop arrangement,
         // a vertex marked safe there still has a safe neighbor here (safe neighbors precomputed).
-        for raw_cops_neighs in data.cop_moves.raw_lazy_cop_moves_from(edges, &raw_cops) {
-            let cop_neighs = &raw_cops_neighs[..nr_cops];
+        for mut cops_neighs in data.cop_moves.raw_lazy_cop_moves_from(edges, cops) {
             for (v, &safe_before_curr, safe_last_move) in izip!(
                 0..,
                 &safe_should_cops_move_to_curr,
-                data.safe_vertices(cop_neighs)
+                data.safe_vertices(&mut cops_neighs)
             ) {
                 if safe_last_move && !safe_before_curr {
-                    let curr_positions = data.cop_moves.unpack(cops_index).collect_vec();
                     return Err(format!(
                         "Räuberstrategie nicht kontinuierlich an Knoten {v},\
-                        wenn Cops von {cop_neighs:?} zu {curr_positions:?} ziehen."
+                        wenn Cops von {cops_neighs:?} zu {cops:?} ziehen."
                     ));
                 }
             }
@@ -787,9 +821,8 @@ pub struct CopStrategy {
 
 impl CopStrategy {
     pub fn pack(&self, cops: &[usize]) -> (SmallVec<[&ExplicitAutomorphism; 4]>, CompactCopsIndex) {
-        let mut raw_cops = [usize::MAX; MAX_COPS];
-        raw_cops[..cops.len()].copy_from_slice(cops);
-        self.cop_moves.pack(&self.symmetry, raw_cops)
+        let mut raw_cops = RawCops::new(cops);
+        self.cop_moves.pack(&self.symmetry, &mut raw_cops)
     }
 
     /// values not stored because that would break the format are computed here

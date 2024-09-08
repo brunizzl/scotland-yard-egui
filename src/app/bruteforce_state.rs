@@ -1,6 +1,6 @@
 use std::{fs, io::Write, path::PathBuf, thread, time::Instant};
 
-use itertools::{izip, Itertools};
+use itertools::izip;
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -328,20 +328,17 @@ impl BruteforceComputationState {
             sym.cop_moves.nr_map_vertices(),
             no_sym.cop_moves.nr_map_vertices()
         );
-        let nr_cops = sym.cop_moves.nr_cops();
         for cops_index in no_sym.cop_moves.all_positions() {
-            let mut raw_cops = no_sym.cop_moves.eager_unpack(cops_index);
-            let cops = &mut raw_cops[..nr_cops];
-            let safe_with_sym = sym.safe_vertices(cops);
-            let safe_without_sym = no_sym.safe_vertices(cops);
+            let mut cops = no_sym.cop_moves.eager_unpack(cops_index);
+            let safe_with_sym = sym.safe_vertices(&mut cops);
+            let safe_without_sym = no_sym.safe_vertices(&mut cops);
             for (v, s1, s2) in izip!(0.., safe_with_sym, safe_without_sym) {
                 if s1 != s2 {
-                    let original_cops = cops.iter().copied().collect_vec();
-                    let autos = sym.symmetry.to_representative(cops);
+                    let (autos, repr) = sym.symmetry.power_repr(&mut cops);
                     let v_rot = autos[0].apply_forward(v);
                     return Confidence::Err(format!(
-                        "Fehler: Konfigs {:?} uneinig in Knoten {} (rotiert = {})",
-                        original_cops, v, v_rot
+                        "Fehler: Cops {cops:?} repräsentiert von {repr:?} \
+                        uneinig in Knoten {v} (rotiert = {v_rot})."
                     ));
                 }
             }
