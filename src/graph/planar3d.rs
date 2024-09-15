@@ -12,6 +12,8 @@ use crate::graph::*;
 mod equivalence;
 pub use equivalence::*;
 
+pub mod grid;
+
 mod bidirectional_range;
 use bidirectional_range::*;
 
@@ -691,7 +693,7 @@ impl Embedding3D {
         let nr_vertices = (len * len) as usize;
         let mut vertices = Vec::with_capacity(nr_vertices);
         let mut edges = EdgeList::new(6, nr_vertices);
-        let index_of = |x, y| (x * len + y) as usize;
+        let this = grid::GridGraph::new(len as usize, grid::Norm::Hex, wrap);
 
         let scale = 1.0 / (len as f32 + 1.0);
         let x_step = scale * vec3(1.0, 0.0, 0.0);
@@ -702,32 +704,13 @@ impl Embedding3D {
                 let pos = corner + (x as f32) * x_step + (y as f32) * y_step;
                 vertices.push(pos);
 
-                let v = index_of(x, y);
+                let vxy = grid::Coords { x, y };
+                let v = this.index_of(vxy);
                 debug_assert_eq!(v + 1, vertices.len());
-                if len > 2 {
-                    for (nx_raw, ny_raw) in [
-                        (x - 1, y),
-                        (x + 1, y),
-                        (x, y - 1),
-                        (x, y + 1),
-                        (x - 1, y - 1),
-                        (x + 1, y + 1),
-                    ] {
-                        let nx = (nx_raw + len) % len;
-                        let ny = (ny_raw + len) % len;
-                        let nv = index_of(nx, ny);
-                        let valid = wrap || (nx == nx_raw && ny == ny_raw);
-                        if nv < v && valid {
-                            edges.add_edge(v, nv);
-                        }
+                for n in this.neighbor_indices_of(vxy) {
+                    if len > 2 || !edges.has_directed_edge(v, n) {
+                        edges.add_directed_edge(v, n);
                     }
-                }
-            }
-        }
-        if len == 2 {
-            for v1 in 0..4 {
-                for v2 in (v1 + 1)..4 {
-                    edges.add_edge(v1, v2);
                 }
             }
         }
@@ -764,7 +747,7 @@ impl Embedding3D {
         let nr_vertices = (len * len) as usize;
         let mut vertices = Vec::with_capacity(nr_vertices);
         let mut edges = EdgeList::new(6, nr_vertices);
-        let index_of = |x, y| (x * len + y) as usize;
+        let this = grid::GridGraph::new(len as usize, grid::Norm::Quad, wrap);
 
         let scale = 1.0 / (len as f32 + 1.0);
         let x_step = scale * vec3(1.0, 0.0, 0.0);
@@ -775,27 +758,15 @@ impl Embedding3D {
                 let pos = corner + (x as f32) * x_step + (y as f32) * y_step;
                 vertices.push(pos);
 
-                let v = index_of(x, y);
+                let vxy = grid::Coords { x, y };
+                let v = this.index_of(vxy);
                 debug_assert_eq!(v + 1, vertices.len());
-                if len > 2 {
-                    for (nx_raw, ny_raw) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                        let nx = (nx_raw + len) % len;
-                        let ny = (ny_raw + len) % len;
-                        let nv = index_of(nx, ny);
-                        let valid = wrap || (nx == nx_raw && ny == ny_raw);
-                        if nv < v && valid {
-                            edges.add_edge(v, nv);
-                        }
+                for n in this.neighbor_indices_of(vxy) {
+                    if len > 2 || !edges.has_directed_edge(v, n) {
+                        edges.add_directed_edge(v, n);
                     }
                 }
             }
-        }
-        if len == 2 {
-            debug_assert_eq!(edges.nr_vertices(), 4);
-            edges.add_edge(0, 1);
-            edges.add_edge(1, 3);
-            edges.add_edge(3, 2);
-            edges.add_edge(2, 0);
         }
 
         let (sym_group, shape) = if wrap {

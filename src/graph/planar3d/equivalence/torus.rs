@@ -1,71 +1,6 @@
 use itertools::iproduct;
 
-use super::*;
-
-mod ordered_colwise {
-    use super::*;
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct SquareCoords {
-        x: isize,
-        y: isize,
-    }
-
-    impl SquareCoords {
-        pub fn x(self) -> isize {
-            self.x
-        }
-        pub fn y(self) -> isize {
-            self.y
-        }
-    }
-
-    #[derive(Serialize, Deserialize, Clone, Copy)]
-    pub struct OrderedColWise {
-        /// square root of number of vertices, nr of vertices per row / column in unit square
-        len: usize,
-    }
-
-    impl OrderedColWise {
-        pub fn new(len: usize) -> Self {
-            Self { len }
-        }
-
-        pub fn nr_vertices(&self) -> usize {
-            self.len * self.len
-        }
-
-        pub fn pack_small_coordinates(&self, mut x: isize, mut y: isize) -> SquareCoords {
-            // computing modulo is faster this way for values just outside len (as is the case for x and y)
-            let ilen = self.len as isize;
-            while x < 0 {
-                x += ilen;
-            }
-            while y < 0 {
-                y += ilen;
-            }
-            while x >= ilen {
-                x -= ilen;
-            }
-            while y >= ilen {
-                y -= ilen;
-            }
-            SquareCoords { x, y }
-        }
-
-        pub fn coordinates_of(&self, v: usize) -> SquareCoords {
-            let x = (v / self.len) as isize;
-            let y = (v % self.len) as isize;
-            SquareCoords { x, y }
-        }
-
-        pub fn index_of(&self, coords: SquareCoords) -> usize {
-            let v = coords.x * (self.len as isize) + coords.y;
-            v as usize
-        }
-    }
-}
-use ordered_colwise::*;
+use super::{grid::*, *};
 
 pub trait Rotation<const COUNT: usize>
 where
@@ -175,7 +110,7 @@ const BOOL: [bool; 2] = [false, true];
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TorusAutomorphism<const N: usize, R: Rotation<N>> {
     colwise: OrderedColWise,
-    new_origin: SquareCoords,
+    new_origin: Coords,
     turn: R,
     flip: bool,
 }
@@ -184,12 +119,10 @@ pub type TorusAutomorphism4 = TorusAutomorphism<4, Turn4>;
 
 impl<const N: usize, R: Rotation<N>> Automorphism for TorusAutomorphism<N, R> {
     fn apply_forward(&self, v: usize) -> usize {
-        let old_coords = self.colwise.coordinates_of(v);
-        let mut x = old_coords.x();
-        let mut y = old_coords.y();
+        let Coords { mut x, mut y } = self.colwise.coordinates_of(v);
 
-        x -= self.new_origin.x();
-        y -= self.new_origin.y();
+        x -= self.new_origin.x;
+        y -= self.new_origin.y;
         (x, y) = self.turn.rotate_forward(x, y);
         if self.flip {
             std::mem::swap(&mut x, &mut y);
@@ -204,17 +137,15 @@ impl<const N: usize, R: Rotation<N>> Automorphism for TorusAutomorphism<N, R> {
     }
 
     fn apply_backward(&self, v: usize) -> usize {
-        let old_coords = self.colwise.coordinates_of(v);
-        let mut x = old_coords.x();
-        let mut y = old_coords.y();
+        let Coords { mut x, mut y } = self.colwise.coordinates_of(v);
 
         // reversed order of apply_forward
         if self.flip {
             std::mem::swap(&mut x, &mut y);
         }
         (x, y) = self.turn.rotate_backward(x, y);
-        x += self.new_origin.x();
-        y += self.new_origin.y();
+        x += self.new_origin.x;
+        y += self.new_origin.y;
 
         let new_coords = self.colwise.pack_small_coordinates(x, y);
         self.colwise.index_of(new_coords)
