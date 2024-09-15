@@ -684,11 +684,9 @@ impl Embedding3D {
     }
 
     /// rendered flat as two subdivided equilateral triangles.
-    /// imagine taking a square and  connecting the left and right sides and the top and bottom sides.
+    /// if wrap: connect the left and right sides and the top and bottom sides.
     /// this is topologically a torus.
-    /// now slant the shape to the right until the upper left corner sits centered above the bottom side.
-    /// connecting the upper left and lower right corners yields the two equilateral triangles.
-    fn new_subdivided_triangle_torus(len: isize) -> Self {
+    fn new_subdivided_triangle_grid(len: isize, wrap: bool) -> Self {
         assert!(len >= 2);
         let nr_vertices = (len * len) as usize;
         let mut vertices = Vec::with_capacity(nr_vertices);
@@ -707,7 +705,7 @@ impl Embedding3D {
                 let v = index_of(x, y);
                 debug_assert_eq!(v + 1, vertices.len());
                 if len > 2 {
-                    for (nx, ny) in [
+                    for (nx_raw, ny_raw) in [
                         (x - 1, y),
                         (x + 1, y),
                         (x, y - 1),
@@ -715,10 +713,11 @@ impl Embedding3D {
                         (x - 1, y - 1),
                         (x + 1, y + 1),
                     ] {
-                        let nx = (nx + len) % len;
-                        let ny = (ny + len) % len;
+                        let nx = (nx_raw + len) % len;
+                        let ny = (ny_raw + len) % len;
                         let nv = index_of(nx, ny);
-                        if nv < v {
+                        let valid = wrap || (nx == nx_raw && ny == ny_raw);
+                        if nv < v && valid {
                             edges.add_edge(v, nv);
                         }
                     }
@@ -732,24 +731,35 @@ impl Embedding3D {
                 }
             }
         }
-        let sym = torus::TorusSymmetry::new(nr_vertices);
+
+        let (sym_group, shape) = if wrap {
+            (
+                SymGroup::Torus6(torus::TorusSymmetry6::new(nr_vertices)),
+                Shape::TriangTorus,
+            )
+        } else {
+            (
+                SymGroup::None(NoSymmetry::new(nr_vertices)),
+                Shape::TriangGrid,
+            )
+        };
 
         sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexHull::empty(),
-            shape: Shape::TriangTorus,
+            shape,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
             edges,
-            sym_group: SymGroup::Torus6(sym),
+            sym_group,
         }
     }
 
     /// rendered flat as one large subdivided square.
-    /// imagine taking a square and connecting the left and right sides and the top and bottom sides.
+    /// if wrap: connect the left and right sides and the top and bottom sides.
     /// this is topologically a torus.
-    fn new_subdivided_squares_torus(len: isize) -> Self {
+    fn new_subdivided_squares_grid(len: isize, wrap: bool) -> Self {
         assert!(len >= 2);
         let nr_vertices = (len * len) as usize;
         let mut vertices = Vec::with_capacity(nr_vertices);
@@ -768,11 +778,12 @@ impl Embedding3D {
                 let v = index_of(x, y);
                 debug_assert_eq!(v + 1, vertices.len());
                 if len > 2 {
-                    for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                        let nx = (nx + len) % len;
-                        let ny = (ny + len) % len;
+                    for (nx_raw, ny_raw) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                        let nx = (nx_raw + len) % len;
+                        let ny = (ny_raw + len) % len;
                         let nv = index_of(nx, ny);
-                        if nv < v {
+                        let valid = wrap || (nx == nx_raw && ny == ny_raw);
+                        if nv < v && valid {
                             edges.add_edge(v, nv);
                         }
                     }
@@ -786,17 +797,28 @@ impl Embedding3D {
             edges.add_edge(3, 2);
             edges.add_edge(2, 0);
         }
-        let sym = torus::TorusSymmetry::new(nr_vertices);
+
+        let (sym_group, shape) = if wrap {
+            (
+                SymGroup::Torus4(torus::TorusSymmetry4::new(nr_vertices)),
+                Shape::SquareTorus,
+            )
+        } else {
+            (
+                SymGroup::None(NoSymmetry::new(nr_vertices)),
+                Shape::SquareGrid,
+            )
+        };
 
         sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexHull::empty(),
-            shape: Shape::SquareTorus,
+            shape,
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
             edges,
-            sym_group: SymGroup::Torus4(sym),
+            sym_group,
         }
     }
 
@@ -930,7 +952,7 @@ impl Embedding3D {
     ) {
         debug_assert!(matches!(
             self.shape,
-            Shape::TriangTorus | Shape::SquareTorus
+            Shape::TriangTorus | Shape::SquareTorus | Shape::TriangGrid | Shape::SquareGrid
         ));
         let nr_vs = self.nr_vertices();
         let side_len = f32::sqrt(nr_vs as f32) as usize;
@@ -1006,11 +1028,11 @@ impl Embedding3D {
                 self.draw_visible_hull_edges(to_screen, painter, stroke, visible, false);
                 false
             },
-            Shape::TriangTorus => {
+            Shape::TriangTorus | Shape::TriangGrid => {
                 self.draw_torus_edges(to_screen, painter, stroke, true);
                 true
             },
-            Shape::SquareTorus => {
+            Shape::SquareTorus | Shape::SquareGrid => {
                 self.draw_torus_edges(to_screen, painter, stroke, false);
                 true
             },
@@ -1077,8 +1099,10 @@ impl Embedding3D {
             Football => Self::new_subdivided_football(res, false),
             FabianHamann => Self::new_subdivided_football(res, true),
             Random2D(seed) => Self::from_2d(super::random_triangulated(res, 8, seed), shape),
-            TriangTorus => Self::new_subdivided_triangle_torus(res as isize),
-            SquareTorus => Self::new_subdivided_squares_torus(res as isize),
+            TriangTorus => Self::new_subdivided_triangle_grid(res as isize, true),
+            SquareTorus => Self::new_subdivided_squares_grid(res as isize, true),
+            TriangGrid => Self::new_subdivided_triangle_grid(res as isize, false),
+            SquareGrid => Self::new_subdivided_squares_grid(res as isize, false),
         }
     }
 

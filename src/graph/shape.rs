@@ -12,6 +12,8 @@ pub enum Shape {
     Dodecahedron,
     TriangTorus,
     SquareTorus,
+    TriangGrid,
+    SquareGrid,
     RegularPolygon2D(isize),
     Random2D(u32),
 }
@@ -29,6 +31,8 @@ impl Shape {
             Self::Dodecahedron => "Dodekaeder",
             Self::TriangTorus => "Torus (Dreiecke)",
             Self::SquareTorus => "Torus (Vierecke)",
+            Self::TriangGrid => "Gitter (Dreiecke)",
+            Self::SquareGrid => "Gitter (Vierecke)",
             Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
             Self::Random2D(_) => "2D Kreisscheibe trianguliert",
         }
@@ -45,6 +49,8 @@ impl Shape {
             Self::Random2D(seed) => format!("Zufaellig-{seed}"),
             Self::TriangTorus => "Torus-Dreiecke".to_string(),
             Self::SquareTorus => "Torus-Vierecke".to_string(),
+            Self::TriangGrid => "Gitter-Dreiecke".to_string(),
+            Self::SquareGrid => "Gitter-Vierecke".to_string(),
             Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
             Self::Tetrahedron => "Tetraeder".to_string(),
             Self::Icosahedron => "Ikosaeder".to_string(),
@@ -63,6 +69,8 @@ impl Shape {
             Self::Dodecahedron => "🌐Dod",
             Self::TriangTorus => "🍩6",
             Self::SquareTorus => "🍩4",
+            Self::TriangGrid => "✂🍩6",
+            Self::SquareGrid => "✂🍩4",
             Self::RegularPolygon2D(_) => "⬣",
             Self::Random2D(_) => "⏺",
         }
@@ -80,8 +88,8 @@ impl Shape {
             | Self::Dodecahedron
             | Self::RegularPolygon2D(_)
             | Self::Random2D(_) => 0,
-            Self::TriangTorus => 2,
-            Self::SquareTorus => 2,
+
+            Self::TriangTorus | Self::SquareTorus | Self::TriangGrid | Self::SquareGrid => 2,
         }
     }
 
@@ -98,6 +106,8 @@ impl Shape {
 
             Self::TriangTorus
             | Self::SquareTorus
+            | Self::TriangGrid
+            | Self::SquareGrid
             | Self::RegularPolygon2D(_)
             | Self::Random2D(_) => false,
         }

@@ -320,7 +320,7 @@ pub mod test {
             SymGroup::Explicit(e) => test_impl(e.all_automorphisms(), edges),
             SymGroup::Torus4(t) => test_impl(t.all_automorphisms(), edges),
             SymGroup::Torus6(t) => test_impl(t.all_automorphisms(), edges),
-            SymGroup::None(n) => test_impl(n.all_automorphisms(), edges),
+            SymGroup::None(_) => panic!("why test autmorphisms without symmetry?"),
         }
     }
 
@@ -370,22 +370,22 @@ pub mod test {
 
     #[test]
     fn torus6_automorphisms_are_group() {
-        let g3 = Embedding3D::new_subdivided_triangle_torus(3);
+        let g3 = Embedding3D::new_subdivided_triangle_grid(3, true);
         is_group(g3.sym_group());
         automorphisms_respect_edges(&g3);
 
-        let g5 = Embedding3D::new_subdivided_triangle_torus(6);
+        let g5 = Embedding3D::new_subdivided_triangle_grid(6, true);
         is_group(g5.sym_group());
         automorphisms_respect_edges(&g5);
     }
 
     #[test]
     fn torus4_automorphisms_are_group() {
-        let g3 = Embedding3D::new_subdivided_squares_torus(3);
+        let g3 = Embedding3D::new_subdivided_squares_grid(3, true);
         is_group(g3.sym_group());
         automorphisms_respect_edges(&g3);
 
-        let g5 = Embedding3D::new_subdivided_squares_torus(6);
+        let g5 = Embedding3D::new_subdivided_squares_grid(6, true);
         is_group(g5.sym_group());
         automorphisms_respect_edges(&g5);
     }

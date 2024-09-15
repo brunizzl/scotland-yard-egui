@@ -173,82 +173,65 @@ impl Map {
             ComboBox::from_id_source(&self.data as *const _)
                 .selected_text(self.shape().name_str())
                 .show_ui(ui, |ui| {
-                    ui.radio_value(
-                        &mut new_shape,
-                        Shape::Tetrahedron,
-                        Shape::Tetrahedron.name_str(),
-                    );
-                    ui.radio_value(
-                        &mut new_shape,
-                        Shape::Octahedron,
-                        Shape::Octahedron.name_str(),
-                    );
-                    ui.radio_value(
-                        &mut new_shape,
-                        Shape::Icosahedron,
-                        Shape::Icosahedron.name_str(),
-                    );
-                    if ui
-                        .add(RadioButton::new(
-                            matches!(new_shape, Shape::DividedIcosahedron(_)),
-                            Shape::DividedIcosahedron(0).name_str(),
-                        ))
-                        .clicked()
-                    {
-                        new_shape = Shape::DividedIcosahedron(0);
+                    macro_rules! radio {
+                        ($repr:expr, $case:pat) => {
+                            let selected = matches!(new_shape, $case);
+                            let name = $repr.name_str();
+                            let button = RadioButton::new(selected, name);
+                            if ui.add(button).clicked() {
+                                new_shape = $repr;
+                            }
+                        };
                     }
-                    ui.radio_value(
-                        &mut new_shape,
-                        Shape::Dodecahedron,
-                        Shape::Dodecahedron.name_str(),
-                    );
-                    ui.radio_value(&mut new_shape, Shape::Cube, Shape::Cube.name_str());
-                    ui.radio_value(&mut new_shape, Shape::Football, Shape::Football.name_str());
-                    ui.radio_value(
-                        &mut new_shape,
-                        Shape::FabianHamann,
-                        Shape::FabianHamann.name_str(),
-                    );
-                    ui.radio_value(
-                        &mut new_shape,
-                        Shape::TriangTorus,
-                        Shape::TriangTorus.name_str(),
-                    );
-                    ui.radio_value(
-                        &mut new_shape,
-                        Shape::SquareTorus,
-                        Shape::SquareTorus.name_str(),
-                    );
-                    if ui
-                        .add(RadioButton::new(
-                            matches!(new_shape, Shape::RegularPolygon2D(_)),
-                            Shape::RegularPolygon2D(0).name_str(),
-                        ))
-                        .clicked()
-                    {
-                        new_shape = Shape::RegularPolygon2D(6);
-                    }
-                    if ui
-                        .add(RadioButton::new(
-                            matches!(new_shape, Shape::Random2D(_)),
-                            Shape::Random2D(0).name_str(),
-                        ))
-                        .clicked()
-                    {
-                        new_shape = Shape::Random2D(1337);
-                    }
-                    change |= new_shape != self.shape();
+                    use Shape::*;
+                    radio!(Tetrahedron, Tetrahedron);
+                    radio!(Octahedron, Octahedron);
+                    radio!(Icosahedron, Icosahedron);
+                    radio!(DividedIcosahedron(0), DividedIcosahedron(_));
+                    radio!(Dodecahedron, Dodecahedron);
+                    radio!(Cube, Cube);
+                    radio!(Football, Football);
+                    radio!(FabianHamann, FabianHamann);
+                    radio!(TriangTorus, TriangTorus | TriangGrid);
+                    radio!(SquareTorus, SquareTorus | SquareGrid);
+                    //radio!(RegularPolygon2D(6), RegularPolygon2D(_));
+                    radio!(Random2D(1337), Random2D(_));
                 });
-            change |= match &mut new_shape {
+            match &mut new_shape {
                 Shape::DividedIcosahedron(pressure) => {
-                    add_drag_value(ui, pressure, "Druck", (0, self.resolution), 1)
+                    add_drag_value(ui, pressure, "Druck", (0, self.resolution), 1);
                 },
                 Shape::RegularPolygon2D(nr_sides) => {
-                    add_drag_value(ui, nr_sides, "Seiten", (3, 10), 1)
+                    add_drag_value(ui, nr_sides, "Seiten", (3, 10), 1);
                 },
-                Shape::Random2D(seed) => add_drag_value(ui, seed, "Seed", (0, u32::MAX), 1),
-                _ => add_disabled_drag_value(ui),
-            };
+                Shape::Random2D(seed) => {
+                    add_drag_value(ui, seed, "Seed", (0, u32::MAX), 1);
+                },
+                Shape::SquareGrid => {
+                    if ui.button(" ↪↩ ").on_hover_text("klebe zu Torus").clicked() {
+                        new_shape = Shape::SquareTorus;
+                    }
+                },
+                Shape::SquareTorus => {
+                    if ui.button("   ✂   ").on_hover_text("zerschneiden").clicked() {
+                        new_shape = Shape::SquareGrid;
+                    }
+                },
+                Shape::TriangGrid => {
+                    if ui.button(" ↪↩ ").on_hover_text("klebe zu Torus").clicked() {
+                        new_shape = Shape::TriangTorus;
+                    }
+                },
+                Shape::TriangTorus => {
+                    if ui.button("   ✂   ").on_hover_text("zerschneiden").clicked() {
+                        new_shape = Shape::TriangGrid;
+                    }
+                },
+                _ => {
+                    add_disabled_drag_value(ui);
+                },
+            }
+            change |= new_shape != self.shape();
             ui.add_space(8.0);
             let min = new_shape.min_res();
             change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (min, 200), 1);

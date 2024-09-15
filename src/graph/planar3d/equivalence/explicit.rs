@@ -477,33 +477,33 @@ pub mod test {
 
         match s {
             SymGroup::Explicit(e) => converts_impl(e),
-            SymGroup::None(n) => converts_impl(n),
             SymGroup::Torus4(t4) => converts_impl(t4),
             SymGroup::Torus6(t6) => converts_impl(t6),
+            SymGroup::None(_) => panic!("why test autmorphisms without symmetry?"),
         }
     }
 
     #[test]
     fn torus4_converts_to_explicit() {
-        let g3 = Embedding3D::new_subdivided_squares_torus(3);
+        let g3 = Embedding3D::new_subdivided_squares_grid(3, true);
         sym_converts_to_explicit(g3.sym_group());
 
-        let g5 = Embedding3D::new_subdivided_squares_torus(6);
+        let g5 = Embedding3D::new_subdivided_squares_grid(6, true);
         sym_converts_to_explicit(g5.sym_group());
 
-        let g9 = Embedding3D::new_subdivided_squares_torus(9);
+        let g9 = Embedding3D::new_subdivided_squares_grid(9, true);
         sym_converts_to_explicit(g9.sym_group());
     }
 
     #[test]
     fn torus6_converts_to_explicit() {
-        let g3 = Embedding3D::new_subdivided_triangle_torus(3);
+        let g3 = Embedding3D::new_subdivided_triangle_grid(3, true);
         sym_converts_to_explicit(g3.sym_group());
 
-        let g5 = Embedding3D::new_subdivided_triangle_torus(6);
+        let g5 = Embedding3D::new_subdivided_triangle_grid(6, true);
         sym_converts_to_explicit(g5.sym_group());
 
-        let g9 = Embedding3D::new_subdivided_triangle_torus(9);
+        let g9 = Embedding3D::new_subdivided_triangle_grid(9, true);
         sym_converts_to_explicit(g9.sym_group());
     }
 

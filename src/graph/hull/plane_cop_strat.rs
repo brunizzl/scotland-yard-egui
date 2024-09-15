@@ -58,8 +58,8 @@ impl PlaneCopStat {
         self.danger_zones.clear();
         self.danger_zones.resize(edges.nr_vertices(), 0);
         let min_outside_at_corner = match shape {
-            Shape::RegularPolygon2D(6) | Shape::TriangTorus => 3,
-            Shape::SquareTorus => 2,
+            Shape::RegularPolygon2D(6) | Shape::TriangTorus | Shape::TriangGrid => 3,
+            Shape::SquareTorus | Shape::SquareGrid => 2,
             _ => {
                 // currently i only thought about a strategy for 4-regular or 6-regular graphs.
                 return;
