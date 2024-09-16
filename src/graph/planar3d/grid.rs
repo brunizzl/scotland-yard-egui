@@ -146,7 +146,6 @@ impl GridGraph {
         }
     }
 
-    #[allow(dead_code)]
     pub fn try_from(g: &Embedding3D) -> Option<Self> {
         let (norm, wrap) = match g.shape() {
             Shape::SquareTorus => (Norm::Quad, true),
@@ -205,5 +204,26 @@ impl GridGraph {
 
     pub fn neighbor_indices_of(&self, v: Coords) -> impl Iterator<Item = usize> + '_ {
         self.neighbors_of(v).map(|v| self.index_of(v))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn quad_unit_directions_are_unit() {
+        assert_eq!(Norm::Quad.unit_directions().len(), 4);
+        for &dir in Norm::Quad.unit_directions() {
+            assert_eq!(1, Norm::Quad.apply(dir));
+        }
+    }
+
+    #[test]
+    fn hex_unit_directions_are_unit() {
+        assert_eq!(Norm::Hex.unit_directions().len(), 6);
+        for &dir in Norm::Hex.unit_directions() {
+            assert_eq!(1, Norm::Hex.apply(dir));
+        }
     }
 }
