@@ -165,6 +165,19 @@ const fn create_distinct_colors(sat: usize) -> [F32Color; 32] {
     res
 }
 
+pub const fn sample_color_wheel<const N: usize>(sat: usize, off: usize) -> [F32Color; N] {
+    let mut res = [F32Color([0.0; 3], 1.0); N];
+    let tau = 5_999_999;
+    let mut i = 0;
+    while i < N {
+        let ang = (((i + off) % N) * tau) / N;
+        let val = 1000;
+        res[i].0 = hsv_to_rgbf_normalized(ang, sat, val);
+        i += 1;
+    }
+    res
+}
+
 pub fn zip_to_f32<'a>(
     drain: impl Iterator<Item = &'a mut F32Color>,
     source: impl Iterator<Item = &'a Color32>,

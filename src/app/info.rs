@@ -1027,7 +1027,8 @@ impl Info {
     }
 
     fn draw_green_circles(&mut self, ui: &Ui, con: &DrawContext<'_>) {
-        let colors = if ui.ctx().style().visuals.dark_mode {
+        let dark = ui.ctx().style().visuals.dark_mode;
+        let colors = if dark {
             &color::DARK_MARKER_COLORS_F32
         } else {
             &color::BRIGHT_MARKER_COLORS_F32
@@ -1114,8 +1115,10 @@ impl Info {
                 }
             },
             VertexColorInfo::Escape2Grid => {
+                let sat = if dark { 750 } else { 350 };
+                let colors = color::sample_color_wheel::<6>(sat, 4);
                 for (&esc, util) in izip!(&self.escapable_grid.escapable, utils_iter) {
-                    let color = || color::u8_marker_color(esc, colors);
+                    let color = || color::u8_marker_color(esc, &colors);
                     draw_if!(esc != 0, util, color);
                 }
             },
@@ -1268,7 +1271,7 @@ impl Info {
     }
 
     fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) {
-        let font = FontId::proportional(12.0 * self.options.number_scale * con.scale);
+        let font = FontId::monospace(12.0 * self.options.number_scale * con.scale);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::WHITE
         } else {
@@ -1335,9 +1338,17 @@ impl Info {
                 }));
             },
             VertexNumberInfo::EscapableNodesGrid => {
+                use graph::Shape::*;
+                // these arrows will not follow the camera rotation and (i hope) they never will.
+                let arrows: &[_] = match con.map.shape() {
+                    SquareGrid | SquareTorus => &['➡', '⬇', '⬅', '⬆'],
+                    TriangGrid | TriangTorus => &['➡', '↘', '↙', '⬅', '↖', '↗'],
+                    _ => {
+                        return;
+                    },
+                };
                 draw!(self.escapable_grid.escapable.iter().map(|&x| -> String {
-                    const NAMES: [char; 8] = ['0', '1', '2', '3', '4', '5', '6', '7'];
-                    izip!(NAMES, 0..)
+                    izip!(arrows, 0..)
                         .filter_map(|(name, i)| ((1u8 << i) & x != 0).then_some(name))
                         .collect()
                 }));
