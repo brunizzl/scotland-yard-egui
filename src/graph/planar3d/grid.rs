@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -10,10 +8,47 @@ pub struct Coords {
     pub y: isize,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+impl std::ops::Add<Coords> for Coords {
+    type Output = Coords;
+    fn add(self, rhs: Coords) -> Self::Output {
+        Coords {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+
+impl std::ops::Sub<Coords> for Coords {
+    type Output = Coords;
+    fn sub(self, rhs: Coords) -> Self::Output {
+        Coords {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
+}
+
+impl std::ops::Neg for Coords {
+    type Output = Coords;
+    fn neg(self) -> Self::Output {
+        Coords { x: -self.x, y: -self.y }
+    }
+}
+
+impl std::ops::Mul<Coords> for isize {
+    type Output = Coords;
+    fn mul(self, rhs: Coords) -> Self::Output {
+        Coords {
+            x: rhs.x * self,
+            y: rhs.y * self,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct OrderedColWise {
     /// square root of number of vertices, nr of vertices per row / column in unit square
-    len: usize,
+    pub len: usize,
 }
 
 impl OrderedColWise {
@@ -62,24 +97,50 @@ pub enum Norm {
 }
 
 impl Norm {
-    pub fn nr_neighs(self) -> usize {
+    pub fn apply(self, v: Coords) -> isize {
+        let x = v.x.abs();
+        let y = v.y.abs();
         match self {
-            Self::Hex => 6,
-            Self::Quad => 4,
+            // note: due to stupidity, the program uses a different coordinate system than the thesis.
+            // thus: `v.x - v.y`, not `v.x + v.y`
+            Self::Hex => (v.x - v.y).abs().max(x).max(y),
+            Self::Quad => x + y,
+        }
+    }
+
+    // returns all unit directions along grid lines (two directions per line)
+    pub fn unit_directions(self) -> &'static [Coords] {
+        match self {
+            Self::Hex => &[
+                Coords { x: 1, y: 0 },
+                Coords { x: 1, y: 1 },
+                Coords { x: 0, y: 1 },
+                Coords { x: -1, y: 0 },
+                Coords { x: -1, y: -1 },
+                Coords { x: 0, y: -1 },
+            ],
+            Self::Quad => &[
+                Coords { x: 1, y: 0 },
+                Coords { x: 0, y: 1 },
+                Coords { x: -1, y: 0 },
+                Coords { x: 0, y: -1 },
+            ],
         }
     }
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub struct GridGraph {
-    vertices: OrderedColWise,
-    norm: Norm,
-    wrap: bool,
+    pub columns: OrderedColWise,
+    pub norm: Norm,
+    /// if true: grid is wrapped to torus
+    pub wrap: bool,
 }
 
 impl GridGraph {
     pub fn new(len: usize, norm: Norm, wrap: bool) -> Self {
         Self {
-            vertices: OrderedColWise::new(len),
+            columns: OrderedColWise::new(len),
             norm,
             wrap,
         }
@@ -99,30 +160,50 @@ impl GridGraph {
         Some(Self::new(len, norm, wrap))
     }
 
+    pub fn side_len(&self) -> isize {
+        self.columns.len as isize
+    }
+
+    pub fn index_of(&self, v: Coords) -> usize {
+        self.columns.index_of(v)
+    }
+
+    pub fn coordinates_of(&self, v: usize) -> Coords {
+        self.columns.coordinates_of(v)
+    }
+
+    /// try to bring coordinate in "normal form", e.g. how it maps to a vertex index.
+    /// this is only guaranteed to work on tori, where wrapping is allowed.
+    /// on non-tori, the input must already be in normal form in order to be returned.
+    pub fn try_wrap(&self, v: Coords) -> Option<Coords> {
+        let wrapped = self.columns.pack_small_coordinates(v.x, v.y);
+        (self.wrap || wrapped == v).then_some(wrapped)
+    }
+
     pub fn neighbors_of(&self, v: Coords) -> impl Iterator<Item = Coords> + '_ {
-        let Coords { x, y } = v;
-        let raw = [
-            (x - 1, y),
-            (x + 1, y),
-            (x, y - 1),
-            (x, y + 1),
-            (x - 1, y - 1),
-            (x + 1, y + 1),
-        ];
-        raw.into_iter().take(self.norm.nr_neighs()).filter_map(|(nx, ny)| {
-            let n = self.vertices.pack_small_coordinates(nx, ny);
-            (self.wrap || (nx == n.x && ny == n.y)).then_some(n)
-        })
+        self.norm
+            .unit_directions()
+            .iter()
+            .filter_map(move |&dir| self.try_wrap(v + dir))
+    }
+
+    /// returns all vertices with distance `dist`.
+    /// funkiness caused by tori is ignored. only non-wrapping distance is considered.
+    #[allow(dead_code)]
+    pub fn dist_neighbors_of(&self, v: Coords, dist: usize) -> impl Iterator<Item = Coords> + '_ {
+        let dist = dist as isize;
+        self.norm.unit_directions().iter().circular_tuple_windows().flat_map(
+            move |(&dir1, &dir2)| {
+                (0..dist).filter_map(move |i| {
+                    let n = v + i * dir1 + (dist - i) * dir2;
+                    debug_assert_eq!(dist, self.norm.apply(n - v));
+                    self.try_wrap(n)
+                })
+            },
+        )
     }
 
     pub fn neighbor_indices_of(&self, v: Coords) -> impl Iterator<Item = usize> + '_ {
-        self.neighbors_of(v).map(|coords| self.index_of(coords))
-    }
-}
-
-impl Deref for GridGraph {
-    type Target = OrderedColWise;
-    fn deref(&self) -> &Self::Target {
-        &self.vertices
+        self.neighbors_of(v).map(|v| self.index_of(v))
     }
 }

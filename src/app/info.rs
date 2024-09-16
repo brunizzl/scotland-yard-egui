@@ -21,6 +21,7 @@ pub enum VertexColorInfo {
     SafeBoundary,
     Escape1,
     Escape2,
+    Escape2Grid,
     Dilemma,
     BruteForceRes,
     MinCopDist,
@@ -51,6 +52,7 @@ impl VertexColorInfo {
             die der Räuber zum Rand braucht, diesen nicht auf Länge 0 kürzen können. \n\
             Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
             als die Cops diesen Abschnitt dicht machen können.",
+            Escape2Grid => "Variante von Escape2 die nur auf Gittern (Zerschnitten + Tori) funktioniert",
             Dilemma => "Knoten von denen aus ein \"Fluchtoption 2\" Knoten erreicht werden kann, weil \
             sich mehrere von denen überlappen (funzt noch bei weitem nicht immer. \
             Diese Schätzung kann sowohl zu konservativ, als auch zu generös sein.)",
@@ -84,9 +86,10 @@ impl VertexColorInfo {
             NearNodes => "für Räuber nähere Knoten",
             SafeOutside => "Sicherer Außenbereich",
             SafeBoundary => "Sicherere Grenze",
-            Escape1 => "Punkte mit Fluchtoption 1",
-            Escape2 => "Punkte mit Fluchtoption 2",
-            Dilemma => "Punkte mit Fluchtoption 3",
+            Escape1 => "Fluchtoption 1",
+            Escape2 => "Fluchtoption 2",
+            Escape2Grid => "Fluchtoption 2 (Gitter)",
+            Dilemma => "Fluchtoption 3",
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
@@ -109,6 +112,7 @@ pub enum VertexNumberInfo {
     Indices,
     RobberAdvantage,
     EscapeableNodes,
+    EscapableNodesGrid,
     MinCopDist,
     MaxCopDist,
     RobberDist,
@@ -126,6 +130,8 @@ impl VertexNumberInfo {
             RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
             EscapeableNodes => "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
             Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
+            EscapableNodesGrid => "jede Fluchtrichtung hat einen Namen in { 0 .. 6 }. \
+            Der Marker listet alle Richtungen, in die der Räuber fliehen kann.",
             MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
             MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",
             VertexEquivalenceClass => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
@@ -145,6 +151,7 @@ impl VertexNumberInfo {
             Indices => "Knotenindizes",
             RobberAdvantage => "Marker Fluchtoption 1",
             EscapeableNodes => "Marker Fluchtoption 2",
+            EscapableNodesGrid => "Marker Fluchtoption 2 (Gitter)",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
             VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
@@ -347,7 +354,8 @@ pub struct Info {
 
     //state kept for each node in map
     cop_hull_data: graph::ConvexHullData,
-    escapable: graph::EscapeableNodes,
+    escapable: graph::EscapableNodes,
+    escapable_grid: graph::EscapableDirections,
     dilemma: graph::DilemmaNodes,
     plane_cop_strat: graph::PlaneCopStat,
 
@@ -389,7 +397,8 @@ impl Default for Info {
             currently_marked: Vec::new(),
 
             cop_hull_data: graph::ConvexHullData::new(),
-            escapable: graph::EscapeableNodes::new(),
+            escapable: graph::EscapableNodes::new(),
+            escapable_grid: graph::EscapableDirections::new(),
             dilemma: graph::DilemmaNodes::new(),
             plane_cop_strat: graph::PlaneCopStat::new(),
             min_cop_dist: Vec::new(),
@@ -431,7 +440,8 @@ impl Info {
             currently_marked: Vec::new(),
 
             cop_hull_data: graph::ConvexHullData::new(),
-            escapable: graph::EscapeableNodes::new(),
+            escapable: graph::EscapableNodes::new(),
+            escapable_grid: graph::EscapableDirections::new(),
             dilemma: graph::DilemmaNodes::new(),
             plane_cop_strat: graph::PlaneCopStat::new(),
             min_cop_dist: Vec::new(),
@@ -644,6 +654,15 @@ impl Info {
         );
     }
 
+    fn update_escapable_grid(&mut self, con: &DrawContext<'_>) {
+        self.escapable_grid.update(
+            con.map.data(),
+            self.characters.active_cops(),
+            &self.cop_hull_data,
+            &mut self.queue,
+        );
+    }
+
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {
         self.dilemma.update(
             con.edges,
@@ -671,6 +690,7 @@ impl Info {
         self.update_max_cop_dist(con.edges);
         self.update_convex_cop_hull(con);
         self.update_escapable(con);
+        self.update_escapable_grid(con);
         self.update_dilemma(con);
         self.update_cop_advantage(con.edges);
         self.update_plane_cop_strat(con);
@@ -699,11 +719,16 @@ impl Info {
         let update_escapable = update_plane_cop_strat
             || matches!(
                 self.options.vertex_color_info(),
-                VertexColorInfo::Escape2 | VertexColorInfo::Debugging | VertexColorInfo::Dilemma
+                VertexColorInfo::Escape2
+                    | VertexColorInfo::Escape2Grid
+                    | VertexColorInfo::Debugging
+                    | VertexColorInfo::Dilemma
             )
             || matches!(
                 self.options.vertex_number_info(),
-                VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
+                VertexNumberInfo::EscapeableNodes
+                    | VertexNumberInfo::EscapableNodesGrid
+                    | VertexNumberInfo::Debugging
             );
 
         let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)
@@ -745,6 +770,7 @@ impl Info {
         }
         if (cop_moved || self.escapable.escapable().len() != nr_vertices) && update_escapable {
             self.update_escapable(con);
+            self.update_escapable_grid(con);
         }
         if (cop_moved || self.dilemma.dilemma().len() != nr_vertices) && update_dilemma {
             self.update_dilemma(con);
@@ -1087,6 +1113,12 @@ impl Info {
                     draw_if!(esc != 0, util, color);
                 }
             },
+            VertexColorInfo::Escape2Grid => {
+                for (&esc, util) in izip!(&self.escapable_grid.escapable, utils_iter) {
+                    let color = || color::u8_marker_color(esc, colors);
+                    draw_if!(esc != 0, util, color);
+                }
+            },
             VertexColorInfo::Dilemma => {
                 for (&esc, util) in izip!(self.dilemma.dilemma(), utils_iter) {
                     let color = || color::u32_marker_color(esc, colors);
@@ -1154,11 +1186,24 @@ impl Info {
                 }
             },
             VertexColorInfo::Debugging => {
-                for &v in self.escapable.inner_connecting_line() {
-                    if con.visible[v] {
-                        self.currently_marked[v] = true;
-                        let pos = con.positions[v];
-                        draw_circle_at(pos, self.options.automatic_marker_color);
+                //for &v in self.escapable.inner_connecting_line() {
+                //    if con.visible[v] {
+                //        self.currently_marked[v] = true;
+                //        let pos = con.positions[v];
+                //        draw_circle_at(pos, self.options.automatic_marker_color);
+                //    }
+                //}
+                if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
+                    if let Some(r) = self.characters.robber() {
+                        let v = g.coordinates_of(r.vertex());
+                        for (dist, color) in izip!(0.., color::HAND_PICKED_MARKER_COLORS) {
+                            for nxy in g.dist_neighbors_of(v, dist) {
+                                let n = g.index_of(nxy);
+                                if con.visible[n] {
+                                    draw_circle_at(con.positions[n], color);
+                                }
+                            }
+                        }
                     }
                 }
             },
@@ -1286,6 +1331,14 @@ impl Info {
                     ];
                     izip!(NAMES, 0..)
                         .filter_map(|(name, i)| ((1u32 << i) & x != 0).then_some(name))
+                        .collect()
+                }));
+            },
+            VertexNumberInfo::EscapableNodesGrid => {
+                draw!(self.escapable_grid.escapable.iter().map(|&x| -> String {
+                    const NAMES: [char; 8] = ['0', '1', '2', '3', '4', '5', '6', '7'];
+                    izip!(NAMES, 0..)
+                        .filter_map(|(name, i)| ((1u8 << i) & x != 0).then_some(name))
                         .collect()
                 }));
             },

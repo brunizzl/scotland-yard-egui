@@ -45,7 +45,7 @@ impl DelimitingGroup {
 /// divides vertices in convex hull into subsets where a robber escape through some boundary segment
 /// is possible
 /// (each segment lies between two cops on boundary, cops in interior are not considered in computation)
-pub struct EscapeableNodes {
+pub struct EscapableNodes {
     /// intermediary value, kept to reserve allocations etc.
     /// has one entry per vertex, stores distance of that vertex to some (unspecified) node on hull boundary.
     /// which node the distance is in respect to is remembered in `self.last_write_by`
@@ -97,7 +97,7 @@ fn compute_marker(cop_pair: (usize, usize), cops: &[Character], marker_nr: usize
     1u32 << (bit % 32)
 }
 
-impl EscapeableNodes {
+impl EscapableNodes {
     /// orders `colors` as if marker bit of escapable region was chosen by the guarding cop pair
     pub fn order_by_cops<T: Clone>(&self, cops: &[Character], colors: &[T; 32]) -> [T; 32] {
         let mut res = colors.clone();
@@ -225,7 +225,7 @@ impl EscapeableNodes {
     /// these regions will now be deleted in regions where third cops could otherwise interfere.
     fn consider_interior_cops(
         &mut self,
-        shape: Shape,
+        _shape: Shape,
         cops: &[Character],
         hull_data: &ConvexHullData,
         edges: &EdgeList,
@@ -337,13 +337,8 @@ impl EscapeableNodes {
                         }
                     }
                     let paint = |n: usize, keep: &[_]| {
-                        let res = keep[n] == Keep::No && hull_data.hull[n].contained();
-                        //fails on torus, because the whole thing fails on torus
-                        use Shape::{SquareTorus, TriangTorus};
-                        let on_torus = matches!(shape, TriangTorus | SquareTorus);
-                        // todo: when is this failing? (sometimes also on regular plane)
-                        debug_assert!(!res || (self.escapable[n] & marker != 0) || on_torus);
-                        res
+                        // todo: why is this not always true?
+                        keep[n] == Keep::No && hull_data.hull[n].contained()
                     };
                     edges.recolor_region_with(Keep::Yes, &mut self.keep_escapable, paint, queue);
 

@@ -9,7 +9,10 @@ use crate::app::character::Character;
 mod boundary;
 
 mod escapable;
-pub use escapable::EscapeableNodes;
+pub use escapable::EscapableNodes;
+
+mod escapable_grid;
+pub use escapable_grid::EscapableDirections;
 
 mod escapable_extra;
 pub use escapable_extra::DilemmaNodes;
