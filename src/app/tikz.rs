@@ -57,7 +57,7 @@ impl TikzPicture {
 
     fn width_scale(&self) -> f32 {
         let coord_scale = self.coord_scale();
-        coord_scale * 20.0
+        coord_scale * 30.0
     }
 
     /// `clip_rect` is assumed to be in egui's screen coordinates.
@@ -178,6 +178,16 @@ impl TikzPicture {
                     self.add_command(&format!(
                         "\\node[color={color}, scale={scale}, anchor=north] at ({x},{y}) {{{content}}};"
                     ));
+                },
+                Shape::Path(ps) => {
+                    let color = self.color_name(ps.fill);
+                    let mut command = format!("\\filldraw[color={color}] ");
+                    for &point in &ps.points {
+                        let Pos2 { x, y } = self.to_tikz.transform_pos(point);
+                        command += &format!("({x}, {y}) -- ");
+                    }
+                    command += "cycle;";
+                    self.add_command(&command);
                 },
                 _ => {},
             }

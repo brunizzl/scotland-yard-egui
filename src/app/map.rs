@@ -234,7 +234,8 @@ impl Map {
             change |= new_shape != self.shape();
             ui.add_space(8.0);
             let min = new_shape.min_res();
-            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (min, 200), 1);
+            let max = new_shape.max_res();
+            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (min, max), 1);
             if change {
                 self.recompute(new_shape);
                 self.adjust_info(info);

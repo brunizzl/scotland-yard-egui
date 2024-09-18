@@ -1287,7 +1287,7 @@ impl Info {
     }
 
     fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) {
-        let font = FontId::monospace(12.0 * self.options.number_scale * con.scale);
+        let font = FontId::proportional(12.0 * self.options.number_scale * con.scale);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::WHITE
         } else {
@@ -1354,14 +1354,39 @@ impl Info {
                 }));
             },
             VertexNumberInfo::EscapableNodesGrid => {
-                // these arrows will not follow the camera rotation and (i hope) they never will.
-                let arrows = self.escapable_grid.escape_dir_emojies();
-                let shown = self.options.shown_escape_directions;
-                draw!(self.escapable_grid.escapable.iter().map(|&x| -> String {
-                    izip!(arrows, 0..)
-                        .filter_map(|(arrow, i)| ((1u8 << i) & shown & x != 0).then_some(arrow))
-                        .collect()
-                }));
+                if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
+                    if g.side_len() < 3 {
+                        return;
+                    }
+                    let dirs = {
+                        let v0_xy = graph::grid::Coords { x: 1, y: 1 };
+                        let v0 = g.index_of(v0_xy);
+                        let v0_pos = con.cam().transform(con.positions[v0]);
+                        g.norm
+                            .unit_directions()
+                            .iter()
+                            .map(|&dir| {
+                                let neigh = g.index_of(v0_xy + dir);
+                                let neigh_pos = con.cam().transform(con.positions[neigh]);
+                                (neigh_pos - v0_pos) * 0.4 * self.options.number_scale
+                            })
+                            .collect_vec()
+                    };
+                    let stroke = egui::Stroke::new(con.scale * 1.4, color);
+                    let iter = self.escapable_grid.escapable.iter();
+                    let shown = self.options.shown_escape_directions;
+                    for (v, &val, &vis) in izip!(0.., iter, con.visible) {
+                        let shown_val = val & shown;
+                        if vis && shown_val != 0 {
+                            let v_pos = con.cam().transform(con.positions[v]);
+                            for (i, &dir) in izip!(0.., &dirs) {
+                                if (1u8 << i) & shown_val != 0 {
+                                    add_arrow(&con.painter, v_pos, dir, stroke);
+                                }
+                            }
+                        }
+                    }
+                }
             },
             VertexNumberInfo::MaxCopDist => {
                 draw_isize_slice(&self.max_cop_dist);
@@ -1435,7 +1460,8 @@ impl Info {
 
                 let curr_pos = con.vertex_draw_pos(curr_v);
                 let next_pos = con.vertex_draw_pos(next_v);
-                con.painter.arrow(
+                add_arrow(
+                    &con.painter,
                     curr_pos,
                     next_pos - curr_pos,
                     Stroke {

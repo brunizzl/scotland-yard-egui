@@ -93,6 +93,23 @@ impl Shape {
         }
     }
 
+    pub fn max_res(self) -> isize {
+        match self {
+            Self::Tetrahedron
+            | Self::Octahedron
+            | Self::Icosahedron
+            | Self::DividedIcosahedron(_)
+            | Self::Cube
+            | Self::Football
+            | Self::FabianHamann
+            | Self::Dodecahedron
+            | Self::RegularPolygon2D(_)
+            | Self::Random2D(_) => 200,
+
+            Self::TriangTorus | Self::SquareTorus | Self::TriangGrid | Self::SquareGrid => 800,
+        }
+    }
+
     pub fn is_3d(self) -> bool {
         match self {
             Self::Tetrahedron

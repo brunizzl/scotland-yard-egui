@@ -113,6 +113,22 @@ fn add_disabled_drag_value(ui: &mut Ui) -> bool {
     .inner
 }
 
+fn add_arrow(painter: &Painter, origin: Pos2, vec: Vec2, stroke: Stroke) {
+    let vec_normal = vec.normalized();
+    let orthogonal = vec_normal.rot90();
+    const SQRT_3: f32 = 1.732_050_8;
+    let tip_len = 3.0 * stroke.width;
+    let tip_tip = origin + vec;
+    let tip = tip_tip - (SQRT_3 * tip_len) * vec_normal;
+    {
+        let tip_side_1 = tip + tip_len * orthogonal;
+        let tip_side_2 = tip - tip_len * orthogonal;
+        let points = [tip_tip, tip_side_1, tip_side_2].into();
+        painter.add(Shape::convex_polygon(points, stroke.color, Stroke::NONE));
+    }
+    painter.line_segment([origin, tip], stroke);
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MouseTool {
     Drag,
