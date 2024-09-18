@@ -162,7 +162,10 @@ impl VertexNumberInfo {
     }
 }
 
-fn _63() -> u8 { 63 }
+/// used to set default value of [`Options::shown_escape_directions`]
+fn _63() -> u8 {
+    63
+}
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
