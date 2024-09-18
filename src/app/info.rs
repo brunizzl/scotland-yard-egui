@@ -669,9 +669,12 @@ impl Info {
     }
 
     fn update_escapable_grid(&mut self, con: &DrawContext<'_>) {
-        self.escapable_grid
-            .update_dists_dirs(con.map.data(), &mut self.queue, &self.cop_hull_data);
-        self.escapable_grid.update(self.characters.active_cops());
+        self.escapable_grid.update(
+            con.map.data(),
+            &mut self.queue,
+            &self.cop_hull_data,
+            self.characters.active_cops(),
+        );
     }
 
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {

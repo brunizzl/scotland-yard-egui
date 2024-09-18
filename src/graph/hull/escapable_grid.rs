@@ -36,14 +36,14 @@ impl EscapableDirections {
         }
     }
 
-    pub fn update_dists_dirs(
+    fn update_dists_dirs(
         &mut self,
         map: &Embedding3D,
         queue: &mut VecDeque<usize>,
         hull_data: &ConvexHullData,
-    ) {
+    ) -> bool {
         let Some(g) = GridGraph::try_from(map) else {
-            return;
+            return false;
         };
 
         // update distances
@@ -67,9 +67,20 @@ impl EscapableDirections {
                 *esc = all;
             }
         }
+
+        true
     }
 
-    pub fn update<'a>(&mut self, active_cops: impl Iterator<Item = &'a Character>) {
+    pub fn update<'a>(
+        &mut self,
+        map: &Embedding3D,
+        queue: &mut VecDeque<usize>,
+        hull_data: &ConvexHullData,
+        active_cops: impl Iterator<Item = &'a Character>,
+    ) {
+        if !self.update_dists_dirs(map, queue, hull_data) {
+            return;
+        }
         let g = self.graph;
 
         let cops_vec = active_cops.collect_vec();
