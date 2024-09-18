@@ -13,7 +13,7 @@ pub struct EscapableDirections {
     dists_0: Vec<isize>,
     /// remembers graph of last update.
     /// if that is unchanged, [`Self::dists_0`] can be kept the same.
-    old_graph: GridGraph,
+    graph: GridGraph,
 }
 
 impl EscapableDirections {
@@ -21,7 +21,7 @@ impl EscapableDirections {
         Self {
             escapable: Vec::new(),
             dists_0: Vec::new(),
-            old_graph: GridGraph {
+            graph: GridGraph {
                 columns: OrderedColWise { len: 0 },
                 norm: Norm::Quad,
                 wrap: false,
@@ -29,22 +29,26 @@ impl EscapableDirections {
         }
     }
 
-    pub fn update<'a, Cs>(
+    pub fn escape_dir_emojies(&self) -> &'static [char] {
+        match self.graph.norm {
+            Norm::Quad => &['➡', '⬇', '⬅', '⬆'],
+            Norm::Hex => &['➡', '↘', '↙', '⬅', '↖', '↗'],
+        }
+    }
+
+    pub fn update_dists_dirs(
         &mut self,
         map: &Embedding3D,
-        active_cops: Cs,
-        hull_data: &ConvexHullData,
         queue: &mut VecDeque<usize>,
-    ) where
-        Cs: Iterator<Item = &'a Character>,
-    {
+        hull_data: &ConvexHullData,
+    ) {
         let Some(g) = GridGraph::try_from(map) else {
             return;
         };
 
         // update distances
         debug_assert!(g.side_len() > 0);
-        if g.wrap && self.old_graph != g {
+        if g.wrap && self.graph != g {
             self.dists_0.clear();
             self.dists_0.resize(map.nr_vertices(), isize::MAX);
             self.dists_0[0] = 0;
@@ -52,19 +56,21 @@ impl EscapableDirections {
             queue.push_back(0);
             map.edges().calc_distances_to(queue, &mut self.dists_0);
         }
-        self.old_graph = g;
+        self.graph = g;
 
         // initialize escapable to have the complete hull inside marked
-        {
-            self.escapable.clear();
-            let all = (1u8 << g.norm.unit_directions().len()) - 1;
-            self.escapable.resize(map.nr_vertices(), 0);
-            for (esc, inside) in izip!(&mut self.escapable, hull_data.hull()) {
-                if inside.contained() {
-                    *esc = all;
-                }
+        self.escapable.clear();
+        self.escapable.resize(map.nr_vertices(), 0);
+        let all = (1u8 << self.graph.norm.unit_directions().len()) - 1;
+        for (esc, inside) in izip!(&mut self.escapable, hull_data.hull()) {
+            if inside.contained() {
+                *esc = all;
             }
         }
+    }
+
+    pub fn update<'a>(&mut self, active_cops: impl Iterator<Item = &'a Character>) {
+        let g = self.graph;
 
         let cops_vec = active_cops.collect_vec();
         let dist = |a, b| {
@@ -168,10 +174,15 @@ impl EscapableDirections {
                             }
 
                             let still_safe =
-                                || safe_boundary.iter().all(|&b| dist(v, b) <= safe_dist);
+                                || safe_boundary.iter().all(|&b| dist(v_repr, b) <= safe_dist);
                             in_safe_region = in_safe_region && still_safe();
-                            // TODO: why is graph.wrap needed? e.g. why can we reenter a safe region on tori?
-                            debug_assert!(in_safe_region || !still_safe() || g.wrap);
+                            // on tori, continuously walking in the same direction will not result
+                            // in a monotonous distance increase to a given fixed vertex.
+                            // on flat grids with boundaries, it will.
+                            // the theory will not (directly) consider tori anyway, thus
+                            // we act as if we aren't on a torus => once outside the safe region,
+                            // always (from there on) outside the safe region.
+                            debug_assert!(g.wrap || in_safe_region || !still_safe());
                             if !in_safe_region {
                                 self.escapable[index] -= mask;
                             }

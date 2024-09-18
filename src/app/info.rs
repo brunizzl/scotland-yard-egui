@@ -162,6 +162,8 @@ impl VertexNumberInfo {
     }
 }
 
+fn _63() -> u8 { 63 }
+
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
     manual_marker_colors: [Color32; 8],
@@ -180,6 +182,8 @@ struct Options {
     marked_robber_dist: isize, //determines max dist marked in VertexColorInfo::RobberDist
     #[serde(skip)]
     specific_shown_vertex: usize,
+    #[serde(default = "_63", skip_serializing)]
+    shown_escape_directions: u8,
 
     number_scale: f32,
     manual_marker_scale: f32,
@@ -202,6 +206,7 @@ const DEFAULT_OPTIONS: Options = Options {
     marked_cop_dist: 10,
     marked_robber_dist: 10,
     specific_shown_vertex: 0,
+    shown_escape_directions: 63,
 
     last_selected_vertex_color_infos: [VertexColorInfo::None; 7],
     last_selected_vertex_number_infos: [VertexNumberInfo::None; 7],
@@ -310,7 +315,13 @@ impl Options {
                         ui.label("Index");
                     });
                     false
-                }
+                },
+                VertexColorInfo::Escape2Grid => {
+                    let mut shown_f = self.shown_escape_directions as f32;
+                    let resp = add_drag_value(ui, &mut shown_f, "Richtungen (Bits)", (1.0, 63.0), 2);
+                    self.shown_escape_directions = shown_f as u8;
+                    resp
+                },
                 _ => add_disabled_drag_value(ui),
             };
 
@@ -655,12 +666,9 @@ impl Info {
     }
 
     fn update_escapable_grid(&mut self, con: &DrawContext<'_>) {
-        self.escapable_grid.update(
-            con.map.data(),
-            self.characters.active_cops(),
-            &self.cop_hull_data,
-            &mut self.queue,
-        );
+        self.escapable_grid
+            .update_dists_dirs(con.map.data(), &mut self.queue, &self.cop_hull_data);
+        self.escapable_grid.update(self.characters.active_cops());
     }
 
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {
@@ -1117,9 +1125,11 @@ impl Info {
             VertexColorInfo::Escape2Grid => {
                 let sat = if dark { 750 } else { 350 };
                 let colors = color::sample_color_wheel::<6>(sat, 4);
+                let shown = self.options.shown_escape_directions;
                 for (&esc, util) in izip!(&self.escapable_grid.escapable, utils_iter) {
-                    let color = || color::u8_marker_color(esc, &colors);
-                    draw_if!(esc != 0, util, color);
+                    let esc_shown = esc & shown;
+                    let color = || color::u8_marker_color(esc_shown, &colors);
+                    draw_if!(esc_shown != 0, util, color);
                 }
             },
             VertexColorInfo::Dilemma => {
@@ -1338,18 +1348,12 @@ impl Info {
                 }));
             },
             VertexNumberInfo::EscapableNodesGrid => {
-                use graph::Shape::*;
                 // these arrows will not follow the camera rotation and (i hope) they never will.
-                let arrows: &[_] = match con.map.shape() {
-                    SquareGrid | SquareTorus => &['➡', '⬇', '⬅', '⬆'],
-                    TriangGrid | TriangTorus => &['➡', '↘', '↙', '⬅', '↖', '↗'],
-                    _ => {
-                        return;
-                    },
-                };
+                let arrows = self.escapable_grid.escape_dir_emojies();
+                let shown = self.options.shown_escape_directions;
                 draw!(self.escapable_grid.escapable.iter().map(|&x| -> String {
                     izip!(arrows, 0..)
-                        .filter_map(|(name, i)| ((1u8 << i) & x != 0).then_some(name))
+                        .filter_map(|(arrow, i)| ((1u8 << i) & shown & x != 0).then_some(arrow))
                         .collect()
                 }));
             },
