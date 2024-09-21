@@ -4,7 +4,7 @@ use itertools::{izip, Itertools};
 
 use strum::IntoEnumIterator;
 
-use crate::graph::{self, bruteforce as bf, Automorphism, SymmetryGroup};
+use crate::graph::{self, bruteforce as bf, Automorphism, Embedding3D, SymmetryGroup};
 
 use self::bruteforce_state::BruteforceComputationState;
 use self::character::Character;
@@ -330,7 +330,7 @@ impl Options {
 
 
             ui.add_space(8.0);
-            ui.label("Zahlen:");
+            ui.label("Symbole:");
             add_scale_drag_value(ui, &mut self.number_scale, "Größe");
             ComboBox::from_id_source(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
@@ -391,7 +391,7 @@ pub struct Info {
     pub characters: character::State,
 
     options: Options,
-    menu_change: bool,
+    last_change: u64,
 
     worker: BruteforceComputationState,
 
@@ -424,7 +424,7 @@ impl Default for Info {
 
             characters: character::State::new(),
             options: DEFAULT_OPTIONS,
-            menu_change: false,
+            last_change: 0,
 
             worker: BruteforceComputationState::new(),
 
@@ -467,7 +467,7 @@ impl Info {
 
             characters,
             options,
-            menu_change: false,
+            last_change: 0,
 
             worker: BruteforceComputationState::new(),
 
@@ -476,9 +476,12 @@ impl Info {
         }
     }
 
+    pub fn register_change_now(&mut self, ctx: &egui::Context) {
+        self.last_change = ctx.frame_nr();
+    }
+
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
-        self.menu_change = false;
-        self.menu_change |= self.options.draw_menu(ui);
+        let mut change = self.options.draw_menu(ui);
 
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
@@ -495,7 +498,10 @@ impl Info {
             });
         }
 
-        self.menu_change |= self.characters.draw_menu(ui, map, &mut self.queue);
+        change |= self.characters.draw_menu(ui, map, &mut self.queue);
+        if change {
+            self.register_change_now(ui.ctx());
+        }
     }
 
     pub fn draw_windows(&mut self, ctx: &Context) {
@@ -697,6 +703,20 @@ impl Info {
         );
     }
 
+    pub fn adjust_to_new_map(&mut self, ctx: &egui::Context, map: &Embedding3D) {
+        for ch in self.characters.all_mut() {
+            ch.adjust_to_new_map(map, &mut self.queue);
+        }
+
+        let nr_vertices = map.nr_vertices();
+        if self.marked_manually.len() != nr_vertices {
+            self.characters.forget_move_history();
+            self.marked_manually.clear();
+            self.marked_manually.resize(nr_vertices, 0);
+        }
+        self.register_change_now(ctx);
+    }
+
     /// recomputes everything
     pub fn definitely_update(&mut self, con: &DrawContext<'_>) {
         self.characters.update(con, &mut self.queue);
@@ -713,10 +733,12 @@ impl Info {
     /// recomputes only things currently shown or required by things currently shown
     /// and only if something relevant (e.g. a cop's position) changed
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
+        let nr_vertices = con.edges.nr_vertices();
         self.characters.update(con, &mut self.queue);
         let robber_moved = self.characters.robber_updated();
         let cop_moved = self.characters.cop_updated();
 
+        debug_assert_eq!(self.cop_advantage.len(), nr_vertices);
         let update_cop_advantage = matches!(
             self.options.vertex_color_info(),
             VertexColorInfo::Escape1 | VertexColorInfo::Debugging
@@ -725,34 +747,45 @@ impl Info {
             VertexNumberInfo::RobberAdvantage | VertexNumberInfo::Debugging
         );
 
+        debug_assert_eq!(self.plane_cop_strat.danger_zones().len(), nr_vertices);
         let update_plane_cop_strat = matches!(
             self.options.vertex_color_info(),
             VertexColorInfo::CopStratPlaneDanger
         );
 
+        debug_assert_eq!(self.escapable.escapable().len(), nr_vertices);
         let update_escapable = update_plane_cop_strat
             || matches!(
                 self.options.vertex_color_info(),
-                VertexColorInfo::Escape2
-                    | VertexColorInfo::Escape2Grid
-                    | VertexColorInfo::Debugging
-                    | VertexColorInfo::Dilemma
+                VertexColorInfo::Escape2 | VertexColorInfo::Debugging | VertexColorInfo::Dilemma
             )
             || matches!(
                 self.options.vertex_number_info(),
-                VertexNumberInfo::EscapeableNodes
-                    | VertexNumberInfo::EscapableNodesGrid
-                    | VertexNumberInfo::Debugging
+                VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
             );
 
+        debug_assert_eq!(self.escapable_grid.escapable.len(), nr_vertices);
+        let update_esc_grid = update_plane_cop_strat
+            || matches!(
+                self.options.vertex_color_info(),
+                VertexColorInfo::Escape2Grid | VertexColorInfo::Debugging
+            )
+            || matches!(
+                self.options.vertex_number_info(),
+                VertexNumberInfo::EscapableNodesGrid | VertexNumberInfo::Debugging
+            );
+
+        debug_assert_eq!(self.dilemma.dilemma().len(), nr_vertices);
         let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)
             || matches!(
                 self.options.vertex_number_info(),
                 VertexNumberInfo::Debugging
             );
 
+        debug_assert_eq!(self.cop_hull_data.hull().len(), nr_vertices);
         let update_hull = update_cop_advantage
             || update_escapable
+            || update_esc_grid
             || matches!(
                 self.options.vertex_color_info(),
                 VertexColorInfo::SafeOutside | VertexColorInfo::SafeBoundary
@@ -760,6 +793,7 @@ impl Info {
             || self.options.show_convex_hull
             || self.options.show_hull_boundary;
 
+        debug_assert_eq!(self.min_cop_dist.len(), nr_vertices);
         let update_min_cop_dist = update_hull
             || matches!(
                 self.options.vertex_color_info(),
@@ -769,34 +803,32 @@ impl Info {
             )
             || self.options.vertex_number_info() == VertexNumberInfo::MinCopDist;
 
+        debug_assert_eq!(self.max_cop_dist.len(), nr_vertices);
         let update_max_cop_dist = self.options.vertex_number_info() == VertexNumberInfo::MaxCopDist
             || self.options.vertex_color_info() == VertexColorInfo::MaxCopDist;
 
-        let nr_vertices = con.edges.nr_vertices();
-        if (cop_moved || self.max_cop_dist.len() != nr_vertices) && update_max_cop_dist {
+        if cop_moved && update_max_cop_dist {
             self.update_max_cop_dist(con.edges);
         }
-        if (cop_moved || self.min_cop_dist.len() != nr_vertices) && update_min_cop_dist {
+        if cop_moved && update_min_cop_dist {
             self.update_min_cop_dist(con.edges);
         }
-        if (cop_moved || self.cop_hull_data.hull().len() != nr_vertices) && update_hull {
+        if cop_moved && update_hull {
             self.update_convex_cop_hull(con);
         }
-        if (cop_moved || self.escapable.escapable().len() != nr_vertices) && update_escapable {
+        if cop_moved && update_escapable {
             self.update_escapable(con);
+        }
+        if cop_moved && update_esc_grid {
             self.update_escapable_grid(con);
         }
-        if (cop_moved || self.dilemma.dilemma().len() != nr_vertices) && update_dilemma {
+        if cop_moved && update_dilemma {
             self.update_dilemma(con);
         }
-        if (cop_moved || robber_moved || self.cop_advantage.len() != nr_vertices)
-            && update_cop_advantage
-        {
+        if (cop_moved || robber_moved) && update_cop_advantage {
             self.update_cop_advantage(con.edges);
         }
-        if (cop_moved || self.plane_cop_strat.danger_zones().len() != nr_vertices)
-            && update_plane_cop_strat
-        {
+        if cop_moved && update_plane_cop_strat {
             self.update_plane_cop_strat(con);
         }
     }
@@ -893,6 +925,7 @@ impl Info {
     }
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
+        let mut change = false;
         let held_key = ui.input(|info| {
             if info.key_pressed(Key::F3) {
                 self.characters.show_allowed_next_steps ^= true;
@@ -922,7 +955,7 @@ impl Info {
                     if !self.characters.remove_cop_at_vertex(v) {
                         self.characters.create_character_at(pointer_pos, con.map);
                     }
-                    self.menu_change = true;
+                    change = true;
                 }
             }
 
@@ -942,7 +975,7 @@ impl Info {
                 for (n, &key) in izip!(2.., &NUMS[..6]) {
                     if info.key_pressed(key) {
                         self.options.last_selected_vertex_color_infos[..n].rotate_right(1);
-                        self.menu_change = true;
+                        change = true;
                     }
                 }
                 return Some(Key::Q);
@@ -951,7 +984,7 @@ impl Info {
                 for (n, &key) in izip!(2.., &NUMS[..6]) {
                     if info.key_pressed(key) {
                         self.options.last_selected_vertex_number_infos[..n].rotate_right(1);
-                        self.menu_change = true;
+                        change = true;
                     }
                 }
                 return Some(Key::W);
@@ -999,6 +1032,9 @@ impl Info {
                     _ => unreachable!(),
                 }
             });
+        }
+        if change {
+            self.register_change_now(ui.ctx());
         }
     }
 
@@ -1494,7 +1530,7 @@ impl Info {
 
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
         self.process_general_input(ui, con, tool);
-        if self.menu_change || ui.ctx().frame_nr() == 0 {
+        if self.last_change == ui.ctx().frame_nr() {
             self.definitely_update(con);
         } else {
             self.maybe_update(con);

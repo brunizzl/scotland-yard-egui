@@ -1,7 +1,7 @@
 use crate::graph::Shape;
 use itertools::izip;
 
-use crate::app::{cam::Camera3D, info::Info};
+use crate::app::cam::Camera3D;
 use crate::geo::Pos3;
 use crate::graph::{EdgeList, Embedding3D};
 
@@ -35,17 +35,17 @@ impl Map {
         self.resolution as usize
     }
 
-    pub fn new(info: &mut Info, cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
         let shape = load_or(cc.storage, SHAPE, || Shape::Icosahedron);
-        let (resolution, shrunk) = {
+        let resolution = {
             let last_res = load_or(cc.storage, RESOLUTION, || 12);
             //to not accidentally lag on restart, we limit maximal initial resolution for
             //graphs that are slow to build. currently this is only Random2D.
             if last_res > 50 && matches!(shape, Shape::Random2D(_)) {
-                (50, true)
+                50
             } else {
-                (last_res, false)
+                last_res
             }
         };
         let camera = load_or(cc.storage, CAMERA, Camera3D::default);
@@ -59,13 +59,6 @@ impl Map {
             camera,
         };
         result.recompute(shape);
-        result.adjust_info(info);
-
-        //graph is not exactly the same -> vertex indices are now worthless
-        //(and in worst case larger than curr number of vertices)
-        if shrunk {
-            info.characters.forget_move_history();
-        }
 
         result
     }
@@ -152,23 +145,11 @@ impl Map {
         self.recompute(shape);
     }
 
-    pub fn adjust_info(&self, info: &mut Info) {
-        for ch in info.characters.all_mut() {
-            ch.adjust_to_new_map(&self.data, &mut info.queue);
-        }
-
-        let nr_vertices = self.data.nr_vertices();
-        if info.marked_manually.len() != nr_vertices {
-            info.marked_manually.clear();
-            info.marked_manually.resize(nr_vertices, 0);
-        }
-    }
-
-    pub fn draw_menu(&mut self, ui: &mut Ui, info: &mut Info) {
-        let mut new_shape = self.shape();
+    pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         self.camera.draw_menu(ui);
+        let mut change = false;
         ui.collapsing("Spielfeld", |ui| {
-            let mut change = false;
+            let mut new_shape = self.shape();
             ui.label("Form:");
             ComboBox::from_id_source(&self.data as *const _)
                 .selected_text(self.shape().name_str())
@@ -238,11 +219,10 @@ impl Map {
             change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (min, max), 1);
             if change {
                 self.recompute(new_shape);
-                self.adjust_info(info);
-                info.characters.forget_move_history();
             }
             ui.label(format!("    ➡ {} Knoten", self.data.nr_vertices()));
         });
+        change
     }
 
     pub fn scale(&self) -> f32 {

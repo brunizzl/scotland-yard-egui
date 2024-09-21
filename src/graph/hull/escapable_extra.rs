@@ -37,6 +37,9 @@ impl LazySafeToDilemma {
             },
             Err(index) => {
                 let res = self.from.len() as u16;
+                if res >= 32 {
+                    return 31;
+                }
                 self.from.insert(index, overlap);
                 self.number.insert(index, 1);
                 self.first.insert(index, vertex);

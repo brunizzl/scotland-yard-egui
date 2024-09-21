@@ -22,11 +22,11 @@ struct SavedState {
 }
 
 impl SavedState {
-    fn set(&mut self, map: &mut map::Map, info: &mut info::Info) {
+    fn set(&mut self, ctx: &egui::Context, map: &mut map::Map, info: &mut info::Info) {
         map.change_to(self.shape, self.resolution);
         info.characters = self.characters.clone_without_distances();
         info.marked_manually = crate::rle::decode(&self.manual_markers);
-        map.adjust_info(info);
+        info.adjust_to_new_map(ctx, map.data());
     }
 
     fn path(&self) -> std::path::PathBuf {
@@ -303,7 +303,7 @@ impl SavedStates {
                     ui.horizontal(|ui| {
                         let button = highlight(ui.button(text), Some(i) == self.active);
                         if button.on_hover_text("laden").clicked() {
-                            self.saves[i].set(map, info);
+                            self.saves[i].set(ui.ctx(), map, info);
                             self.active = Some(i);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

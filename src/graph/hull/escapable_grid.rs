@@ -36,6 +36,7 @@ impl EscapableDirections {
         hull_data: &ConvexHullData,
     ) -> bool {
         self.escapable.clear();
+        self.escapable.resize(map.nr_vertices(), 0);
         let Some(g) = GridGraph::try_from(map) else {
             return false;
         };
@@ -53,7 +54,6 @@ impl EscapableDirections {
         self.graph = g;
 
         // initialize escapable to have the complete hull inside marked
-        self.escapable.resize(map.nr_vertices(), 0);
         let all = (1u8 << self.graph.norm.unit_directions().len()) - 1;
         for (esc, inside) in izip!(&mut self.escapable, hull_data.hull()) {
             if inside.contained() {

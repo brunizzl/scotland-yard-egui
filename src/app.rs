@@ -169,7 +169,8 @@ impl State {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut info = info::Info::new(cc);
-        let map = map::Map::new(&mut info, cc);
+        let map = map::Map::new(cc);
+        info.adjust_to_new_map(&cc.egui_ctx, map.data());
         let saves = saves::SavedStates::new(cc);
         Self {
             map,
@@ -281,7 +282,10 @@ impl eframe::App for State {
                     //this forces the scroll bar to the right edge of the left panel
                     ui.allocate_at_least(Vec2::new(ui.available_width(), 0.0), Sense::hover());
 
-                    self.map.draw_menu(ui, &mut self.info);
+                    let map_change = self.map.draw_menu(ui);
+                    if map_change {
+                        self.info.adjust_to_new_map(ui.ctx(), self.map.data());
+                    }
                     self.info.draw_menu(ui, &self.map);
                     ui.add_space(50.0);
                 });
