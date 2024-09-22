@@ -1404,11 +1404,11 @@ impl Info {
                             .map(|&dir| {
                                 let neigh = g.index_of(v0_xy + dir);
                                 let neigh_pos = con.cam().transform(con.positions[neigh]);
-                                (neigh_pos - v0_pos) * 0.4 * self.options.number_scale
+                                (neigh_pos - v0_pos) * 0.3
                             })
                             .collect_vec()
                     };
-                    let stroke = egui::Stroke::new(con.scale * 1.4, color);
+                    let stroke = egui::Stroke::new(font.size * 0.1, color);
                     let iter = self.escapable_grid.escapable.iter();
                     let shown = self.options.shown_escape_directions;
                     for (v, &val, &vis) in izip!(0.., iter, con.visible) {
@@ -1417,7 +1417,7 @@ impl Info {
                             let v_pos = con.cam().transform(con.positions[v]);
                             for (i, &dir) in izip!(0.., &dirs) {
                                 if (1u8 << i) & shown_val != 0 {
-                                    add_arrow(&con.painter, v_pos, dir, stroke);
+                                    add_arrow(&con.painter, v_pos, dir, stroke, 2.0);
                                 }
                             }
                         }
@@ -1504,6 +1504,7 @@ impl Info {
                         width: con.scale * 1.6,
                         color: Color32::from_rgb(150, 150, 255),
                     },
+                    4.0,
                 );
             }
         }

@@ -113,11 +113,11 @@ fn add_disabled_drag_value(ui: &mut Ui) -> bool {
     .inner
 }
 
-fn add_arrow(painter: &Painter, origin: Pos2, vec: Vec2, stroke: Stroke) {
+fn add_arrow(painter: &Painter, origin: Pos2, vec: Vec2, stroke: Stroke, tip_scale: f32) {
     let vec_normal = vec.normalized();
     let orthogonal = vec_normal.rot90();
     const SQRT_3: f32 = 1.732_050_8;
-    let tip_len = 3.0 * stroke.width;
+    let tip_len = tip_scale * stroke.width;
     let tip_tip = origin + vec;
     let tip = tip_tip - (SQRT_3 * tip_len) * vec_normal;
     {
