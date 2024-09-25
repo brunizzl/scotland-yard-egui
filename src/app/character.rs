@@ -208,6 +208,18 @@ impl Character {
         let point_rect = Rect::from_center_size(draw_screen_pos, vec2(rect_len, rect_len));
         let character_id = con.response.id.with(self as *const Self);
         let point_response = ui.interact(point_rect, character_id, Sense::drag());
+
+        // change a cop's apperance on right click.
+        // this has no actual meaning, so no need to tell anyone something changed.
+        if let Id::Cop(i) = &mut self.id {
+            point_response.context_menu(|ui| {
+                ui.set_max_width(0.0);
+                for (emoji_i, &emoji) in izip!(0.., Id::COP_EMOJIES) {
+                    ui.radio_value(i, emoji_i, emoji);
+                }
+            });
+        }
+
         let now_dragging = point_response.dragged_by(PointerButton::Primary);
         let was_dragging = matches!(self.pos, Pos::OnScreen(_));
         //dragging starts -> update actual position to match drawn position
