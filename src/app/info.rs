@@ -545,29 +545,56 @@ impl Info {
                             }
                         }
 
-                        let hint = match () {
-                            () if automatic_markers_shown => "füge automatische Marker hinzu",
-                            () if hull_shown => "füge Konvexe Hülle hinzu",
-                            () => "füge Konvexe Hülle / automatische Marker hinzu",
+                        let what_set = match () {
+                            () if automatic_markers_shown => "automatische Marker",
+                            () if hull_shown => "Konvexe Hülle",
+                            () => "aktive manuelle Marker",
                         };
-                        if ui.button(" ⬇ ").on_hover_text(hint).clicked() {
-                            if automatic_markers_shown {
-                                let iter = izip!(&self.currently_marked, &mut self.marked_manually);
-                                for (&set, marker) in iter {
-                                    if set {
+
+                        for operation in [" + ", " · ", " - "] {
+                            let apply = |marker: &mut u8, other: bool| match operation {
+                                " + " => {
+                                    if other {
                                         *marker |= bit_i;
                                     }
-                                }
-                            } else if hull_shown {
-                                let iter = izip!(self.cop_hull_data.hull(), &mut self.marked_manually);
-                                for (&hull, marker) in iter {
-                                    if hull.contained() {
-                                        *marker |= bit_i;
+                                },
+                                " · " => {
+                                    if !other && (*marker & bit_i != 0) {
+                                        *marker -= bit_i;
+                                    }
+                                },
+                                " - " => {
+                                    if other && (*marker & bit_i != 0) {
+                                        *marker -= bit_i;
+                                    }
+                                },
+                                _ => unreachable!(),
+                            };
+                            let hint = match operation {
+                                " + " => format!("füge {what_set} hinzu (Vereinigung)"),
+                                " · " => format!("behalte nur {what_set} (Schnitt)"),
+                                " - " => format!("entferne {what_set} (Differenz)"),
+                                _ => unreachable!(),
+                            };
+                            if ui.button(operation).on_hover_text(hint).clicked() {
+                                if automatic_markers_shown {
+                                    let iter = izip!(&self.currently_marked, &mut self.marked_manually);
+                                    for (&set, marker) in iter {
+                                        apply(marker, set);
+                                    }
+                                } else if hull_shown {
+                                    let iter = izip!(self.cop_hull_data.hull(), &mut self.marked_manually);
+                                    for (&hull, marker) in iter {
+                                        apply(marker, hull.contained());
+                                    }
+                                } else {
+                                    let mask = 1u8 << opts.active_manual_marker;
+                                    for marker in &mut self.marked_manually {
+                                        apply(marker, *marker & mask != 0);
                                     }
                                 }
                             }
                         }
-
                     });
                 }
             });
