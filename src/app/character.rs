@@ -734,7 +734,7 @@ impl State {
             let glow = ch.id().glow();
             let trans = glow.gamma_multiply(0.3);
 
-            let mut size = con.scale * 4.0;
+            let mut size = con.scale * 5.0;
             for (&v1, &v2) in ch.past_vertices().iter().rev().tuple_windows() {
                 if !con.visible[v1] || !con.visible[v2] {
                     continue;
@@ -750,8 +750,8 @@ impl State {
                 let line = Shape::LineSegment { points, stroke };
                 con.painter.add(line);
 
-                if size > con.scale * 1.0 {
-                    size *= 0.9;
+                if size > con.scale * 3.0 {
+                    size *= 0.95;
                 }
             }
         }
