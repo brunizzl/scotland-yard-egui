@@ -129,36 +129,10 @@ fn add_arrow(painter: &Painter, origin: Pos2, vec: Vec2, stroke: Stroke, tip_sca
     painter.line_segment([origin, tip], stroke);
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum MouseTool {
-    Drag,
-    Draw,
-    Erase,
-}
-
-impl MouseTool {
-    fn symbol(self) -> &'static str {
-        match self {
-            MouseTool::Drag => " ♟ ",
-            MouseTool::Draw => " ✏ ",
-            MouseTool::Erase => " 📗 ",
-        }
-    }
-
-    fn what(self) -> &'static str {
-        match self {
-            MouseTool::Drag => "bewege Figuren",
-            MouseTool::Draw => "zeichne",
-            MouseTool::Erase => "radiere",
-        }
-    }
-}
-
 pub struct State {
     map: map::Map,
     info: info::Info,
 
-    tool: MouseTool,
     menu_visible: bool,
     fullscreen: bool,
 
@@ -175,28 +149,9 @@ impl State {
         Self {
             map,
             info,
-            tool: MouseTool::Drag,
             menu_visible: true,
             fullscreen: false,
             saves,
-        }
-    }
-
-    fn show_tool_tooltip(&mut self, ctx: &Context) {
-        let next = match self.tool {
-            MouseTool::Drag => MouseTool::Draw,
-            MouseTool::Draw => MouseTool::Erase,
-            MouseTool::Erase => MouseTool::Drag,
-        };
-        let f1_down = ctx.input(|info| {
-            if info.key_released(Key::F1) {
-                self.tool = next;
-            }
-            info.key_down(Key::F1)
-        });
-        if f1_down {
-            let symbol = RichText::new(next.symbol()).size(30.0);
-            show_tooltip_text(ctx, Id::new(&self.tool as *const _), symbol);
         }
     }
 }
@@ -214,7 +169,10 @@ zoom:
 strg + scrollen
 
 verschieben einer Figur:
-ziehen mit linker Maustaste",
+ziehen mit linker Maustaste
+
+Viele Menüpunkte zeigen Extrainformation, 
+wenn die Maus über ihnen schwebt.",
             )
             .wrap(false),
         );
@@ -245,7 +203,6 @@ impl eframe::App for State {
         if ctx.input(|info| info.modifiers.ctrl && info.key_pressed(Key::B)) {
             self.menu_visible ^= true;
         }
-        self.show_tool_tooltip(ctx);
 
         if self.menu_visible {
             SidePanel::left("left_panel").show(ctx, |ui| {
@@ -267,15 +224,7 @@ impl eframe::App for State {
                 });
 
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Werkzeug: ").on_hover_text("rotiere mit F1");
-                    for mode in [MouseTool::Drag, MouseTool::Draw, MouseTool::Erase] {
-                        let button = Button::new(mode.symbol()).selected(self.tool == mode);
-                        if ui.add(button).on_hover_text(mode.what()).clicked() {
-                            self.tool = mode;
-                        }
-                    }
-                });
+                self.info.draw_mouse_tool_controls(ui);
 
                 ui.separator();
                 ScrollArea::vertical().show(ui, |ui| {
@@ -294,7 +243,7 @@ impl eframe::App for State {
 
         CentralPanel::default().show(ctx, |ui| {
             let con = self.map.update_and_draw(ui);
-            self.info.update_and_draw(ui, &con, self.tool);
+            self.info.update_and_draw(ui, &con);
 
             if !self.menu_visible {
                 let pos = Rect::from_center_size(pos2(12.0, 2.0), Vec2::ZERO);
@@ -302,11 +251,6 @@ impl eframe::App for State {
                 if ui.put(pos, open).on_hover_text("Menü ausklappen (strg + b)").clicked() {
                     self.menu_visible = true;
                 }
-            }
-            if matches!(self.tool, MouseTool::Draw | MouseTool::Erase)
-                && con.response.contains_pointer()
-            {
-                ctx.set_cursor_icon(CursorIcon::Crosshair);
             }
         });
 

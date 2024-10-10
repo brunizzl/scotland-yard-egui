@@ -350,19 +350,62 @@ impl Options {
                         menu_change = true;
                     }
                 }).response.on_hover_text("rotiere durch letzte mit [W] + [1]/[2]/[3]/[4]");
-
-
-            ui.add_space(8.0);
-            if ui.add(Button::new("✏ Manuelle Marker").selected(self.show_manual_marker_window)).clicked() {
-                self.show_manual_marker_window = !self.show_manual_marker_window;
-            }
         });
 
         menu_change
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum MouseTool {
+    Drag,
+    Draw,
+    Erase,
+}
+
+impl MouseTool {
+    fn symbol(self) -> &'static str {
+        match self {
+            MouseTool::Drag => " ♟ ",
+            MouseTool::Draw => " ✏ ",
+            MouseTool::Erase => " 📗 ",
+        }
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            MouseTool::Drag => "bewege Figuren ([E] + [1])",
+            MouseTool::Draw => "zeichne ([E] + [2])",
+            MouseTool::Erase => "radiere ([E] + [3])",
+        }
+    }
+
+    pub const ALL: [Self; 3] = [Self::Drag, Self::Draw, Self::Erase];
+
+    /// input is old self, result new one. updating stored information must be done elsewhere
+    pub fn draw_mouse_tool_controls(self, ui: &mut Ui) -> Self {
+        let mut new = self;
+        ui.horizontal(|ui| {
+            ui.label("Werkzeug: ").on_hover_text(
+                "Manuelle Marker der aktiven Farbe können an dem der Mausposition nächsten Knoten \
+                mit Klicken bei Auswahl des [✏]-Werkzeuges hinzugefügt und bei Auswahl von [📗] entfernt werden. \
+                Alternativ: Setzten mit [m] und Entfernen mit [n]. \
+                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird."
+            );
+            for t in MouseTool::ALL {
+                let button = Button::new(t.symbol()).selected(self == t);
+                if ui.add(button).on_hover_text(t.what()).clicked() {
+                    new = t;
+                }
+            }
+        });
+        new
+    }
+}
+
 pub struct Info {
+    tool: MouseTool,
+
     ///remembers all vertices currently colored by `VertexColorInfo` of `self.options`
     currently_marked: Vec<bool>,
 
@@ -408,6 +451,7 @@ mod storage_keys {
 impl Default for Info {
     fn default() -> Self {
         Self {
+            tool: MouseTool::Drag,
             currently_marked: Vec::new(),
 
             cop_hull_data: graph::ConvexHullData::new(),
@@ -451,6 +495,7 @@ impl Info {
         let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
 
         Self {
+            tool: MouseTool::Drag,
             currently_marked: Vec::new(),
 
             cop_hull_data: graph::ConvexHullData::new(),
@@ -504,27 +549,39 @@ impl Info {
         }
     }
 
+    fn change_tool_to(&mut self, new: MouseTool) {
+        if new != self.tool && new != MouseTool::Drag {
+            self.options.show_manual_marker_window = true;
+        }
+        self.tool = new;
+    }
+
+    pub fn draw_mouse_tool_controls(&mut self, ui: &mut Ui) {
+        let new = self.tool.draw_mouse_tool_controls(ui);
+        self.change_tool_to(new);
+    }
+
     pub fn draw_windows(&mut self, ctx: &Context) {
         let opts = &mut self.options;
         let automatic_markers_shown = opts.vertex_color_info() != VertexColorInfo::None;
         let hull_shown = opts.show_convex_hull;
-        Window::new("✏")
+        let mut new_tool = self.tool;
+        Window::new("Manuelle Marker")
             .open(&mut opts.show_manual_marker_window)
-            .collapsible(false)
+            .constrain_to(ctx.screen_rect())
             .show(ctx, |ui| {
-                ui.label("[Info]").on_hover_text(
-                    "Manuelle Marker der aktiven Farbe können an dem der Mausposition nächsten Knoten \
-                mit Klicken bei Auswahl des [✏]-Werkzeuges hinzugefügt und bei Auswahl von [📗] entfernt werden. \
-                Alternativ: Setzten mit [m] und Entfernen mit [n]. \
-                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird.",
-                );
+                new_tool = new_tool.draw_mouse_tool_controls(ui);
                 add_scale_drag_value(ui, &mut opts.manual_marker_scale, "Größe");
 
                 for (i, color) in izip!(0.., &mut opts.manual_marker_colors) {
                     ui.horizontal(|ui| {
                         let bit_i = 1u8 << i;
                         let hover_choose = format!("wähle Farbe (f + {})", i + 1);
-                        if ui.radio(opts.active_manual_marker == i, "").on_hover_text(hover_choose).clicked() {
+                        if ui
+                            .radio(opts.active_manual_marker == i, "")
+                            .on_hover_text(hover_choose)
+                            .clicked()
+                        {
                             opts.active_manual_marker = i;
                             opts.shown_manual_markers |= bit_i;
                         }
@@ -578,12 +635,14 @@ impl Info {
                             };
                             if ui.button(operation).on_hover_text(hint).clicked() {
                                 if automatic_markers_shown {
-                                    let iter = izip!(&self.currently_marked, &mut self.marked_manually);
+                                    let iter =
+                                        izip!(&self.currently_marked, &mut self.marked_manually);
                                     for (&set, marker) in iter {
                                         apply(marker, set);
                                     }
                                 } else if hull_shown {
-                                    let iter = izip!(self.cop_hull_data.hull(), &mut self.marked_manually);
+                                    let iter =
+                                        izip!(self.cop_hull_data.hull(), &mut self.marked_manually);
                                     for (&hull, marker) in iter {
                                         apply(marker, hull.contained());
                                     }
@@ -598,6 +657,7 @@ impl Info {
                     });
                 }
             });
+        self.change_tool_to(new_tool);
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
@@ -950,7 +1010,8 @@ impl Info {
         );
     }
 
-    pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
+    pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+        let tool = self.tool;
         let mut change = false;
         let held_key = ui.input(|info| {
             if info.key_pressed(Key::F3) {
@@ -1023,6 +1084,14 @@ impl Info {
                 }
                 return Some(Key::F);
             }
+            if info.key_down(Key::E) {
+                for (new_tool, &key) in izip!(MouseTool::ALL, &NUMS[..3]) {
+                    if info.key_pressed(key) {
+                        self.change_tool_to(new_tool);
+                    }
+                }
+                return Some(Key::E);
+            }
             None
         });
 
@@ -1054,6 +1123,9 @@ impl Info {
                                 }
                             });
                         }
+                    },
+                    Key::E => {
+                        ui.add(Label::new(RichText::new(tool.symbol()).size(30.0)));
                     },
                     _ => unreachable!(),
                 }
@@ -1555,8 +1627,14 @@ impl Info {
         }
     }
 
-    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
-        self.process_general_input(ui, con, tool);
+    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+        if matches!(self.tool, MouseTool::Draw | MouseTool::Erase)
+            && con.response.contains_pointer()
+        {
+            ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+        }
+
+        self.process_general_input(ui, con);
         self.characters.start_new_frame(con, &mut self.queue);
         if self.last_change == ui.ctx().frame_nr() {
             self.definitely_update(con);
@@ -1571,7 +1649,7 @@ impl Info {
         self.characters.draw_allowed_next_steps(con);
         self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
-        self.characters.draw(ui, con, tool == MouseTool::Drag);
+        self.characters.draw(ui, con, self.tool == MouseTool::Drag);
         self.screenshot_as_tikz(con);
     }
 }
