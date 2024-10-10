@@ -746,7 +746,6 @@ impl Info {
 
     /// recomputes everything
     pub fn definitely_update(&mut self, con: &DrawContext<'_>) {
-        self.characters.update(con, &mut self.queue);
         self.update_min_cop_dist(con.edges);
         self.update_max_cop_dist(con.edges);
         self.update_convex_cop_hull(con);
@@ -761,7 +760,6 @@ impl Info {
     /// and only if something relevant (e.g. a cop's position) changed
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
         let nr_vertices = con.edges.nr_vertices();
-        self.characters.update(con, &mut self.queue);
         let robber_moved = self.characters.robber_updated();
         let cop_moved = self.characters.cop_updated();
 
@@ -926,7 +924,8 @@ impl Info {
             };
             let robber_vertex = self
                 .characters
-                .robber()
+                .all()
+                .first()
                 .map_or("<Keiner>".to_string(), |r| r.vertex().to_string());
             format!(
                 "\n\
@@ -1138,7 +1137,7 @@ impl Info {
         }
         match self.options.vertex_color_info() {
             VertexColorInfo::NearNodes => {
-                if let Some(r) = self.characters.robber() {
+                if let Some(r) = self.characters.active_robber() {
                     for (r_dist, c_dist, util) in izip!(r.dists(), &self.min_cop_dist, utils_iter) {
                         draw_if!(r_dist < c_dist, util);
                     }
@@ -1152,7 +1151,7 @@ impl Info {
                 }
             },
             VertexColorInfo::RobberDist => {
-                if let Some(r) = self.characters.robber() {
+                if let Some(r) = self.characters.active_robber() {
                     let bnd = self.options.marked_robber_dist;
                     for (&dist, util) in izip!(r.dists(), utils_iter) {
                         draw_if!(dist == bnd, util);
@@ -1231,7 +1230,7 @@ impl Info {
             },
             VertexColorInfo::RobberVertexClass => {
                 if let (Some(r), SymGroup::Explicit(sym)) =
-                    (self.characters.robber(), con.sym_group())
+                    (self.characters.active_robber(), con.sym_group())
                 {
                     let v0 = r.vertex();
                     for auto in sym.all_automorphisms() {
@@ -1276,7 +1275,7 @@ impl Info {
                 //    }
                 //}
                 if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
-                    if let Some(r) = self.characters.robber() {
+                    if let Some(r) = self.characters.active_robber() {
                         let v = g.coordinates_of(r.vertex());
                         for (dist, color) in izip!(0.., color::HAND_PICKED_MARKER_COLORS) {
                             for nxy in g.dist_neighbors_of(v, dist) {
@@ -1461,7 +1460,7 @@ impl Info {
                 draw_isize_slice(&self.cop_advantage);
             },
             VertexNumberInfo::RobberDist => {
-                if let Some(r) = self.characters.robber() {
+                if let Some(r) = self.characters.active_robber() {
                     draw_isize_slice(r.dists());
                 }
             },
@@ -1478,7 +1477,7 @@ impl Info {
         if !self.options.show_cop_strat {
             return;
         }
-        let Some(robber) = self.characters.robber() else {
+        let Some(robber) = self.characters.active_robber() else {
             return;
         };
         let robber_v = robber.vertex();
@@ -1558,6 +1557,7 @@ impl Info {
 
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, tool: MouseTool) {
         self.process_general_input(ui, con, tool);
+        self.characters.start_new_frame(con, &mut self.queue);
         if self.last_change == ui.ctx().frame_nr() {
             self.definitely_update(con);
         } else {
@@ -1572,7 +1572,6 @@ impl Info {
         self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con, tool == MouseTool::Drag);
-        self.characters.frame_is_finished();
         self.screenshot_as_tikz(con);
     }
 }

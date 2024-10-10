@@ -1021,13 +1021,9 @@ impl Embedding3D {
         }
     }
 
-    pub fn find_local_minimum(
-        &self,
-        mut potential: impl FnMut(usize, Pos3) -> f32,
-        node_hint: usize,
-    ) -> (usize, f32) {
-        let pot = |v| potential(v, self.vertices[v]);
-        self.edges.find_local_minimum(pot, node_hint)
+    pub fn find_global_minimum(&self, mut f: impl FnMut(usize, Pos3) -> f32) -> (usize, f32) {
+        let pot = |v| f(v, self.vertices[v]);
+        self.edges.find_global_minimum(pot)
     }
 
     pub fn from_2d(planar: Embedding2D, shape: Shape) -> Self {

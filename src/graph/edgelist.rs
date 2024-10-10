@@ -436,4 +436,20 @@ impl EdgeList {
         }
         (nearest, smallest_pot)
     }
+
+    pub fn find_global_minimum<T>(&self, mut potential: impl FnMut(usize) -> T) -> (usize, T)
+    where
+        T: PartialOrd,
+    {
+        let mut best = 0;
+        let mut smallest_pot = potential(0);
+        for v in 0..self.length {
+            let v_pot = potential(v);
+            if v_pot < smallest_pot {
+                best = v;
+                smallest_pot = v_pot;
+            }
+        }
+        (best, smallest_pot)
+    }
 } //impl EdgeList
