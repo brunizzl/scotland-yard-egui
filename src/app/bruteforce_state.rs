@@ -483,7 +483,7 @@ impl BruteforceComputationState {
                 game_type.shape.to_sting(),
                 game_type.resolution
             ))
-            .wrap(false),
+            .wrap_mode(egui::TextWrapMode::Extend),
         );
     }
 
@@ -507,7 +507,7 @@ impl BruteforceComputationState {
                 game_type.resolution,
                 strat.max_moves,
             ))
-            .wrap(false),
+            .wrap_mode(egui::TextWrapMode::Extend),
         );
     }
 
@@ -602,11 +602,11 @@ impl BruteforceComputationState {
                     task_str,
                     worker.game_type.as_tuple_string()
                 ))
-                .wrap(false),
+                .wrap_mode(egui::TextWrapMode::Extend),
             );
 
             if let Some(r) = &mut worker.manager {
-                ui.add(Label::new(r.last_log()).wrap(false));
+                ui.add(Label::new(r.last_log()).wrap_mode(egui::TextWrapMode::Extend));
                 ui.horizontal(|ui| {
                     let (label, cmd) = if paused {
                         (" ▶ ", Command::Work)
@@ -625,7 +625,7 @@ impl BruteforceComputationState {
                                 if ratio < 1.0 {
                                     let text = format!("{}%", (ratio * 100.0) as isize);
                                     let id = egui::Id::new(r as *const _);
-                                    egui::show_tooltip_text(ui.ctx(), id, text);
+                                    egui::show_tooltip_text(ui.ctx(), ui.layer_id(), id, text);
                                 } else {
                                     r.send_command(Command::Abort).ok();
                                 }
@@ -658,7 +658,7 @@ impl BruteforceComputationState {
                     game_type.as_tuple_string(),
                     err
                 ))
-                .wrap(false),
+                .wrap_mode(egui::TextWrapMode::Extend),
             );
             if ui.button("löschen").clicked() {
                 delete = Some(i);

@@ -89,7 +89,7 @@ impl Camera3D {
                 self.reset();
             }
             ui.add_space(3.0);
-            ui.add(DragValue::new(&mut self.zoom_speed).clamp_range(0.05..=4.0).speed(0.01))
+            ui.add(DragValue::new(&mut self.zoom_speed).range(0.05..=4.0).speed(0.01))
                 .on_hover_text("Zoom-/Scroll-/Rotationsgeschwindigkeit");
             ui.add_space(3.0);
             if ui.add(Button::new("🔄").sense(Sense::drag())).dragged() {

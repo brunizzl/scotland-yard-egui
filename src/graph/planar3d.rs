@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use bool_csr::BoolCSR;
-use egui::{Painter, Stroke};
+use egui::{epaint::PathStroke, Painter};
 use itertools::{izip, Itertools};
 use smallvec::{smallvec, SmallVec};
 
@@ -825,7 +825,7 @@ impl Embedding3D {
         &self,
         to_screen: &geo::ToScreen,
         painter: &Painter,
-        stroke: Stroke,
+        stroke: PathStroke,
         visible: &mut [bool],
         draw_inner_fast: bool,
     ) {
@@ -847,7 +847,10 @@ impl Embedding3D {
 
         let draw_line = |vertices: &[Pos3], v1, v2| {
             let edge = [to_screen.apply(vertices[v1]), to_screen.apply(vertices[v2])];
-            let line = egui::Shape::LineSegment { points: edge, stroke };
+            let line = egui::Shape::LineSegment {
+                points: edge,
+                stroke: stroke.clone(),
+            };
             painter.add(line);
         };
         let iter = itertools::izip!(
@@ -918,7 +921,7 @@ impl Embedding3D {
         &self,
         to_screen: &geo::ToScreen,
         painter: &Painter,
-        stroke: Stroke,
+        stroke: PathStroke,
         draw_diagonals: bool,
     ) {
         debug_assert!(matches!(
@@ -933,7 +936,7 @@ impl Embedding3D {
             let p1 = self.vertices[v1];
             let p2 = self.vertices[v2];
             let points = [to_screen.apply(p1), to_screen.apply(p2)];
-            painter.add(egui::Shape::LineSegment { points, stroke });
+            painter.add(egui::Shape::LineSegment { points, stroke: stroke.clone() });
         };
 
         // draw lines stored als blocks
@@ -970,12 +973,12 @@ impl Embedding3D {
         }
     }
 
-    fn draw_all_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: Stroke) {
+    fn draw_all_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: PathStroke) {
         self.edges.for_each_edge(|v1, v2| {
             let p1 = self.vertices[v1];
             let p2 = self.vertices[v2];
             let points = [to_screen.apply(p1), to_screen.apply(p2)];
-            painter.add(egui::Shape::LineSegment { points, stroke });
+            painter.add(egui::Shape::LineSegment { points, stroke: stroke.clone() });
         });
     }
 
@@ -983,7 +986,7 @@ impl Embedding3D {
         &self,
         to_screen: &geo::ToScreen,
         painter: &Painter,
-        stroke: Stroke,
+        stroke: PathStroke,
         visible: &mut [bool],
     ) {
         let visible_needs_update = match self.shape {

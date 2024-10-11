@@ -80,11 +80,7 @@ where
                 f_val / step
             });
         }
-        ui.add(
-            egui::DragValue::new(val)
-                .clamp_range(min..=max)
-                .update_while_editing(false),
-        );
+        ui.add(egui::DragValue::new(val).range(min..=max).update_while_editing(false));
         if ui.button(" + ").clicked() && prev < max {
             *val = T::from_f64(if T::INTEGRAL {
                 f_val + step
@@ -144,7 +140,7 @@ impl State {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut info = info::Info::new(cc);
         let map = map::Map::new(cc);
-        info.adjust_to_new_map(&cc.egui_ctx, map.data());
+        info.adjust_to_new_map(map.data());
         let saves = saves::SavedStates::new(cc);
         Self {
             map,
@@ -174,7 +170,7 @@ ziehen mit linker Maustaste
 Viele Menüpunkte zeigen Extrainformation, 
 wenn die Maus über ihnen schwebt.",
             )
-            .wrap(false),
+            .wrap_mode(egui::TextWrapMode::Extend),
         );
     });
 }
@@ -210,13 +206,13 @@ impl eframe::App for State {
                 ui.horizontal(|ui| {
                     //add spaces to force minimum width of sidebar
                     let compile_info = format!("kompiliert: {compile_datetime} ");
-                    ui.add(Label::new(compile_info).wrap(false));
+                    ui.add(Label::new(compile_info).wrap_mode(egui::TextWrapMode::Extend));
                     if ui.button("⏴").on_hover_text("Menü einklappen (strg + b)").clicked() {
                         self.menu_visible = false;
                     }
                 });
                 ui.horizontal(|ui| {
-                    egui::widgets::global_dark_light_mode_switch(ui);
+                    egui::widgets::global_theme_preference_switch(ui);
 
                     draw_usage_info(ui);
 
@@ -234,7 +230,7 @@ impl eframe::App for State {
 
                     let map_change = self.map.draw_menu(ui);
                     if map_change {
-                        self.info.adjust_to_new_map(ui.ctx(), self.map.data());
+                        self.info.adjust_to_new_map(self.map.data());
                     }
                     self.info.draw_menu(ui, &self.map);
                     ui.add_space(50.0);

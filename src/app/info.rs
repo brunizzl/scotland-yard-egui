@@ -262,7 +262,7 @@ impl Options {
         ui.collapsing("Knoteninfo", |ui| {
             //obv. whether to draw vertices or not has no influence over any actual information -> no need to update menu change
             ui.horizontal(|ui| {
-                ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
+                ui.add(Checkbox::new(&mut self.draw_vertices, "Knoten"));
                 self.vertex_style.draw_options(ui, &[Color32::GRAY]);
             });
             ui.add_space(8.0);
@@ -270,7 +270,7 @@ impl Options {
 
             ui.horizontal(|ui| {
                 menu_change |= ui
-                    .add(Checkbox::new(&mut self.show_convex_hull, "zeige konvexe Hülle um Cops"))
+                    .add(Checkbox::new(&mut self.show_convex_hull, "konvexe Hülle um Cops"))
                     .on_hover_text(
                         "Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
                     wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
@@ -284,7 +284,7 @@ impl Options {
                 menu_change |= ui
                 .add(Checkbox::new(
                     &mut self.show_hull_boundary,
-                    "zeige Grenze konvexer Hülle",
+                    "Grenze konvexer Hülle",
                 ))
                 .on_hover_text(
                     "Punkte in Hülle, die mindestens einen Nachbarn ausserhalb Hülle haben. \
@@ -297,9 +297,9 @@ impl Options {
             });
 
             ui.add_space(8.0);
-            ui.add(Checkbox::new(&mut self.show_cop_strat, "zeige Polizeistrategie"))
+            ui.add(Checkbox::new(&mut self.show_cop_strat, "Polizeistrategie"))
                 .on_hover_text(
-                    "Wenn für aktuelle Anzahl Cops & aktuellen Graphen Bruteforce \
+                    "Wenn für aktuelle Anzahl Cops & für aktuellen Graphen Bruteforce \
                 Polizeistrategie berechnet wurde und aktueller Spielstate von Cops \
                 gewonnen wird, werden alle idealen Züge angezeigt."
                 );
@@ -310,7 +310,7 @@ impl Options {
                 ui.label("Marker:");
                 self.automatic_marker_style.draw_options(ui, &[color::GREEN]);
             });
-            ComboBox::from_id_source(&self.last_selected_vertex_color_infos as *const _)
+            ComboBox::from_id_salt(&self.last_selected_vertex_color_infos as *const _)
                 .selected_text(self.vertex_color_info().name_str())
                 .show_ui(ui, |ui| {
                     super::style::close_options_menu();
@@ -359,7 +359,7 @@ impl Options {
                 ui.label("Symbole:");
                 self.number_style.draw_options(ui, &[]);
             });
-            ComboBox::from_id_source(&self.last_selected_vertex_number_infos as *const _)
+            ComboBox::from_id_salt(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
                     let mut curr = self.vertex_number_info();
@@ -461,7 +461,8 @@ pub struct Info {
     pub characters: character::State,
 
     options: Options,
-    last_change: u64,
+    frame_number: usize,
+    last_change_frame: usize,
 
     worker: BruteforceComputationState,
 
@@ -495,7 +496,8 @@ impl Default for Info {
 
             characters: character::State::new(),
             options: DEFAULT_OPTIONS,
-            last_change: 0,
+            last_change_frame: 0,
+            frame_number: 0,
 
             worker: BruteforceComputationState::new(),
 
@@ -539,7 +541,8 @@ impl Info {
 
             characters,
             options,
-            last_change: 0,
+            last_change_frame: 0,
+            frame_number: 0,
 
             worker: BruteforceComputationState::new(),
 
@@ -548,8 +551,8 @@ impl Info {
         }
     }
 
-    pub fn register_change_now(&mut self, ctx: &egui::Context) {
-        self.last_change = ctx.frame_nr();
+    pub fn register_change_now(&mut self) {
+        self.last_change_frame = self.frame_number;
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
@@ -572,7 +575,7 @@ impl Info {
 
         change |= self.characters.draw_menu(ui, map, &mut self.queue);
         if change {
-            self.register_change_now(ui.ctx());
+            self.register_change_now();
         }
     }
 
@@ -822,7 +825,7 @@ impl Info {
         );
     }
 
-    pub fn adjust_to_new_map(&mut self, ctx: &egui::Context, map: &Embedding3D) {
+    pub fn adjust_to_new_map(&mut self, map: &Embedding3D) {
         for ch in self.characters.all_mut() {
             ch.adjust_to_new_map(map, &mut self.queue);
         }
@@ -833,7 +836,7 @@ impl Info {
             self.marked_manually.clear();
             self.marked_manually.resize(nr_vertices, 0);
         }
-        self.register_change_now(ctx);
+        self.register_change_now();
     }
 
     /// recomputes everything
@@ -1130,42 +1133,51 @@ impl Info {
 
         if let Some(key) = held_key {
             let id = Id::new((&self.options as *const _, "tooltip-fast-switch"));
-            egui::show_tooltip(ui.ctx(), id, |ui| {
+            egui::show_tooltip(ui.ctx(), ui.layer_id(), id, |ui| {
                 let opts = &self.options;
+                ui.ctx().all_styles_mut(|s| {
+                    s.wrap_mode = Some(egui::TextWrapMode::Extend);
+                });
+                let add_unwrapped = |ui: &mut Ui, txt| {
+                    ui.add(Label::new(txt).wrap_mode(egui::TextWrapMode::Extend));
+                };
                 match key {
                     Key::Q => {
                         for n in 1..7 {
                             let s = opts.last_selected_vertex_color_infos[n].name_str();
-                            ui.label(format!("{n}: {s}"));
+                            add_unwrapped(ui, format!("{n}: {s}"));
                         }
                     },
                     Key::W => {
                         for n in 1..7 {
                             let s = opts.last_selected_vertex_number_infos[n].name_str();
-                            ui.label(format!("{n}: {s}"));
+                            add_unwrapped(ui, format!("{n}: {s}"));
                         }
                     },
                     Key::F => {
                         const SIZE: Vec2 = vec2(28.0, 14.0); //14.0 is default text size
                         for (n, &s) in izip!(1.., &opts.manual_marker_styles) {
                             ui.horizontal(|ui| {
-                                ui.label(format!("{n}: "));
+                                add_unwrapped(ui, format!("{n}: "));
                                 egui::color_picker::show_color(ui, s.colors[0], SIZE);
                                 if n - 1 == opts.active_manual_marker {
-                                    ui.label("⬅");
+                                    add_unwrapped(ui, String::from("⬅"));
                                 }
                             });
                         }
                     },
                     Key::E => {
-                        ui.add(Label::new(RichText::new(tool.symbol()).size(30.0)));
+                        ui.add(
+                            Label::new(RichText::new(tool.symbol()).size(30.0))
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        );
                     },
                     _ => unreachable!(),
                 }
             });
         }
         if change {
-            self.register_change_now(ui.ctx());
+            self.register_change_now();
         }
     }
 
@@ -1707,7 +1719,7 @@ impl Info {
 
         self.process_general_input(ui, con);
         self.characters.start_new_frame(con, &mut self.queue);
-        if self.last_change == ui.ctx().frame_nr() {
+        if self.last_change_frame == self.frame_number {
             self.definitely_update(con);
         } else {
             self.maybe_update(con);
@@ -1722,5 +1734,7 @@ impl Info {
         self.draw_numbers(ui, con);
         self.characters.draw(ui, con, self.tool == MouseTool::Drag);
         self.screenshot_as_tikz(con);
+
+        self.frame_number += 1;
     }
 }

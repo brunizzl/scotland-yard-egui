@@ -5,7 +5,7 @@ use std::{
 
 use itertools::{izip, Itertools};
 
-use egui::{pos2, vec2, Color32, Painter, Pos2, Rect, Sense, Stroke, Ui};
+use egui::{epaint::PathStroke, pos2, vec2, Color32, Painter, Pos2, Rect, Sense, Stroke, Ui};
 
 use crate::{
     app::bruteforce_state::GameType,
@@ -757,7 +757,7 @@ impl State {
                     let space_dist = (con.positions[v2] - con.positions[v1]).length();
                     let max = con.map.data().max_shown_edge_length();
                     let color = if space_dist < max { glow } else { trans };
-                    Stroke::new(size * 0.75, color)
+                    PathStroke::new(size * 0.75, color)
                 };
                 let line = egui::Shape::LineSegment { points, stroke };
                 con.painter.add(line);

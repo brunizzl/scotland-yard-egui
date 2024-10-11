@@ -1,4 +1,5 @@
 use crate::graph::Shape;
+use egui::epaint::PathStroke;
 use itertools::izip;
 
 use crate::app::cam::Camera3D;
@@ -151,7 +152,7 @@ impl Map {
         ui.collapsing("Spielfeld", |ui| {
             let mut new_shape = self.shape();
             ui.label("Form:");
-            egui::ComboBox::from_id_source(&self.data as *const _)
+            egui::ComboBox::from_id_salt(&self.data as *const _)
                 .selected_text(self.shape().name_str())
                 .show_ui(ui, |ui| {
                     macro_rules! radio {
@@ -281,7 +282,7 @@ impl Map {
         } else {
             color::LIGHT_GREY
         };
-        let grey_stroke = Stroke::new(scale, color);
+        let grey_stroke = PathStroke::new(scale, color);
 
         self.data.draw_edges_and_update_visibility(
             self.camera.to_screen(),
