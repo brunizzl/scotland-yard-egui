@@ -1,4 +1,4 @@
-use egui::{epaint::TextShape, text::LayoutJob, *};
+use egui::{pos2, Button, Context, Label, Painter, Pos2, Rect, Stroke, Ui, Vec2};
 
 use crate::geo::Pos3;
 use crate::graph::{EdgeList, SymGroup};
@@ -11,6 +11,7 @@ mod color;
 mod info;
 pub mod map;
 mod saves;
+mod style;
 mod tikz;
 
 mod bruteforce_state;
@@ -25,8 +26,8 @@ pub struct DrawContext<'a> {
     pub positions: &'a [Pos3],
     pub tolerance: f32,
     pub scale: f32,
-    pub painter: Painter,
-    pub response: Response,
+    pub painter: egui::Painter,
+    pub response: egui::Response,
 }
 
 impl<'a> DrawContext<'a> {
@@ -97,11 +98,6 @@ where
     .inner
 }
 
-fn add_scale_drag_value(ui: &mut Ui, val: &mut f32, name: &str) -> bool {
-    const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
-    add_drag_value(ui, val, name, (0.125, 8.0), FIFTH_ROOT_OF_TWO)
-}
-
 fn add_disabled_drag_value(ui: &mut Ui) -> bool {
     ui.horizontal(|ui| {
         ui.add_enabled(false, egui::Button::new(" - "));
@@ -124,7 +120,11 @@ fn add_arrow(painter: &Painter, origin: Pos2, vec: Vec2, stroke: Stroke, tip_sca
         let tip_side_1 = tip + tip_len * orthogonal;
         let tip_side_2 = tip - tip_len * orthogonal;
         let points = [tip_tip, tip_side_1, tip_side_2].into();
-        painter.add(Shape::convex_polygon(points, stroke.color, Stroke::NONE));
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            stroke.color,
+            Stroke::NONE,
+        ));
     }
     painter.line_segment([origin, tip], stroke);
 }
@@ -196,16 +196,16 @@ impl eframe::App for State {
     }
 
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        if NATIVE && ctx.input(|info| info.key_pressed(Key::F11)) {
+        if NATIVE && ctx.input(|info| info.key_pressed(egui::Key::F11)) {
             self.fullscreen ^= true;
-            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(self.fullscreen));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
         }
-        if ctx.input(|info| info.modifiers.ctrl && info.key_pressed(Key::B)) {
+        if ctx.input(|info| info.modifiers.ctrl && info.key_pressed(egui::Key::B)) {
             self.menu_visible ^= true;
         }
 
         if self.menu_visible {
-            SidePanel::left("left_panel").show(ctx, |ui| {
+            egui::SidePanel::left("left_panel").show(ctx, |ui| {
                 let compile_datetime = compile_time::datetime_str!();
                 ui.horizontal(|ui| {
                     //add spaces to force minimum width of sidebar
@@ -216,7 +216,7 @@ impl eframe::App for State {
                     }
                 });
                 ui.horizontal(|ui| {
-                    widgets::global_dark_light_mode_switch(ui);
+                    egui::widgets::global_dark_light_mode_switch(ui);
 
                     draw_usage_info(ui);
 
@@ -227,9 +227,10 @@ impl eframe::App for State {
                 self.info.draw_mouse_tool_controls(ui);
 
                 ui.separator();
-                ScrollArea::vertical().show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
                     //this forces the scroll bar to the right edge of the left panel
-                    ui.allocate_at_least(Vec2::new(ui.available_width(), 0.0), Sense::hover());
+                    let hover = egui::Sense::hover();
+                    ui.allocate_at_least(Vec2::new(ui.available_width(), 0.0), hover);
 
                     let map_change = self.map.draw_menu(ui);
                     if map_change {
@@ -241,7 +242,7 @@ impl eframe::App for State {
             });
         }
 
-        CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ctx, |ui| {
             let con = self.map.update_and_draw(ui);
             self.info.update_and_draw(ui, &con);
 

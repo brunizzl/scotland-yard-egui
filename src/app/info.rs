@@ -4,12 +4,24 @@ use itertools::{izip, Itertools};
 
 use strum::IntoEnumIterator;
 
-use crate::graph::{self, bruteforce as bf, Automorphism, Embedding3D, SymmetryGroup};
+use egui::{
+    text::LayoutJob, vec2, Button, Checkbox, Color32, ComboBox, Context, DragValue, Id, Label,
+    Pos2, RichText, Ui, Vec2, Window,
+};
 
-use self::bruteforce_state::BruteforceComputationState;
-use self::character::Character;
+use crate::geo::Pos3;
+use crate::graph::{
+    self, bruteforce as bf, Automorphism, EdgeList, Embedding3D, SymGroup, SymmetryGroup,
+};
 
-use super::{color, *};
+use super::{
+    add_disabled_drag_value, add_drag_value,
+    bruteforce_state::BruteforceComputationState,
+    character::{self, Character},
+    color, load_or, map,
+    style::Style,
+    DrawContext, NATIVE,
+};
 
 #[derive(
     Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize, serde::Serialize, strum_macros::EnumIter,
@@ -162,15 +174,14 @@ impl VertexNumberInfo {
     }
 }
 
-/// used to set default value of [`Options::shown_escape_directions`]
-fn _63() -> u8 {
-    63
-}
-
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
-    manual_marker_colors: [Color32; 8],
-    automatic_marker_color: Color32,
+    vertex_style: Style<1>,
+    manual_marker_styles: [Style<1>; 8],
+    automatic_marker_style: Style<1>,
+    hull_style: Style<1>,
+    hull_boundary_style: Style<1>,
+    number_style: Style<0>,
 
     active_manual_marker: usize, //expected in 0..8
     shown_manual_markers: u8,    //bitmask
@@ -185,23 +196,32 @@ struct Options {
     marked_robber_dist: isize, //determines max dist marked in VertexColorInfo::RobberDist
     #[serde(skip)]
     specific_shown_vertex: usize,
-    #[serde(default = "_63", skip_serializing)]
     shown_escape_directions: u8,
-
-    number_scale: f32,
-    manual_marker_scale: f32,
-    automatic_marker_scale: f32,
 
     show_convex_hull: bool,
     show_hull_boundary: bool,
     draw_vertices: bool,
     show_cop_strat: bool,
     show_manual_marker_window: bool,
+    combine_manual_marker_colors: bool,
 }
 
 const DEFAULT_OPTIONS: Options = Options {
-    manual_marker_colors: color::HAND_PICKED_MARKER_COLORS,
-    automatic_marker_color: color::GREEN,
+    vertex_style: Style::new(&[Color32::GRAY]),
+    manual_marker_styles: [
+        Style::new(&[color::HAND_PICKED_MARKER_COLORS[0]]),
+        Style::new(&[color::HAND_PICKED_MARKER_COLORS[1]]),
+        Style::new(&[color::HAND_PICKED_MARKER_COLORS[2]]),
+        Style::new(&[color::HAND_PICKED_MARKER_COLORS[3]]),
+        Style::new(&[color::HAND_PICKED_MARKER_COLORS[4]]),
+        Style::new(&[color::HAND_PICKED_MARKER_COLORS[5]]),
+        Style::new(&[color::HAND_PICKED_MARKER_COLORS[6]]),
+        Style::new(&[color::HAND_PICKED_MARKER_COLORS[7]]),
+    ],
+    automatic_marker_style: Style::new(&[color::GREEN]),
+    hull_style: Style::new(&[color::LIGHT_BLUE]),
+    hull_boundary_style: Style::new(&[color::WHITE]),
+    number_style: Style::new(&[]),
 
     active_manual_marker: 0,
     shown_manual_markers: u8::MAX,
@@ -214,15 +234,12 @@ const DEFAULT_OPTIONS: Options = Options {
     last_selected_vertex_color_infos: [VertexColorInfo::None; 7],
     last_selected_vertex_number_infos: [VertexNumberInfo::None; 7],
 
-    number_scale: 1.0,
-    manual_marker_scale: 1.0,
-    automatic_marker_scale: 1.0,
-
     show_convex_hull: false,
     show_hull_boundary: false,
     draw_vertices: false,
     show_cop_strat: false,
     show_manual_marker_window: false,
+    combine_manual_marker_colors: true,
 };
 
 impl Default for Options {
@@ -243,19 +260,28 @@ impl Options {
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut menu_change = false;
         ui.collapsing("Knoteninfo", |ui| {
-            //obv. wether to draw vertices or not has no influence over any actual information -> no need to update menu change
-            ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
+            //obv. whether to draw vertices or not has no influence over any actual information -> no need to update menu change
+            ui.horizontal(|ui| {
+                ui.add(Checkbox::new(&mut self.draw_vertices, "zeige Knoten"));
+                self.vertex_style.draw_options(ui, &[Color32::GRAY]);
+            });
             ui.add_space(8.0);
 
-            menu_change |= ui
-                .add(Checkbox::new(&mut self.show_convex_hull, "zeige konvexe Hülle um Cops"))
-                .on_hover_text(
-                    "Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
-                wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
-                hier immer als außerhalb der Hülle angenommen wird.",
-                )
-                .changed();
-            menu_change |= ui
+
+            ui.horizontal(|ui| {
+                menu_change |= ui
+                    .add(Checkbox::new(&mut self.show_convex_hull, "zeige konvexe Hülle um Cops"))
+                    .on_hover_text(
+                        "Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
+                    wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
+                    hier immer als außerhalb der Hülle angenommen wird.",
+                    )
+                    .changed();
+                self.hull_style.draw_options(ui, &[color::LIGHT_BLUE]);
+            });
+
+            ui.horizontal(|ui| {
+                menu_change |= ui
                 .add(Checkbox::new(
                     &mut self.show_hull_boundary,
                     "zeige Grenze konvexer Hülle",
@@ -267,6 +293,8 @@ impl Options {
                 aufgenommen werden konnte.",
                 )
                 .changed();
+                self.hull_boundary_style.draw_options(ui, &[color::WHITE]);
+            });
 
             ui.add_space(8.0);
             ui.add(Checkbox::new(&mut self.show_cop_strat, "zeige Polizeistrategie"))
@@ -278,18 +306,15 @@ impl Options {
 
 
             ui.add_space(8.0);
-            ui.label("Marker:");
-            add_scale_drag_value(ui, &mut self.automatic_marker_scale, "Größe");
             ui.horizontal(|ui| {
-                ui.color_edit_button_srgba(&mut self.automatic_marker_color);
-                if ui.button(" F₀ ").on_hover_text("Setze Farbe zurück").clicked() {
-                    self.automatic_marker_color = DEFAULT_OPTIONS.automatic_marker_color;
-                }
-                ui.label("Farbe");
+                ui.label("Marker:");
+                self.automatic_marker_style.draw_options(ui, &[color::GREEN]);
             });
             ComboBox::from_id_source(&self.last_selected_vertex_color_infos as *const _)
                 .selected_text(self.vertex_color_info().name_str())
                 .show_ui(ui, |ui| {
+                    super::style::close_options_menu();
+
                     let mut curr = self.vertex_color_info();
                     for val in VertexColorInfo::iter() {
                         ui.radio_value(&mut curr, val, val.name_str())
@@ -330,8 +355,10 @@ impl Options {
 
 
             ui.add_space(8.0);
-            ui.label("Symbole:");
-            add_scale_drag_value(ui, &mut self.number_scale, "Größe");
+            ui.horizontal(|ui| {
+                ui.label("Symbole:");
+                self.number_style.draw_options(ui, &[]);
+            });
             ComboBox::from_id_source(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
@@ -571,9 +598,16 @@ impl Info {
             .constrain_to(ctx.screen_rect())
             .show(ctx, |ui| {
                 new_tool = new_tool.draw_mouse_tool_controls(ui);
-                add_scale_drag_value(ui, &mut opts.manual_marker_scale, "Größe");
+                ui.add(Checkbox::new(
+                    &mut opts.combine_manual_marker_colors,
+                    "kombiniere Marker",
+                ))
+                .on_hover_text(
+                    "Die Farben aller Marker eines Knotens werden gemischt angezeigt\n\
+                    und alle Marker haben die Größe des ersten Markers.",
+                );
 
-                for (i, color) in izip!(0.., &mut opts.manual_marker_colors) {
+                for (i, color) in izip!(0.., &mut opts.manual_marker_styles) {
                     ui.horizontal(|ui| {
                         let bit_i = 1u8 << i;
                         let hover_choose = format!("wähle Farbe (f + {})", i + 1);
@@ -591,10 +625,8 @@ impl Info {
                             debug_assert_eq!(show, (opts.shown_manual_markers & bit_i) != 0);
                         };
 
-                        ui.color_edit_button_srgba(color);
-                        if ui.button(" F₀ ").on_hover_text("setze Farbe zurück").clicked() {
-                            *color = color::HAND_PICKED_MARKER_COLORS[i];
-                        }
+                        ui.color_edit_button_srgba(&mut color.colors[0]);
+                        color.draw_options(ui, &[color::HAND_PICKED_MARKER_COLORS[i]]);
                         if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
                             let mask = u8::MAX - bit_i;
                             for marker in &mut self.marked_manually {
@@ -1011,6 +1043,7 @@ impl Info {
     }
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+        use egui::{Key, PointerButton};
         let tool = self.tool;
         let mut change = false;
         let held_key = ui.input(|info| {
@@ -1055,7 +1088,7 @@ impl Info {
             }
 
             const NUMS: [Key; 8] = {
-                use Key::*;
+                use egui::Key::*;
                 [Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8]
             };
             if info.key_down(Key::Q) {
@@ -1097,7 +1130,7 @@ impl Info {
 
         if let Some(key) = held_key {
             let id = Id::new((&self.options as *const _, "tooltip-fast-switch"));
-            show_tooltip(ui.ctx(), id, |ui| {
+            egui::show_tooltip(ui.ctx(), id, |ui| {
                 let opts = &self.options;
                 match key {
                     Key::Q => {
@@ -1114,10 +1147,10 @@ impl Info {
                     },
                     Key::F => {
                         const SIZE: Vec2 = vec2(28.0, 14.0); //14.0 is default text size
-                        for (n, &c) in izip!(1.., &opts.manual_marker_colors) {
+                        for (n, &s) in izip!(1.., &opts.manual_marker_styles) {
                             ui.horizontal(|ui| {
                                 ui.label(format!("{n}: "));
-                                color_picker::show_color(ui, c, SIZE);
+                                egui::color_picker::show_color(ui, s.colors[0], SIZE);
                                 if n - 1 == opts.active_manual_marker {
                                     ui.label("⬅");
                                 }
@@ -1138,23 +1171,25 @@ impl Info {
 
     fn draw_convex_cop_hull(&self, con: &DrawContext<'_>) {
         if self.options.show_convex_hull {
+            let color = self.options.hull_style.colors[0];
+            let size = con.scale * 8.0 * self.options.hull_style.size;
             for (&in_hull, &pos, &vis) in
                 izip!(self.cop_hull_data.hull(), con.positions, con.visible)
             {
                 if vis && in_hull.contained() {
                     let draw_pos = con.cam().transform(pos);
-                    let marker_circle =
-                        Shape::circle_filled(draw_pos, con.scale * 8.0, color::LIGHT_BLUE);
+                    let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
                     con.painter.add(marker_circle);
                 }
             }
         }
         if self.options.show_hull_boundary {
+            let color = self.options.hull_boundary_style.colors[0];
+            let size = con.scale * 2.0 * self.options.hull_boundary_style.size;
             for &v in self.cop_hull_data.boundary() {
                 if con.visible[v] {
                     let draw_pos = con.vertex_draw_pos(v);
-                    let marker_circle =
-                        Shape::circle_filled(draw_pos, con.scale * 2.0, color::WHITE);
+                    let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
                     con.painter.add(marker_circle);
                 }
             }
@@ -1165,10 +1200,12 @@ impl Info {
         if !self.options.draw_vertices {
             return;
         }
+        let size = 4.0 * con.scale * self.options.vertex_style.size;
+        let color = self.options.vertex_style.colors[0];
         for (&vis, &pos) in izip!(con.visible, con.positions) {
             if vis {
                 let draw_pos = con.cam().transform(pos);
-                let marker_circle = Shape::circle_filled(draw_pos, con.scale * 4.0, Color32::GRAY);
+                let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
                 con.painter.add(marker_circle);
             }
         }
@@ -1186,10 +1223,10 @@ impl Info {
         self.currently_marked.resize(con.edges.nr_vertices(), false);
         let utils_iter = izip!(&mut self.currently_marked, con.positions, con.visible);
 
-        let size = 6.0 * self.options.automatic_marker_scale * con.scale;
+        let size = 6.0 * self.options.automatic_marker_style.size * con.scale;
         let draw_circle_at = |pos, color| {
             let draw_pos = con.cam().transform(pos);
-            let marker_circle = Shape::circle_filled(draw_pos, size, color);
+            let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
             con.painter.add(marker_circle);
         };
         macro_rules! draw_if {
@@ -1204,7 +1241,8 @@ impl Info {
                 }
             };
             ($cond:expr, $util:expr) => {
-                draw_if!($cond, $util, || self.options.automatic_marker_color);
+                let c = self.options.automatic_marker_style.colors[0];
+                draw_if!($cond, $util, || c);
             };
         }
         match self.options.vertex_color_info() {
@@ -1310,7 +1348,7 @@ impl Info {
                         self.currently_marked[sym_v] = true;
                         if con.visible[sym_v] {
                             let sym_pos = con.positions[sym_v];
-                            draw_circle_at(sym_pos, self.options.automatic_marker_color);
+                            draw_circle_at(sym_pos, self.options.automatic_marker_style.colors[0]);
                         }
                     }
                 }
@@ -1325,14 +1363,14 @@ impl Info {
                     self.currently_marked[v] = true;
                     let pos = con.positions[v];
                     if con.visible[v] {
-                        draw_circle_at(pos, self.options.automatic_marker_color);
+                        draw_circle_at(pos, self.options.automatic_marker_style.colors[0]);
                     } else {
                         //only draw half size
                         let draw_pos = con.cam().transform(pos);
-                        let marker_circle = Shape::circle_filled(
+                        let marker_circle = egui::Shape::circle_filled(
                             draw_pos,
                             con.scale * 3.0,
-                            self.options.automatic_marker_color,
+                            self.options.automatic_marker_style.colors[0],
                         );
                         con.painter.add(marker_circle);
                     }
@@ -1378,10 +1416,11 @@ impl Info {
                 let active_dists =
                     self.characters.active_cops().map(Character::dists).collect_vec();
 
-                let color_3exact = self.options.automatic_marker_color;
-                let color_3about = self.options.automatic_marker_color.gamma_multiply(0.85);
-                let color_2exact = self.options.automatic_marker_color.gamma_multiply(0.6);
-                let color_2about = self.options.automatic_marker_color.gamma_multiply(0.3);
+                let base_color = self.options.automatic_marker_style.colors[0];
+                let color_3exact = base_color;
+                let color_3about = base_color.gamma_multiply(0.85);
+                let color_2exact = base_color.gamma_multiply(0.6);
+                let color_2about = base_color.gamma_multiply(0.3);
                 let choose_color = |w| match w {
                     w if w >= 300 => color_3exact,
                     w if w >= 201 => color_3about,
@@ -1413,7 +1452,7 @@ impl Info {
             },
             VertexColorInfo::SpecificVertex => {
                 if let Some(&pos) = con.positions.get(self.options.specific_shown_vertex) {
-                    draw_circle_at(pos, self.options.automatic_marker_color);
+                    draw_circle_at(pos, self.options.automatic_marker_style.colors[0]);
                 }
             },
             VertexColorInfo::None => {},
@@ -1421,7 +1460,7 @@ impl Info {
     }
 
     fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) {
-        let font = FontId::proportional(12.0 * self.options.number_scale * con.scale);
+        let font = egui::FontId::proportional(12.0 * self.options.number_style.size * con.scale);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::WHITE
         } else {
@@ -1430,13 +1469,14 @@ impl Info {
         let draw_text_at = |pos: Pos3, txt: String| {
             if !txt.is_empty() {
                 let mut layout_job = LayoutJob::simple_singleline(txt, font.clone(), color);
-                layout_job.halign = Align::Center;
+                layout_job.halign = egui::Align::Center;
                 let galley = ui.fonts(|f| f.layout_job(layout_job));
                 let screen_pos = con.cam().transform(pos);
                 // shift pos upwards (negative y direction), so text is centered on vertex
                 // why the heck is the best value not 0.5 btw?
                 let above_pos = screen_pos - font.size * vec2(0.0, 0.53);
-                let text = Shape::Text(TextShape::new(above_pos, galley, color));
+                let text =
+                    egui::Shape::Text(egui::epaint::TextShape::new(above_pos, galley, color));
                 con.painter.add(text);
             }
         };
@@ -1515,7 +1555,7 @@ impl Info {
                             let v_pos = con.cam().transform(con.positions[v]);
                             for (i, &dir) in izip!(0.., &dirs) {
                                 if (1u8 << i) & shown_val != 0 {
-                                    add_arrow(&con.painter, v_pos, dir, stroke, 2.0);
+                                    super::add_arrow(&con.painter, v_pos, dir, stroke, 2.0);
                                 }
                             }
                         }
@@ -1594,11 +1634,11 @@ impl Info {
 
                 let curr_pos = con.vertex_draw_pos(curr_v);
                 let next_pos = con.vertex_draw_pos(next_v);
-                add_arrow(
+                super::add_arrow(
                     &con.painter,
                     curr_pos,
                     next_pos - curr_pos,
-                    Stroke {
+                    egui::Stroke {
                         width: con.scale * 1.6,
                         color: Color32::from_rgb(150, 150, 255),
                     },
@@ -1608,22 +1648,53 @@ impl Info {
         }
     }
 
-    fn draw_manual_markers(&self, con: &DrawContext<'_>) {
-        let size = 4.5 * self.options.manual_marker_scale * con.scale;
+    fn draw_manual_markers_combined(&self, con: &DrawContext<'_>) {
+        let size = 4.5 * self.options.manual_marker_styles[0].size * con.scale;
         let mut f32_colors = [color::F32Color::default(); 8];
         let mask = self.options.shown_manual_markers;
         color::zip_to_f32(
             f32_colors.iter_mut(),
-            self.options.manual_marker_colors.iter(),
+            self.options.manual_marker_styles.iter().map(|s| &s.colors[0]),
         );
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
             let masked = marked & mask;
             if vis && masked != 0 {
                 let draw_pos = con.cam().transform(pos);
                 let color = color::u8_marker_color(masked, &f32_colors);
-                let marker_circle = Shape::circle_filled(draw_pos, size, color);
+                let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
                 con.painter.add(marker_circle);
             }
+        }
+    }
+
+    fn draw_manual_markers_seperated(&self, con: &DrawContext<'_>) {
+        let mut sizes = [0.0f32; 8];
+        for (size, style) in izip!(&mut sizes, &self.options.manual_marker_styles) {
+            *size = 4.5 * con.scale * style.size;
+        }
+        let mask = self.options.shown_manual_markers;
+        for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
+            let masked = marked & mask;
+            if vis && masked != 0 {
+                let draw_pos = con.cam().transform(pos);
+                let mut single_mask: u8 = 1;
+                for (style, size) in izip!(&self.options.manual_marker_styles, sizes) {
+                    if masked & single_mask != 0 {
+                        let color = style.colors[0];
+                        let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
+                        con.painter.add(marker_circle);
+                    }
+                    single_mask <<= 1;
+                }
+            }
+        }
+    }
+
+    fn draw_manual_markers(&self, con: &DrawContext<'_>) {
+        if self.options.combine_manual_marker_colors {
+            self.draw_manual_markers_combined(con);
+        } else {
+            self.draw_manual_markers_seperated(con);
         }
     }
 
@@ -1631,7 +1702,7 @@ impl Info {
         if matches!(self.tool, MouseTool::Draw | MouseTool::Erase)
             && con.response.contains_pointer()
         {
-            ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
         }
 
         self.process_general_input(ui, con);

@@ -151,14 +151,14 @@ impl Map {
         ui.collapsing("Spielfeld", |ui| {
             let mut new_shape = self.shape();
             ui.label("Form:");
-            ComboBox::from_id_source(&self.data as *const _)
+            egui::ComboBox::from_id_source(&self.data as *const _)
                 .selected_text(self.shape().name_str())
                 .show_ui(ui, |ui| {
                     macro_rules! radio {
                         ($repr:expr, $case:pat) => {
                             let selected = matches!(new_shape, $case);
                             let name = $repr.name_str();
-                            let button = RadioButton::new(selected, name);
+                            let button = egui::RadioButton::new(selected, name);
                             if ui.add(button).clicked() {
                                 new_shape = $repr;
                             }
@@ -267,7 +267,7 @@ impl Map {
 
     pub fn update_and_draw<'a>(&'a mut self, ui: &mut Ui) -> DrawContext<'a> {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
-        let (response, painter) = ui.allocate_painter(draw_space, Sense::hover());
+        let (response, painter) = ui.allocate_painter(draw_space, egui::Sense::hover());
         let screen = response.rect;
         if self.is_3d() {
             self.camera.update_3d(ui, screen);

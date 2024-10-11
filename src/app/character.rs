@@ -5,6 +5,8 @@ use std::{
 
 use itertools::{izip, Itertools};
 
+use egui::{pos2, vec2, Color32, Painter, Pos2, Rect, Sense, Stroke, Ui};
+
 use crate::{
     app::bruteforce_state::GameType,
     geo::{Pos3, Vec3},
@@ -14,7 +16,7 @@ use crate::{
     },
 };
 
-use super::{color::*, *};
+use super::{color::*, map, DrawContext};
 
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub enum Id {
@@ -159,28 +161,29 @@ impl Character {
 
     fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, character_size: f32) {
         //draw circles
-        let character_circle = Shape::circle_filled(draw_pos, character_size, self.id.color());
+        let character_circle =
+            egui::Shape::circle_filled(draw_pos, character_size, self.id.color());
         painter.add(character_circle);
         if self.on_node {
             let stroke = Stroke::new(character_size * 0.375, self.id.glow());
-            let marker_circle = Shape::circle_stroke(draw_pos, character_size, stroke);
+            let marker_circle = egui::Shape::circle_stroke(draw_pos, character_size, stroke);
             painter.add(marker_circle);
         }
         //draw emoji
-        let font = FontId::proportional(character_size * 2.0);
+        let font = egui::FontId::proportional(character_size * 2.0);
         let emoji_pos = draw_pos - character_size * vec2(0.0, 1.35);
         let emoji_str = self.id.emoji().to_string();
-        let mut layout_job = text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
-        layout_job.halign = Align::Center;
+        let mut layout_job = egui::text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
+        layout_job.halign = egui::Align::Center;
         let galley = painter.ctx().fonts(|f| f.layout_job(layout_job));
-        let emoji = Shape::Text(epaint::TextShape::new(emoji_pos, galley, WHITE));
+        let emoji = egui::Shape::Text(egui::epaint::TextShape::new(emoji_pos, galley, WHITE));
         painter.add(emoji);
     }
 
     fn draw_small_at_node(&self, con: &DrawContext<'_>) {
         let character_size = f32::max(4.0, con.scale * 4.0);
         let draw_pos = con.vertex_draw_pos(self.nearest_vertex);
-        let character_circle = Shape::circle_filled(draw_pos, character_size, self.id.glow());
+        let character_circle = egui::Shape::circle_filled(draw_pos, character_size, self.id.glow());
         con.painter.add(character_circle);
     }
 
@@ -235,7 +238,7 @@ impl Character {
             });
         }
 
-        let now_dragging = point_response.dragged_by(PointerButton::Primary);
+        let now_dragging = point_response.dragged_by(egui::PointerButton::Primary);
         let was_dragging = matches!(self.pos, Pos::OnScreen(_));
         //dragging starts -> update actual position to match drawn position
         if now_dragging {
@@ -756,7 +759,7 @@ impl State {
                     let color = if space_dist < max { glow } else { trans };
                     Stroke::new(size * 0.75, color)
                 };
-                let line = Shape::LineSegment { points, stroke };
+                let line = egui::Shape::LineSegment { points, stroke };
                 con.painter.add(line);
 
                 if size > con.scale * 3.0 {
@@ -785,7 +788,8 @@ impl State {
                 if con.visible[n] {
                     let draw_pos = con.vertex_draw_pos(n);
                     let stroke = Stroke::new(con.scale * 2.0, name.glow());
-                    let marker_circle = Shape::circle_stroke(draw_pos, con.scale * 6.5, stroke);
+                    let marker_circle =
+                        egui::Shape::circle_stroke(draw_pos, con.scale * 6.5, stroke);
                     con.painter.add(marker_circle);
                 }
             }
