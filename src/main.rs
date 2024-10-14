@@ -32,13 +32,29 @@ fn main() {
     let web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async {
-        eframe::WebRunner::new()
+        let document = web_sys::window().expect("No window").document().expect("No document");
+
+        let start_result = eframe::WebRunner::new()
             .start(
                 "the_canvas_id", // hardcode it
                 web_options,
                 Box::new(|cc| Ok(Box::new(scotland_yard_egui::State::new(cc)))),
             )
-            .await
-            .expect("failed to start eframe");
+            .await;
+
+        // Remove the loading text and spinner:
+        if let Some(loading_text) = document.get_element_by_id("loading_text") {
+            match start_result {
+                Ok(_) => {
+                    loading_text.remove();
+                },
+                Err(e) => {
+                    loading_text.set_inner_html(
+                        "<p> The app has crashed. See the developer console for details. </p>",
+                    );
+                    panic!("Failed to start eframe: {e:?}");
+                },
+            }
+        }
     });
 }
