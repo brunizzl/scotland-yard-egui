@@ -310,7 +310,7 @@ impl Options {
                 ui.label("Marker:");
                 self.automatic_marker_style.draw_options(ui, &[color::GREEN]);
             });
-            ComboBox::from_id_salt(&self.last_selected_vertex_color_infos as *const _)
+            ComboBox::from_id_source(&self.last_selected_vertex_color_infos as *const _)
                 .selected_text(self.vertex_color_info().name_str())
                 .show_ui(ui, |ui| {
                     super::style::close_options_menu();
@@ -359,7 +359,7 @@ impl Options {
                 ui.label("Symbole:");
                 self.number_style.draw_options(ui, &[]);
             });
-            ComboBox::from_id_salt(&self.last_selected_vertex_number_infos as *const _)
+            ComboBox::from_id_source(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
                     let mut curr = self.vertex_number_info();
@@ -1135,9 +1135,6 @@ impl Info {
             let id = Id::new((&self.options as *const _, "tooltip-fast-switch"));
             egui::show_tooltip(ui.ctx(), ui.layer_id(), id, |ui| {
                 let opts = &self.options;
-                ui.ctx().all_styles_mut(|s| {
-                    s.wrap_mode = Some(egui::TextWrapMode::Extend);
-                });
                 let add_unwrapped = |ui: &mut Ui, txt| {
                     ui.add(Label::new(txt).wrap_mode(egui::TextWrapMode::Extend));
                 };

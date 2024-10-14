@@ -152,7 +152,7 @@ impl Map {
         ui.collapsing("Spielfeld", |ui| {
             let mut new_shape = self.shape();
             ui.label("Form:");
-            egui::ComboBox::from_id_salt(&self.data as *const _)
+            egui::ComboBox::from_id_source(&self.data as *const _)
                 .selected_text(self.shape().name_str())
                 .show_ui(ui, |ui| {
                     macro_rules! radio {
