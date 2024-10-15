@@ -1058,13 +1058,16 @@ impl Info {
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
                 self.characters.undo_move(con.edges, con.positions, &mut self.queue);
+                change = true;
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
                 self.characters.redo_move(con.edges, con.positions, &mut self.queue);
+                change = true;
             }
             if info.modifiers.ctrl && info.key_pressed(Key::R) {
                 self.characters
                     .repeat_snd_last_move(con.edges, con.positions, &mut self.queue);
+                change = true;
             }
 
             let pointer_pos = info.pointer.latest_pos()?;
@@ -1707,13 +1710,19 @@ impl Info {
         }
     }
 
-    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
-        if matches!(self.tool, MouseTool::Draw | MouseTool::Erase)
-            && con.response.contains_pointer()
-        {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    fn choose_pointer_symbol(&mut self, ctx: &egui::Context, con: &DrawContext<'_>) {
+        if con.response.contains_pointer() {
+            let icon = match self.tool {
+                MouseTool::Drag => egui::CursorIcon::Default,
+                MouseTool::Draw => egui::CursorIcon::Crosshair,
+                MouseTool::Erase => egui::CursorIcon::Crosshair,
+            };
+            ctx.set_cursor_icon(icon);
         }
+    }
 
+    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+        self.choose_pointer_symbol(ui.ctx(), con);
         self.process_general_input(ui, con);
         self.characters.start_new_frame(con, &mut self.queue);
         if self.last_change_frame == self.frame_number {
