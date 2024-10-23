@@ -101,7 +101,7 @@ impl VertexColorInfo {
             Escape1 => "Fluchtoption 1",
             Escape2 => "Fluchtoption 2",
             Escape2Grid => "Fluchtoption 2 (Gitter)",
-            Dilemma => "Fluchtoption 3",
+            Dilemma => "Fluchtoption 3 (Gitter)",
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
@@ -809,7 +809,7 @@ impl Info {
         self.dilemma.update(
             con.edges,
             self.escapable.escapable(),
-            self.cop_hull_data.hull(),
+            &self.escapable_grid,
             &mut self.queue,
         );
     }
@@ -877,7 +877,7 @@ impl Info {
         let update_escapable = update_plane_cop_strat
             || matches!(
                 self.options.vertex_color_info(),
-                VertexColorInfo::Escape2 | VertexColorInfo::Debugging | VertexColorInfo::Dilemma
+                VertexColorInfo::Escape2 | VertexColorInfo::Dilemma | VertexColorInfo::Debugging
             )
             || matches!(
                 self.options.vertex_number_info(),
@@ -888,7 +888,9 @@ impl Info {
         let update_esc_grid = update_plane_cop_strat
             || matches!(
                 self.options.vertex_color_info(),
-                VertexColorInfo::Escape2Grid | VertexColorInfo::Debugging
+                VertexColorInfo::Escape2Grid
+                    | VertexColorInfo::Dilemma
+                    | VertexColorInfo::Debugging
             )
             || matches!(
                 self.options.vertex_number_info(),
@@ -1396,16 +1398,27 @@ impl Info {
                 //        draw_circle_at(pos, self.options.automatic_marker_color);
                 //    }
                 //}
+                //if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
+                //    if let Some(r) = self.characters.active_robber() {
+                //        let v = g.coordinates_of(r.vertex());
+                //        for (dist, color) in izip!(0.., color::HAND_PICKED_MARKER_COLORS) {
+                //            for nxy in g.dist_neighbors_of(v, dist) {
+                //                let n = g.index_of(nxy);
+                //                if con.visible[n] {
+                //                    draw_circle_at(con.positions[n], color);
+                //                }
+                //            }
+                //        }
+                //    }
+                //}
                 if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
                     if let Some(r) = self.characters.active_robber() {
-                        let v = g.coordinates_of(r.vertex());
-                        for (dist, color) in izip!(0.., color::HAND_PICKED_MARKER_COLORS) {
-                            for nxy in g.dist_neighbors_of(v, dist) {
-                                let n = g.index_of(nxy);
-                                if con.visible[n] {
-                                    draw_circle_at(con.positions[n], color);
-                                }
-                            }
+                        let robber_coords = g.coordinates_of(r.vertex());
+                        let sector = graph::grid::Sector(self.escapable_grid.escapable[r.vertex()]);
+                        for (v, util) in izip!(0.., utils_iter) {
+                            let v_coords = g.coordinates_of(v);
+                            let dir = g.norm.canonical_coords(v_coords - robber_coords);
+                            draw_if!(sector.contains(&dir), util);
                         }
                     }
                 }
@@ -1546,13 +1559,13 @@ impl Info {
                     }
                     let dirs = {
                         let v0_xy = graph::grid::Coords { x: 1, y: 1 };
-                        let v0 = g.index_of(v0_xy);
+                        let v0 = g.unchecked_index_of(v0_xy);
                         let v0_pos = con.cam().transform(con.positions[v0]);
                         g.norm
                             .unit_directions()
                             .iter()
                             .map(|&dir| {
-                                let neigh = g.index_of(v0_xy + dir);
+                                let neigh = g.unchecked_index_of(v0_xy + dir);
                                 let neigh_pos = con.cam().transform(con.positions[neigh]);
                                 (neigh_pos - v0_pos) * 0.3
                             })

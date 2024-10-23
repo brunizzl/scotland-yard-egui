@@ -705,7 +705,7 @@ impl Embedding3D {
                 vertices.push(pos);
 
                 let vxy = grid::Coords { x, y };
-                let v = this.index_of(vxy);
+                let v = this.unchecked_index_of(vxy);
                 debug_assert_eq!(v + 1, vertices.len());
                 for n in this.neighbor_indices_of(vxy) {
                     if len > 2 || !edges.has_directed_edge(v, n) {
@@ -759,7 +759,7 @@ impl Embedding3D {
                 vertices.push(pos);
 
                 let vxy = grid::Coords { x, y };
-                let v = this.index_of(vxy);
+                let v = this.unchecked_index_of(vxy);
                 debug_assert_eq!(v + 1, vertices.len());
                 for n in this.neighbor_indices_of(vxy) {
                     if len > 2 || !edges.has_directed_edge(v, n) {

@@ -29,6 +29,10 @@ impl EscapableDirections {
         }
     }
 
+    pub fn graph(&self) -> GridGraph {
+        self.graph
+    }
+
     fn update_dists_dirs(
         &mut self,
         map: &Embedding3D,
@@ -70,6 +74,80 @@ impl EscapableDirections {
         true
     }
 
+    /// computes all safe boundaries between cop1 and cop2.
+    /// to be efficient with allocations, we pass the storage for the result as `safe_boundaries` parameter.
+    /// returns how many safe boundaries where constructed.
+    pub fn find_safe_boundaries(
+        &self,
+        cop1: Coords,
+        cop2: Coords,
+        safe_boundaries: &mut [Vec<Coords>; 6],
+    ) -> usize {
+        let g = self.graph;
+        let dist = |a, b| g.dist_to_0(&self.dists_0, a - b);
+
+        let cops_dist = dist(cop1, cop2);
+        debug_assert!(cops_dist >= 4);
+
+        let path_dirs = {
+            // find all directions in which a shortest path from `cop1` to `cop2` starts
+            let mut res = smallvec::SmallVec::<[_; 6]>::new();
+            for &d in g.norm.unit_directions() {
+                if dist(cop1 + d, cop2) == cops_dist - 1 {
+                    res.push(d);
+                }
+            }
+            // graph is connected -> there is always a shortest path -> .len() >= 1
+            debug_assert!(g.wrap || (1..=2).contains(&res.len()));
+            // guarantee the fixed storage of safe boundaries suffices
+            debug_assert!((1..=safe_boundaries.len()).contains(&res.len()));
+            res
+        };
+
+        for sb in &mut safe_boundaries[..] {
+            sb.clear();
+        }
+        for (bd, &d1) in izip!(safe_boundaries, &path_dirs) {
+            let mut curr = cop1;
+            let mut add_if_safe = |curr| {
+                if dist(cop1, curr) >= 2 && dist(cop2, curr) >= 2 {
+                    bd.push(curr);
+                }
+            };
+            for step1 in 0..cops_dist {
+                let plus_d1 = curr + d1;
+                // a single direction to walk from cop1 to cop2 only suffices,
+                // if both stand on a common grid line.
+                // we start walking in d1 until this no longer brings us closer to cop2.
+                if dist(cop2, plus_d1) == cops_dist - (step1 + 1) {
+                    curr = g.try_wrap(plus_d1).unwrap();
+                    add_if_safe(curr);
+                } else {
+                    // we have reached the corner of the hull between cop1 and cop2 and must
+                    // now follow the grid line to cop2.
+                    let d2 = *path_dirs
+                        .iter()
+                        .find(|&&d2| dist(cop2, curr + d2) == cops_dist - (step1 + 1))
+                        .unwrap();
+                    // curr is already on same grid line as cop2
+                    debug_assert_eq!(g.try_wrap(curr + (cops_dist - step1) * d2).unwrap(), cop2);
+                    for step2 in step1..cops_dist {
+                        let plus_d2 = curr + d2;
+                        debug_assert_eq!(dist(cop2, plus_d2), cops_dist - (step2 + 1));
+                        curr = g.try_wrap(plus_d2).unwrap();
+                        add_if_safe(curr);
+                    }
+                    // we have taken cops_dist many steps -> better have reached cop2
+                    debug_assert_eq!(curr, cop2);
+                    break;
+                }
+            }
+            debug_assert_eq!(curr, cop2);
+        }
+
+        path_dirs.len()
+    }
+
     pub fn update<'a>(
         &mut self,
         map: &Embedding3D,
@@ -83,16 +161,15 @@ impl EscapableDirections {
         let g = self.graph;
 
         let cops_vec = active_cops.collect_vec();
-        let dist = |a, b| {
-            if g.wrap {
-                let Coords { x, y } = a - b;
-                let wrapped = g.columns.pack_small_coordinates(x, y);
-                self.dists_0[g.index_of(wrapped)]
-            } else {
-                g.norm.apply(a - b)
-            }
-        };
-        let mut safe_boundaries = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let dist = |a, b| g.dist_to_0(&self.dists_0, a - b);
+        let mut safe_boundaries = [
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ];
         'remove_pair_shadows: for (ch_cop1, ch_cop2) in cops_vec.iter().tuple_combinations() {
             let cop1 = g.coordinates_of(ch_cop1.vertex());
             let cop2 = g.coordinates_of(ch_cop2.vertex());
@@ -103,64 +180,7 @@ impl EscapableDirections {
             if cops_dist < 4 {
                 continue 'remove_pair_shadows;
             }
-            let path_dirs = {
-                // find all directions in which a shortest path from `cop1` to `cop2` starts
-                let mut res = smallvec::SmallVec::<[_; 4]>::new();
-                for &d in g.norm.unit_directions() {
-                    if dist(cop1 + d, cop2) == cops_dist - 1 {
-                        res.push(d);
-                    }
-                }
-                // graph is connected -> there is always a shortest path -> .len() >= 1
-                debug_assert!(g.wrap || (1..=2).contains(&res.len()));
-                // guarantee the fixed storage of safe boundaries suffices
-                debug_assert!((1..=safe_boundaries.len()).contains(&res.len()));
-                res
-            };
-
-            for sb in &mut safe_boundaries {
-                sb.clear();
-            }
-            for (bd, &d1) in izip!(&mut safe_boundaries, &path_dirs) {
-                let mut curr = cop1;
-                let mut add_if_safe = |curr| {
-                    if dist(cop1, curr) >= 2 && dist(cop2, curr) >= 2 {
-                        bd.push(curr);
-                    }
-                };
-                for step1 in 0..cops_dist {
-                    let plus_d1 = curr + d1;
-                    // a single direction to walk from cop1 to cop2 only suffices,
-                    // if both stand on a common grid line.
-                    // we start walking in d1 until this no longer brings us closer to cop2.
-                    if dist(cop2, plus_d1) == cops_dist - (step1 + 1) {
-                        curr = g.try_wrap(plus_d1).unwrap();
-                        add_if_safe(curr);
-                    } else {
-                        // we have reached the corner of the hull between cop1 and cop2 and must
-                        // now follow the grid line to cop2.
-                        let d2 = *path_dirs
-                            .iter()
-                            .find(|&&d2| dist(cop2, curr + d2) == cops_dist - (step1 + 1))
-                            .unwrap();
-                        // curr is already on same grid line as cop2
-                        debug_assert_eq!(
-                            g.try_wrap(curr + (cops_dist - step1) * d2).unwrap(),
-                            cop2
-                        );
-                        for step2 in step1..cops_dist {
-                            let plus_d2 = curr + d2;
-                            debug_assert_eq!(dist(cop2, plus_d2), cops_dist - (step2 + 1));
-                            curr = g.try_wrap(plus_d2).unwrap();
-                            add_if_safe(curr);
-                        }
-                        // we have taken cops_dist many steps -> better have reached cop2
-                        debug_assert_eq!(curr, cop2);
-                        break;
-                    }
-                }
-                debug_assert_eq!(curr, cop2);
-            }
+            let nr_boundaries = self.find_safe_boundaries(cop1, cop2, &mut safe_boundaries);
 
             // for the found safe boundaries, we remove all vertices not part of the induced
             // escapable region for every direction.
@@ -168,7 +188,7 @@ impl EscapableDirections {
             // thus vertices "behind" cops / neighbors of cops are removed seperately below.
             for (i, &escape_dir) in izip!(0.., g.norm.unit_directions()) {
                 let mask = 1u8 << i;
-                for safe_boundary in &safe_boundaries[..path_dirs.len()] {
+                for safe_boundary in &safe_boundaries[..nr_boundaries] {
                     let safe_dist = safe_boundary.len() as isize - 1;
                     debug_assert_eq!(safe_dist, cops_dist - 4);
                     for &path_v in safe_boundary {
@@ -178,7 +198,7 @@ impl EscapableDirections {
                             let Some(v_repr) = g.try_wrap(v) else {
                                 break;
                             };
-                            let index = g.index_of(v_repr);
+                            let index = g.unchecked_index_of(v_repr);
                             if self.escapable[index] & mask == 0 {
                                 break;
                             }
@@ -205,16 +225,15 @@ impl EscapableDirections {
         // remove vertices directly shadowed by single cops
         for &ch_cop in &cops_vec {
             let cop = g.coordinates_of(ch_cop.vertex());
-            self.escapable[g.index_of(cop)] = 0;
+            self.escapable[g.unchecked_index_of(cop)] = 0;
             for (i, &escape_dir) in izip!(0.., g.norm.unit_directions()) {
                 let mask = 1u8 << i;
                 for cop_neigh in g.neighbors_of(cop) {
                     for step in 0..g.side_len() {
                         let v = cop_neigh - step * escape_dir;
-                        let Some(v_repr) = g.try_wrap(v) else {
+                        let Some(index) = g.index_of(v) else {
                             break;
                         };
-                        let index = g.index_of(v_repr);
                         if self.escapable[index] & mask == 0 {
                             break;
                         }
