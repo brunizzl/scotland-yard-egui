@@ -1538,7 +1538,8 @@ impl Info {
                 }
             },
             VertexNumberInfo::Debugging => {
-                draw!(self.escapable.owners());
+                //draw!(self.escapable.owners());
+                draw!(self.dilemma.allowed_steps(), |&&x| x > 0);
             },
             VertexNumberInfo::EscapeableNodes => {
                 draw!(self.escapable.escapable().iter().map(|&x| -> String {

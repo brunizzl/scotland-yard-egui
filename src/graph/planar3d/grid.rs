@@ -248,7 +248,7 @@ impl Norm {
     }
 
     /// returns all unit directions along grid lines (two directions per line)
-    pub fn unit_directions(self) -> &'static [Coords] {
+    pub const fn unit_directions(self) -> &'static [Coords] {
         match self {
             Self::Hex => &[
                 Coords { x: 1, y: 0 },

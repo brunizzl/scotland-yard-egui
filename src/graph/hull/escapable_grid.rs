@@ -162,14 +162,7 @@ impl EscapableDirections {
 
         let cops_vec = active_cops.collect_vec();
         let dist = |a, b| g.dist_to_0(&self.dists_0, a - b);
-        let mut safe_boundaries = [
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        ];
+        let mut safe_boundaries = [const { Vec::new() }; 6];
         'remove_pair_shadows: for (ch_cop1, ch_cop2) in cops_vec.iter().tuple_combinations() {
             let cop1 = g.coordinates_of(ch_cop1.vertex());
             let cop2 = g.coordinates_of(ch_cop2.vertex());
