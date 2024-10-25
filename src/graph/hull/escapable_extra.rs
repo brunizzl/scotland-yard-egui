@@ -41,12 +41,6 @@ impl MapToDilemmaBit {
     fn clear(&mut self) {
         self.from.clear();
     }
-
-    /// contains (from, to, number, first) in that order, where from is itself a pair.
-    #[allow(dead_code)]
-    fn iter(&self) -> impl Iterator<Item = ((u8, u8), u16)> + '_ {
-        izip!(self.from.iter().copied(), self.to.iter().copied(),)
-    }
 }
 
 /// when two sets of escapable vertices overlap, they allow the robber to approach both at once and thus
@@ -118,8 +112,8 @@ impl DilemmaNodes {
         esc_dirs: &EscapableDirections,
         active_cops: &[&Character],
     ) {
-        let g = esc_dirs.graph();
-        if g.columns.nr_vertices() != edges.nr_vertices() || g.norm != Norm::Hex {
+        let g = esc_dirs.graph.data;
+        if g.grid.nr_vertices() != edges.nr_vertices() || g.norm != Norm::Hex {
             return;
         }
         const UNIT_DIRS: &[grid::Coords] = Norm::Hex.unit_directions();
@@ -151,7 +145,7 @@ impl DilemmaNodes {
                 let fst_corner = {
                     let mut v = g.coordinates_of(component_v);
                     for &dir in UNIT_DIRS {
-                        for _ in 0..g.columns.len {
+                        for _ in 0..g.grid.len {
                             let Some(v_step) = g.try_wrap(v + dir) else {
                                 break;
                             };
@@ -178,7 +172,7 @@ impl DilemmaNodes {
                 }
                 for (res_i, &dir) in izip!(&mut res, UNIT_DIRS) {
                     let mut v = curr_corner;
-                    for _ in 0..g.columns.len {
+                    for _ in 0..g.grid.len {
                         let Some(v_step) = g.try_wrap(v + dir) else {
                             break;
                         };
@@ -274,7 +268,7 @@ impl DilemmaNodes {
                     };
                     let mut in_region_which_overlaps = true;
                     let mut steps_left = thickness;
-                    for step_len in 1..(g.columns.len as isize) {
+                    for step_len in 1..g.side_len() {
                         let Some(index) = g.index_of(v + step_len * dir) else {
                             break;
                         };
@@ -355,7 +349,7 @@ impl DilemmaNodes {
                 .copied()
                 .filter(|c| g.disc_around(c.vertex(), 2).any(|v| self.allowed_dirs[v] != 0))
                 .collect_vec();
-            esc_dirs.remove_non_winning(&relevant_cops, &mut self.dilemma_dirs);
+            esc_dirs.graph.remove_non_winning(&relevant_cops, &mut self.dilemma_dirs);
         }
     }
 

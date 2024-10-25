@@ -807,7 +807,7 @@ impl Info {
         self.escapable_grid.update(
             con.map.data(),
             &mut self.queue,
-            &self.cop_hull_data,
+            self.cop_hull_data.hull(),
             &active_cops,
         );
     }

@@ -306,7 +306,7 @@ impl Norm {
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct GridGraph {
-    pub columns: OrderedColWise,
+    pub grid: OrderedColWise,
     pub norm: Norm,
     /// if true: grid is wrapped to torus
     pub wrap: bool,
@@ -315,7 +315,7 @@ pub struct GridGraph {
 impl GridGraph {
     pub fn new(len: usize, norm: Norm, wrap: bool) -> Self {
         Self {
-            columns: OrderedColWise::new(len),
+            grid: OrderedColWise::new(len),
             norm,
             wrap,
         }
@@ -335,26 +335,26 @@ impl GridGraph {
     }
 
     pub fn side_len(&self) -> isize {
-        self.columns.len as isize
+        self.grid.len as isize
     }
 
     pub fn unchecked_index_of(&self, v: Coords) -> usize {
-        self.columns.index_of(v)
+        self.grid.index_of(v)
     }
 
     pub fn index_of(&self, v: Coords) -> Option<usize> {
-        self.try_wrap(v).map(|w| self.columns.index_of(w))
+        self.try_wrap(v).map(|w| self.grid.index_of(w))
     }
 
     pub fn coordinates_of(&self, v: usize) -> Coords {
-        self.columns.coordinates_of(v)
+        self.grid.coordinates_of(v)
     }
 
     /// try to bring coordinate in "normal form", e.g. how it maps to a vertex index.
     /// this is only guaranteed to work on tori, where wrapping is allowed.
     /// on non-tori, the input must already be in normal form in order to be returned.
     pub fn try_wrap(&self, v: Coords) -> Option<Coords> {
-        let wrapped = self.columns.pack_small_coordinates(v.x, v.y);
+        let wrapped = self.grid.pack_small_coordinates(v.x, v.y);
         (self.wrap || wrapped == v).then_some(wrapped)
     }
 
@@ -390,18 +390,6 @@ impl GridGraph {
 
     pub fn neighbor_indices_of(&self, v: Coords) -> impl Iterator<Item = usize> + '_ {
         self.neighbors_of(v).map(|v| self.unchecked_index_of(v))
-    }
-
-    /// computes distance of `v` to `Coords { x: 0, y: 0 }`.
-    /// if `self.wrapped`, `dists_to_0` must contain the distance to 0 of every normalized vertex.
-    pub fn dist_to_0(&self, dists_to_0: &[isize], v: Coords) -> isize {
-        if self.wrap {
-            let wrapped = self.columns.pack_small_coordinates(v.x, v.y);
-            debug_assert_eq!(dists_to_0.len(), self.columns.nr_vertices());
-            dists_to_0[self.unchecked_index_of(wrapped)]
-        } else {
-            self.norm.apply(v)
-        }
     }
 }
 

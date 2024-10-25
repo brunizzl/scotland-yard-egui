@@ -8,46 +8,93 @@ pub struct EscapableDirections {
     /// wether it is safe to escape in the corresponding of the four directions.
     /// in hex grids, the first 6 bits are used.
     pub escapable: Vec<u8>,
-    /// distance of every vertex to vertex `0`, which is also `Coords{ x: 0, y: 0 }`.
-    /// used to compute arbitrary distances on tori
-    dists_0: Vec<isize>,
     /// remembers graph of last update.
-    /// if that is unchanged, [`Self::dists_0`] can be kept the same.
-    graph: GridGraph,
+    pub graph: DistGridGraph,
 }
 
 impl EscapableDirections {
     pub fn new() -> Self {
         Self {
             escapable: Vec::new(),
-            dists_0: Vec::new(),
-            graph: GridGraph {
-                columns: OrderedColWise { len: 0 },
-                norm: Norm::Quad,
-                wrap: false,
-            },
+            graph: DistGridGraph::new(),
         }
     }
 
-    pub fn graph(&self) -> GridGraph {
-        self.graph
+    fn update_dists_dirs(&mut self, convex_cop_hull: &[InSet]) {
+        assert!(self.graph.represents_current_map);
+        assert_eq!(self.graph.nr_vertices(), convex_cop_hull.len());
+        assert_eq!(self.graph.nr_vertices(), self.escapable.len());
+
+        // initialize escapable to have the complete hull inside marked for doughnuts
+        // and to have __everything__ marked for non-wrapping grids
+        let all = (1u8 << self.graph.data.norm.unit_directions().len()) - 1;
+        if !self.graph.data.wrap {
+            self.escapable.fill(all);
+        } else {
+            for (esc, inside) in izip!(&mut self.escapable, convex_cop_hull) {
+                if inside.contained() {
+                    *esc = all;
+                }
+            }
+        }
     }
 
-    fn update_dists_dirs(
+    pub fn update(
         &mut self,
         map: &Embedding3D,
         queue: &mut VecDeque<usize>,
-        hull_data: &ConvexHullData,
-    ) -> bool {
+        cop_hull: &[InSet],
+        active_cops: &[&Character],
+    ) {
+        assert_eq!(map.nr_vertices(), cop_hull.len());
+
         self.escapable.clear();
+        self.escapable.resize(map.nr_vertices(), 0);
+
+        self.graph.update(map, queue);
+        if !self.graph.represents_current_map {
+            return;
+        }
+        self.update_dists_dirs(cop_hull);
+        self.graph.remove_non_winning(active_cops, &mut self.escapable);
+    }
+}
+
+pub struct DistGridGraph {
+    pub data: GridGraph,
+    /// distance of every vertex to vertex `0`, which is also `Coords{ x: 0, y: 0 }`.
+    /// used to compute arbitrary distances on tori
+    pub dists_0: Vec<isize>,
+    /// not all graphs in this program fit in the format of a GridGraph, hence this.
+    pub represents_current_map: bool,
+}
+
+impl DistGridGraph {
+    pub fn nr_vertices(&self) -> usize {
+        self.data.grid.nr_vertices()
+    }
+
+    pub fn new() -> Self {
+        Self {
+            data: GridGraph {
+                grid: OrderedColWise { len: 0 },
+                norm: Norm::Quad,
+                wrap: false,
+            },
+            dists_0: Vec::new(),
+            represents_current_map: false,
+        }
+    }
+
+    pub fn update(&mut self, map: &Embedding3D, queue: &mut VecDeque<usize>) {
         let Some(g) = GridGraph::try_from(map) else {
-            self.escapable.resize(map.nr_vertices(), 0);
-            return false;
+            self.represents_current_map = false;
+            return;
         };
 
         // update distances
         debug_assert!(g.side_len() > 0);
-        if g.wrap && self.graph != g {
+        if g.wrap && self.data != g {
             self.dists_0.clear();
             self.dists_0.resize(map.nr_vertices(), isize::MAX);
             self.dists_0[0] = 0;
@@ -55,23 +102,21 @@ impl EscapableDirections {
             queue.push_back(0);
             map.edges().calc_distances_to(queue, &mut self.dists_0);
         }
-        self.graph = g;
+        self.data = g;
 
-        // initialize escapable to have the complete hull inside marked for doughnuts
-        // and to have __everything__ marked for non-wrapping grids
-        let all = (1u8 << self.graph.norm.unit_directions().len()) - 1;
-        if !g.wrap {
-            self.escapable.resize(map.nr_vertices(), all);
+        self.represents_current_map = true;
+    }
+
+    /// computes distance of `v` to `Coords { x: 0, y: 0 }`.
+    /// if `self.wrapped`, `dists_to_0` must contain the distance to 0 of every normalized vertex.
+    pub fn dist_to_0(&self, v: Coords) -> isize {
+        if self.data.wrap {
+            let wrapped = self.data.grid.pack_small_coordinates(v.x, v.y);
+            debug_assert_eq!(self.dists_0.len(), self.data.grid.nr_vertices());
+            self.dists_0[self.data.unchecked_index_of(wrapped)]
         } else {
-            self.escapable.resize(map.nr_vertices(), 0);
-            for (esc, inside) in izip!(&mut self.escapable, hull_data.hull()) {
-                if inside.contained() {
-                    *esc = all;
-                }
-            }
+            self.data.norm.apply(v)
         }
-
-        true
     }
 
     /// computes all safe boundaries between cop1 and cop2.
@@ -83,8 +128,9 @@ impl EscapableDirections {
         cop2: Coords,
         safe_boundaries: &mut [Vec<Coords>; 6],
     ) -> usize {
-        let g = self.graph;
-        let dist = |a, b| g.dist_to_0(&self.dists_0, a - b);
+        assert!(self.represents_current_map);
+        let g = self.data;
+        let dist = |a, b| self.dist_to_0(a - b);
 
         let cops_dist = dist(cop1, cop2);
         debug_assert!(cops_dist >= 4);
@@ -149,9 +195,10 @@ impl EscapableDirections {
     }
 
     pub fn remove_non_winning(&self, cops_vec: &[&Character], winning: &mut [u8]) {
-        let g = self.graph;
+        assert!(self.represents_current_map);
+        let g = self.data;
+        let dist = |a, b| self.dist_to_0(a - b);
 
-        let dist = |a, b| g.dist_to_0(&self.dists_0, a - b);
         let mut safe_boundaries = [const { Vec::new() }; 6];
         'remove_pair_shadows: for (ch_cop1, ch_cop2) in cops_vec.iter().tuple_combinations() {
             let cop1 = g.coordinates_of(ch_cop1.vertex());
@@ -225,20 +272,5 @@ impl EscapableDirections {
                 }
             }
         }
-    }
-
-    pub fn update(
-        &mut self,
-        map: &Embedding3D,
-        queue: &mut VecDeque<usize>,
-        hull_data: &ConvexHullData,
-        active_cops: &[&Character],
-    ) {
-        if !self.update_dists_dirs(map, queue, hull_data) {
-            return;
-        }
-        let mut escapable = std::mem::take(&mut self.escapable);
-        self.remove_non_winning(active_cops, &mut escapable);
-        self.escapable = escapable;
     }
 }
