@@ -99,8 +99,8 @@ impl VertexColorInfo {
             SafeOutside => "Sicherer Außenbereich",
             SafeBoundary => "Sicherere Grenze",
             Escape1 => "Fluchtoption 1",
-            Escape2 => "Fluchtoption 2",
-            Escape2Grid => "Fluchtoption 2 (Gitter)",
+            Escape2 => "Fluchtoption 2 (Komponenten)",
+            Escape2Grid => "Fluchtoption 2 (Richtungen)",
             Dilemma => "Fluchtoption 3 (Gitter)",
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
@@ -165,8 +165,8 @@ impl VertexNumberInfo {
             Indices => "Knotenindizes",
             RobberAdvantage => "Marker Fluchtoption 1",
             EscapeableNodes => "Marker Fluchtoption 2",
-            EscapableNodesGrid => "Marker Fluchtoption 2 (Gitter)",
-            DilemmaDirections => "Marker Dilemma (Gitter)",
+            EscapableNodesGrid => "Pfeile Fluchtoption 2 (Gitter)",
+            DilemmaDirections => "Pfeile Fluchtoption 3 (Gitter)",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
             VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
@@ -816,7 +816,7 @@ impl Info {
         let active_cops = self.characters.active_cops().collect_vec();
         self.dilemma.update(
             con.edges,
-            self.escapable.escapable(),
+            self.cop_hull_data.hull(),
             &self.escapable_grid,
             &mut self.queue,
             &active_cops,
@@ -863,80 +863,65 @@ impl Info {
     /// recomputes only things currently shown or required by things currently shown
     /// and only if something relevant (e.g. a cop's position) changed
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
+        use VertexColorInfo as Color;
+        use VertexNumberInfo as Symbol;
+
         let nr_vertices = con.edges.nr_vertices();
         let robber_moved = self.characters.robber_updated();
         let cop_moved = self.characters.cop_updated();
 
+        let color = self.options.vertex_color_info();
+        let symbol = self.options.vertex_number_info();
+        let show_debug = matches!(color, Color::Debugging) || matches!(symbol, Symbol::Debugging);
+
         debug_assert_eq!(self.cop_advantage.len(), nr_vertices);
-        let update_cop_advantage = matches!(
-            self.options.vertex_color_info(),
-            VertexColorInfo::Escape1 | VertexColorInfo::Debugging
-        ) || matches!(
-            self.options.vertex_number_info(),
-            VertexNumberInfo::RobberAdvantage | VertexNumberInfo::Debugging
-        );
+        let update_cop_advantage = show_debug
+            || matches!(color, Color::Escape1)
+            || matches!(symbol, Symbol::RobberAdvantage);
 
         debug_assert_eq!(self.plane_cop_strat.danger_zones().len(), nr_vertices);
-        let update_plane_cop_strat = matches!(
-            self.options.vertex_color_info(),
-            VertexColorInfo::CopStratPlaneDanger
-        );
-
-        debug_assert_eq!(self.dilemma.overlap().len(), nr_vertices);
-        let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)
-            || matches!(
-                self.options.vertex_number_info(),
-                VertexNumberInfo::DilemmaDirections | VertexNumberInfo::Debugging
-            );
+        let update_plane_cop_strat = show_debug || matches!(color, Color::CopStratPlaneDanger);
 
         debug_assert_eq!(self.escapable.escapable().len(), nr_vertices);
-        let update_escapable = update_plane_cop_strat
-            || update_dilemma
-            || matches!(
-                self.options.vertex_color_info(),
-                VertexColorInfo::Escape2 | VertexColorInfo::Debugging
-            )
-            || matches!(
-                self.options.vertex_number_info(),
-                VertexNumberInfo::EscapeableNodes | VertexNumberInfo::Debugging
-            );
+        let update_escapable = show_debug
+            || update_plane_cop_strat
+            || matches!(color, Color::Escape2)
+            || matches!(symbol, Symbol::EscapeableNodes);
 
-        debug_assert_eq!(self.escapable_grid.escapable.len(), nr_vertices);
-        let update_esc_grid = update_plane_cop_strat
+        debug_assert_eq!(self.dilemma.overlap.len(), nr_vertices);
+        let update_dilemma = show_debug
+            || matches!(color, Color::Dilemma)
+            || matches!(symbol, Symbol::DilemmaDirections);
+
+        debug_assert_eq!(self.escapable_grid.esc_directions.len(), nr_vertices);
+        let update_esc_grid = show_debug
+            || update_plane_cop_strat
             || update_dilemma
-            || matches!(
-                self.options.vertex_color_info(),
-                VertexColorInfo::Escape2Grid | VertexColorInfo::Debugging
-            )
-            || matches!(
-                self.options.vertex_number_info(),
-                VertexNumberInfo::EscapableNodesGrid | VertexNumberInfo::Debugging
-            );
+            || matches!(color, Color::Escape2Grid | Color::Escape2)
+            || matches!(symbol, Symbol::EscapableNodesGrid | Symbol::EscapeableNodes);
 
         debug_assert_eq!(self.cop_hull_data.hull().len(), nr_vertices);
-        let update_hull = update_cop_advantage
+        let update_hull = show_debug
+            || update_cop_advantage
             || update_escapable
             || update_esc_grid
-            || matches!(
-                self.options.vertex_color_info(),
-                VertexColorInfo::SafeOutside | VertexColorInfo::SafeBoundary
-            )
+            || matches!(color, Color::SafeOutside | Color::SafeBoundary)
             || self.options.show_convex_hull
             || self.options.show_hull_boundary;
 
         debug_assert_eq!(self.min_cop_dist.len(), nr_vertices);
-        let update_min_cop_dist = update_hull
+        let update_min_cop_dist = show_debug
+            || update_hull
             || matches!(
-                self.options.vertex_color_info(),
-                VertexColorInfo::MinCopDist
-                    | VertexColorInfo::NearNodes
-                    | VertexColorInfo::CopsVoronoi
+                color,
+                Color::MinCopDist | Color::NearNodes | Color::CopsVoronoi
             )
-            || self.options.vertex_number_info() == VertexNumberInfo::MinCopDist;
+            || symbol == Symbol::MinCopDist;
 
         debug_assert_eq!(self.max_cop_dist.len(), nr_vertices);
-        let update_max_cop_dist = self.options.vertex_number_info() == VertexNumberInfo::MaxCopDist
-            || self.options.vertex_color_info() == VertexColorInfo::MaxCopDist;
+        let update_max_cop_dist = show_debug
+            || self.options.vertex_number_info() == Symbol::MaxCopDist
+            || color == Color::MaxCopDist;
 
         if cop_moved && update_max_cop_dist {
             self.update_max_cop_dist(con.edges);
@@ -1318,7 +1303,12 @@ impl Info {
             },
             VertexColorInfo::Escape2 => {
                 let colors = self.escapable.order_by_cops(self.characters.cops(), colors);
-                for (&esc, util) in izip!(self.escapable.escapable(), utils_iter) {
+                let escs = if self.escapable_grid.graph.represents_current_map {
+                    &self.escapable_grid.esc_components[..]
+                } else {
+                    self.escapable.escapable()
+                };
+                for (&esc, util) in izip!(escs, utils_iter) {
                     let color = || color::u32_marker_color(esc, &colors);
                     draw_if!(esc != 0, util, color);
                 }
@@ -1327,14 +1317,14 @@ impl Info {
                 let sat = if dark { 750 } else { 350 };
                 let colors = color::sample_color_wheel::<6>(sat, 4);
                 let shown = self.options.shown_escape_directions;
-                for (&esc, util) in izip!(&self.escapable_grid.escapable, utils_iter) {
+                for (&esc, util) in izip!(&self.escapable_grid.esc_directions, utils_iter) {
                     let esc_shown = esc & shown;
                     let color = || color::u8_marker_color(esc_shown, &colors);
                     draw_if!(esc_shown != 0, util, color);
                 }
             },
             VertexColorInfo::Dilemma => {
-                for (&esc, util) in izip!(self.dilemma.overlap(), utils_iter) {
+                for (&esc, util) in izip!(&self.dilemma.overlap, utils_iter) {
                     let color = || color::u32_marker_color(esc, colors);
                     draw_if!(esc != 0, util, color);
                 }
@@ -1423,7 +1413,8 @@ impl Info {
                 if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
                     if let Some(r) = self.characters.active_robber() {
                         let robber_coords = g.coordinates_of(r.vertex());
-                        let sector = graph::grid::Sector(self.escapable_grid.escapable[r.vertex()]);
+                        let sector =
+                            graph::grid::Sector(self.escapable_grid.esc_directions[r.vertex()]);
                         for (v, util) in izip!(0.., utils_iter) {
                             let v_coords = g.coordinates_of(v);
                             let dir = g.norm.canonical_coords(v_coords - robber_coords);
@@ -1540,8 +1531,7 @@ impl Info {
                     let v0_xy = graph::grid::Coords { x: 1, y: 1 };
                     let v0 = g.unchecked_index_of(v0_xy);
                     let v0_pos = con.cam().transform(con.positions[v0]);
-                    g.norm
-                        .unit_directions()
+                    graph::grid::Sector::bit_unit_directions(g.norm)
                         .iter()
                         .map(|&dir| {
                             let neigh = g.unchecked_index_of(v0_xy + dir);
@@ -1582,11 +1572,15 @@ impl Info {
             },
             VertexNumberInfo::Debugging => {
                 //draw!(self.escapable.owners());
-                draw!(self.dilemma.allowed_steps(), |&&x| x > 0);
                 //draw_arrows(&self.dilemma.allowed_dirs, u8::MAX);
             },
             VertexNumberInfo::EscapeableNodes => {
-                draw!(self.escapable.escapable().iter().map(|&x| -> String {
+                let escs = if self.escapable_grid.graph.represents_current_map {
+                    &self.escapable_grid.esc_components[..]
+                } else {
+                    self.escapable.escapable()
+                };
+                draw!(escs.iter().map(|&x| -> String {
                     const NAMES: [char; 32] = [
                         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E',
                         'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
@@ -1599,11 +1593,11 @@ impl Info {
             },
             VertexNumberInfo::EscapableNodesGrid => {
                 let mask = self.options.shown_escape_directions;
-                let directions = &self.escapable_grid.escapable;
+                let directions = &self.escapable_grid.esc_directions;
                 draw_arrows(directions, mask);
             },
             VertexNumberInfo::DilemmaDirections => {
-                let directions = self.dilemma.dilemma();
+                let directions = &self.dilemma.dilemma_dirs;
                 draw_arrows(directions, u8::MAX);
             },
             VertexNumberInfo::MaxCopDist => {

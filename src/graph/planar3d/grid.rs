@@ -141,7 +141,7 @@ impl CanonicalCoords {
         self.e1 - self.e2
     }
 
-    pub fn sector(&self) -> Sector {
+    pub const fn sector(&self) -> Sector {
         let e1pos = (self.e1 > 0) as u8;
         let e3neg = (self.e3 < 0) as u8 * (1 << 1);
         let e2pos = (self.e2 > 0) as u8 * (1 << 2);
@@ -174,6 +174,13 @@ pub struct Sector(pub u8);
 
 #[allow(dead_code)]
 impl Sector {
+    pub const fn all(norm: Norm) -> Self {
+        match norm {
+            Norm::Hex => Self(0b00111111),
+            Norm::Quad => Self(0b00101101),
+        }
+    }
+
     pub fn contains(self, dir: &CanonicalCoords) -> bool {
         let dir_sector = dir.sector();
         (self.0 | !dir_sector.0) == u8::MAX
@@ -237,9 +244,47 @@ impl Sector {
         Self(res & MASK)
     }
 
-    pub fn directions(self) -> impl Iterator<Item = Coords> {
-        izip!(0..6, Norm::Hex.unit_directions())
-            .filter_map(move |(i, &coords)| (self.0 & (1 << i) != 0).then_some(coords))
+    pub fn keep_inner_on_hex(self) -> Self {
+        let mut shift_right = self.0 >> 1;
+        let mut shift_left = self.0 << 1;
+        const FST_BIT: u8 = 1 << 0;
+        const LST_BIT: u8 = 1 << 5;
+        if self.0 & FST_BIT != 0 {
+            shift_right |= LST_BIT;
+        }
+        if self.0 & LST_BIT != 0 {
+            shift_left |= FST_BIT;
+        }
+        const MASK: u8 = (1 << 6) - 1;
+        let res = shift_right & self.0 & shift_left;
+        Self(res & MASK)
+    }
+
+    /// unit direction of each bit in self
+    pub const fn bit_unit_directions(norm: Norm) -> &'static [Coords; 6] {
+        match norm {
+            Norm::Hex => &[
+                Coords { x: 1, y: 0 },
+                Coords { x: 1, y: 1 },
+                Coords { x: 0, y: 1 },
+                Coords { x: -1, y: 0 },
+                Coords { x: -1, y: -1 },
+                Coords { x: 0, y: -1 },
+            ],
+            Norm::Quad => &[
+                Coords { x: 1, y: 0 },
+                Coords { x: 0, y: 0 },
+                Coords { x: 0, y: 1 },
+                Coords { x: -1, y: 0 },
+                Coords { x: 0, y: 0 },
+                Coords { x: 0, y: -1 },
+            ],
+        }
+    }
+
+    pub fn directions(self, norm: Norm) -> impl Iterator<Item = Coords> {
+        let dirs = Self::bit_unit_directions(norm);
+        izip!(0..6, dirs).filter_map(move |(i, &coords)| (self.0 & (1 << i) != 0).then_some(coords))
     }
 }
 
@@ -283,8 +328,10 @@ impl Norm {
         }
     }
 
-    pub fn canonical_coords(self, vec: Coords) -> CanonicalCoords {
-        let e123 = |e1, e2, e3| CanonicalCoords { e1, e2, e3 };
+    pub const fn canonical_coords(self, vec: Coords) -> CanonicalCoords {
+        const fn e123(e1: isize, e2: isize, e3: isize) -> CanonicalCoords {
+            CanonicalCoords { e1, e2, e3 }
+        }
         let Coords { x, y } = vec;
         match self {
             Self::Hex => {
@@ -452,7 +499,7 @@ mod test {
                 .iter()
                 .map(|c| norm.canonical_coords(*c).sector())
                 .fold(Sector(0), Sector::union);
-            let mut sectors_dirs = sectors.directions().collect_vec();
+            let mut sectors_dirs = sectors.directions(norm).collect_vec();
             active_dirs.sort();
             sectors_dirs.sort();
             assert_eq!(active_dirs, sectors_dirs);
@@ -468,7 +515,7 @@ mod test {
                 .iter()
                 .map(|c| norm.canonical_coords(*c).sector())
                 .fold(Sector(0), Sector::union);
-            let mut sectors_dirs = sectors.directions().collect_vec();
+            let mut sectors_dirs = sectors.directions(norm).collect_vec();
             active_dirs.sort();
             sectors_dirs.sort();
             assert_eq!(active_dirs, sectors_dirs);

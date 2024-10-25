@@ -4,10 +4,13 @@ use grid::*;
 /// should compute the same thing as [`hull::EscapableNodes`],
 /// if graph in question is a grid (optionally wrapped to torus)
 pub struct EscapableDirections {
+    pub esc_components: Vec<u32>,
+    component_directions: [Sector; 32],
+
     /// in quad grids the first four bits per entry store,
     /// wether it is safe to escape in the corresponding of the four directions.
     /// in hex grids, the first 6 bits are used.
-    pub escapable: Vec<u8>,
+    pub esc_directions: Vec<u8>,
     /// remembers graph of last update.
     pub graph: DistGridGraph,
 }
@@ -15,27 +18,151 @@ pub struct EscapableDirections {
 impl EscapableDirections {
     pub fn new() -> Self {
         Self {
-            escapable: Vec::new(),
+            esc_components: Vec::new(),
+            component_directions: [Sector(0); 32],
+            esc_directions: Vec::new(),
             graph: DistGridGraph::new(),
         }
     }
 
-    fn update_dists_dirs(&mut self, convex_cop_hull: &[InSet]) {
+    fn initialize_directions(&mut self, convex_cop_hull: &[InSet]) {
         assert!(self.graph.represents_current_map);
         assert_eq!(self.graph.nr_vertices(), convex_cop_hull.len());
-        assert_eq!(self.graph.nr_vertices(), self.escapable.len());
+        assert_eq!(self.graph.nr_vertices(), self.esc_directions.len());
 
         // initialize escapable to have the complete hull inside marked for doughnuts
         // and to have __everything__ marked for non-wrapping grids
-        let all = (1u8 << self.graph.data.norm.unit_directions().len()) - 1;
+        let all = Sector::all(self.graph.data.norm).0;
         if !self.graph.data.wrap {
-            self.escapable.fill(all);
+            self.esc_directions.fill(all);
         } else {
-            for (esc, inside) in izip!(&mut self.escapable, convex_cop_hull) {
-                if inside.contained() {
+            for (esc, h) in izip!(&mut self.esc_directions, convex_cop_hull) {
+                if h.contained() {
                     *esc = all;
                 }
             }
+        }
+    }
+
+    /// returns the number of found components
+    fn find_components(&mut self, hull: &[InSet], queue: &mut VecDeque<usize>) -> usize {
+        let g = self.graph.data;
+        assert_eq!(hull.len(), self.esc_components.len());
+        assert_eq!(hull.len(), self.esc_directions.len());
+
+        let mut boundary_section = Vec::new();
+
+        // we guarantee to find every component by iterating trough every vertex.
+        // how far we have iterated previously, is remembered here.
+        let mut search_start = 0;
+        for component_nr in 0.. {
+            let component_bit = 1u32 << (component_nr % 32);
+
+            // find first not-yet handled vertex of a component
+            let component_v = 'find_new_component: {
+                let i0 = search_start;
+                for (i, h, &esc, &marker) in izip!(
+                    i0..,
+                    &hull[i0..],
+                    &self.esc_directions[i0..],
+                    &self.esc_components[i0..]
+                ) {
+                    if h.on_boundary() && esc != 0 && marker == 0 {
+                        search_start = i;
+                        break 'find_new_component i;
+                    }
+                }
+                return component_nr;
+            };
+
+            boundary_section.clear();
+            queue.clear();
+
+            // find the boundary section
+            boundary_section.push(component_v);
+            self.esc_components[component_v] |= component_bit;
+            queue.push_back(component_v);
+            while let Some(v) = queue.pop_front() {
+                let v_coords = g.coordinates_of(v);
+                for n in g.neighbor_indices_of(v_coords) {
+                    if hull[n].on_boundary()
+                        && self.esc_directions[n] != 0
+                        && self.esc_components[n] & component_bit == 0
+                    {
+                        boundary_section.push(n);
+                        self.esc_components[n] |= component_bit;
+                        queue.push_back(n);
+                    }
+                }
+            }
+
+            // we could take the directions of any boundary vertex and are done,
+            // except if a region from the other side overlaps into this boundary.
+            let boundary_dirs = boundary_section
+                .iter()
+                .map(|&bv| Sector(self.esc_directions[bv]))
+                .fold(Sector::all(g.norm), Sector::intersection);
+            self.component_directions[component_nr % 32] = boundary_dirs;
+            debug_assert!(g.wrap || boundary_dirs.0.count_ones() > 0);
+
+            // if a boundary has three escape directions,
+            // it is sufficient to only walk (the opposite of) the center direction
+            // to reach every vertex of the component from some boundary vertex.
+            let center_dirs = if boundary_dirs.0.count_ones() <= 2 {
+                boundary_dirs
+            } else {
+                // we do not consider what happens on tori, because on there,
+                // what we computed as the convex hull is not even always convex.
+                debug_assert!(g.wrap || g.norm == Norm::Hex);
+                debug_assert!(g.wrap || boundary_dirs.keep_inner_on_hex().0 != 0);
+                boundary_dirs.keep_inner_on_hex()
+            };
+            let inside_dirs = smallvec::SmallVec::<[_; 6]>::from_iter(
+                center_dirs.directions(g.norm).map(std::ops::Neg::neg),
+            );
+
+            // mark the region
+            for &inside_dir in &inside_dirs {
+                for &bv in &boundary_section {
+                    let bv_coords = g.coordinates_of(bv);
+                    let mut dirs_left = center_dirs.0;
+                    for step_len in 1..g.side_len() {
+                        let Some(v) = g.index_of(bv_coords + step_len * inside_dir) else {
+                            break;
+                        };
+                        dirs_left &= self.esc_directions[v];
+                        if match g.norm {
+                            Norm::Hex => dirs_left != center_dirs.0,
+                            Norm::Quad => dirs_left == 0,
+                        } {
+                            break;
+                        }
+                        self.esc_components[v] |= component_bit;
+                    }
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    /// sometimes we failed to unmark some escape directions on tori.
+    /// we take a conservative approach here and only keep the directions of the corresponding components.
+    /// this is extra conservative, because which directions belong to a boundary section on a torus,
+    /// is somewhat ill-defined (due to the fact, that we do not actually compute a correct convex hull on tori).
+    fn delete_leftover_on_torus(&mut self, nr_components: usize) {
+        assert_eq!(self.esc_components.len(), self.graph.nr_vertices());
+        assert_eq!(self.esc_directions.len(), self.graph.nr_vertices());
+        if !self.graph.data.wrap {
+            return;
+        }
+        let nr_used_bits = nr_components.clamp(0, 32);
+        let used_bits_mask = (1 << nr_used_bits) - 1;
+        for (dir, &comp) in izip!(&mut self.esc_directions, &self.esc_components) {
+            debug_assert_eq!(comp & used_bits_mask, comp);
+            let valid_dirs = izip!(0..nr_used_bits, &self.component_directions)
+                .filter_map(|(i, &ds)| ((1 << i) & comp != 0).then_some(ds))
+                .fold(Sector(0), Sector::union);
+            *dir = valid_dirs.0;
         }
     }
 
@@ -48,15 +175,20 @@ impl EscapableDirections {
     ) {
         assert_eq!(map.nr_vertices(), cop_hull.len());
 
-        self.escapable.clear();
-        self.escapable.resize(map.nr_vertices(), 0);
+        self.esc_components.clear();
+        self.esc_components.resize(map.nr_vertices(), 0);
+
+        self.esc_directions.clear();
+        self.esc_directions.resize(map.nr_vertices(), 0);
 
         self.graph.update(map, queue);
         if !self.graph.represents_current_map {
             return;
         }
-        self.update_dists_dirs(cop_hull);
-        self.graph.remove_non_winning(active_cops, &mut self.escapable);
+        self.initialize_directions(cop_hull);
+        self.graph.remove_non_winning(active_cops, &mut self.esc_directions);
+        let nr_components = self.find_components(cop_hull, queue);
+        self.delete_leftover_on_torus(nr_components);
     }
 }
 
@@ -216,7 +348,10 @@ impl DistGridGraph {
             // escapable region for every direction.
             // note: we only remove "behind" the safe boundary,
             // thus vertices "behind" cops / neighbors of cops are removed seperately below.
-            for (i, &escape_dir) in izip!(0.., g.norm.unit_directions()) {
+            for (i, &escape_dir) in izip!(0.., Sector::bit_unit_directions(g.norm)) {
+                if g.norm.apply(escape_dir) == 0 {
+                    continue;
+                }
                 let mask = 1u8 << i;
                 for safe_boundary in &safe_boundaries[..nr_boundaries] {
                     let safe_dist = safe_boundary.len() as isize - 1;
@@ -256,7 +391,10 @@ impl DistGridGraph {
         for &ch_cop in cops_vec {
             let cop = g.coordinates_of(ch_cop.vertex());
             winning[g.unchecked_index_of(cop)] = 0;
-            for (i, &escape_dir) in izip!(0.., g.norm.unit_directions()) {
+            for (i, &escape_dir) in izip!(0.., Sector::bit_unit_directions(g.norm)) {
+                if g.norm.apply(escape_dir) == 0 {
+                    continue;
+                }
                 let mask = 1u8 << i;
                 for cop_neigh in g.neighbors_of(cop) {
                     for step in 0..g.side_len() {

@@ -33,16 +33,11 @@ On Fedora Rawhide you need to run:
 ### TODO
 
 #### Theory
-* extend convex hull to prevent jumps
+* extend convex hull to prevent jumps on platonics
 * think about how to extend the escapable regions concept to identify more vertices
-* formulate robber strategy when outside hull
-
-#### Functionality
-* adapt hull boundary to respect torus (allow multiple disjoined boundary segements / perhaps don't care about boundary as circle, but only care about connected components of safe boundary?)
 
 #### Nice To Have
 * extract base functionality of EdgeList to own thing
-* fix bug where sometimes lazy-safe regions have floating parts left that should have been removed.
 * add randomly (with seed 👀) triangulated torus as graph option
 
 #### Lowest priority

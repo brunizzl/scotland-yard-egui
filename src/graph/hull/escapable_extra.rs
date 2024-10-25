@@ -1,4 +1,4 @@
-use grid::Norm;
+use grid::*;
 
 use super::*;
 
@@ -40,6 +40,7 @@ impl MapToDilemmaBit {
 
     fn clear(&mut self) {
         self.from.clear();
+        self.to.clear();
     }
 }
 
@@ -51,7 +52,7 @@ impl MapToDilemmaBit {
 pub struct DilemmaNodes {
     to_this: MapToDilemmaBit,
 
-    dilemma_dirs: Vec<u8>,
+    pub dilemma_dirs: Vec<u8>,
 
     /// temporary value, only stored here to allow visual debugging (and to save on allocations).
     pub overlap: Vec<u32>,
@@ -74,22 +75,7 @@ impl DilemmaNodes {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn dilemma(&self) -> &[u8] {
-        &self.dilemma_dirs
-    }
-
-    #[allow(dead_code)]
-    pub fn overlap(&self) -> &[u32] {
-        &self.overlap
-    }
-
-    #[allow(dead_code)]
-    pub fn allowed_steps(&self) -> &[isize] {
-        &self.allowed_steps
-    }
-
-    fn mark_overlapping(&mut self, esc_components: &[u32], edges: &EdgeList) {
+    fn mark_overlapping(&mut self, edges: &EdgeList, esc_components: &[u32]) {
         let mut bits = smallvec::SmallVec::<[u8; 16]>::new();
         for (over, neighs, &ls) in izip!(&mut self.overlap, edges.neighbors(), esc_components) {
             let union_with_neighs: u32 =
@@ -107,9 +93,9 @@ impl DilemmaNodes {
 
     fn mark_dilemma(
         &mut self,
+        esc_dirs: &EscapableDirections,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
-        esc_dirs: &EscapableDirections,
         active_cops: &[&Character],
     ) {
         let g = esc_dirs.graph.data;
@@ -273,12 +259,11 @@ impl DilemmaNodes {
                             break;
                         };
                         if in_region_which_overlaps {
-                            if esc_dirs.escapable[index] & shadow_marker != 0 {
+                            if esc_dirs.esc_directions[index] & shadow_marker != 0 {
                                 break;
                             }
-                            if esc_dirs.escapable[index] != 0 {
+                            if esc_dirs.esc_directions[index] != 0 {
                                 self.allowed_steps[index] = thickness;
-                                self.dilemma_dirs[index] |= escape_marker;
                             } else {
                                 in_region_which_overlaps = false;
                                 queue.push_back(index);
@@ -356,26 +341,33 @@ impl DilemmaNodes {
     pub fn update(
         &mut self,
         edges: &EdgeList,
-        esc_components: &[u32],
+        hull: &[InSet],
         esc_dirs: &EscapableDirections,
         queue: &mut VecDeque<usize>,
         active_cops: &[&Character],
     ) {
+        assert_eq!(hull.len(), edges.nr_vertices());
+        assert_eq!(esc_dirs.esc_directions.len(), edges.nr_vertices());
+
         self.to_this.clear();
 
-        self.allowed_steps.clear();
-        self.allowed_steps.resize(esc_components.len(), 0);
-
         self.overlap.clear();
-        self.overlap.resize(esc_components.len(), 0);
+        self.overlap.resize(edges.nr_vertices(), 0);
+
+        self.allowed_steps.clear();
+        self.allowed_steps.resize(edges.nr_vertices(), 0);
 
         self.allowed_dirs.clear();
-        self.allowed_dirs.resize(esc_components.len(), 0);
+        self.allowed_dirs.resize(edges.nr_vertices(), 0);
 
         self.dilemma_dirs.clear();
-        self.dilemma_dirs.resize(esc_components.len(), 0);
+        self.dilemma_dirs.resize(edges.nr_vertices(), 0);
 
-        self.mark_overlapping(esc_components, edges);
-        self.mark_dilemma(edges, queue, esc_dirs, active_cops);
+        if !esc_dirs.graph.represents_current_map {
+            return;
+        }
+
+        self.mark_overlapping(edges, &esc_dirs.esc_components);
+        self.mark_dilemma(esc_dirs, edges, queue, active_cops);
     }
 }
