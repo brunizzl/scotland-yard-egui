@@ -121,6 +121,7 @@ impl CanonicalCoords {
     /// points nord-nord-west in screen directions
     pub const E3: Coords = Coords { x: -1, y: -1 };
 
+    #[allow(dead_code)]
     pub fn as_coords(&self) -> Coords {
         self.e1 * Self::E1 + self.e2 * Self::E2 + self.e3 * Self::E3
     }
@@ -141,7 +142,7 @@ impl CanonicalCoords {
     }
 
     pub fn sector(&self) -> Sector {
-        let e1pos = (self.e1 > 0) as u8 * (1 << 0);
+        let e1pos = (self.e1 > 0) as u8;
         let e3neg = (self.e3 < 0) as u8 * (1 << 1);
         let e2pos = (self.e2 > 0) as u8 * (1 << 2);
         let e1neg = (self.e1 < 0) as u8 * (1 << 3);
@@ -171,10 +172,11 @@ impl CanonicalCoords {
 #[repr(transparent)]
 pub struct Sector(pub u8);
 
+#[allow(dead_code)]
 impl Sector {
     pub fn contains(self, dir: &CanonicalCoords) -> bool {
         let dir_sector = dir.sector();
-        self.0 | !dir_sector.0 == u8::MAX
+        (self.0 | !dir_sector.0) == u8::MAX
     }
 
     pub fn union(self, other: Self) -> Self {
@@ -219,6 +221,20 @@ impl Sector {
             Norm::Hex => HEX_CONNECTED[self.0 as usize],
             Norm::Quad => QUAD_CONNECTED[self.0 as usize],
         }
+    }
+
+    pub fn add_adjacent_on_hex(self) -> Self {
+        let mut res = (self.0 << 1) | self.0 | (self.0 >> 1);
+        const FST_BIT: u8 = 1 << 0;
+        const LST_BIT: u8 = 1 << 5;
+        if self.0 & FST_BIT != 0 {
+            res |= LST_BIT;
+        }
+        if self.0 & LST_BIT != 0 {
+            res |= FST_BIT;
+        }
+        const MASK: u8 = (1 << 6) - 1;
+        Self(res & MASK)
     }
 
     pub fn directions(self) -> impl Iterator<Item = Coords> {
@@ -349,11 +365,11 @@ impl GridGraph {
             .filter_map(move |&dir| self.try_wrap(v + dir))
     }
 
-    /// returns all vertices with distance `dist`.
+    /// returns all vertices with distance `radius`.
     /// funkiness caused by tori is ignored. only non-wrapping distance is considered.
     #[allow(dead_code)]
-    pub fn dist_neighbors_of(&self, v: Coords, dist: usize) -> impl Iterator<Item = Coords> + '_ {
-        let dist = dist as isize;
+    pub fn circle_around(&self, v: Coords, radius: usize) -> impl Iterator<Item = Coords> + '_ {
+        let dist = radius as isize;
         self.norm.unit_directions().iter().circular_tuple_windows().flat_map(
             move |(&dir1, &dir2)| {
                 (0..dist).filter_map(move |i| {
@@ -363,6 +379,13 @@ impl GridGraph {
                 })
             },
         )
+    }
+
+    pub fn disc_around(&self, v: usize, max_radius: usize) -> impl Iterator<Item = usize> + '_ {
+        let v = self.coordinates_of(v);
+        (1..=max_radius)
+            .flat_map(move |radius| self.circle_around(v, radius))
+            .map(|coords| self.unchecked_index_of(coords))
     }
 
     pub fn neighbor_indices_of(&self, v: Coords) -> impl Iterator<Item = usize> + '_ {
@@ -495,6 +518,16 @@ mod test {
 
             assert!(!Sector(a | c).connected_on(norm));
             assert!(!Sector(b | d).connected_on(norm));
+        }
+    }
+
+    #[test]
+    fn adjacent_directions_are_connected() {
+        for i in 0..6 {
+            let single_dir = Sector(1 << i);
+            let three_dirs = single_dir.add_adjacent_on_hex();
+            assert!(three_dirs.0.count_ones() == 3);
+            assert!(three_dirs.connected_on(Norm::Hex));
         }
     }
 }

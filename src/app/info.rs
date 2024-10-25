@@ -125,6 +125,7 @@ pub enum VertexNumberInfo {
     RobberAdvantage,
     EscapeableNodes,
     EscapableNodesGrid,
+    DilemmaDirections,
     MinCopDist,
     MaxCopDist,
     RobberDist,
@@ -144,6 +145,7 @@ impl VertexNumberInfo {
             Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
             EscapableNodesGrid => "jede Fluchtrichtung hat einen Namen in { 0 .. 6 }. \
             Der Marker listet alle Richtungen, in die der Räuber fliehen kann.",
+            DilemmaDirections => "eine dieser Richtungen führt garantiert wieder auf einen Dilemmaknoten",
             MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
             MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",
             VertexEquivalenceClass => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
@@ -164,6 +166,7 @@ impl VertexNumberInfo {
             RobberAdvantage => "Marker Fluchtoption 1",
             EscapeableNodes => "Marker Fluchtoption 2",
             EscapableNodesGrid => "Marker Fluchtoption 2 (Gitter)",
+            DilemmaDirections => "Marker Dilemma (Gitter)",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
             VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
@@ -583,6 +586,9 @@ impl Info {
         if new != self.tool && new != MouseTool::Drag {
             self.options.show_manual_marker_window = true;
         }
+        if new == self.tool && new == MouseTool::Drag {
+            self.options.show_manual_marker_window ^= true;
+        }
         self.tool = new;
     }
 
@@ -797,20 +803,23 @@ impl Info {
     }
 
     fn update_escapable_grid(&mut self, con: &DrawContext<'_>) {
+        let active_cops = self.characters.active_cops().collect_vec();
         self.escapable_grid.update(
             con.map.data(),
             &mut self.queue,
             &self.cop_hull_data,
-            self.characters.active_cops(),
+            &active_cops,
         );
     }
 
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {
+        let active_cops = self.characters.active_cops().collect_vec();
         self.dilemma.update(
             con.edges,
             self.escapable.escapable(),
             &self.escapable_grid,
             &mut self.queue,
+            &active_cops,
         );
     }
 
@@ -873,11 +882,19 @@ impl Info {
             VertexColorInfo::CopStratPlaneDanger
         );
 
+        debug_assert_eq!(self.dilemma.overlap().len(), nr_vertices);
+        let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)
+            || matches!(
+                self.options.vertex_number_info(),
+                VertexNumberInfo::DilemmaDirections | VertexNumberInfo::Debugging
+            );
+
         debug_assert_eq!(self.escapable.escapable().len(), nr_vertices);
         let update_escapable = update_plane_cop_strat
+            || update_dilemma
             || matches!(
                 self.options.vertex_color_info(),
-                VertexColorInfo::Escape2 | VertexColorInfo::Dilemma | VertexColorInfo::Debugging
+                VertexColorInfo::Escape2 | VertexColorInfo::Debugging
             )
             || matches!(
                 self.options.vertex_number_info(),
@@ -886,22 +903,14 @@ impl Info {
 
         debug_assert_eq!(self.escapable_grid.escapable.len(), nr_vertices);
         let update_esc_grid = update_plane_cop_strat
+            || update_dilemma
             || matches!(
                 self.options.vertex_color_info(),
-                VertexColorInfo::Escape2Grid
-                    | VertexColorInfo::Dilemma
-                    | VertexColorInfo::Debugging
+                VertexColorInfo::Escape2Grid | VertexColorInfo::Debugging
             )
             || matches!(
                 self.options.vertex_number_info(),
                 VertexNumberInfo::EscapableNodesGrid | VertexNumberInfo::Debugging
-            );
-
-        debug_assert_eq!(self.dilemma.dilemma().len(), nr_vertices);
-        let update_dilemma = matches!(self.options.vertex_color_info(), VertexColorInfo::Dilemma)
-            || matches!(
-                self.options.vertex_number_info(),
-                VertexNumberInfo::Debugging
             );
 
         debug_assert_eq!(self.cop_hull_data.hull().len(), nr_vertices);
@@ -1068,7 +1077,7 @@ impl Info {
             }
             if info.modifiers.ctrl && info.key_pressed(Key::R) {
                 self.characters
-                    .repeat_snd_last_move(con.edges, con.positions, &mut self.queue);
+                    .continue_move_pattern(con.edges, con.positions, &mut self.queue);
                 change = true;
             }
 
@@ -1325,7 +1334,7 @@ impl Info {
                 }
             },
             VertexColorInfo::Dilemma => {
-                for (&esc, util) in izip!(self.dilemma.dilemma(), utils_iter) {
+                for (&esc, util) in izip!(self.dilemma.overlap(), utils_iter) {
                     let color = || color::u32_marker_color(esc, colors);
                     draw_if!(esc != 0, util, color);
                 }
@@ -1522,6 +1531,40 @@ impl Info {
             let show = |&&num: &&_| num != isize::MAX;
             draw!(numbers, show);
         };
+        let draw_arrows = |directions: &[u8], mask: u8| {
+            if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
+                if g.side_len() < 3 {
+                    return;
+                }
+                let stroke_dirs = {
+                    let v0_xy = graph::grid::Coords { x: 1, y: 1 };
+                    let v0 = g.unchecked_index_of(v0_xy);
+                    let v0_pos = con.cam().transform(con.positions[v0]);
+                    g.norm
+                        .unit_directions()
+                        .iter()
+                        .map(|&dir| {
+                            let neigh = g.unchecked_index_of(v0_xy + dir);
+                            let neigh_pos = con.cam().transform(con.positions[neigh]);
+                            (neigh_pos - v0_pos) * 0.35
+                        })
+                        .collect_vec()
+                };
+                let stroke_size = 1.85 * con.scale;
+                let stroke = egui::Stroke::new(stroke_size, color);
+                for (v, &val, &vis) in izip!(0.., directions, con.visible) {
+                    let shown_val = val & mask;
+                    if vis && shown_val != 0 {
+                        let v_pos = con.cam().transform(con.positions[v]);
+                        for (i, &dir) in izip!(0.., &stroke_dirs) {
+                            if (1u8 << i) & shown_val != 0 {
+                                super::add_arrow(&con.painter, v_pos, dir, stroke, 2.0);
+                            }
+                        }
+                    }
+                }
+            }
+        };
 
         match self.options.vertex_number_info() {
             VertexNumberInfo::Indices => {
@@ -1540,6 +1583,7 @@ impl Info {
             VertexNumberInfo::Debugging => {
                 //draw!(self.escapable.owners());
                 draw!(self.dilemma.allowed_steps(), |&&x| x > 0);
+                //draw_arrows(&self.dilemma.allowed_dirs, u8::MAX);
             },
             VertexNumberInfo::EscapeableNodes => {
                 draw!(self.escapable.escapable().iter().map(|&x| -> String {
@@ -1554,39 +1598,13 @@ impl Info {
                 }));
             },
             VertexNumberInfo::EscapableNodesGrid => {
-                if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
-                    if g.side_len() < 3 {
-                        return;
-                    }
-                    let dirs = {
-                        let v0_xy = graph::grid::Coords { x: 1, y: 1 };
-                        let v0 = g.unchecked_index_of(v0_xy);
-                        let v0_pos = con.cam().transform(con.positions[v0]);
-                        g.norm
-                            .unit_directions()
-                            .iter()
-                            .map(|&dir| {
-                                let neigh = g.unchecked_index_of(v0_xy + dir);
-                                let neigh_pos = con.cam().transform(con.positions[neigh]);
-                                (neigh_pos - v0_pos) * 0.3
-                            })
-                            .collect_vec()
-                    };
-                    let stroke = egui::Stroke::new(font.size * 0.1, color);
-                    let iter = self.escapable_grid.escapable.iter();
-                    let shown = self.options.shown_escape_directions;
-                    for (v, &val, &vis) in izip!(0.., iter, con.visible) {
-                        let shown_val = val & shown;
-                        if vis && shown_val != 0 {
-                            let v_pos = con.cam().transform(con.positions[v]);
-                            for (i, &dir) in izip!(0.., &dirs) {
-                                if (1u8 << i) & shown_val != 0 {
-                                    super::add_arrow(&con.painter, v_pos, dir, stroke, 2.0);
-                                }
-                            }
-                        }
-                    }
-                }
+                let mask = self.options.shown_escape_directions;
+                let directions = &self.escapable_grid.escapable;
+                draw_arrows(directions, mask);
+            },
+            VertexNumberInfo::DilemmaDirections => {
+                let directions = self.dilemma.dilemma();
+                draw_arrows(directions, u8::MAX);
             },
             VertexNumberInfo::MaxCopDist => {
                 draw_isize_slice(&self.max_cop_dist);

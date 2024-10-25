@@ -457,63 +457,106 @@ impl State {
         }
     }
 
-    /// if move history has at least length 2, the character moving that second last move moves again
-    /// in the most similar direction
-    pub fn repeat_snd_last_move(
+    /// we try to find a pattern in the last made moves and try to continue this pattern
+    pub fn continue_move_pattern(
         &mut self,
         edges: &EdgeList,
         positions: &[Pos3],
         queue: &mut VecDeque<usize>,
     ) {
-        if self.past_moves.len() >= 2 {
-            let (i, curr_v) = self.past_moves[self.past_moves.len() - 2];
-            let ch = &mut self.characters[i];
-            let prev_v = if ch.past_vertices.last() == Some(&curr_v) {
-                assert!(ch.past_vertices.len() >= 2);
-                ch.past_vertices[ch.past_vertices.len() - 2]
-            } else {
-                debug_assert!(ch.past_vertices.len() >= 3);
-                //(maybe) TODO: also handle case where same character walked two steps in succession
-                return;
-            };
-            let next_v = {
-                // the next vertex should have the fewest possible commn neighbors with the last vertex
-                // as proxy to increase the distance to the last vertex as fast as possible.
-                // in case this graph-structure-only condition yields multiple candidates, we then
-                // take the vertex which is closest to a step extrapolated from the last step.
-                let prev_neighs =
-                    smallvec::SmallVec::<[_; 8]>::from_iter(edges.neighbors_of(prev_v));
-                let to_curr = positions[curr_v] - positions[prev_v];
-                let next_pos = positions[curr_v] + to_curr;
-                let mut fewest_common = usize::MAX;
-                let mut closest_pos = 1e10;
-                let mut best = usize::MAX;
-                for n in edges.neighbors_of(curr_v) {
-                    let nr_common =
-                        edges.neighbors_of(n).filter(|nn| prev_neighs.contains(nn)).count()
-                            + 100 * prev_neighs.contains(&n) as usize;
-                    let pos_err = (positions[n] - next_pos).length();
-                    if nr_common < fewest_common
-                        || (nr_common == fewest_common && pos_err < closest_pos)
-                    {
-                        fewest_common = nr_common;
-                        closest_pos = pos_err;
-                        best = n;
+        // find longest period with at least one repetition
+        let (character_index, last_destination) = 'find_period_start: {
+            let hist = &self.past_moves[..];
+            let mut period_len = usize::min(hist.len() / 2, 4);
+            while period_len > 0 {
+                let newest_hist = &hist[(hist.len() - 2 * period_len)..];
+                let fst_period = &newest_hist[..period_len];
+                let last_period = &newest_hist[period_len..];
+                let mut same_character_pattern = true;
+                for step in 0..period_len {
+                    // only which character moved is compared, because
+                    // this is vastly easier than in what direction the last moves where
+                    // (we have the character indices stored directly, move directions not.)
+                    if fst_period[step].0 != last_period[step].0 {
+                        same_character_pattern = false;
+                        break;
                     }
                 }
-                if best == usize::MAX {
-                    return;
+                if same_character_pattern {
+                    break 'find_period_start (fst_period[0]);
                 }
-                best
-            };
-            ch.past_vertices.push(next_v);
-            ch.nearest_vertex = next_v;
-            ch.update_distances(edges, queue);
-            ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
-            ch.on_node = true;
-            self.past_moves.push((i, next_v));
-            self.future_moves.clear();
-        }
+                period_len -= 1;
+            }
+            return;
+        };
+
+        let ch = &mut self.characters[character_index];
+        let last_origin = 'find_last_origin: {
+            let hist = ch.past_vertices();
+            for (i, &v) in izip!(0..(hist.len()), hist).rev() {
+                if v == last_destination && i > 0 {
+                    break 'find_last_origin hist[i - 1];
+                }
+            }
+            return;
+        };
+        let &[.., prev_v, curr_v] = ch.past_vertices() else {
+            return;
+        };
+
+        let next_v = {
+            // the next vertex should have the fewest possible commn neighbors with the last vertex
+            // as proxy to increase the distance to the last vertex as fast as possible.
+            // in case this graph-structure-only condition yields multiple candidates, we then
+            // take the vertex which is closest to a step extrapolated from the last step.
+            let prev_neighs = smallvec::SmallVec::<[_; 8]>::from_iter(edges.neighbors_of(prev_v));
+            let mut fewest_common = usize::MAX;
+            let mut vertex_with_least_common = usize::MAX;
+
+            let last_step_dir = (positions[last_destination] - positions[last_origin]).normalized();
+            let mut largest_dir_similarity = -1e10;
+            let mut vertex_with_biggest_dot_prod = usize::MAX;
+            for n in edges.neighbors_of(curr_v) {
+                let nr_common = edges.neighbors_of(n).filter(|nn| prev_neighs.contains(nn)).count()
+                    + 100 * prev_neighs.contains(&n) as usize;
+
+                let dir_similarity =
+                    (positions[n] - positions[curr_v]).normalized().dot(last_step_dir);
+                debug_assert!((-1.1..=1.1).contains(&dir_similarity));
+
+                if nr_common < fewest_common
+                    || nr_common <= fewest_common && largest_dir_similarity < dir_similarity
+                {
+                    fewest_common = nr_common;
+                    vertex_with_least_common = n;
+                }
+
+                if largest_dir_similarity < dir_similarity
+                    || (largest_dir_similarity - dir_similarity).abs() < 0.05
+                        && nr_common < fewest_common
+                {
+                    largest_dir_similarity = dir_similarity;
+                    vertex_with_biggest_dot_prod = n;
+                }
+            }
+            // we prefer the vertex in most similar direction, if the direction is similar enough.
+            if largest_dir_similarity >= 0.5 {
+                vertex_with_biggest_dot_prod
+            } else if vertex_with_least_common != usize::MAX {
+                vertex_with_least_common
+            } else {
+                return;
+            }
+        };
+
+        ch.past_vertices.push(next_v);
+        ch.nearest_vertex = next_v;
+        ch.update_distances(edges, queue);
+        ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
+        ch.on_node = true;
+
+        self.past_moves.push((character_index, next_v));
+        self.future_moves.clear();
     }
 
     pub fn forget_move_history(&mut self) {

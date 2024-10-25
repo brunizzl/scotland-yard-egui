@@ -77,7 +77,7 @@ impl EscapableDirections {
     /// computes all safe boundaries between cop1 and cop2.
     /// to be efficient with allocations, we pass the storage for the result as `safe_boundaries` parameter.
     /// returns how many safe boundaries where constructed.
-    pub fn find_safe_boundaries(
+    fn find_safe_boundaries(
         &self,
         cop1: Coords,
         cop2: Coords,
@@ -148,19 +148,9 @@ impl EscapableDirections {
         path_dirs.len()
     }
 
-    pub fn update<'a>(
-        &mut self,
-        map: &Embedding3D,
-        queue: &mut VecDeque<usize>,
-        hull_data: &ConvexHullData,
-        active_cops: impl Iterator<Item = &'a Character>,
-    ) {
-        if !self.update_dists_dirs(map, queue, hull_data) {
-            return;
-        }
+    pub fn remove_non_winning(&self, cops_vec: &[&Character], winning: &mut [u8]) {
         let g = self.graph;
 
-        let cops_vec = active_cops.collect_vec();
         let dist = |a, b| g.dist_to_0(&self.dists_0, a - b);
         let mut safe_boundaries = [const { Vec::new() }; 6];
         'remove_pair_shadows: for (ch_cop1, ch_cop2) in cops_vec.iter().tuple_combinations() {
@@ -192,7 +182,7 @@ impl EscapableDirections {
                                 break;
                             };
                             let index = g.unchecked_index_of(v_repr);
-                            if self.escapable[index] & mask == 0 {
+                            if winning[index] & mask == 0 {
                                 break;
                             }
 
@@ -207,7 +197,7 @@ impl EscapableDirections {
                             // always (from there on) outside the safe region.
                             debug_assert!(g.wrap || in_safe_region || !still_safe());
                             if !in_safe_region {
-                                self.escapable[index] -= mask;
+                                winning[index] -= mask;
                             }
                         }
                     }
@@ -216,9 +206,9 @@ impl EscapableDirections {
         }
 
         // remove vertices directly shadowed by single cops
-        for &ch_cop in &cops_vec {
+        for &ch_cop in cops_vec {
             let cop = g.coordinates_of(ch_cop.vertex());
-            self.escapable[g.unchecked_index_of(cop)] = 0;
+            winning[g.unchecked_index_of(cop)] = 0;
             for (i, &escape_dir) in izip!(0.., g.norm.unit_directions()) {
                 let mask = 1u8 << i;
                 for cop_neigh in g.neighbors_of(cop) {
@@ -227,13 +217,28 @@ impl EscapableDirections {
                         let Some(index) = g.index_of(v) else {
                             break;
                         };
-                        if self.escapable[index] & mask == 0 {
+                        if winning[index] & mask == 0 {
                             break;
                         }
-                        self.escapable[index] -= mask;
+                        winning[index] -= mask;
                     }
                 }
             }
         }
+    }
+
+    pub fn update(
+        &mut self,
+        map: &Embedding3D,
+        queue: &mut VecDeque<usize>,
+        hull_data: &ConvexHullData,
+        active_cops: &[&Character],
+    ) {
+        if !self.update_dists_dirs(map, queue, hull_data) {
+            return;
+        }
+        let mut escapable = std::mem::take(&mut self.escapable);
+        self.remove_non_winning(active_cops, &mut escapable);
+        self.escapable = escapable;
     }
 }
