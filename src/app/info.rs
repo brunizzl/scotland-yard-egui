@@ -34,7 +34,8 @@ pub enum VertexColorInfo {
     Escape1,
     Escape2,
     Escape2Grid,
-    Dilemma,
+    Escape3Grid,
+    Escape23Grid,
     BruteForceRes,
     MinCopDist,
     MaxCopDist,
@@ -65,9 +66,10 @@ impl VertexColorInfo {
             Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
             als die Cops diesen Abschnitt dicht machen können.",
             Escape2Grid => "Variante von Escape2 die nur auf Gittern (Zerschnitten + Tori) funktioniert",
-            Dilemma => "Knoten von denen aus ein \"Fluchtoption 2\" Knoten erreicht werden kann, weil \
+            Escape3Grid => "Knoten von denen aus ein \"Fluchtoption 2\" Knoten erreicht werden kann, weil \
             sich mehrere von denen überlappen (funzt noch bei weitem nicht immer. \
             Diese Schätzung kann sowohl zu konservativ, als auch zu generös sein.)",
+            Escape23Grid => "Vereinigung aus Fluchtoptionen 2 und 3",
             BruteForceRes => "Wenn Bruteforce Berechnung ergeben hat, \
             dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
             aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
@@ -101,7 +103,8 @@ impl VertexColorInfo {
             Escape1 => "Fluchtoption 1",
             Escape2 => "Fluchtoption 2 (Komponenten)",
             Escape2Grid => "Fluchtoption 2 (Richtungen)",
-            Dilemma => "Fluchtoption 3 (Gitter)",
+            Escape3Grid => "Fluchtoption 3 (Gitter)",
+            Escape23Grid => "Fluchtoption 2 & 3 (Gitter)",
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
@@ -119,13 +122,14 @@ impl VertexColorInfo {
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize, strum_macros::EnumIter)]
-pub enum VertexNumberInfo {
+pub enum VertexSymbolInfo {
     None,
     Indices,
     RobberAdvantage,
-    EscapeableNodes,
-    EscapableNodesGrid,
-    DilemmaDirections,
+    Escape2,
+    Escape2Grid,
+    Escape3Grid,
+    Escape23Grid,
     MinCopDist,
     MaxCopDist,
     RobberDist,
@@ -134,18 +138,19 @@ pub enum VertexNumberInfo {
     Debugging,
 }
 
-impl VertexNumberInfo {
+impl VertexSymbolInfo {
     const fn description(self) -> &'static str {
-        use VertexNumberInfo::*;
+        use VertexSymbolInfo::*;
         match self {
             None => "Es werden keine Zahlen angezeigt",
             Indices => "nur relevant für Debugging",
             RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
-            EscapeableNodes => "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
+            Escape2 => "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
             Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
-            EscapableNodesGrid => "jede Fluchtrichtung hat einen Namen in { 0 .. 6 }. \
+            Escape2Grid => "jede Fluchtrichtung hat einen Namen in { 0 .. 6 }. \
             Der Marker listet alle Richtungen, in die der Räuber fliehen kann.",
-            DilemmaDirections => "eine dieser Richtungen führt garantiert wieder auf einen Dilemmaknoten",
+            Escape23Grid => "Kombination aus Fluchtoption 2 & 3 auf Gitter.",
+            Escape3Grid => "eine dieser Richtungen führt garantiert wieder auf einen Dilemmaknoten",
             MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
             MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",
             VertexEquivalenceClass => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
@@ -159,14 +164,15 @@ impl VertexNumberInfo {
     }
 
     const fn name_str(self) -> &'static str {
-        use VertexNumberInfo::*;
+        use VertexSymbolInfo::*;
         match self {
             None => "Keine",
             Indices => "Knotenindizes",
             RobberAdvantage => "Marker Fluchtoption 1",
-            EscapeableNodes => "Marker Fluchtoption 2",
-            EscapableNodesGrid => "Pfeile Fluchtoption 2 (Gitter)",
-            DilemmaDirections => "Pfeile Fluchtoption 3 (Gitter)",
+            Escape2 => "Marker Fluchtoption 2",
+            Escape2Grid => "Pfeile Fluchtoption 2 (Gitter)",
+            Escape3Grid => "Pfeile Fluchtoption 3 (Gitter)",
+            Escape23Grid => "Pfeile Fluchtoption 2 & 3 (Gitter)",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
             VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
@@ -192,7 +198,7 @@ struct Options {
     /// currently selected one at index 0
     last_selected_vertex_color_infos: [VertexColorInfo; 7],
     /// currently selected one at index 0
-    last_selected_vertex_number_infos: [VertexNumberInfo; 7],
+    last_selected_vertex_number_infos: [VertexSymbolInfo; 7],
 
     //these are only used, when the respective VertexColorInfo(s) is/are active
     marked_cop_dist: isize, //determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
@@ -235,7 +241,7 @@ const DEFAULT_OPTIONS: Options = Options {
     shown_escape_directions: 63,
 
     last_selected_vertex_color_infos: [VertexColorInfo::None; 7],
-    last_selected_vertex_number_infos: [VertexNumberInfo::None; 7],
+    last_selected_vertex_number_infos: [VertexSymbolInfo::None; 7],
 
     show_convex_hull: false,
     show_hull_boundary: false,
@@ -256,7 +262,7 @@ impl Options {
         self.last_selected_vertex_color_infos[0]
     }
 
-    pub fn vertex_number_info(&self) -> VertexNumberInfo {
+    pub fn vertex_number_info(&self) -> VertexSymbolInfo {
         self.last_selected_vertex_number_infos[0]
     }
 
@@ -366,7 +372,7 @@ impl Options {
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
                     let mut curr = self.vertex_number_info();
-                    for val in VertexNumberInfo::iter() {
+                    for val in VertexSymbolInfo::iter() {
                         ui.radio_value(&mut curr, val, val.name_str())
                             .on_hover_text(val.description());
                     }
@@ -864,7 +870,7 @@ impl Info {
     /// and only if something relevant (e.g. a cop's position) changed
     fn maybe_update(&mut self, con: &DrawContext<'_>) {
         use VertexColorInfo as Color;
-        use VertexNumberInfo as Symbol;
+        use VertexSymbolInfo as Symbol;
 
         let nr_vertices = con.edges.nr_vertices();
         let robber_moved = self.characters.robber_updated();
@@ -886,19 +892,19 @@ impl Info {
         let update_escapable = show_debug
             || update_plane_cop_strat
             || matches!(color, Color::Escape2)
-            || matches!(symbol, Symbol::EscapeableNodes);
+            || matches!(symbol, Symbol::Escape2);
 
         debug_assert_eq!(self.dilemma.overlap.len(), nr_vertices);
         let update_dilemma = show_debug
-            || matches!(color, Color::Dilemma)
-            || matches!(symbol, Symbol::DilemmaDirections);
+            || matches!(color, Color::Escape3Grid | Color::Escape23Grid)
+            || matches!(symbol, Symbol::Escape3Grid | Symbol::Escape23Grid);
 
         debug_assert_eq!(self.escapable_grid.esc_directions.len(), nr_vertices);
         let update_esc_grid = show_debug
             || update_plane_cop_strat
             || update_dilemma
             || matches!(color, Color::Escape2Grid | Color::Escape2)
-            || matches!(symbol, Symbol::EscapableNodesGrid | Symbol::EscapeableNodes);
+            || matches!(symbol, Symbol::Escape2Grid | Symbol::Escape2);
 
         debug_assert_eq!(self.cop_hull_data.hull().len(), nr_vertices);
         let update_hull = show_debug
@@ -1139,15 +1145,25 @@ impl Info {
                 };
                 match key {
                     Key::Q => {
-                        for n in 1..7 {
+                        for n in 0..7 {
                             let s = opts.last_selected_vertex_color_infos[n].name_str();
-                            add_unwrapped(ui, format!("{n}: {s}"));
+                            if n == 0 {
+                                add_unwrapped(ui, s.to_string());
+                                ui.separator();
+                            } else {
+                                add_unwrapped(ui, format!("{n}: {s}"));
+                            }
                         }
                     },
                     Key::W => {
-                        for n in 1..7 {
+                        for n in 0..7 {
                             let s = opts.last_selected_vertex_number_infos[n].name_str();
-                            add_unwrapped(ui, format!("{n}: {s}"));
+                            if n == 0 {
+                                add_unwrapped(ui, s.to_string());
+                                ui.separator();
+                            } else {
+                                add_unwrapped(ui, format!("{n}: {s}"));
+                            }
                         }
                     },
                     Key::F => {
@@ -1323,10 +1339,30 @@ impl Info {
                     draw_if!(esc_shown != 0, util, color);
                 }
             },
-            VertexColorInfo::Dilemma => {
-                for (&esc, util) in izip!(&self.dilemma.overlap, utils_iter) {
+            VertexColorInfo::Escape3Grid => {
+                for (&esc, util) in izip!(&self.dilemma.dilemma_regions, utils_iter) {
                     let color = || color::u32_marker_color(esc, colors);
                     draw_if!(esc != 0, util, color);
+                }
+            },
+            VertexColorInfo::Escape23Grid => {
+                for (&esc2, &esc3, &overlap, util) in izip!(
+                    &self.escapable_grid.esc_components,
+                    &self.dilemma.dilemma_regions,
+                    &self.dilemma.overlap,
+                    utils_iter
+                ) {
+                    let esc = esc2 | esc3;
+                    let color = || {
+                        let bits = if esc != 0 { esc } else { overlap };
+                        let ophague = color::u32_marker_color(bits, colors);
+                        if esc2 != 0 {
+                            ophague
+                        } else {
+                            ophague.gamma_multiply(0.45)
+                        }
+                    };
+                    draw_if!(esc != 0 || overlap != 0, util, color);
                 }
             },
             VertexColorInfo::BruteForceRes => {
@@ -1410,17 +1446,21 @@ impl Info {
                 //        }
                 //    }
                 //}
-                if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
-                    if let Some(r) = self.characters.active_robber() {
-                        let robber_coords = g.coordinates_of(r.vertex());
-                        let sector =
-                            graph::grid::Sector(self.escapable_grid.esc_directions[r.vertex()]);
-                        for (v, util) in izip!(0.., utils_iter) {
-                            let v_coords = g.coordinates_of(v);
-                            let dir = g.norm.canonical_coords(v_coords - robber_coords);
-                            draw_if!(sector.contains(&dir), util);
-                        }
-                    }
+                //if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
+                //    if let Some(r) = self.characters.active_robber() {
+                //        let robber_coords = g.coordinates_of(r.vertex());
+                //        let sector =
+                //            graph::grid::Sector(self.escapable_grid.esc_directions[r.vertex()]);
+                //        for (v, util) in izip!(0.., utils_iter) {
+                //            let v_coords = g.coordinates_of(v);
+                //            let dir = g.norm.canonical_coords(v_coords - robber_coords);
+                //            draw_if!(sector.contains(&dir), util);
+                //        }
+                //    }
+                //}
+                for (&esc, util) in izip!(&self.dilemma.overlap, utils_iter) {
+                    let color = || color::u32_marker_color(esc, colors);
+                    draw_if!(esc != 0, util, color);
                 }
             },
             VertexColorInfo::SafeOutside => {
@@ -1557,10 +1597,10 @@ impl Info {
         };
 
         match self.options.vertex_number_info() {
-            VertexNumberInfo::Indices => {
+            VertexSymbolInfo::Indices => {
                 draw!(0..);
             },
-            VertexNumberInfo::BruteforceCopMoves => {
+            VertexSymbolInfo::BruteforceCopMoves => {
                 let (active_cops, game_type) = self.characters.police_state(con);
                 if let Some(strat) = self.worker.strats_for(&game_type) {
                     let (autos, cop_positions) = strat.pack(&active_cops);
@@ -1570,11 +1610,12 @@ impl Info {
                     draw!(auto.forward().map(|v| nr_moves_left[v]), show);
                 }
             },
-            VertexNumberInfo::Debugging => {
+            VertexSymbolInfo::Debugging => {
                 //draw!(self.escapable.owners());
                 //draw_arrows(&self.dilemma.allowed_dirs, u8::MAX);
+                draw!(&self.dilemma.allowed_steps, |&&x| x > 0);
             },
-            VertexNumberInfo::EscapeableNodes => {
+            VertexSymbolInfo::Escape2 => {
                 let escs = if self.escapable_grid.graph.represents_current_map {
                     &self.escapable_grid.esc_components[..]
                 } else {
@@ -1591,35 +1632,44 @@ impl Info {
                         .collect()
                 }));
             },
-            VertexNumberInfo::EscapableNodesGrid => {
+            VertexSymbolInfo::Escape2Grid => {
                 let mask = self.options.shown_escape_directions;
                 let directions = &self.escapable_grid.esc_directions;
                 draw_arrows(directions, mask);
             },
-            VertexNumberInfo::DilemmaDirections => {
+            VertexSymbolInfo::Escape3Grid => {
                 let directions = &self.dilemma.dilemma_dirs;
                 draw_arrows(directions, u8::MAX);
             },
-            VertexNumberInfo::MaxCopDist => {
+            VertexSymbolInfo::Escape23Grid => {
+                let combined = izip!(
+                    &self.dilemma.dilemma_dirs,
+                    &self.escapable_grid.esc_directions
+                )
+                .map(|(&a, &b)| a | b)
+                .collect_vec();
+                draw_arrows(&combined, u8::MAX);
+            },
+            VertexSymbolInfo::MaxCopDist => {
                 draw_isize_slice(&self.max_cop_dist);
             },
-            VertexNumberInfo::MinCopDist => {
+            VertexSymbolInfo::MinCopDist => {
                 draw_isize_slice(&self.min_cop_dist);
             },
-            VertexNumberInfo::RobberAdvantage => {
+            VertexSymbolInfo::RobberAdvantage => {
                 draw_isize_slice(&self.cop_advantage);
             },
-            VertexNumberInfo::RobberDist => {
+            VertexSymbolInfo::RobberDist => {
                 if let Some(r) = self.characters.active_robber() {
                     draw_isize_slice(r.dists());
                 }
             },
-            VertexNumberInfo::VertexEquivalenceClass => {
+            VertexSymbolInfo::VertexEquivalenceClass => {
                 if let SymGroup::Explicit(e) = con.sym_group() {
                     draw!(e.vertex_representatives());
                 }
             },
-            VertexNumberInfo::None => {},
+            VertexSymbolInfo::None => {},
         }
     }
 

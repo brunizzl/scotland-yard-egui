@@ -467,7 +467,7 @@ impl State {
         // find longest period with at least one repetition
         let (character_index, last_destination) = 'find_period_start: {
             let hist = &self.past_moves[..];
-            let mut period_len = usize::min(hist.len() / 2, 4);
+            let mut period_len = usize::min(hist.len() / 2, 3);
             while period_len > 0 {
                 let newest_hist = &hist[(hist.len() - 2 * period_len)..];
                 let fst_period = &newest_hist[..period_len];
@@ -483,10 +483,19 @@ impl State {
                     }
                 }
                 if same_character_pattern {
-                    break 'find_period_start (fst_period[0]);
+                    break 'find_period_start fst_period[0];
                 }
                 period_len -= 1;
             }
+            // if all else fails but two moves where made, take the character of the second last move
+            if let &[.., pair, _] = hist {
+                break 'find_period_start pair;
+            }
+            // if only a single move was made, repeat that.
+            if let &[.., pair] = hist {
+                break 'find_period_start pair;
+            }
+            // no move was made -> nothing to repeat -> do nothing
             return;
         };
 
