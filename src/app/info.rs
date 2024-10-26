@@ -1334,7 +1334,7 @@ impl Info {
                 let colors = color::sample_color_wheel::<6>(sat, 4);
                 let shown = self.options.shown_escape_directions;
                 for (&esc, util) in izip!(&self.escapable_grid.esc_directions, utils_iter) {
-                    let esc_shown = esc & shown;
+                    let esc_shown = esc.0 & shown;
                     let color = || color::u8_marker_color(esc_shown, &colors);
                     draw_if!(esc_shown != 0, util, color);
                 }
@@ -1525,6 +1525,8 @@ impl Info {
     }
 
     fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) {
+        use graph::grid::Dirs;
+
         let font = egui::FontId::proportional(12.0 * self.options.number_style.size * con.scale);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::WHITE
@@ -1562,7 +1564,7 @@ impl Info {
             let show = |&&num: &&_| num != isize::MAX;
             draw!(numbers, show);
         };
-        let draw_arrows = |directions: &[u8], mask: u8| {
+        let draw_arrows = |directions: &[Dirs], mask: Dirs| {
             if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
                 if g.side_len() < 3 {
                     return;
@@ -1571,7 +1573,8 @@ impl Info {
                     let v0_xy = graph::grid::Coords { x: 1, y: 1 };
                     let v0 = g.unchecked_index_of(v0_xy);
                     let v0_pos = con.cam().transform(con.positions[v0]);
-                    graph::grid::Sector::bit_unit_directions(g.norm)
+                    g.norm
+                        .unit_directions()
                         .iter()
                         .map(|&dir| {
                             let neigh = g.unchecked_index_of(v0_xy + dir);
@@ -1583,11 +1586,11 @@ impl Info {
                 let stroke_size = 1.85 * con.scale;
                 let stroke = egui::Stroke::new(stroke_size, color);
                 for (v, &val, &vis) in izip!(0.., directions, con.visible) {
-                    let shown_val = val & mask;
-                    if vis && shown_val != 0 {
+                    let shown_val = val.intersection(mask);
+                    if vis && shown_val.nonempty() {
                         let v_pos = con.cam().transform(con.positions[v]);
-                        for (i, &dir) in izip!(0.., &stroke_dirs) {
-                            if (1u8 << i) & shown_val != 0 {
+                        for (mask, &dir) in izip!(Dirs::unit_bits(g.norm), &stroke_dirs) {
+                            if mask.intersection(shown_val).nonempty() {
                                 super::add_arrow(&con.painter, v_pos, dir, stroke, 2.0);
                             }
                         }
@@ -1635,20 +1638,20 @@ impl Info {
             VertexSymbolInfo::Escape2Grid => {
                 let mask = self.options.shown_escape_directions;
                 let directions = &self.escapable_grid.esc_directions;
-                draw_arrows(directions, mask);
+                draw_arrows(directions, Dirs(mask));
             },
             VertexSymbolInfo::Escape3Grid => {
                 let directions = &self.dilemma.dilemma_dirs;
-                draw_arrows(directions, u8::MAX);
+                draw_arrows(directions, Dirs(u8::MAX));
             },
             VertexSymbolInfo::Escape23Grid => {
                 let combined = izip!(
                     &self.dilemma.dilemma_dirs,
                     &self.escapable_grid.esc_directions
                 )
-                .map(|(&a, &b)| a | b)
+                .map(|(&a, &b)| a.union(b))
                 .collect_vec();
-                draw_arrows(&combined, u8::MAX);
+                draw_arrows(&combined, Dirs(u8::MAX));
             },
             VertexSymbolInfo::MaxCopDist => {
                 draw_isize_slice(&self.max_cop_dist);

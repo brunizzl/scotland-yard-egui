@@ -5,12 +5,12 @@ use grid::*;
 /// if graph in question is a grid (optionally wrapped to torus)
 pub struct EscapableDirections {
     pub esc_components: Vec<u32>,
-    component_directions: [Sector; 32],
+    component_directions: [Dirs; 32],
 
     /// in quad grids the first four bits per entry store,
     /// wether it is safe to escape in the corresponding of the four directions.
     /// in hex grids, the first 6 bits are used.
-    pub esc_directions: Vec<u8>,
+    pub esc_directions: Vec<Dirs>,
     /// remembers graph of last update.
     pub graph: DistGridGraph,
 }
@@ -19,7 +19,7 @@ impl EscapableDirections {
     pub fn new() -> Self {
         Self {
             esc_components: Vec::new(),
-            component_directions: [Sector(0); 32],
+            component_directions: [Dirs::EMPTY; 32],
             esc_directions: Vec::new(),
             graph: DistGridGraph::new(),
         }
@@ -32,7 +32,7 @@ impl EscapableDirections {
 
         // initialize escapable to have the complete hull inside marked for doughnuts
         // and to have __everything__ marked for non-wrapping grids
-        let all = Sector::all(self.graph.data.norm).0;
+        let all = Dirs::all(self.graph.data.norm);
         if !self.graph.data.wrap {
             self.esc_directions.fill(all);
         } else {
@@ -67,7 +67,7 @@ impl EscapableDirections {
                     &self.esc_directions[i0..],
                     &self.esc_components[i0..]
                 ) {
-                    if h.on_boundary() && esc != 0 && marker == 0 {
+                    if h.on_boundary() && esc.nonempty() && marker == 0 {
                         search_start = i;
                         break 'find_new_component i;
                     }
@@ -86,7 +86,7 @@ impl EscapableDirections {
                 let v_coords = g.coordinates_of(v);
                 for n in g.neighbor_indices_of(v_coords) {
                     if hull[n].on_boundary()
-                        && self.esc_directions[n] != 0
+                        && self.esc_directions[n] != Dirs::EMPTY
                         && self.esc_components[n] & component_bit == 0
                     {
                         boundary_section.push(n);
@@ -100,8 +100,8 @@ impl EscapableDirections {
             // except if a region from the other side overlaps into this boundary.
             let boundary_dirs = boundary_section
                 .iter()
-                .map(|&bv| Sector(self.esc_directions[bv]))
-                .fold(Sector::all(g.norm), Sector::intersection);
+                .map(|&bv| self.esc_directions[bv])
+                .fold(Dirs::all(g.norm), Dirs::intersection);
             self.component_directions[component_nr % 32] = boundary_dirs;
             debug_assert!(g.wrap || boundary_dirs.0.count_ones() > 0);
 
@@ -125,15 +125,15 @@ impl EscapableDirections {
             for &inside_dir in &inside_dirs {
                 for &bv in &boundary_section {
                     let bv_coords = g.coordinates_of(bv);
-                    let mut dirs_left = center_dirs.0;
+                    let mut dirs_left = center_dirs;
                     for step_len in 1..g.side_len() {
                         let Some(v) = g.index_of(bv_coords + step_len * inside_dir) else {
                             break;
                         };
-                        dirs_left &= self.esc_directions[v];
+                        dirs_left.intersect(self.esc_directions[v]);
                         if match g.norm {
-                            Norm::Hex => dirs_left != center_dirs.0,
-                            Norm::Quad => dirs_left == 0,
+                            Norm::Hex => dirs_left != center_dirs,
+                            Norm::Quad => dirs_left == Dirs::EMPTY,
                         } {
                             break;
                         }
@@ -162,8 +162,8 @@ impl EscapableDirections {
             debug_assert_eq!(comp & used_bits_mask, comp);
             let valid_dirs = izip!(0..nr_used_bits, &self.component_directions)
                 .filter_map(|(i, &ds)| ((1 << i) & comp != 0).then_some(ds))
-                .fold(Sector(0), Sector::union);
-            *dir &= valid_dirs.0;
+                .fold(Dirs::EMPTY, Dirs::union);
+            dir.intersect(valid_dirs);
         }
     }
 
@@ -180,7 +180,7 @@ impl EscapableDirections {
         self.esc_components.resize(map.nr_vertices(), 0);
 
         self.esc_directions.clear();
-        self.esc_directions.resize(map.nr_vertices(), 0);
+        self.esc_directions.resize(map.nr_vertices(), Dirs::EMPTY);
 
         self.graph.update(map, queue);
         if !self.graph.represents_current_map {
@@ -327,7 +327,7 @@ impl DistGridGraph {
         path_dirs.len()
     }
 
-    pub fn remove_non_winning(&self, cops_vec: &[&Character], winning: &mut [u8]) {
+    pub fn remove_non_winning(&self, cops_vec: &[&Character], winning: &mut [Dirs]) {
         assert!(self.represents_current_map);
         let g = self.data;
         let dist = |a, b| self.dist_to_0(a - b);
@@ -349,11 +349,7 @@ impl DistGridGraph {
             // escapable region for every direction.
             // note: we only remove "behind" the safe boundary,
             // thus vertices "behind" cops / neighbors of cops are removed seperately below.
-            for (i, &escape_dir) in izip!(0.., Sector::bit_unit_directions(g.norm)) {
-                if g.norm.apply(escape_dir) == 0 {
-                    continue;
-                }
-                let mask = 1u8 << i;
+            for (&mask, &escape_dir) in Dirs::unit_bits_and_directions(g.norm) {
                 for safe_boundary in &safe_boundaries[..nr_boundaries] {
                     let safe_dist = safe_boundary.len() as isize - 1;
                     debug_assert_eq!(safe_dist, cops_dist - 4);
@@ -365,7 +361,7 @@ impl DistGridGraph {
                                 break;
                             };
                             let index = g.unchecked_index_of(v_repr);
-                            if winning[index] & mask == 0 {
+                            if winning[index].intersection(mask) == Dirs::EMPTY {
                                 break;
                             }
 
@@ -380,7 +376,7 @@ impl DistGridGraph {
                             // always (from there on) outside the safe region.
                             debug_assert!(g.wrap || in_safe_region || !still_safe());
                             if !in_safe_region {
-                                winning[index] -= mask;
+                                winning[index].0 -= mask.0;
                             }
                         }
                     }
@@ -391,22 +387,18 @@ impl DistGridGraph {
         // remove vertices directly shadowed by single cops
         for &ch_cop in cops_vec {
             let cop = g.coordinates_of(ch_cop.vertex());
-            winning[g.unchecked_index_of(cop)] = 0;
-            for (i, &escape_dir) in izip!(0.., Sector::bit_unit_directions(g.norm)) {
-                if g.norm.apply(escape_dir) == 0 {
-                    continue;
-                }
-                let mask = 1u8 << i;
+            winning[g.unchecked_index_of(cop)] = Dirs::EMPTY;
+            for (&mask, &escape_dir) in Dirs::unit_bits_and_directions(g.norm) {
                 for cop_neigh in g.neighbors_of(cop) {
                     for step in 0..g.side_len() {
                         let v = cop_neigh - step * escape_dir;
                         let Some(index) = g.index_of(v) else {
                             break;
                         };
-                        if winning[index] & mask == 0 {
+                        if winning[index].intersection(mask).is_empty() {
                             break;
                         }
-                        winning[index] -= mask;
+                        winning[index].0 -= mask.0;
                     }
                 }
             }

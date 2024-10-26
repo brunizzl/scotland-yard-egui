@@ -141,14 +141,15 @@ impl CanonicalCoords {
         self.e1 - self.e2
     }
 
-    pub const fn sector(&self) -> Sector {
+    pub const fn dirs(&self) -> Dirs {
+        // this works for both hex and quad, as in the quad case we just have `self.e3 == 0`.
         let e1pos = (self.e1 > 0) as u8;
         let e3neg = (self.e3 < 0) as u8 * (1 << 1);
         let e2pos = (self.e2 > 0) as u8 * (1 << 2);
         let e1neg = (self.e1 < 0) as u8 * (1 << 3);
         let e3pos = (self.e3 > 0) as u8 * (1 << 4);
         let e2neg = (self.e2 < 0) as u8 * (1 << 5);
-        Sector(e1pos | e3neg | e2pos | e1neg | e3pos | e2neg)
+        Dirs(e1pos | e3neg | e2pos | e1neg | e3pos | e2neg)
     }
 }
 
@@ -162,7 +163,7 @@ impl CanonicalCoords {
 /// - positive e3 coordinate
 /// - negative e2 coordinate
 ///
-/// therefore:
+/// therefore for any single vector in this format:
 /// not on grid line -> two bits are set.
 /// on grid line but nonzero -> one bit is set.
 /// zero -> no bit is set.
@@ -170,10 +171,10 @@ impl CanonicalCoords {
 /// The same is done with square coordinates, therefore bits 1 and 4 are always 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct Sector(pub u8);
+pub struct Dirs(pub u8);
 
 #[allow(dead_code)]
-impl Sector {
+impl Dirs {
     pub const fn all(norm: Norm) -> Self {
         match norm {
             Norm::Hex => Self(0b00111111),
@@ -181,20 +182,45 @@ impl Sector {
         }
     }
 
-    pub fn contains(self, dir: &CanonicalCoords) -> bool {
-        let dir_sector = dir.sector();
-        (self.0 | !dir_sector.0) == u8::MAX
+    pub const EMPTY: Self = Dirs(0);
+
+    #[inline(always)]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
     }
 
-    pub fn union(self, other: Self) -> Self {
+    #[inline(always)]
+    pub const fn nonempty(self) -> bool {
+        self.0 != 0
+    }
+
+    #[inline(always)]
+    pub const fn contain(self, cc: &CanonicalCoords) -> bool {
+        let dirs = cc.dirs();
+        (self.0 | !dirs.0) == u8::MAX
+    }
+
+    #[inline(always)]
+    pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 
-    pub fn intersection(self, other: Self) -> Self {
+    #[inline(always)]
+    pub fn unionize(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    #[inline(always)]
+    pub const fn intersection(self, other: Self) -> Self {
         Self(self.0 & other.0)
     }
 
-    pub fn connected_on(self, norm: Norm) -> bool {
+    #[inline(always)]
+    pub fn intersect(&mut self, other: Self) {
+        self.0 &= other.0;
+    }
+
+    pub const fn connected_on(self, norm: Norm) -> bool {
         const fn compute_connected(square: bool) -> [bool; 64] {
             let mut res = [false; 64];
             let mut union: u8 = 0;
@@ -230,7 +256,7 @@ impl Sector {
         }
     }
 
-    pub fn add_adjacent_on_hex(self) -> Self {
+    pub const fn add_adjacent_on_hex(self) -> Self {
         let mut res = (self.0 << 1) | self.0 | (self.0 >> 1);
         const FST_BIT: u8 = 1 << 0;
         const LST_BIT: u8 = 1 << 5;
@@ -244,7 +270,7 @@ impl Sector {
         Self(res & MASK)
     }
 
-    pub fn keep_inner_on_hex(self) -> Self {
+    pub const fn keep_inner_on_hex(self) -> Self {
         let mut shift_right = self.0 >> 1;
         let mut shift_left = self.0 << 1;
         const FST_BIT: u8 = 1 << 0;
@@ -260,31 +286,37 @@ impl Sector {
         Self(res & MASK)
     }
 
-    /// unit direction of each bit in self
-    pub const fn bit_unit_directions(norm: Norm) -> &'static [Coords; 6] {
+    /// same order as [`Norm::unit_directions`]
+    pub const fn unit_bits(norm: Norm) -> &'static [Dirs] {
         match norm {
             Norm::Hex => &[
-                Coords { x: 1, y: 0 },
-                Coords { x: 1, y: 1 },
-                Coords { x: 0, y: 1 },
-                Coords { x: -1, y: 0 },
-                Coords { x: -1, y: -1 },
-                Coords { x: 0, y: -1 },
+                Dirs(1 << 0),
+                Dirs(1 << 1),
+                Dirs(1 << 2),
+                Dirs(1 << 3),
+                Dirs(1 << 4),
+                Dirs(1 << 5),
             ],
             Norm::Quad => &[
-                Coords { x: 1, y: 0 },
-                Coords { x: 0, y: 0 },
-                Coords { x: 0, y: 1 },
-                Coords { x: -1, y: 0 },
-                Coords { x: 0, y: 0 },
-                Coords { x: 0, y: -1 },
+                Dirs(1 << 0),
+                // bit 1 is unused (would be direction 3)
+                Dirs(1 << 2),
+                Dirs(1 << 3),
+                // bit 4 is unused (would be negative direction 3)
+                Dirs(1 << 5),
             ],
         }
     }
 
+    pub fn unit_bits_and_directions(
+        norm: Norm,
+    ) -> impl Iterator<Item = (&'static Self, &'static Coords)> {
+        izip!(Self::unit_bits(norm), norm.unit_directions())
+    }
+
     pub fn directions(self, norm: Norm) -> impl Iterator<Item = Coords> {
-        let dirs = Self::bit_unit_directions(norm);
-        izip!(0..6, dirs).filter_map(move |(i, &coords)| (self.0 & (1 << i) != 0).then_some(coords))
+        let it = Self::unit_bits_and_directions(norm);
+        it.filter_map(move |(&dir, &coords)| (self.intersection(dir).nonempty()).then_some(coords))
     }
 }
 
@@ -497,8 +529,8 @@ mod test {
         for mut active_dirs in norm.unit_directions().iter().copied().powerset() {
             let sectors = active_dirs
                 .iter()
-                .map(|c| norm.canonical_coords(*c).sector())
-                .fold(Sector(0), Sector::union);
+                .map(|c| norm.canonical_coords(*c).dirs())
+                .fold(Dirs::EMPTY, Dirs::union);
             let mut sectors_dirs = sectors.directions(norm).collect_vec();
             active_dirs.sort();
             sectors_dirs.sort();
@@ -513,8 +545,8 @@ mod test {
         for mut active_dirs in norm.unit_directions().iter().copied().powerset() {
             let sectors = active_dirs
                 .iter()
-                .map(|c| norm.canonical_coords(*c).sector())
-                .fold(Sector(0), Sector::union);
+                .map(|c| norm.canonical_coords(*c).dirs())
+                .fold(Dirs::EMPTY, Dirs::union);
             let mut sectors_dirs = sectors.directions(norm).collect_vec();
             active_dirs.sort();
             sectors_dirs.sort();
@@ -527,42 +559,52 @@ mod test {
         {
             let norm = Norm::Hex;
             let [a, b, c, d, e, f] = [1, 2, 4, 8, 16, 32];
-            assert!(Sector(a | b | d | e | f).connected_on(norm));
-            assert!(Sector(a | b | c).connected_on(norm));
-            assert!(Sector(a | b).connected_on(norm));
-            assert!(Sector(c | d | e).connected_on(norm));
-            assert!(Sector(f | a).connected_on(norm));
-            assert!(Sector(0).connected_on(norm));
-            assert!(Sector(d).connected_on(norm));
+            assert!(Dirs(a | b | d | e | f).connected_on(norm));
+            assert!(Dirs(a | b | c).connected_on(norm));
+            assert!(Dirs(a | b).connected_on(norm));
+            assert!(Dirs(c | d | e).connected_on(norm));
+            assert!(Dirs(f | a).connected_on(norm));
+            assert!(Dirs::EMPTY.connected_on(norm));
+            assert!(Dirs(d).connected_on(norm));
 
-            assert!(!Sector(a | c | d).connected_on(norm));
-            assert!(!Sector(a | c | d | f).connected_on(norm));
-            assert!(!Sector(a | d).connected_on(norm));
+            assert!(!Dirs(a | c | d).connected_on(norm));
+            assert!(!Dirs(a | c | d | f).connected_on(norm));
+            assert!(!Dirs(a | d).connected_on(norm));
         }
         {
             let norm = Norm::Quad;
             let [a, b, c, d] = [1, 4, 8, 32];
-            assert!(Sector(a | c | d).connected_on(norm));
-            assert!(Sector(a | b | d).connected_on(norm));
-            assert!(Sector(a | b | c).connected_on(norm));
-            assert!(Sector(a | b).connected_on(norm));
-            assert!(Sector(c | d).connected_on(norm));
-            assert!(Sector(d | a).connected_on(norm));
-            assert!(Sector(0).connected_on(norm));
-            assert!(Sector(d).connected_on(norm));
+            assert!(Dirs(a | c | d).connected_on(norm));
+            assert!(Dirs(a | b | d).connected_on(norm));
+            assert!(Dirs(a | b | c).connected_on(norm));
+            assert!(Dirs(a | b).connected_on(norm));
+            assert!(Dirs(c | d).connected_on(norm));
+            assert!(Dirs(d | a).connected_on(norm));
+            assert!(Dirs::EMPTY.connected_on(norm));
+            assert!(Dirs(d).connected_on(norm));
 
-            assert!(!Sector(a | c).connected_on(norm));
-            assert!(!Sector(b | d).connected_on(norm));
+            assert!(!Dirs(a | c).connected_on(norm));
+            assert!(!Dirs(b | d).connected_on(norm));
         }
     }
 
     #[test]
     fn adjacent_directions_are_connected() {
         for i in 0..6 {
-            let single_dir = Sector(1 << i);
+            let single_dir = Dirs(1 << i);
             let three_dirs = single_dir.add_adjacent_on_hex();
             assert!(three_dirs.0.count_ones() == 3);
             assert!(three_dirs.connected_on(Norm::Hex));
+        }
+    }
+
+    #[test]
+    fn unit_directions_in_same_order() {
+        for norm in [Norm::Hex, Norm::Quad] {
+            for (&dirs, &v) in Dirs::unit_bits_and_directions(norm) {
+                let v_dirs = norm.canonical_coords(v).dirs();
+                assert_eq!(dirs, v_dirs);
+            }
         }
     }
 }
