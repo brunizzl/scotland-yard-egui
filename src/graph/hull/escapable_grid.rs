@@ -149,6 +149,7 @@ impl EscapableDirections {
     /// we take a conservative approach here and only keep the directions of the corresponding components.
     /// this is extra conservative, because which directions belong to a boundary section on a torus,
     /// is somewhat ill-defined (due to the fact, that we do not actually compute a correct convex hull on tori).
+    /// therefore some regions may be more shallow than expected, in some cases consisting of the boundary only.
     fn delete_leftover_on_torus(&mut self, nr_components: usize) {
         assert_eq!(self.esc_components.len(), self.graph.nr_vertices());
         assert_eq!(self.esc_directions.len(), self.graph.nr_vertices());
@@ -162,7 +163,7 @@ impl EscapableDirections {
             let valid_dirs = izip!(0..nr_used_bits, &self.component_directions)
                 .filter_map(|(i, &ds)| ((1 << i) & comp != 0).then_some(ds))
                 .fold(Sector(0), Sector::union);
-            *dir = valid_dirs.0;
+            *dir &= valid_dirs.0;
         }
     }
 
