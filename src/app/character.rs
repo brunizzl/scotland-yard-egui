@@ -464,26 +464,30 @@ impl State {
         positions: &[Pos3],
         queue: &mut VecDeque<usize>,
     ) {
-        // find longest period with at least one repetition
         let (character_index, last_destination) = 'find_period_start: {
             let hist = &self.past_moves[..];
-            let mut period_len = usize::min(hist.len() / 2, 3);
+            let mut period_len = usize::min(hist.len() / 3, 8);
+            // find longest period with at least two repetitions
             while period_len > 0 {
-                let newest_hist = &hist[(hist.len() - 2 * period_len)..];
+                let newest_hist = &hist[(hist.len() - 3 * period_len)..];
                 let fst_period = &newest_hist[..period_len];
-                let last_period = &newest_hist[period_len..];
+                let mid_period = &newest_hist[period_len..(2 * period_len)];
+                let last_period = &newest_hist[(2 * period_len)..];
                 let mut same_character_pattern = true;
-                for step in 0..period_len {
+                for i in 0..period_len {
                     // only which character moved is compared, because
                     // this is vastly easier than in what direction the last moves where
                     // (we have the character indices stored directly, move directions not.)
-                    if fst_period[step].0 != last_period[step].0 {
+                    if fst_period[i].0 != last_period[i].0 || fst_period[i].0 != mid_period[i].0 {
                         same_character_pattern = false;
                         break;
                     }
                 }
                 if same_character_pattern {
-                    break 'find_period_start fst_period[0];
+                    // this is hit or miss.
+                    // to actually choose correctly between mid_period[0] and fst_period[0],
+                    // we would need to also find a pattern in the step directions.
+                    break 'find_period_start mid_period[0];
                 }
                 period_len -= 1;
             }
