@@ -1,15 +1,25 @@
 use super::*;
 use grid::*;
 
-/// should compute the same thing as [`hull::EscapableNodes`],
-/// if graph in question is a grid (optionally wrapped to torus)
+/// should compute nearly the same thing as [`hull::EscapableNodes`],
+/// if graph in question is a grid (optionally wrapped to torus).
+/// Nothing is computed on other graphs.
+/// If the graph is a non-wrapped (non-torus) grid,
+/// also vertices outside the convex hull are marked.
+/// This struct represents the thesis' conncept of "Winning Direction" sets.
 pub struct EscapableDirections {
+    /// one entry per vertex, each region (inside the cop hull and
+    /// induced by a boundary segement) is marked by one bit.
+    /// the hope is, that we never have more than 32 regions, otherwise
+    /// regions share a bit and we hope they do not touch.
     pub esc_components: Vec<u32>,
+
+    /// which directions are contained in region i.
+    /// note: not every vertex of a region must have every direction of the region.
     component_directions: [Dirs; 32],
 
-    /// in quad grids the first four bits per entry store,
-    /// wether it is safe to escape in the corresponding of the four directions.
-    /// in hex grids, the first 6 bits are used.
+    /// stores escape directions for every vertex (if graph is grid).
+    /// on tori, only vertices inside the convex hull may be marked.
     pub esc_directions: Vec<Dirs>,
     /// remembers graph of last update.
     pub graph: DistGridGraph,
@@ -86,7 +96,7 @@ impl EscapableDirections {
                 let v_coords = g.coordinates_of(v);
                 for n in g.neighbor_indices_of(v_coords) {
                     if hull[n].on_boundary()
-                        && self.esc_directions[n] != Dirs::EMPTY
+                        && self.esc_directions[n].nonempty()
                         && self.esc_components[n] & component_bit == 0
                     {
                         boundary_section.push(n);
@@ -133,7 +143,7 @@ impl EscapableDirections {
                         dirs_left.intersect(self.esc_directions[v]);
                         if match g.norm {
                             Norm::Hex => dirs_left != center_dirs,
-                            Norm::Quad => dirs_left == Dirs::EMPTY,
+                            Norm::Quad => dirs_left.is_empty(),
                         } {
                             break;
                         }
@@ -361,7 +371,7 @@ impl DistGridGraph {
                                 break;
                             };
                             let index = g.unchecked_index_of(v_repr);
-                            if winning[index].intersection(mask) == Dirs::EMPTY {
+                            if winning[index].intersection(mask).is_empty() {
                                 break;
                             }
 

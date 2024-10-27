@@ -4,9 +4,7 @@ use super::*;
 
 /// when two sets of escapable vertices overlap, they allow the robber to approach both at once and thus
 /// only allow the police to move one such set away from the robber.
-/// to get all the information we need, both the escapable vertices computed via directions
-/// and the escapable vertices computed via sections of boundary are required for this
-/// thing here to function
+/// this is higly experimental and not yet correct.
 pub struct DilemmaNodes {
     pub dilemma_dirs: Vec<Dirs>,
 

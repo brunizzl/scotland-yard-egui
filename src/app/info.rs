@@ -592,9 +592,6 @@ impl Info {
         if new != self.tool && new != MouseTool::Drag {
             self.options.show_manual_marker_window = true;
         }
-        if new == self.tool && new == MouseTool::Drag {
-            self.options.show_manual_marker_window ^= true;
-        }
         self.tool = new;
     }
 
@@ -1128,6 +1125,9 @@ impl Info {
             if info.key_down(Key::E) {
                 for (new_tool, &key) in izip!(MouseTool::ALL, &NUMS[..3]) {
                     if info.key_pressed(key) {
+                        if new_tool == tool && tool == MouseTool::Drag {
+                            self.options.show_manual_marker_window ^= true;
+                        }
                         self.change_tool_to(new_tool);
                     }
                 }
