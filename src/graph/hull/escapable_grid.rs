@@ -21,6 +21,14 @@ pub struct EscapableDirections {
     /// stores escape directions for every vertex (if graph is grid).
     /// on tori, only vertices inside the convex hull may be marked.
     pub esc_directions: Vec<Dirs>,
+
+    /// per vertex a subset of [`Self::esc_directions`]:
+    /// contains only those vertices, that fulfill the cone condition.
+    /// this means, that there exists a cone with at least two directions starting at this vertex,
+    /// such that no cop and no neighbor of any cop is contained in the cone.
+    /// also: only vertices inside convex hull are marked.
+    pub cone_esc_directions: Vec<Dirs>,
+
     /// remembers graph of last update.
     pub graph: DistGridGraph,
 }
@@ -32,6 +40,7 @@ impl EscapableDirections {
             component_directions: [Dirs::EMPTY; 32],
             esc_directions: Vec::new(),
             graph: DistGridGraph::new(),
+            cone_esc_directions: Vec::new(),
         }
     }
 
@@ -59,6 +68,7 @@ impl EscapableDirections {
         let g = self.graph.data;
         assert_eq!(hull.len(), self.esc_components.len());
         assert_eq!(hull.len(), self.esc_directions.len());
+        assert_eq!(hull.len(), self.cone_esc_directions.len());
 
         let mut boundary_section = Vec::new();
 
@@ -149,6 +159,9 @@ impl EscapableDirections {
             // mark the region
             for &inside_dir in &inside_dirs {
                 for &bv in &boundary_section {
+                    let mut cone_dirs = boundary_dirs;
+                    self.cone_esc_directions[bv].unionize(cone_dirs);
+
                     let bv_coords = g.coordinates_of(bv);
                     let mut dirs_left = center_dirs;
                     for step_len in 1..g.side_len() {
@@ -162,7 +175,14 @@ impl EscapableDirections {
                         } {
                             break;
                         }
+                        // mark components
                         self.esc_components[v] |= component_bit;
+
+                        // mark cone
+                        cone_dirs.intersect(self.esc_directions[v]);
+                        if cone_dirs.0.count_ones() > 1 {
+                            self.cone_esc_directions[v].unionize(cone_dirs);
+                        }
                     }
                 }
             }
@@ -206,6 +226,9 @@ impl EscapableDirections {
 
         self.esc_directions.clear();
         self.esc_directions.resize(map.nr_vertices(), Dirs::EMPTY);
+
+        self.cone_esc_directions.clear();
+        self.cone_esc_directions.resize(map.nr_vertices(), Dirs::EMPTY);
 
         self.graph.update(map, queue);
         if !self.graph.represents_current_map {

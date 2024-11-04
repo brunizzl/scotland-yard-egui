@@ -1318,14 +1318,13 @@ impl Info {
                 }
             },
             VertexColorInfo::Escape2 => {
-                let colors = self.escapable.order_by_cops(self.characters.cops(), colors);
                 let escs = if self.escapable_grid.graph.represents_current_map {
                     &self.escapable_grid.esc_components[..]
                 } else {
                     self.escapable.escapable()
                 };
                 for (&esc, util) in izip!(escs, utils_iter) {
-                    let color = || color::u32_marker_color(esc, &colors);
+                    let color = || color::u32_marker_color(esc, colors);
                     draw_if!(esc != 0, util, color);
                 }
             },
@@ -1346,23 +1345,14 @@ impl Info {
                 }
             },
             VertexColorInfo::Escape23Grid => {
-                for (&esc2, &esc3, &overlap, util) in izip!(
+                for (&esc2, &esc3, util) in izip!(
                     &self.escapable_grid.esc_components,
                     &self.dilemma.dilemma_regions,
-                    &self.dilemma.overlap,
                     utils_iter
                 ) {
                     let esc = esc2 | esc3;
-                    let color = || {
-                        let bits = if esc != 0 { esc } else { overlap };
-                        let ophague = color::u32_marker_color(bits, colors);
-                        if esc2 != 0 {
-                            ophague
-                        } else {
-                            ophague.gamma_multiply(0.45)
-                        }
-                    };
-                    draw_if!(esc != 0 || overlap != 0, util, color);
+                    let color = || color::blend_picked(colors, [esc2 != 0, esc3 != 0].into_iter());
+                    draw_if!(esc != 0, util, color);
                 }
             },
             VertexColorInfo::BruteForceRes => {
@@ -1617,6 +1607,7 @@ impl Info {
                 //draw!(self.escapable.owners());
                 //draw_arrows(&self.dilemma.shadow_dirs, Dirs(u8::MAX));
                 draw_arrows(&self.dilemma.overlap_dirs, Dirs(u8::MAX));
+                //draw_arrows(&self.escapable_grid.strong_esc_directions, Dirs(u8::MAX));
                 draw_isize_slice(&self.dilemma.taken_steps);
             },
             VertexSymbolInfo::Escape2 => {

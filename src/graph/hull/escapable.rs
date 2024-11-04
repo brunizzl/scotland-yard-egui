@@ -98,16 +98,6 @@ fn compute_marker(cop_pair: (usize, usize), cops: &[Character], marker_nr: usize
 }
 
 impl EscapableNodes {
-    /// orders `colors` as if marker bit of escapable region was chosen by the guarding cop pair
-    pub fn order_by_cops<T: Clone>(&self, cops: &[Character], colors: &[T; 32]) -> [T; 32] {
-        let mut res = colors.clone();
-        for group in &self.cop_groups {
-            let from_cops = marker_bit_from_cops(group.pair, cops);
-            res[group.marker_bit()] = colors[from_cops].clone();
-        }
-        res
-    }
-
     pub fn escapable(&self) -> &[u32] {
         &self.escapable
     }
