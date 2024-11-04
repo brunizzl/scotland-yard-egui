@@ -131,6 +131,7 @@ pub struct State {
 
     menu_visible: bool,
     fullscreen: bool,
+    dark_mode: bool,
 
     saves: saves::SavedStates,
 }
@@ -138,6 +139,13 @@ pub struct State {
 impl State {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let dark_mode = load_or(cc.storage, Self::DARK_MODE_KEY, || false);
+        if dark_mode {
+            cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        } else {
+            cc.egui_ctx.set_visuals(egui::Visuals::light());
+        }
+
         let mut info = info::Info::new(cc);
         let map = map::Map::new(cc);
         info.adjust_to_new_map(map.data());
@@ -147,9 +155,12 @@ impl State {
             info,
             menu_visible: true,
             fullscreen: false,
+            dark_mode,
             saves,
         }
     }
+
+    const DARK_MODE_KEY: &'static str = "app::in_dark_mode";
 }
 
 fn draw_usage_info(ui: &mut Ui) {
@@ -186,6 +197,8 @@ where
 impl eframe::App for State {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, Self::DARK_MODE_KEY, &self.dark_mode);
+
         self.map.save(storage);
         self.info.save(storage);
         self.saves.save(storage);
@@ -202,10 +215,10 @@ impl eframe::App for State {
 
         if self.menu_visible {
             egui::SidePanel::left("left_panel").show(ctx, |ui| {
-                let compile_datetime = compile_time::datetime_str!();
                 ui.horizontal(|ui| {
+                    const COMPILE_DATETIME: &str = compile_time::datetime_str!();
                     //add spaces to force minimum width of sidebar
-                    let compile_info = format!("kompiliert: {compile_datetime} ");
+                    let compile_info = format!("kompiliert: {COMPILE_DATETIME} ");
                     ui.add(Label::new(compile_info).wrap_mode(egui::TextWrapMode::Extend));
                     if ui.button("⏴").on_hover_text("Menü einklappen (strg + b)").clicked() {
                         self.menu_visible = false;
@@ -214,6 +227,7 @@ impl eframe::App for State {
                 ui.horizontal(|ui| {
                     //egui::widgets::global_theme_preference_switch(ui); //name in newer egui versions
                     egui::widgets::global_dark_light_mode_switch(ui);
+                    self.dark_mode = ui.visuals().dark_mode;
 
                     draw_usage_info(ui);
 

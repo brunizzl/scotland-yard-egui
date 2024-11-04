@@ -14,10 +14,10 @@ pub struct DilemmaNodes {
     pub overlap: Vec<u32>,
 
     /// temporary value, only stored here to allow visual debugging (and to save on allocations).
-    pub allowed_steps: Vec<isize>,
+    pub taken_steps: Vec<isize>,
 
     /// temporary value, only stored here to allow visual debugging (and to save on allocations).
-    pub allowed_dirs: Vec<Dirs>,
+    pub overlap_dirs: Vec<Dirs>,
 }
 
 impl DilemmaNodes {
@@ -26,12 +26,13 @@ impl DilemmaNodes {
             dilemma_dirs: Vec::new(),
             dilemma_regions: Vec::new(),
             overlap: Vec::new(),
-            allowed_steps: Vec::new(),
-            allowed_dirs: Vec::new(),
+            taken_steps: Vec::new(),
+            overlap_dirs: Vec::new(),
         }
     }
 
-    fn mark_overlapping(
+    #[allow(dead_code)]
+    fn mark_overlapping_dirs(
         &mut self,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
@@ -40,6 +41,7 @@ impl DilemmaNodes {
     ) {
         let combine_neighbor_dirs =
             |v: usize| edges.neighbors_of(v).map(|n| esc_dirs[n]).fold(esc_dirs[v], Dirs::union);
+        //|v: usize| esc_dirs[v];
         let overlaps = |dirs: Dirs| dirs.0.count_ones() > 3;
 
         let mut search_start = 0;
@@ -74,23 +76,69 @@ impl DilemmaNodes {
         }
     }
 
-    fn mark_dilemma(
+    #[allow(dead_code)]
+    fn mark_overlapping_components(
         &mut self,
-        esc_dirs: &EscapableDirections,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
-        active_cops: &[&Character],
+        cops_hull: &[InSet],
+        esc_components: &[u32],
     ) {
-        let g = esc_dirs.graph.data;
-        if g.grid.nr_vertices() != edges.nr_vertices() || g.norm != Norm::Hex {
+        let combine_neighbor_components = |v: usize| {
+            edges
+                .neighbors_of(v)
+                .map(|n| esc_components[n])
+                .fold(esc_components[v], std::ops::BitOr::bitor)
+        };
+        let overlaps = |components: u32| components.count_ones() == 2;
+
+        let mut search_start = 0;
+        for overlap_nr in 0.. {
+            // find first not-yet handled vertex of an overlap region
+            let (region_v, region_dirs) = 'find_new_region: {
+                let v0 = search_start;
+                for (v, h, &marker) in izip!(v0.., &cops_hull[v0..], &self.overlap[v0..]) {
+                    if h.contained() && marker == 0 {
+                        let combined_dirs = combine_neighbor_components(v);
+                        if overlaps(combined_dirs) {
+                            search_start = v + 1;
+                            break 'find_new_region (v, combined_dirs);
+                        }
+                    }
+                }
+                return;
+            };
+            let region_bit = 1u32 << (overlap_nr % 32);
+
+            queue.clear();
+            queue.push_back(region_v);
+            while let Some(v) = queue.pop_front() {
+                if cops_hull[v].contained() && (self.overlap[v] & region_bit == 0) {
+                    let combined_dirs = combine_neighbor_components(v);
+                    if overlaps(combined_dirs & region_dirs) {
+                        self.overlap[v] |= region_bit;
+                        queue.extend(edges.neighbors_of(v));
+                    }
+                }
+            }
+        }
+    }
+
+    fn mark_dilemma(
+        &mut self,
+        escape_directions: &EscapableDirections,
+        edges: &EdgeList,
+        queue: &mut VecDeque<usize>,
+        _active_cops: &[&Character],
+    ) {
+        let g = escape_directions.graph.data;
+        if !escape_directions.graph.represents_current_map || g.norm != Norm::Hex {
             return;
         }
-        const UNIT_DIRS: &[grid::Coords] = Norm::Hex.unit_directions();
+        let esc_dirs = &escape_directions.esc_directions[..];
+        let esc_comps = &escape_directions.esc_components[..];
 
         let mut overlapping_left = self.overlap.clone();
-        let mut boundaries = [const { Vec::new() }; 6];
-
-        //self.dilemma_regions.clone_from_slice(&self.overlap);
 
         // we guarantee to find every component by iterating trough every vertex.
         // how far we have iterated previously, is remembered here.
@@ -107,223 +155,158 @@ impl DilemmaNodes {
             let component_bit = 1 << overlapping_left[component_v].trailing_zeros();
             debug_assert!(overlapping_left[component_v] & component_bit != 0);
 
-            const NOT_IN_SHADOW: isize = isize::MIN;
-            self.allowed_steps.fill(NOT_IN_SHADOW);
-            self.allowed_dirs.fill(Dirs::EMPTY);
+            self.taken_steps.fill(isize::MAX);
+            self.overlap_dirs.fill(Dirs::EMPTY);
 
-            // find extreme vertices
-            let extreme_points = {
-                let fst_corner = {
-                    let mut v = g.coordinates_of(component_v);
-                    for &dir in UNIT_DIRS {
-                        for _ in 0..g.grid.len {
-                            let Some(v_step) = g.try_wrap(v + dir) else {
-                                break;
-                            };
-                            let index_step = g.unchecked_index_of(v_step);
-                            if overlapping_left[index_step] & component_bit == 0 {
-                                break;
-                            }
-                            v = v_step;
+            overlapping_left[component_v] -= component_bit;
+            queue.push_back(component_v);
+
+            // all extreme vertices in a given direction.
+            let mut extreme_vertices = [g.coordinates_of(component_v); 6];
+            while let Some(v) = queue.pop_front() {
+                {
+                    let combined =
+                        edges.neighbors_of(v).map(|n| esc_dirs[n]).fold(esc_dirs[v], Dirs::union);
+                    let mut options = Dirs::EMPTY;
+                    for &dir in Dirs::unit_bits(Norm::Hex) {
+                        let escape_options = dir.add_adjacent_on_hex().setminus(dir);
+                        if combined.intersection(escape_options) == escape_options {
+                            options.unionize(dir);
                         }
                     }
-                    debug_assert_eq!(Some(v), g.try_wrap(v));
-                    v
-                };
-                let nr_neighs_inside = |v_coords| {
-                    let v_index = g.unchecked_index_of(v_coords);
-                    let neighs = edges.neighbors_of(v_index);
-                    neighs.filter(|&n| overlapping_left[n] & component_bit != 0).count()
-                };
-                debug_assert!(g.wrap || nr_neighs_inside(fst_corner) <= 3);
-                let mut res = [grid::Coords { x: 0, y: 0 }; 6];
-                let mut curr_corner = fst_corner;
-                for boundary in &mut boundaries {
-                    boundary.clear();
+                    self.overlap_dirs[v].unionize(options);
                 }
-                for (res_i, &dir) in izip!(&mut res, UNIT_DIRS) {
-                    let mut v = curr_corner;
-                    for _ in 0..g.grid.len {
-                        let Some(v_step) = g.try_wrap(v + dir) else {
-                            break;
-                        };
-                        let index_step = g.unchecked_index_of(v_step);
-                        if overlapping_left[index_step] & component_bit == 0 {
-                            break;
-                        }
-                        debug_assert!(g.wrap || nr_neighs_inside(v) <= 4);
+                for n in edges.neighbors_of(v) {
+                    if overlapping_left[n] & component_bit != 0 {
+                        overlapping_left[n] -= component_bit;
+                        queue.push_back(n);
 
-                        for (&neigh_dir, boundary) in izip!(UNIT_DIRS, &mut boundaries) {
-                            let Some(neigh_index) = g.index_of(v + neigh_dir) else {
-                                continue;
+                        let n_coords = g.coordinates_of(n);
+                        for (i, extreme) in izip!(0..6, &mut extreme_vertices) {
+                            let diff = g.norm.canonical_coords(n_coords - *extreme);
+                            let diff_dir = match i {
+                                0 => diff.e3_line_index(),
+                                1 => diff.e2_line_index(),
+                                2 => -diff.e1_line_index(),
+                                3 => -diff.e3_line_index(),
+                                4 => -diff.e2_line_index(),
+                                5 => diff.e1_line_index(),
+                                _ => unreachable!(),
                             };
-                            if overlapping_left[neigh_index] & component_bit == 0 {
-                                boundary.push(v);
+                            if diff_dir > 0 {
+                                *extreme = n_coords;
                             }
                         }
-
-                        v = v_step;
                     }
-                    debug_assert!(g.wrap || nr_neighs_inside(v) <= 3);
-                    *res_i = v;
-                    curr_corner = v;
                 }
-                debug_assert_eq!(curr_corner, fst_corner);
-                res
-            };
+            }
 
             let thickness = {
-                const MID: usize = UNIT_DIRS.len() / 2;
-                const ORDER: [usize; MID] = [1, 3, 2];
-                // we evaluate how far apart in the relevant dirction two opposite corners are.
-                // this is the reason we always add all six corners:
-                // we now now at which index an extreme point in a given direction is found.
-                // the order in which the pairs are stored is verified here.
-                debug_assert!({
-                    let (xs, ys) = UNIT_DIRS.split_at(MID);
-                    for (ord, &x, &y) in izip!(ORDER, xs, ys) {
-                        let d = g.norm.canonical_coords(x - y);
-                        match ord {
-                            1 => debug_assert!(d.e1 == 2 && d.e2 == 0 && d.e3 == 0),
-                            2 => debug_assert!(d.e1 == 0 && d.e2 == 2 && d.e3 == 0),
-                            3 => debug_assert!(d.e1 == 0 && d.e2 == 0 && d.e3 == -2),
-                            _ => unreachable!(),
-                        }
-                    }
-                    true
-                });
                 let mut min_diff = isize::MAX;
-                let (fst_half, snd_half) = extreme_points.split_at(MID);
-                // access in same order as in assert above
-                for (ord, &ex_1, &ex_2) in izip!(ORDER, fst_half, snd_half) {
+                let (fst_half, snd_half) = extreme_vertices.split_at(3);
+                for (i, &ex_1, &ex_2) in izip!(0..3, fst_half, snd_half) {
                     let diff = g.norm.canonical_coords(ex_1 - ex_2);
-                    let relevant_index = match ord {
-                        1 => diff.e1_line_index(),
-                        2 => diff.e2_line_index(),
-                        3 => diff.e3_line_index(),
+                    let diff_dir = match i {
+                        0 => diff.e3_line_index(),
+                        1 => diff.e2_line_index(),
+                        2 => diff.e1_line_index(),
                         _ => unreachable!(),
                     };
-                    min_diff = isize::min(min_diff, relevant_index.abs());
+                    min_diff = isize::min(min_diff, diff_dir.abs());
                 }
                 min_diff + 1
             };
 
-            overlapping_left[component_v] -= component_bit;
-            self.allowed_steps[component_v] = thickness;
-            self.allowed_dirs[component_v] = Dirs::all(g.norm);
-            queue.push_back(component_v);
-            while let Some(v) = queue.pop_front() {
-                for n in edges.neighbors_of(v) {
-                    if overlapping_left[n] & component_bit != 0 {
-                        overlapping_left[n] -= component_bit;
-                        self.allowed_steps[n] = thickness;
-                        queue.push_back(n);
+            queue.clear();
+            for (v, neighs, &res) in izip!(0.., edges.neighbors(), &self.overlap_dirs) {
+                let v_count = res.0.count_ones();
+                if esc_dirs[v].is_empty() && v_count >= 2 {
+                    self.dilemma_dirs[v].unionize(res);
+                }
+                for n in neighs {
+                    let n_count = self.overlap_dirs[n].0.count_ones();
+                    if n_count >= 2 && n_count > v_count {
+                        self.dilemma_regions[v] |= 1;
+                        self.taken_steps[n] = 0;
+                        queue.push_back(v);
+                        break;
                     }
                 }
             }
 
-            for ((&shadow_mask, &dir), boundary) in
-                izip!(Dirs::unit_bits_and_directions(g.norm), &boundaries)
-            {
-                for &v in boundary {
-                    let escape_marker = {
-                        let mut raw = 0;
-                        let fst_step = v + dir;
-                        for (i, &esc_dir) in izip!(0.., UNIT_DIRS) {
-                            if let Some(index) = g.index_of(fst_step + esc_dir) {
-                                if self.overlap[index] & component_bit != 0 {
-                                    raw |= 1 << i;
+            let escape_bits = edges
+                .neighbors_of(component_v)
+                .map(|n| esc_comps[n])
+                .fold(esc_comps[component_v], std::ops::BitOr::bitor);
+
+            'pop_queue: while let Some(v) = queue.pop_front() {
+                let v_coords = g.coordinates_of(v);
+
+                let in_safe_region = esc_comps[v] & escape_bits != 0;
+                let continued_dirs = if self.taken_steps[v] == isize::MAX && in_safe_region {
+                    Dirs::all_bits_and_directions(g.norm)
+                        .filter_map(|(&dir, &coords)| {
+                            g.index_of(v_coords + coords).map(|index| {
+                                self.overlap_dirs[index].intersection(dir.add_adjacent_on_hex())
+                            })
+                        })
+                        .fold(self.overlap_dirs[v], Dirs::union)
+                } else {
+                    Dirs::all_bits_and_directions(g.norm)
+                        .filter_map(|(&dir, &coords)| {
+                            g.index_of(v_coords + coords)
+                                .map(|index| self.overlap_dirs[index].intersection(dir))
+                        })
+                        .fold(self.overlap_dirs[v], Dirs::union)
+                };
+
+                let neigh_steps = {
+                    let allowed_dirs = if in_safe_region {
+                        continued_dirs.add_adjacent_on_hex()
+                    } else {
+                        continued_dirs
+                    };
+                    let mut res = smallvec::SmallVec::<[_; 6]>::new();
+                    for (&dir, &coords) in Dirs::all_bits_and_directions(g.norm) {
+                        if allowed_dirs.intersection(dir).nonempty() {
+                            if let Some(n) = g.index_of(v_coords + coords) {
+                                if self.taken_steps[n] < isize::MAX {
+                                    res.push(self.taken_steps[n])
                                 }
                             }
                         }
-                        Dirs(raw)
-                    };
-                    let mut in_region_which_overlaps = true;
-                    let mut steps_left = thickness;
-                    for step_len in 1..g.side_len() {
-                        let Some(index) = g.index_of(v + step_len * dir) else {
-                            break;
-                        };
-                        if in_region_which_overlaps {
-                            if esc_dirs.esc_directions[index].intersection(shadow_mask).nonempty() {
-                                break;
+                    }
+                    res.sort();
+                    res
+                };
+
+                for (&steps_1, &steps_2) in neigh_steps.iter().tuple_windows() {
+                    if steps_1 == steps_2 {
+                        let max_update_val = isize::min(thickness, self.taken_steps[v]);
+                        let new_val = if in_safe_region { steps_1 } else { steps_1 + 1 };
+                        if new_val < max_update_val {
+                            if esc_dirs[v].is_empty() {
+                                self.dilemma_dirs[v].unionize(continued_dirs);
                             }
-                            if esc_dirs.esc_directions[index].nonempty() {
-                                self.allowed_steps[index] = thickness;
-                            } else {
-                                in_region_which_overlaps = false;
-                                queue.push_back(index);
-                            }
+                            self.overlap_dirs[v] = continued_dirs;
+                            self.taken_steps[v] = new_val;
+                            self.dilemma_regions[v] |= 8;
+                            queue.extend(edges.neighbors_of(v));
                         }
-                        if !in_region_which_overlaps {
-                            self.allowed_steps[index] = 0;
-                            steps_left -= 1;
-                            if steps_left == 0 {
-                                break;
-                            }
-                        }
-                        self.allowed_dirs[index].unionize(escape_marker);
-                    }
-                }
-            }
-
-            let mut neigh_vals = smallvec::SmallVec::<[isize; 6]>::new();
-            while let Some(v) = queue.pop_front() {
-                if self.allowed_steps[v] == NOT_IN_SHADOW {
-                    continue;
-                }
-                let allowed_dirs_at_v = self.allowed_dirs[v];
-                if self.dilemma_dirs[v].intersection(allowed_dirs_at_v).nonempty() {
-                    continue;
-                }
-
-                neigh_vals.clear();
-                let v_coords = g.coordinates_of(v);
-                for (&mask, &esc_dir) in Dirs::unit_bits_and_directions(g.norm) {
-                    if mask.intersection(allowed_dirs_at_v).nonempty() {
-                        continue;
-                    }
-                    let Some(neigh_index) = g.index_of(v_coords + esc_dir) else {
-                        continue;
-                        //panic!("a valid escape direction must lead to a valid vertex.");
-                    };
-                    let val = self.allowed_steps[neigh_index];
-                    if val > 0 {
-                        debug_assert_ne!(val, NOT_IN_SHADOW);
-                        neigh_vals.push(val);
-                    }
-                }
-
-                neigh_vals.sort_by(|a, b| a.cmp(b).reverse());
-                if let Some((_, &val)) = neigh_vals
-                    .iter()
-                    .dedup_by_with_count(|a, b| a == b)
-                    .find(|(count, _)| count > &1)
-                {
-                    if self.allowed_steps[v] < val - 1 {
-                        self.dilemma_dirs[v].unionize(allowed_dirs_at_v);
-                        self.dilemma_regions[v] |= component_bit;
-                        self.allowed_steps[v] = val - 1;
-                        queue.extend(edges.neighbors_of(v));
+                        continue 'pop_queue;
                     }
                 }
             }
         }
 
-        let relevant_cops = active_cops
-            .iter()
-            .copied()
-            .filter(|c| g.disc_around(c.vertex(), 2).any(|v| self.dilemma_dirs[v].nonempty()))
-            .collect_vec();
-        esc_dirs.graph.remove_non_winning(&relevant_cops, &mut self.dilemma_dirs);
-
-        for (&dir, &overlap, marker) in
-            izip!(&self.dilemma_dirs, &self.overlap, &mut self.dilemma_regions)
-        {
-            if dir.is_empty() && overlap == 0 {
-                *marker = 0;
-            }
-        }
+        //esc_dirs.graph.remove_non_winning(active_cops, &mut self.dilemma_dirs);
+        //for (&dir, &overlap, marker) in
+        //    izip!(&self.dilemma_dirs, &self.overlap, &mut self.dilemma_regions)
+        //{
+        //    if dir.is_empty() && overlap == 0 {
+        //        *marker = 0;
+        //    }
+        //}
     }
 
     pub fn update(
@@ -343,20 +326,22 @@ impl DilemmaNodes {
         self.dilemma_regions.clear();
         self.dilemma_regions.resize(edges.nr_vertices(), 0);
 
-        self.allowed_steps.clear();
-        self.allowed_steps.resize(edges.nr_vertices(), 0);
-
-        self.allowed_dirs.clear();
-        self.allowed_dirs.resize(edges.nr_vertices(), Dirs::EMPTY);
+        self.taken_steps.clear();
+        self.taken_steps.resize(edges.nr_vertices(), 0);
 
         self.dilemma_dirs.clear();
         self.dilemma_dirs.resize(edges.nr_vertices(), Dirs::EMPTY);
+
+        self.overlap_dirs.clear();
+        self.overlap_dirs.resize(edges.nr_vertices(), Dirs::EMPTY);
 
         if !esc_dirs.graph.represents_current_map {
             return;
         }
 
-        self.mark_overlapping(edges, queue, hull, &esc_dirs.esc_directions);
+        //self.mark_overlapping_dirs(edges, queue, hull, &esc_dirs.esc_directions);
+        self.mark_overlapping_components(edges, queue, hull, &esc_dirs.esc_components);
+        //self.mark_overlap_result_dirs(edges, esc_dirs, hull, queue);
         self.mark_dilemma(esc_dirs, edges, queue, active_cops);
     }
 }

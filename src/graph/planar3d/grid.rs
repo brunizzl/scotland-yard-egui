@@ -175,6 +175,8 @@ pub struct Dirs(pub u8);
 
 #[allow(dead_code)]
 impl Dirs {
+    const MASK: u8 = (1 << 6) - 1;
+
     pub const fn all(norm: Norm) -> Self {
         match norm {
             Norm::Hex => Self(0b00111111),
@@ -218,6 +220,11 @@ impl Dirs {
     #[inline(always)]
     pub fn intersect(&mut self, other: Self) {
         self.0 &= other.0;
+    }
+
+    #[inline(always)]
+    pub const fn setminus(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
     }
 
     pub const fn connected_on(self, norm: Norm) -> bool {
@@ -266,8 +273,7 @@ impl Dirs {
         if self.0 & LST_BIT != 0 {
             res |= FST_BIT;
         }
-        const MASK: u8 = (1 << 6) - 1;
-        Self(res & MASK)
+        Self(res & Self::MASK)
     }
 
     pub const fn keep_inner_on_hex(self) -> Self {
@@ -281,9 +287,8 @@ impl Dirs {
         if self.0 & LST_BIT != 0 {
             shift_left |= FST_BIT;
         }
-        const MASK: u8 = (1 << 6) - 1;
         let res = shift_right & self.0 & shift_left;
-        Self(res & MASK)
+        Self(res & Self::MASK)
     }
 
     /// same order as [`Norm::unit_directions`]
@@ -308,14 +313,22 @@ impl Dirs {
         }
     }
 
-    pub fn unit_bits_and_directions(
+    pub const fn half_rotation(self) -> Self {
+        // this works for both hex and quad,
+        // as in the quad case we just have some more bits guaranteed to be zero.
+        let new_high = self.0 << 3;
+        let new_low = self.0 >> 3;
+        Self((new_high | new_low) & Self::MASK)
+    }
+
+    pub fn all_bits_and_directions(
         norm: Norm,
     ) -> impl Iterator<Item = (&'static Self, &'static Coords)> {
         izip!(Self::unit_bits(norm), norm.unit_directions())
     }
 
     pub fn directions(self, norm: Norm) -> impl Iterator<Item = Coords> {
-        let it = Self::unit_bits_and_directions(norm);
+        let it = Self::all_bits_and_directions(norm);
         it.filter_map(move |(&dir, &coords)| (self.intersection(dir).nonempty()).then_some(coords))
     }
 }
@@ -460,13 +473,6 @@ impl GridGraph {
         )
     }
 
-    pub fn disc_around(&self, v: usize, max_radius: usize) -> impl Iterator<Item = usize> + '_ {
-        let v = self.coordinates_of(v);
-        (1..=max_radius)
-            .flat_map(move |radius| self.circle_around(v, radius))
-            .map(|coords| self.unchecked_index_of(coords))
-    }
-
     pub fn neighbor_indices_of(&self, v: Coords) -> impl Iterator<Item = usize> + '_ {
         self.neighbors_of(v).map(|v| self.unchecked_index_of(v))
     }
@@ -601,7 +607,7 @@ mod test {
     #[test]
     fn unit_directions_in_same_order() {
         for norm in [Norm::Hex, Norm::Quad] {
-            for (&dirs, &v) in Dirs::unit_bits_and_directions(norm) {
+            for (&dirs, &v) in Dirs::all_bits_and_directions(norm) {
                 let v_dirs = norm.canonical_coords(v).dirs();
                 assert_eq!(dirs, v_dirs);
             }

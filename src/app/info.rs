@@ -1615,8 +1615,9 @@ impl Info {
             },
             VertexSymbolInfo::Debugging => {
                 //draw!(self.escapable.owners());
-                //draw_arrows(&self.dilemma.allowed_dirs, u8::MAX);
-                draw!(&self.dilemma.allowed_steps, |&&x| x > 0);
+                //draw_arrows(&self.dilemma.shadow_dirs, Dirs(u8::MAX));
+                draw_arrows(&self.dilemma.overlap_dirs, Dirs(u8::MAX));
+                draw_isize_slice(&self.dilemma.taken_steps);
             },
             VertexSymbolInfo::Escape2 => {
                 let escs = if self.escapable_grid.graph.represents_current_map {

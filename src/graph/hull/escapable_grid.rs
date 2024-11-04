@@ -106,12 +106,27 @@ impl EscapableDirections {
                 }
             }
 
-            // we could take the directions of any boundary vertex and are done,
+            // we could take the `self.esc_directions` of any boundary vertex and are done,
             // except if a region from the other side overlaps into this boundary.
-            let boundary_dirs = boundary_section
-                .iter()
-                .map(|&bv| self.esc_directions[bv])
-                .fold(Dirs::all(g.norm), Dirs::intersection);
+            // we could take the intersection of all of the boundaries `self.esc_directions`,
+            // except if __all__ of the boundary is in the overlap.
+            // note: this still fails at hulls of thickness 1, which we however consider not important.
+            let boundary_dirs = {
+                let mut dirs = Dirs::EMPTY;
+                for &bv in &boundary_section {
+                    let bv_coords = g.coordinates_of(bv);
+                    for (&bits, &coords) in Dirs::all_bits_and_directions(g.norm) {
+                        if dirs.intersection(bits).nonempty() {
+                            continue;
+                        }
+                        let neigh = g.index_of(bv_coords + coords);
+                        if neigh.map_or(true, |n| hull[n].outside()) {
+                            dirs.unionize(bits);
+                        }
+                    }
+                }
+                dirs
+            };
             self.component_directions[component_nr % 32] = boundary_dirs;
             debug_assert!(g.wrap || boundary_dirs.0.count_ones() > 0);
 
@@ -332,6 +347,10 @@ impl DistGridGraph {
                 }
             }
             debug_assert_eq!(curr, cop2);
+            debug_assert!(bd
+                .iter()
+                .tuple_windows()
+                .all(|(&v1, v2)| g.neighbors_of(v1).contains(v2)));
         }
 
         path_dirs.len()
@@ -359,12 +378,35 @@ impl DistGridGraph {
             // escapable region for every direction.
             // note: we only remove "behind" the safe boundary,
             // thus vertices "behind" cops / neighbors of cops are removed seperately below.
-            for (&mask, &escape_dir) in Dirs::unit_bits_and_directions(g.norm) {
-                for safe_boundary in &safe_boundaries[..nr_boundaries] {
-                    let safe_dist = safe_boundary.len() as isize - 1;
+            for (&mask, &escape_dir) in Dirs::all_bits_and_directions(g.norm) {
+                for safe_bd in &safe_boundaries[..nr_boundaries] {
+                    let (Some(&start), Some(&end)) = (safe_bd.first(), safe_bd.last()) else {
+                        // we only call find_safe_boundaries if dist(cop1, cop2) >= 4,
+                        // e.g. if safe boundaries are nonempty.
+                        panic!();
+                    };
+                    let safe_dist = safe_bd.len() as isize - 1;
+                    debug_assert_eq!(dist(start, end), safe_dist);
                     debug_assert_eq!(safe_dist, cops_dist - 4);
-                    for &path_v in safe_boundary {
+                    // this radius around v contains only vertices which have a
+                    // maximum distance to safe_bd which is closer or equal to the safe dist.
+                    // therefore: radius 0 -> v is safe, but any neighbor may not be.
+                    let safe_radius = |v: Coords| {
+                        let max_all =
+                            || safe_bd.iter().map(|&b| dist(v, b)).fold(isize::MIN, isize::max);
+                        let max_dist = if !g.wrap && g.norm == Norm::Hex {
+                            let max_ends = isize::max(dist(v, start), dist(v, end));
+                            // guaranteed by some lemma of thesis
+                            debug_assert_eq!(max_ends, max_all());
+                            max_ends
+                        } else {
+                            max_all()
+                        };
+                        safe_dist - max_dist
+                    };
+                    for &path_v in safe_bd {
                         let mut in_safe_region = true;
+                        let mut nr_safe_steps = 0;
                         for step in 0..g.side_len() {
                             let v = path_v - step * escape_dir;
                             let Some(v_repr) = g.try_wrap(v) else {
@@ -372,19 +414,33 @@ impl DistGridGraph {
                             };
                             let index = g.unchecked_index_of(v_repr);
                             if winning[index].intersection(mask).is_empty() {
+                                // the first time we unmark this direction on this grid line,
+                                // we do so until the end of the line.
+                                // if we therefore unmark earlier sections of the same line,
+                                // we only need to proceed until we hit the already umparked section.
+                                // (this works slightly differently on tori, where only directions
+                                // inside the convex hull are marked to begin with.
+                                // This shortcut still works there, because convexity.)
                                 break;
                             }
 
-                            let still_safe =
-                                || safe_boundary.iter().all(|&b| dist(v_repr, b) <= safe_dist);
-                            in_safe_region = in_safe_region && still_safe();
+                            if in_safe_region {
+                                nr_safe_steps -= 1;
+                                if nr_safe_steps < 0 {
+                                    nr_safe_steps = safe_radius(v_repr);
+                                    in_safe_region = nr_safe_steps >= 0;
+                                }
+                            }
                             // on tori, continuously walking in the same direction will not result
                             // in a monotonous distance increase to a given fixed vertex.
                             // on flat grids with boundaries, it will.
                             // the theory will not (directly) consider tori anyway, thus
                             // we act as if we aren't on a torus => once outside the safe region,
                             // always (from there on) outside the safe region.
-                            debug_assert!(g.wrap || in_safe_region || !still_safe());
+                            if !g.wrap {
+                                debug_assert_eq!(in_safe_region, safe_radius(v_repr) >= 0);
+                            }
+
                             if !in_safe_region {
                                 winning[index].0 -= mask.0;
                             }
@@ -394,11 +450,11 @@ impl DistGridGraph {
             }
         }
 
-        // remove vertices directly shadowed by single cops
+        // remove vertices directly shadowed by (1-neighborhoods of) single cops
         for &ch_cop in cops_vec {
             let cop = g.coordinates_of(ch_cop.vertex());
             winning[g.unchecked_index_of(cop)] = Dirs::EMPTY;
-            for (&mask, &escape_dir) in Dirs::unit_bits_and_directions(g.norm) {
+            for (&mask, &escape_dir) in Dirs::all_bits_and_directions(g.norm) {
                 for cop_neigh in g.neighbors_of(cop) {
                     for step in 0..g.side_len() {
                         let v = cop_neigh - step * escape_dir;
@@ -406,6 +462,10 @@ impl DistGridGraph {
                             break;
                         };
                         if winning[index].intersection(mask).is_empty() {
+                            // same as for cop pairs: if we start to unmark
+                            // a direction of a grid line in this direction,
+                            // we continue to do so until the end of the line.
+                            // thus we know to already be done here.
                             break;
                         }
                         winning[index].0 -= mask.0;
