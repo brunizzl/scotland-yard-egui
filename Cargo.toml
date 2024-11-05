@@ -29,6 +29,7 @@ strum = "=0.26.2"
 strum_macros = "0.26"
 ron = "0.8.1"
 time = "0.3.36"
+web-time = "1.1.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

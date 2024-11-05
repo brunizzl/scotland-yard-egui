@@ -3,6 +3,8 @@ use std::{
     collections::{HashMap, VecDeque},
 };
 
+use web_time::{Duration, Instant};
+
 use itertools::{izip, Itertools};
 
 use egui::{epaint::PathStroke, pos2, vec2, Color32, Painter, Pos2, Rect, Sense, Stroke, Ui};
@@ -345,7 +347,7 @@ pub struct State {
     /// these are grouped like this, to make random steps reproducable:
     /// every time the "random steps" option is activated, the Lcg starts with the same state.
     #[serde(skip)]
-    random_steps: Option<(crate::rand::Lcg, std::time::Instant)>,
+    random_steps: Option<(crate::rand::Lcg, Instant)>,
     #[serde(skip)]
     nr_random_steps_at_once: usize,
 }
@@ -588,7 +590,7 @@ impl State {
         self.future_moves.clear();
     }
 
-    const UPDATE_TIME_RANDOM_STEP: std::time::Duration = std::time::Duration::from_millis(300);
+    const UPDATE_TIME_RANDOM_STEP: Duration = Duration::from_millis(100);
 
     pub fn make_random_next_step(
         &mut self,
@@ -601,8 +603,8 @@ impl State {
         let Some((ref mut gen, ref mut step_time)) = self.random_steps else {
             return false;
         };
-        let now = std::time::Instant::now();
-        if (now - *step_time) >= Self::UPDATE_TIME_RANDOM_STEP {
+        let now = Instant::now();
+        if (now - *step_time) >= Self::UPDATE_TIME_RANDOM_STEP.mul_f64(0.8) {
             *step_time = now;
         } else {
             return false;
@@ -666,7 +668,7 @@ impl State {
             }
         }
 
-        if self.past_moves.len() >= 100_000 {
+        if self.past_moves.len() >= 20_000 {
             self.forget_move_history();
         }
 
@@ -883,8 +885,8 @@ impl State {
                 add_drag_value(ui, nr, "Züge pro Update", (1, 100), 1);
             }
             if make_random_steps != self.random_steps.is_some() {
-                self.random_steps = make_random_steps
-                    .then(|| (crate::rand::Lcg::new(0), std::time::Instant::now()));
+                self.random_steps =
+                    make_random_steps.then(|| (crate::rand::Lcg::new(0), Instant::now()));
             }
             if make_random_steps {
                 change |= self.make_random_next_step(map.edges(), map.positions(), queue);
