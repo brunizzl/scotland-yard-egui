@@ -329,6 +329,16 @@ impl Character {
             ..*self
         }
     }
+
+    fn set_vertex_no_dist_update(&mut self, next_v: usize, positions: &[Pos3]) {
+        if self.past_vertices.is_empty() {
+            self.past_vertices.push(self.vertex());
+        }
+        self.past_vertices.push(next_v);
+        self.nearest_vertex = next_v;
+        self.pos = Pos::OnVertex(positions[next_v]);
+        self.on_node = true;
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -438,10 +448,7 @@ impl State {
         let (i, v) = self.future_moves.pop()?;
         self.past_moves.push((i, v));
         let ch = &mut self.characters[i];
-        ch.past_vertices.push(v);
-        ch.nearest_vertex = v;
-        ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
-        ch.on_node = true;
+        ch.set_vertex_no_dist_update(v, positions);
         Some(i)
     }
 
@@ -580,11 +587,8 @@ impl State {
             }
         };
 
-        ch.past_vertices.push(next_v);
-        ch.nearest_vertex = next_v;
+        ch.set_vertex_no_dist_update(next_v, positions);
         ch.update_distances(edges, queue);
-        ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
-        ch.on_node = true;
 
         self.past_moves.push((character_index, next_v));
         self.future_moves.clear();
@@ -610,26 +614,40 @@ impl State {
             return false;
         }
 
-        let mut character_options =
-            self.characters.iter_mut().filter(|c| c.enabled && c.on_node).collect_vec();
+        let character_options = self
+            .characters
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, ch)| (ch.enabled && ch.on_node).then_some(i))
+            .collect_vec();
         if character_options.is_empty() {
             return false;
         }
         let update_distances_directly = self.nr_random_steps_at_once <= character_options.len();
 
         let mut change = false;
+        let mut with_right_job = Vec::new();
         for _ in 0..self.nr_random_steps_at_once {
-            // choose a character to move
-            let mut with_right_job = character_options
-                .iter_mut()
-                .filter(|ch| !ch.id().same_job(last_id))
-                .collect_vec();
+            with_right_job.clear();
+            with_right_job.extend(
+                character_options
+                    .iter()
+                    .copied()
+                    .filter(|&i| !self.characters[i].id().same_job(last_id)),
+            );
             if with_right_job.is_empty() {
+                last_id = match last_id {
+                    Id::Cop(_) => Id::Robber,
+                    Id::Robber => Id::Cop(0),
+                };
                 continue;
             }
 
-            let ch_index = gen.next() as usize % with_right_job.len();
-            let ch: &mut Character = with_right_job[ch_index];
+            let ch_index = {
+                let choice = gen.next() as usize % with_right_job.len();
+                with_right_job[choice]
+            };
+            let ch = &mut self.characters[ch_index];
             last_id = ch.id();
 
             // choose a step to take
@@ -648,13 +666,10 @@ impl State {
             let next_v = step_options[next_v_index];
 
             // update state
-            ch.past_vertices.push(next_v);
-            ch.nearest_vertex = next_v;
+            ch.set_vertex_no_dist_update(next_v, positions);
             if update_distances_directly {
                 ch.update_distances(edges, queue);
             }
-            ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
-            ch.on_node = true;
 
             self.past_moves.push((ch_index, next_v));
             self.future_moves.clear();
@@ -663,8 +678,8 @@ impl State {
         }
 
         if !update_distances_directly && change {
-            for ch in character_options {
-                ch.update_distances(edges, queue);
+            for i in character_options {
+                self.characters[i].update_distances(edges, queue);
             }
         }
 
@@ -773,6 +788,14 @@ impl State {
 
     /// returns a menu change (e.g. a new character was added, one removed...)
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, queue: &mut VecDeque<usize>) -> bool {
+        debug_assert_eq!(
+            self.past_moves.len(),
+            self.characters
+                .iter()
+                .map(|ch| ch.past_vertices().len().saturating_sub(1))
+                .sum()
+        );
+
         let mut change = false;
         ui.collapsing("Figuren / Züge", |ui| {
             ui.horizontal(|ui| {
@@ -866,7 +889,11 @@ impl State {
             print_move("vorletzter Zug", self.snd_last_moved());
             print_move("letzter Zug", self.last_moved());
             print_move("nächster Zug", self.next_moved());
-            ui.label(format!("Rundenindex: {}", self.past_moves.len() / 2));
+            ui.label(format!(
+                "Rundenindex: {}",
+                self.active_robber()
+                    .map_or(0, |r| r.past_vertices().len().saturating_sub(1))
+            ));
 
             ui.add_space(8.0);
             if ui.button(" 🗑 ").on_hover_text("Spiel vergessen").clicked() {
