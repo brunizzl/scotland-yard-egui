@@ -104,7 +104,7 @@ impl VertexColorInfo {
             Escape2 => "Fluchtoption 2 (Komponenten)",
             Escape2Grid => "Fluchtoption 2 (Richtungen)",
             Escape3Grid => "Fluchtoption 3 (Gitter)",
-            Escape23Grid => "Fluchtoption 2 & 3 (Gitter)",
+            Escape23Grid => "Fluchtoption 2 + 3 (Gitter)",
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
@@ -149,7 +149,7 @@ impl VertexSymbolInfo {
             Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
             Escape2Grid => "jede Fluchtrichtung hat einen Namen in { 0 .. 6 }. \
             Der Marker listet alle Richtungen, in die der Räuber fliehen kann.",
-            Escape23Grid => "Kombination aus Fluchtoption 2 & 3 auf Gitter.",
+            Escape23Grid => "Kombination aus Fluchtoption 2 + 3 auf Gitter.",
             Escape3Grid => "eine dieser Richtungen führt garantiert wieder auf einen Dilemmaknoten",
             MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
             MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",

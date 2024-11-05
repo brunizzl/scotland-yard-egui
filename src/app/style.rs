@@ -21,6 +21,8 @@ pub fn close_options_menu() {
     OPEN_MENU.store(0, Ordering::Release);
 }
 
+pub const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
+
 impl<const N: usize> Style<N>
 where
     [Color32; N]: for<'a> serde::Deserialize<'a> + serde::Serialize,
@@ -59,7 +61,6 @@ where
                     }
                     ui.horizontal(|ui| {
                         ui.label("Größe: ");
-                        const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
                         super::add_drag_value(
                             ui,
                             &mut self.size,

@@ -360,6 +360,8 @@ pub struct State {
     random_steps: Option<(crate::rand::Lcg, Instant)>,
     #[serde(skip)]
     nr_random_steps_at_once: usize,
+    #[serde(skip)]
+    random_update_period: Duration,
 }
 
 impl State {
@@ -377,6 +379,7 @@ impl State {
 
             random_steps: None,
             nr_random_steps_at_once: 1,
+            random_update_period: Duration::ZERO,
         }
     }
 
@@ -594,8 +597,6 @@ impl State {
         self.future_moves.clear();
     }
 
-    const UPDATE_TIME_RANDOM_STEP: Duration = Duration::from_millis(100);
-
     pub fn make_random_next_step(
         &mut self,
         edges: &EdgeList,
@@ -608,18 +609,14 @@ impl State {
             return false;
         };
         let now = Instant::now();
-        if (now - *step_time) >= Self::UPDATE_TIME_RANDOM_STEP.mul_f64(0.8) {
+        if (now - *step_time) >= self.random_update_period.mul_f64(0.8) {
             *step_time = now;
         } else {
             return false;
         }
 
-        let character_options = self
-            .characters
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(i, ch)| (ch.enabled && ch.on_node).then_some(i))
-            .collect_vec();
+        let character_options =
+            self.characters.iter().positions(Character::is_active).collect_vec();
         if character_options.is_empty() {
             return false;
         }
@@ -910,6 +907,11 @@ impl State {
             {
                 let nr = &mut self.nr_random_steps_at_once;
                 add_drag_value(ui, nr, "Züge pro Update", (1, 100), 1);
+
+                let mut period = self.random_update_period.as_secs_f32();
+                const STEP: f32 = std::f32::consts::SQRT_2;
+                add_drag_value(ui, &mut period, "Updaterate [s]", (0.125, 16.0), STEP);
+                self.random_update_period = Duration::from_secs_f32(period);
             }
             if make_random_steps != self.random_steps.is_some() {
                 self.random_steps =
@@ -917,7 +919,7 @@ impl State {
             }
             if make_random_steps {
                 change |= self.make_random_next_step(map.edges(), map.positions(), queue);
-                ui.ctx().request_repaint_after(Self::UPDATE_TIME_RANDOM_STEP);
+                ui.ctx().request_repaint_after(self.random_update_period);
             }
         });
 
