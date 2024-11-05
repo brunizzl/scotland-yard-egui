@@ -16,7 +16,7 @@ use crate::{
     },
 };
 
-use super::{color::*, map, DrawContext};
+use super::{add_drag_value, color::*, map, DrawContext};
 
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub enum Id {
@@ -340,6 +340,14 @@ pub struct State {
 
     pub show_past_steps: bool,
     pub show_allowed_next_steps: bool,
+
+    /// if active, fst is random generator, snd is time of last step.
+    /// these are grouped like this, to make random steps reproducable:
+    /// every time the "random steps" option is activated, the Lcg starts with the same state.
+    #[serde(skip)]
+    random_steps: Option<(crate::rand::Lcg, std::time::Instant)>,
+    #[serde(skip)]
+    nr_random_steps_at_once: usize,
 }
 
 impl State {
@@ -354,6 +362,9 @@ impl State {
 
             show_past_steps: false,
             show_allowed_next_steps: false,
+
+            random_steps: None,
+            nr_random_steps_at_once: 1,
         }
     }
 
@@ -466,13 +477,19 @@ impl State {
     ) {
         let (character_index, last_destination) = 'find_period_start: {
             let hist = &self.past_moves[..];
-            let mut period_len = usize::min(hist.len() / 3, 8);
+            let mut period_len = usize::min(hist.len() / 3, 8) + 1;
             // find longest period with at least two repetitions
-            while period_len > 0 {
+            while period_len > 1 {
+                period_len -= 1;
+
                 let newest_hist = &hist[(hist.len() - 3 * period_len)..];
                 let fst_period = &newest_hist[..period_len];
                 let mid_period = &newest_hist[period_len..(2 * period_len)];
                 let last_period = &newest_hist[(2 * period_len)..];
+                // the pattern should be more interesting than just the same guy over and over.
+                if fst_period.iter().map(|x| x.0).all_equal() {
+                    continue;
+                }
                 let mut same_character_pattern = true;
                 for i in 0..period_len {
                     // only which character moved is compared, because
@@ -489,7 +506,6 @@ impl State {
                     // we would need to also find a pattern in the step directions.
                     break 'find_period_start mid_period[0];
                 }
-                period_len -= 1;
             }
             // if all else fails but two moves where made, take the character of the second last move
             if let &[.., pair, _] = hist {
@@ -570,6 +586,91 @@ impl State {
 
         self.past_moves.push((character_index, next_v));
         self.future_moves.clear();
+    }
+
+    const UPDATE_TIME_RANDOM_STEP: std::time::Duration = std::time::Duration::from_millis(300);
+
+    pub fn make_random_next_step(
+        &mut self,
+        edges: &EdgeList,
+        positions: &[Pos3],
+        queue: &mut VecDeque<usize>,
+    ) -> bool {
+        let mut last_id = self.last_moved().map_or(Id::Robber, |c| c.id());
+
+        let Some((ref mut gen, ref mut step_time)) = self.random_steps else {
+            return false;
+        };
+        let now = std::time::Instant::now();
+        if (now - *step_time) >= Self::UPDATE_TIME_RANDOM_STEP {
+            *step_time = now;
+        } else {
+            return false;
+        }
+
+        let mut character_options =
+            self.characters.iter_mut().filter(|c| c.enabled && c.on_node).collect_vec();
+        if character_options.is_empty() {
+            return false;
+        }
+        let update_distances_directly = self.nr_random_steps_at_once <= character_options.len();
+
+        let mut change = false;
+        for _ in 0..self.nr_random_steps_at_once {
+            // choose a character to move
+            let mut with_right_job = character_options
+                .iter_mut()
+                .filter(|ch| !ch.id().same_job(last_id))
+                .collect_vec();
+            if with_right_job.is_empty() {
+                continue;
+            }
+
+            let ch_index = gen.next() as usize % with_right_job.len();
+            let ch: &mut Character = with_right_job[ch_index];
+            last_id = ch.id();
+
+            // choose a step to take
+            let last_v = if ch.past_vertices.len() >= 2 {
+                debug_assert_eq!(ch.past_vertices.last(), Some(&ch.vertex()));
+                ch.past_vertices[ch.past_vertices.len() - 2]
+            } else {
+                usize::MAX
+            };
+            let step_options =
+                edges.neighbors_of(ch.vertex()).filter(|&n| n != last_v).collect_vec();
+            if step_options.is_empty() {
+                continue;
+            }
+            let next_v_index = gen.next() as usize % step_options.len();
+            let next_v = step_options[next_v_index];
+
+            // update state
+            ch.past_vertices.push(next_v);
+            ch.nearest_vertex = next_v;
+            if update_distances_directly {
+                ch.update_distances(edges, queue);
+            }
+            ch.pos = Pos::OnVertex(positions[ch.nearest_vertex]);
+            ch.on_node = true;
+
+            self.past_moves.push((ch_index, next_v));
+            self.future_moves.clear();
+
+            change = true;
+        }
+
+        if !update_distances_directly && change {
+            for ch in character_options {
+                ch.update_distances(edges, queue);
+            }
+        }
+
+        if self.past_moves.len() >= 100_000 {
+            self.forget_move_history();
+        }
+
+        change
     }
 
     pub fn forget_move_history(&mut self) {
@@ -763,11 +864,31 @@ impl State {
             print_move("vorletzter Zug", self.snd_last_moved());
             print_move("letzter Zug", self.last_moved());
             print_move("nächster Zug", self.next_moved());
+            ui.label(format!("Rundenindex: {}", self.past_moves.len() / 2));
 
             ui.add_space(8.0);
             if ui.button(" 🗑 ").on_hover_text("Spiel vergessen").clicked() {
                 self.forget_move_history();
                 change = true;
+            }
+
+            ui.add_space(8.0);
+            let mut make_random_steps = self.random_steps.is_some();
+            ui.add(egui::Checkbox::new(
+                &mut make_random_steps,
+                "zufällige Schritte",
+            ));
+            {
+                let nr = &mut self.nr_random_steps_at_once;
+                add_drag_value(ui, nr, "Züge pro Update", (1, 100), 1);
+            }
+            if make_random_steps != self.random_steps.is_some() {
+                self.random_steps = make_random_steps
+                    .then(|| (crate::rand::Lcg::new(0), std::time::Instant::now()));
+            }
+            if make_random_steps {
+                change |= self.make_random_next_step(map.edges(), map.positions(), queue);
+                ui.ctx().request_repaint_after(Self::UPDATE_TIME_RANDOM_STEP);
             }
         });
 

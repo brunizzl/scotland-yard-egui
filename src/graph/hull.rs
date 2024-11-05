@@ -305,7 +305,7 @@ fn retain_safe_inner_boundary(
     {
         let boundary = &mut boundary[..];
         let mut check_vals = smallvec::SmallVec::<[usize; 6]>::new();
-        while check_front < boundary.len() {
+        'check_all: while check_front < boundary.len() {
             let dist_at = |i| cop_dist[boundary[i]];
             let check_dist = dist_at(check_front);
             let mut check_end = check_front + 1;
@@ -383,7 +383,9 @@ fn retain_safe_inner_boundary(
                 take_largest!(|v| edges.neighbors_of(v).filter(|&n| keep[n] != Keep::No));
 
                 println!("^ ungelöst");
-                assert!(!check_vals.is_empty());
+                if check_vals.is_empty() {
+                    break 'check_all;
+                }
                 check_vals[0]
             };
             retain_end += 1;

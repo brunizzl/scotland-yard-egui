@@ -195,7 +195,7 @@ impl DilemmaNodes {
             'pop_queue: while let Some(v) = queue.pop_front() {
                 let v_coords = g.coordinates_of(v);
 
-                let in_safe_region = cone_dirs[v].intersection(component_dirs).nonempty();
+                let in_safe_region = cone_dirs[v].intersection(component_dirs).0.count_ones() > 1;
                 let continued_dirs = if self.taken_steps[v] == isize::MAX && in_safe_region {
                     Dirs::all_bits_and_directions(g.norm)
                         .filter_map(|(&dir, &coords)| {

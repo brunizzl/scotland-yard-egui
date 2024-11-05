@@ -1,4 +1,5 @@
 ///  linear congruential generator
+#[derive(Default, Clone, Copy)]
 pub struct Lcg {
     state: u64,
 }
