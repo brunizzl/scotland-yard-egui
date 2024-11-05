@@ -36,19 +36,23 @@ impl DilemmaNodes {
         }
     }
 
-    #[allow(dead_code)]
     fn mark_overlapping_dirs(
         &mut self,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
         cops_hull: &[InSet],
-        strong_esc_dirs: &[Dirs],
+        cone_esc_dirs: &[Dirs],
     ) {
+        // guarentee only vertices where multiple escape options exist are marked as escapeable.
+        // not tested here: every marked direction must lead on a straight line to
+        // the boundary and every vertex in between must also have the direction marked.
+        debug_assert!(cone_esc_dirs.iter().all(|&dirs| dirs.0.count_ones() != 1));
+
         let combine_neighbor_dirs = |v: usize| {
             edges
                 .neighbors_of(v)
-                .map(|n| strong_esc_dirs[n])
-                .fold(strong_esc_dirs[v], Dirs::union)
+                .map(|n| cone_esc_dirs[n])
+                .fold(cone_esc_dirs[v], Dirs::union)
         };
 
         self.region_info.clear();
@@ -100,6 +104,7 @@ impl DilemmaNodes {
         let cone_dirs = &escape_directions.cone_esc_directions[..];
         let esc_dirs = &escape_directions.esc_directions[..];
 
+        // helps to find regions.
         let mut overlapping_left = self.overlap.clone();
         self.dilemma_regions.copy_from_slice(&self.overlap);
 
@@ -137,14 +142,14 @@ impl DilemmaNodes {
 
                         let n_coords = g.coordinates_of(n);
                         for (i, extreme) in izip!(0..6, &mut extreme_vertices) {
-                            let diff = g.norm.canonical_coords(n_coords - *extreme);
+                            let diff = n_coords - *extreme;
                             let diff_dir = match i {
-                                0 => diff.e3_line_index(),
-                                1 => diff.e2_line_index(),
-                                2 => -diff.e1_line_index(),
-                                3 => -diff.e3_line_index(),
-                                4 => -diff.e2_line_index(),
-                                5 => diff.e1_line_index(),
+                                0 => diff.line_e1_index(),
+                                1 => diff.line_e2_index(),
+                                2 => diff.line_e3_index(),
+                                3 => -diff.line_e1_index(),
+                                4 => -diff.line_e2_index(),
+                                5 => -diff.line_e3_index(),
                                 _ => unreachable!(),
                             };
                             if diff_dir > 0 {
@@ -159,11 +164,11 @@ impl DilemmaNodes {
                 let mut min_diff = isize::MAX;
                 let (fst_half, snd_half) = extreme_vertices.split_at(3);
                 for (i, &ex_1, &ex_2) in izip!(0..3, fst_half, snd_half) {
-                    let diff = g.norm.canonical_coords(ex_1 - ex_2);
+                    let diff = ex_1 - ex_2;
                     let diff_dir = match i {
-                        0 => diff.e3_line_index(),
-                        1 => diff.e2_line_index(),
-                        2 => diff.e1_line_index(),
+                        0 => diff.line_e1_index(),
+                        1 => diff.line_e2_index(),
+                        2 => diff.line_e3_index(),
                         _ => unreachable!(),
                     };
                     min_diff = isize::min(min_diff, diff_dir.abs());
@@ -246,6 +251,7 @@ impl DilemmaNodes {
                 }
             }
         }
+        debug_assert!(overlapping_left.iter().all(|&overlap| overlap == 0));
 
         // TODO: think about wether this correct
         escape_directions
@@ -253,13 +259,8 @@ impl DilemmaNodes {
             .remove_non_winning(active_cops, &mut self.dilemma_dirs);
 
         // unmark vertices which where just removed as non_winning
-        for (&dir, &overlap, &esc, marker) in izip!(
-            &self.dilemma_dirs,
-            &self.overlap,
-            esc_dirs,
-            &mut self.dilemma_regions
-        ) {
-            if dir.is_empty() && overlap == 0 && esc.is_empty() {
+        for (&dir, &esc, marker) in izip!(&self.dilemma_dirs, esc_dirs, &mut self.dilemma_regions) {
+            if dir.is_empty() && esc.is_empty() {
                 *marker = 0;
             }
         }

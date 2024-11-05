@@ -8,6 +8,23 @@ pub struct Coords {
     pub y: isize,
 }
 
+impl Coords {
+    /// only valid on [`Norm::Hex`], SAME COORDINATE SYSTEM AS THESIS
+    pub const fn line_e1_index(&self) -> isize {
+        -self.y
+    }
+
+    /// only valid on [`Norm::Hex`], SAME COORDINATE SYSTEM AS THESIS
+    pub const fn line_e2_index(&self) -> isize {
+        -self.x
+    }
+
+    /// only valid on [`Norm::Hex`], SAME COORDINATE SYSTEM AS THESIS
+    pub const fn line_e3_index(&self) -> isize {
+        -self.x + self.y
+    }
+}
+
 impl std::ops::Add<Coords> for Coords {
     type Output = Coords;
     fn add(self, rhs: Coords) -> Self::Output {
@@ -95,85 +112,19 @@ impl OrderedColWise {
     }
 }
 
-/// on a hexagonal grid, every direction can be expressed in
-/// any combination of two (linearly independent) unit directions.
-/// The combination with the shortest sum of absolute values is meant to be stored here.
-/// e.g. one entry is always zero, on square grids always [`Self::e3`].
-/// on hex grids, if in a [`Coords`] value, x and y have different signs (in thesis: same signs),
-/// then `Coords{ x, y }` is the same as `CanonicalForm{ e1: x, e2: y, e3: 0 }`.
-///
-/// The purpose of this struct is to have a form of coordinates on the torus,
-/// which directly tell which directions to take to get somewhere on a shortest path.
-pub struct CanonicalCoords {
-    /// same coodinate as is thesis, follows first coordinate exis
-    pub e1: isize,
-    /// negative coordinate compared to thesis, follows snd coodinate axis
-    pub e2: isize,
-    /// same coodinate as is thesis
-    pub e3: isize,
-}
-
-impl CanonicalCoords {
-    /// points east in screen directions
-    pub const E1: Coords = Coords { x: 1, y: 0 };
-    /// points south-south-west in screen directions
-    pub const E2: Coords = Coords { x: 0, y: 1 };
-    /// points nord-nord-west in screen directions
-    pub const E3: Coords = Coords { x: -1, y: -1 };
-
-    #[allow(dead_code)]
-    pub fn as_coords(&self) -> Coords {
-        self.e1 * Self::E1 + self.e2 * Self::E2 + self.e3 * Self::E3
-    }
-
-    /// only valid on [`Norm::Hex`]
-    pub fn e1_line_index(&self) -> isize {
-        self.e3 - self.e2
-    }
-
-    /// only valid on [`Norm::Hex`]
-    pub fn e2_line_index(&self) -> isize {
-        self.e1 - self.e3
-    }
-
-    /// only valid on [`Norm::Hex`]
-    pub fn e3_line_index(&self) -> isize {
-        self.e1 - self.e2
-    }
-
-    pub const fn dirs(&self) -> Dirs {
-        // this works for both hex and quad, as in the quad case we just have `self.e3 == 0`.
-        let e1pos = (self.e1 > 0) as u8;
-        let e3neg = (self.e3 < 0) as u8 * (1 << 1);
-        let e2pos = (self.e2 > 0) as u8 * (1 << 2);
-        let e1neg = (self.e1 < 0) as u8 * (1 << 3);
-        let e3pos = (self.e3 > 0) as u8 * (1 << 4);
-        let e2neg = (self.e2 < 0) as u8 * (1 << 5);
-        Dirs(e1pos | e3neg | e2pos | e1neg | e3pos | e2neg)
-    }
-}
-
-/// given the unit directions of [`CanonicalCoords`],
-/// this type differentiates which coordinate sign combo is present.
 /// on hexagonal coordinates, the first 6 bits are in use and represent the different sectors as follows:
-/// - positive e1 coordiante
+/// - positive e1 coordiante (x in [``Coords`])
 /// - negative e3 coordinate
-/// - positive e2 coordinate
-/// - negative e1 coordinate
+/// - positive e2 coordinate (-y in [``Coords`])
+/// - negative e1 coordinate (-x in [``Coords`])
 /// - positive e3 coordinate
-/// - negative e2 coordinate
-///
-/// therefore for any single vector in this format:
-/// not on grid line -> two bits are set.
-/// on grid line but nonzero -> one bit is set.
-/// zero -> no bit is set.
+/// - negative e2 coordinate (y in [``Coords`])
 ///
 /// The same is done with square coordinates, therefore bits 1 and 4 are always 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Dirs(pub u8);
 
-#[allow(dead_code)]
 impl Dirs {
     const MASK: u8 = (1 << 6) - 1;
 
@@ -194,12 +145,6 @@ impl Dirs {
     #[inline(always)]
     pub const fn nonempty(self) -> bool {
         self.0 != 0
-    }
-
-    #[inline(always)]
-    pub const fn contain(self, cc: &CanonicalCoords) -> bool {
-        let dirs = cc.dirs();
-        (self.0 | !dirs.0) == u8::MAX
     }
 
     #[inline(always)]
@@ -225,42 +170,6 @@ impl Dirs {
     #[inline(always)]
     pub const fn setminus(self, other: Self) -> Self {
         Self(self.0 & !other.0)
-    }
-
-    pub const fn connected_on(self, norm: Norm) -> bool {
-        const fn compute_connected(square: bool) -> [bool; 64] {
-            let mut res = [false; 64];
-            let mut union: u8 = 0;
-            while union < 64 {
-                let mut nr_flips = 0;
-                let fst_bit = union & 1 != 0;
-                let mut last_bit = fst_bit;
-                let mut i = 1;
-                while i < 6 {
-                    // bits 1 and 4 on a square grid are not used, because
-                    // this is where we store how any steps we took in direction e3.
-                    // -> skip these
-                    if !square || (i != 1 && i != 4) {
-                        let curr_bit = (union & (1 << i)) != 0;
-                        if curr_bit != last_bit {
-                            nr_flips += 1;
-                        }
-                        last_bit = curr_bit;
-                    }
-                    i += 1;
-                }
-                assert!((fst_bit == last_bit) == (nr_flips % 2 == 0));
-                res[union as usize] = nr_flips <= 2;
-                union += 1;
-            }
-            res
-        }
-        const HEX_CONNECTED: [bool; 64] = compute_connected(false);
-        const QUAD_CONNECTED: [bool; 64] = compute_connected(true);
-        match norm {
-            Norm::Hex => HEX_CONNECTED[self.0 as usize],
-            Norm::Quad => QUAD_CONNECTED[self.0 as usize],
-        }
     }
 
     pub const fn add_adjacent_on_hex(self) -> Self {
@@ -313,14 +222,6 @@ impl Dirs {
         }
     }
 
-    pub const fn half_rotation(self) -> Self {
-        // this works for both hex and quad,
-        // as in the quad case we just have some more bits guaranteed to be zero.
-        let new_high = self.0 << 3;
-        let new_low = self.0 >> 3;
-        Self((new_high | new_low) & Self::MASK)
-    }
-
     pub fn all_bits_and_directions(
         norm: Norm,
     ) -> impl Iterator<Item = (&'static Self, &'static Coords)> {
@@ -329,7 +230,7 @@ impl Dirs {
 
     pub fn directions(self, norm: Norm) -> impl Iterator<Item = Coords> {
         let it = Self::all_bits_and_directions(norm);
-        it.filter_map(move |(&dir, &coords)| (self.intersection(dir).nonempty()).then_some(coords))
+        it.filter_map(move |(&dir, &coords)| self.intersection(dir).nonempty().then_some(coords))
     }
 }
 
@@ -370,28 +271,6 @@ impl Norm {
                 Coords { x: -1, y: 0 },
                 Coords { x: 0, y: -1 },
             ],
-        }
-    }
-
-    pub const fn canonical_coords(self, vec: Coords) -> CanonicalCoords {
-        const fn e123(e1: isize, e2: isize, e3: isize) -> CanonicalCoords {
-            CanonicalCoords { e1, e2, e3 }
-        }
-        let Coords { x, y } = vec;
-        match self {
-            Self::Hex => {
-                // again: the coordinate system in use here has
-                // the y-axis flipped when compared to the system
-                // chosen in the thesis.
-                if x * y <= 0 {
-                    e123(x, y, 0)
-                } else if y.abs() > x.abs() {
-                    e123(0, y - x, -x)
-                } else {
-                    e123(x - y, 0, -y)
-                }
-            },
-            Self::Quad => e123(x, y, 0),
         }
     }
 }
@@ -495,122 +374,6 @@ mod test {
         assert_eq!(Norm::Hex.unit_directions().len(), 6);
         for &dir in Norm::Hex.unit_directions() {
             assert_eq!(1, Norm::Hex.apply(dir));
-        }
-    }
-
-    #[test]
-    fn round_trip_canonical_hex() {
-        let norm = Norm::Hex;
-        for x in -5..=5 {
-            for y in -5..=5 {
-                let vec = Coords { x, y };
-                let cc = norm.canonical_coords(vec);
-                let back = cc.as_coords();
-                assert_eq!(vec, back);
-                let len = cc.e1.abs() + cc.e2.abs() + cc.e3.abs();
-                assert_eq!(len, norm.apply(vec));
-            }
-        }
-    }
-
-    #[test]
-    fn round_trip_canonical_quad() {
-        let norm = Norm::Quad;
-        for x in -5..=5 {
-            for y in -5..=5 {
-                let vec = Coords { x, y };
-                let cc = norm.canonical_coords(vec);
-                let back = cc.as_coords();
-                assert_eq!(vec, back);
-                let len = cc.e1.abs() + cc.e2.abs() + cc.e3.abs();
-                assert_eq!(len, norm.apply(vec));
-            }
-        }
-    }
-
-    #[test]
-    fn round_trip_sector_combos_dirs_hex() {
-        use itertools::Itertools;
-        let norm = Norm::Hex;
-        for mut active_dirs in norm.unit_directions().iter().copied().powerset() {
-            let sectors = active_dirs
-                .iter()
-                .map(|c| norm.canonical_coords(*c).dirs())
-                .fold(Dirs::EMPTY, Dirs::union);
-            let mut sectors_dirs = sectors.directions(norm).collect_vec();
-            active_dirs.sort();
-            sectors_dirs.sort();
-            assert_eq!(active_dirs, sectors_dirs);
-        }
-    }
-
-    #[test]
-    fn round_trip_sector_combos_dirs_quad() {
-        use itertools::Itertools;
-        let norm = Norm::Quad;
-        for mut active_dirs in norm.unit_directions().iter().copied().powerset() {
-            let sectors = active_dirs
-                .iter()
-                .map(|c| norm.canonical_coords(*c).dirs())
-                .fold(Dirs::EMPTY, Dirs::union);
-            let mut sectors_dirs = sectors.directions(norm).collect_vec();
-            active_dirs.sort();
-            sectors_dirs.sort();
-            assert_eq!(active_dirs, sectors_dirs);
-        }
-    }
-
-    #[test]
-    fn connected_sections() {
-        {
-            let norm = Norm::Hex;
-            let [a, b, c, d, e, f] = [1, 2, 4, 8, 16, 32];
-            assert!(Dirs(a | b | d | e | f).connected_on(norm));
-            assert!(Dirs(a | b | c).connected_on(norm));
-            assert!(Dirs(a | b).connected_on(norm));
-            assert!(Dirs(c | d | e).connected_on(norm));
-            assert!(Dirs(f | a).connected_on(norm));
-            assert!(Dirs::EMPTY.connected_on(norm));
-            assert!(Dirs(d).connected_on(norm));
-
-            assert!(!Dirs(a | c | d).connected_on(norm));
-            assert!(!Dirs(a | c | d | f).connected_on(norm));
-            assert!(!Dirs(a | d).connected_on(norm));
-        }
-        {
-            let norm = Norm::Quad;
-            let [a, b, c, d] = [1, 4, 8, 32];
-            assert!(Dirs(a | c | d).connected_on(norm));
-            assert!(Dirs(a | b | d).connected_on(norm));
-            assert!(Dirs(a | b | c).connected_on(norm));
-            assert!(Dirs(a | b).connected_on(norm));
-            assert!(Dirs(c | d).connected_on(norm));
-            assert!(Dirs(d | a).connected_on(norm));
-            assert!(Dirs::EMPTY.connected_on(norm));
-            assert!(Dirs(d).connected_on(norm));
-
-            assert!(!Dirs(a | c).connected_on(norm));
-            assert!(!Dirs(b | d).connected_on(norm));
-        }
-    }
-
-    #[test]
-    fn adjacent_directions_are_connected() {
-        for i in 0..6 {
-            let single_dir = Dirs(1 << i);
-            let three_dirs = single_dir.add_adjacent_on_hex();
-            assert!(three_dirs.0.count_ones() == 3);
-            assert!(three_dirs.connected_on(Norm::Hex));
-        }
-    }
-
-    #[test]
-    fn unit_directions_in_same_order() {
-        for norm in [Norm::Hex, Norm::Quad] {
-            for (&dirs, &v) in Dirs::all_bits_and_directions(norm) {
-                let v_dirs = norm.canonical_coords(v).dirs();
-                assert_eq!(dirs, v_dirs);
-            }
         }
     }
 }
