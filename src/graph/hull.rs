@@ -19,7 +19,7 @@ mod plane_cop_strat;
 pub use plane_cop_strat::PlaneCopStat;
 
 struct SafeSegment {
-    /// indexes into [`ConvexHullV2::flat_boundary_segments`]
+    /// indexes into [`CopsHull::flat_boundary_segments`]
     boundary_indices: Range<usize>,
     /// vertices of cops guarding the segment
     guards: (usize, usize),
@@ -54,10 +54,6 @@ impl CopsHull {
 
     pub fn hull(&self) -> &[InSet] {
         &self.hull
-    }
-
-    pub fn boundary(&self) -> impl Iterator<Item = usize> + '_ {
-        self.flat_boundary_segments.iter().copied()
     }
 
     /// each segment consists of vertices on boundary, segments are divided by cops
@@ -193,6 +189,8 @@ impl CopsHull {
                         }
                     }
                 }
+                debug_assert!((0..hull.len()).all(|v| !new_on_boundary(v, hull)));
+                debug_assert!(hull.iter().copied().all(InSet::finished_construction));
                 return;
             };
             // mark every suitable withness vertex as withness

@@ -817,7 +817,7 @@ impl Info {
         self.escapable_grid.update(
             con.map.data(),
             &mut self.queue,
-            self.cop_hull_data.hull(),
+            &self.cop_hull_data,
             &active_cops,
         );
     }
@@ -1217,11 +1217,13 @@ impl Info {
         if self.options.show_hull_boundary {
             let color = self.options.hull_boundary_style.colors[0];
             let size = con.scale * 4.0 * self.options.hull_boundary_style.size;
-            for v in self.cop_hull_data.boundary() {
-                if con.visible[v] {
-                    let draw_pos = con.vertex_draw_pos(v);
-                    let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
-                    con.painter.add(marker_circle);
+            for segment in self.cop_hull_data.safe_boundary_parts() {
+                for &v in segment {
+                    if con.visible[v] {
+                        let draw_pos = con.vertex_draw_pos(v);
+                        let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
+                        con.painter.add(marker_circle);
+                    }
                 }
             }
         }

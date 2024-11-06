@@ -63,59 +63,15 @@ impl EscapableDirections {
         }
     }
 
-    /// returns the number of found components
-    fn find_components(&mut self, hull: &[InSet], queue: &mut VecDeque<usize>) -> usize {
+    fn find_components(&mut self, cops_hull: &CopsHull) {
         let g = self.graph.data;
+        let hull = cops_hull.hull();
         assert_eq!(hull.len(), self.esc_components.len());
         assert_eq!(hull.len(), self.esc_directions.len());
         assert_eq!(hull.len(), self.cone_esc_directions.len());
 
-        let mut boundary_section = Vec::new();
-
-        // we guarantee to find every component by iterating trough every vertex.
-        // how far we have iterated previously, is remembered here.
-        let mut search_start = 0;
-        for component_nr in 0.. {
+        for (component_nr, boundary_section) in izip!(0.., cops_hull.safe_boundary_parts()) {
             let component_bit = 1u32 << (component_nr % 32);
-
-            // find first not-yet handled vertex of a component
-            let component_v = 'find_new_component: {
-                let i0 = search_start;
-                for (i, h, &esc, &marker) in izip!(
-                    i0..,
-                    &hull[i0..],
-                    &self.esc_directions[i0..],
-                    &self.esc_components[i0..]
-                ) {
-                    if h.on_boundary() && esc.nonempty() && marker == 0 {
-                        search_start = i;
-                        break 'find_new_component i;
-                    }
-                }
-                return component_nr;
-            };
-
-            boundary_section.clear();
-            queue.clear();
-
-            // find the boundary section
-            boundary_section.push(component_v);
-            self.esc_components[component_v] |= component_bit;
-            queue.push_back(component_v);
-            while let Some(v) = queue.pop_front() {
-                let v_coords = g.coordinates_of(v);
-                for n in g.neighbor_indices_of(v_coords) {
-                    if hull[n].on_boundary()
-                        && self.esc_directions[n].nonempty()
-                        && self.esc_components[n] & component_bit == 0
-                    {
-                        boundary_section.push(n);
-                        self.esc_components[n] |= component_bit;
-                        queue.push_back(n);
-                    }
-                }
-            }
-
             // we could take the `self.esc_directions` of any boundary vertex and are done,
             // except if a region from the other side overlaps into this boundary.
             // we could take the intersection of all of the boundaries `self.esc_directions`,
@@ -123,7 +79,7 @@ impl EscapableDirections {
             // note: this still fails at hulls of thickness 1, which we however consider not important.
             let boundary_dirs = {
                 let mut dirs = Dirs::EMPTY;
-                for &bv in &boundary_section {
+                for &bv in boundary_section {
                     let bv_coords = g.coordinates_of(bv);
                     for (&bits, &coords) in Dirs::all_bits_and_directions(g.norm) {
                         if dirs.intersection(bits).nonempty() {
@@ -158,13 +114,13 @@ impl EscapableDirections {
 
             // mark the region
             for &inside_dir in &inside_dirs {
-                for &bv in &boundary_section {
+                for &bv in boundary_section {
                     let mut cone_dirs = boundary_dirs;
                     self.cone_esc_directions[bv].unionize(cone_dirs);
 
                     let bv_coords = g.coordinates_of(bv);
                     let mut dirs_left = center_dirs;
-                    for step_len in 1..g.side_len() {
+                    for step_len in 0..g.side_len() {
                         let Some(v) = g.index_of(bv_coords + step_len * inside_dir) else {
                             break;
                         };
@@ -187,7 +143,6 @@ impl EscapableDirections {
                 }
             }
         }
-        unreachable!()
     }
 
     /// sometimes we failed to unmark some escape directions on tori.
@@ -216,10 +171,10 @@ impl EscapableDirections {
         &mut self,
         map: &Embedding3D,
         queue: &mut VecDeque<usize>,
-        cop_hull: &[InSet],
+        cop_hull: &CopsHull,
         active_cops: &[&Character],
     ) {
-        assert_eq!(map.nr_vertices(), cop_hull.len());
+        assert_eq!(map.nr_vertices(), cop_hull.hull().len());
 
         self.esc_components.clear();
         self.esc_components.resize(map.nr_vertices(), 0);
@@ -234,10 +189,10 @@ impl EscapableDirections {
         if !self.graph.represents_current_map {
             return;
         }
-        self.initialize_directions(cop_hull);
+        self.initialize_directions(cop_hull.hull());
         self.graph.remove_non_winning(active_cops, &mut self.esc_directions);
-        let nr_components = self.find_components(cop_hull, queue);
-        self.delete_leftover_on_torus(nr_components);
+        self.find_components(cop_hull);
+        self.delete_leftover_on_torus(cop_hull.safe_boundary_parts().len());
     }
 }
 
