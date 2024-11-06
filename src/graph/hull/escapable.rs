@@ -1,5 +1,24 @@
 use super::*;
 
+/// relies just on [`InSet::No`] and [`InSet::Interieur`], doesn't need [`InSet::OnBoundary`] for `hull` to function.
+/// `all_elements` contains every element of `hull`.
+fn find_unordered_boundary(
+    boundary: &mut Vec<usize>,
+    hull: &[InSet],
+    edges: &EdgeList,
+    all_elements: &[usize],
+) {
+    debug_assert!(boundary.is_empty());
+    debug_assert_eq!(edges.nr_vertices(), hull.len());
+
+    for &v in all_elements {
+        debug_assert!(hull[v].contained());
+        if edges.neighbors_of(v).any(|n| hull[n].outside()) {
+            boundary.push(v);
+        }
+    }
+}
+
 /// all cops delimiting a Region are listed here
 /// values are interpreted as indices in `cops` slice, e.g.
 /// index 0 maps to the second position in all of the characters.
@@ -63,7 +82,7 @@ pub struct EscapableNodes {
     escapable: Vec<u32>, //one entry per vertex
 
     /// intermediary value
-    cop_pair_hull: CopPairHullData,
+    cop_pair_hull: CopPairHull,
 
     /// intermediary value, kept to reserve allocations etc.
     /// lists vertices of cop_pair_hull(s) boundaries, but only side torward outher boundary.
@@ -122,7 +141,7 @@ impl EscapableNodes {
             some_boundary_dist: Vec::new(),
             last_write_by: Vec::new(),
             escapable: Vec::new(),
-            cop_pair_hull: CopPairHullData::default(),
+            cop_pair_hull: CopPairHull::default(),
             some_inner_boundaries: Default::default(),
             keep_escapable: Vec::new(),
             cop_groups: Vec::new(),
@@ -291,7 +310,7 @@ impl EscapableNodes {
                     ) {
                         self.cop_pair_hull.compute_hull([c1, c2], edges, queue);
                         boundary.clear();
-                        boundary::find_unordered_boundary(
+                        find_unordered_boundary(
                             boundary,
                             &self.cop_pair_hull.hull,
                             edges,
@@ -478,7 +497,7 @@ impl EscapableNodes {
 
             self.cop_pair_hull.compute_hull([c1, c2], edges, queue);
             boundary.clear();
-            boundary::find_unordered_boundary(
+            find_unordered_boundary(
                 &mut boundary,
                 &self.cop_pair_hull.hull,
                 edges,

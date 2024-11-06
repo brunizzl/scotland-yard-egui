@@ -6,8 +6,6 @@ use itertools::{izip, Itertools};
 use super::*;
 use crate::app::character::Character;
 
-mod boundary;
-
 mod escapable;
 pub use escapable::EscapableNodes;
 
@@ -402,202 +400,6 @@ impl CopsHull {
     }
 }
 
-#[allow(dead_code)]
-/// geodesic convex hull over some vertices with respect to some graph
-pub struct ConvexHullData {
-    /// one entry per vertex in graph
-    hull: Vec<InSet>,
-
-    /// enumerates vertices which are on boundary
-    /// beginning == end == some cop's position
-    boundary: Vec<usize>,
-
-    /// indexes in self.boundary, each segment is delimited by two cops on boundary.
-    /// includes only vertices with min cop dist >= 2
-    /// segments without any interior point (e.g. delimiting cops with distance <= 2) are NOT stored.
-    safe_segments: Vec<Range<usize>>,
-
-    /// same length as [`Self::segments`], stores vertices of cops guarding the segment of same index.
-    guards: Vec<(usize, usize)>,
-}
-
-#[allow(dead_code)]
-impl ConvexHullData {
-    pub fn new() -> Self {
-        Self {
-            hull: Vec::new(),
-            boundary: Vec::new(),
-            safe_segments: Vec::new(),
-            guards: Vec::new(),
-        }
-    }
-
-    pub fn hull(&self) -> &[InSet] {
-        &self.hull
-    }
-
-    pub fn boundary(&self) -> impl Iterator<Item = usize> + '_ {
-        self.boundary.iter().copied()
-    }
-
-    /// each segment consists of vertices on boundary, segments are divided by cops
-    /// iterator contains vertices of safe parts of boundary, e.g. cops and neighboring vertices cut away from begin and end.
-    pub fn safe_boundary_parts(&self) -> impl ExactSizeIterator<Item = &'_ [usize]> + '_ + Clone {
-        self.safe_segments.iter().map(|seg| &self.boundary[seg.clone()])
-    }
-
-    /// each segment consists of vertices on boundary, segments are divided by cops
-    /// iterator contains vertices of both boundary cops for a given boundary.
-    /// each boundary cop should thus appear twice.
-    pub fn boundary_cop_vertices(&self) -> &[(usize, usize)] {
-        &self.guards
-    }
-
-    fn update_inside(
-        &mut self,
-        cops: &[Character],
-        edges: &EdgeList,
-        queue: &mut VecDeque<usize>,
-        vertices_outside_hull: &[usize],
-    ) {
-        queue.clear();
-
-        self.hull.clear();
-        self.hull.resize(edges.nr_vertices(), InSet::Unknown);
-        let hull = &mut self.hull[..];
-        for i in 0..cops.len() {
-            let cop_i = &cops[i];
-            if !cop_i.is_active() {
-                continue;
-            }
-            for cop_j in cops[(i + 1)..].iter().filter(|c| c.is_active()) {
-                //walk from cop i to cop j on all shortest paths
-                hull[cop_i.vertex()] = InSet::NewlyAdded;
-                queue.push_back(cop_i.vertex());
-                while let Some(node) = queue.pop_front() {
-                    let curr_dist_to_j = cop_j.dists()[node];
-                    for neigh in edges.neighbors_of(node) {
-                        if cop_j.dists()[neigh] < curr_dist_to_j && hull[neigh] != InSet::NewlyAdded
-                        {
-                            hull[neigh] = InSet::NewlyAdded;
-                            queue.push_back(neigh);
-                        }
-                    }
-                }
-                //change these paths from InSet::NewlyAdded to InSet::Yes
-                //(to allow new paths to go through the current one)
-                queue.push_back(cop_i.vertex());
-                hull[cop_i.vertex()] = InSet::Interieur;
-                edges.recolor_region((InSet::NewlyAdded, InSet::Interieur), hull, queue);
-            }
-        }
-        //color outside as InSet::No (note: this might miss some edge cases; best to not place cops at rim)
-        for &p in vertices_outside_hull {
-            if hull[p] == InSet::Unknown {
-                hull[p] = InSet::No;
-                queue.push_back(p);
-            }
-        }
-        edges.recolor_region((InSet::Unknown, InSet::No), hull, queue);
-
-        //color remaining InSet::Perhaps as InSet::Interieur
-        for x in hull {
-            if *x == InSet::Unknown {
-                *x = InSet::Interieur;
-            }
-        }
-        //mark boundary as such
-        let hull = &mut self.hull[..];
-        for (v, mut neighs) in izip!(0.., edges.neighbors()) {
-            if hull[v].contained() && neighs.any(|n| hull[n].outside()) {
-                hull[v] = InSet::OnBoundary;
-            }
-        }
-    }
-
-    /// assumes that self.hull is already up to date
-    fn update_boundary(
-        &mut self,
-        cops: &[Character],
-        edges: &EdgeList,
-        queue: &mut VecDeque<usize>,
-    ) {
-        self.boundary.clear();
-        for cop in cops {
-            let v = cop.vertex();
-            if cop.is_active() && self.hull[v].on_boundary() {
-                self.boundary.push(v);
-                if boundary::find_convex_hull_boundary(
-                    &mut self.boundary,
-                    cop.dists(),
-                    &self.hull,
-                    edges,
-                    queue,
-                )
-                .is_ok()
-                {
-                    return;
-                }
-                self.boundary.clear();
-            }
-        }
-    }
-
-    fn update_segments(&mut self, edges: &EdgeList, min_cop_dist: &[isize]) {
-        self.guards.clear();
-        self.safe_segments.clear();
-        debug_assert_eq!(self.hull.len(), min_cop_dist.len());
-        if self.boundary.len() < 5 {
-            return;
-        }
-        debug_assert_eq!(0, min_cop_dist[self.boundary[0]]);
-        let mut start = 1;
-        loop {
-            while min_cop_dist[self.boundary[start]] <= 1 {
-                start += 1;
-                if start == self.boundary.len() {
-                    return;
-                }
-            }
-            let mut stop = start;
-            while min_cop_dist[self.boundary[stop]] > 1 {
-                stop += 1;
-                if stop == self.boundary.len() {
-                    return;
-                }
-            }
-
-            let find_cop = |i: usize| {
-                let v0 = self.boundary[i];
-                edges.neighbors_of(v0).find(|&v| min_cop_dist[v] == 0).unwrap()
-            };
-            let (cop_1, cop_2) = (find_cop(start - 1), find_cop(stop));
-            self.guards.push((cop_1, cop_2));
-
-            debug_assert_eq!(min_cop_dist[self.boundary[start]], 2);
-            debug_assert_eq!(min_cop_dist[self.boundary[stop - 1]], 2);
-            let safe_part = start..stop;
-            debug_assert!(!safe_part.is_empty());
-            self.safe_segments.push(safe_part);
-
-            start = stop;
-        }
-    }
-
-    pub fn update(
-        &mut self,
-        cops: &[Character],
-        edges: &EdgeList,
-        min_cop_dist: &[isize],
-        queue: &mut VecDeque<usize>,
-        vertices_outside_hull: &[usize],
-    ) {
-        self.update_inside(cops, edges, queue, vertices_outside_hull);
-        self.update_boundary(cops, edges, queue);
-        self.update_segments(edges, min_cop_dist);
-    }
-}
-
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Keep {
@@ -608,15 +410,15 @@ enum Keep {
     YesButAlreadyVisited,
 }
 
-/// very similar to ConvexHullData, only this time for just a pair of cops.
+/// very similar to [`CopsHull`], only this time for just a pair of cops.
 /// as this is computed (potentially) many times in a single frame, it tries to never iterate over all vertices.
 #[derive(Default)]
-struct CopPairHullData {
+struct CopPairHull {
     hull: Vec<InSet>,         //one entry per vertex
     all_vertices: Vec<usize>, //indices of all vertices
 }
 
-impl CopPairHullData {
+impl CopPairHull {
     fn compute_hull(
         &mut self,
         [cop_1, cop_2]: [&Character; 2],
