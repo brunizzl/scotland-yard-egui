@@ -20,6 +20,389 @@ pub use escapable_extra::DilemmaNodes;
 mod plane_cop_strat;
 pub use plane_cop_strat::PlaneCopStat;
 
+struct SafeSegment {
+    /// indexes into [`ConvexHullV2::flat_boundary_segments`]
+    boundary_indices: Range<usize>,
+    /// vertices of cops guarding the segment
+    guards: (usize, usize),
+}
+
+/// geodesic convex hull over set of police positions.
+/// this is not guaranteed to always exactly resemble the convex hull.
+/// what is guaranteed however, is the following:
+///  - every vertex on a shortest path between two policemen is contained.
+///  - if the vertex furthest away from any officer is not on such a shortest path, it is not contained.
+///  - in the graph without the path vertices,
+///     every connected component other than the one with the vertex furthest away is also contained.
+pub struct CopsHull {
+    /// one entry per vertex in graph
+    hull: Vec<InSet>,
+
+    /// all winning boundary segments are stored in direct succession
+    flat_boundary_segments: Vec<usize>,
+
+    /// if the boundary has `n` segments, this has length `n`.
+    safe_segments: Vec<SafeSegment>,
+}
+
+impl CopsHull {
+    pub fn new() -> Self {
+        Self {
+            hull: Vec::new(),
+            flat_boundary_segments: Vec::new(),
+            safe_segments: Vec::new(),
+        }
+    }
+
+    pub fn hull(&self) -> &[InSet] {
+        &self.hull
+    }
+
+    pub fn boundary(&self) -> impl Iterator<Item = usize> + '_ {
+        self.flat_boundary_segments.iter().copied()
+    }
+
+    /// each segment consists of vertices on boundary, segments are divided by cops
+    /// iterator contains vertices of safe parts of boundary, e.g. cops and neighboring vertices cut away from begin and end.
+    pub fn safe_boundary_parts(&self) -> impl ExactSizeIterator<Item = &'_ [usize]> + '_ + Clone {
+        self.safe_segments
+            .iter()
+            .map(|seg| &self.flat_boundary_segments[seg.boundary_indices.clone()])
+    }
+
+    pub fn boundary_cop_vertices(
+        &self,
+    ) -> impl ExactSizeIterator<Item = &(usize, usize)> + '_ + Clone {
+        self.safe_segments.iter().map(|seg| &seg.guards)
+    }
+
+    fn update_inside(
+        &mut self,
+        cops: &[Character],
+        edges: &EdgeList,
+        queue: &mut VecDeque<usize>,
+        vertices_outside_hull: &[usize],
+    ) {
+        queue.clear();
+
+        self.hull.clear();
+        self.hull.resize(edges.nr_vertices(), InSet::Unknown);
+        let hull = &mut self.hull[..];
+        for i in 0..cops.len() {
+            let cop_i = &cops[i];
+            if !cop_i.is_active() {
+                continue;
+            }
+            for cop_j in cops[(i + 1)..].iter().filter(|c| c.is_active()) {
+                //walk from cop i to cop j on all shortest paths
+                hull[cop_i.vertex()] = InSet::NewlyAdded;
+                queue.push_back(cop_i.vertex());
+                while let Some(node) = queue.pop_front() {
+                    let curr_dist_to_j = cop_j.dists()[node];
+                    for neigh in edges.neighbors_of(node) {
+                        if cop_j.dists()[neigh] < curr_dist_to_j && hull[neigh] != InSet::NewlyAdded
+                        {
+                            hull[neigh] = InSet::NewlyAdded;
+                            queue.push_back(neigh);
+                        }
+                    }
+                }
+                //change these paths from InSet::NewlyAdded to InSet::Yes
+                //(to allow new paths to go through the current one)
+                queue.push_back(cop_i.vertex());
+                hull[cop_i.vertex()] = InSet::Interieur;
+                edges.recolor_region((InSet::NewlyAdded, InSet::Interieur), hull, queue);
+            }
+        }
+        //color outside as InSet::No (note: this might miss some edge cases; best to not place cops at rim)
+        for &p in vertices_outside_hull {
+            if hull[p] == InSet::Unknown {
+                hull[p] = InSet::No;
+                queue.push_back(p);
+            }
+        }
+        edges.recolor_region((InSet::Unknown, InSet::No), hull, queue);
+
+        //color remaining InSet::Perhaps as InSet::Interieur
+        for x in hull {
+            if *x == InSet::Unknown {
+                *x = InSet::Interieur;
+            }
+        }
+    }
+
+    fn find_boundary(
+        &mut self,
+        cops: &[Character],
+        edges: &EdgeList,
+        queue: &mut VecDeque<usize>,
+        min_cop_dist: &[isize],
+    ) {
+        let is_edge = |v1: usize, v2: usize| edges.has_directed_edge(v1, v2);
+        let neighs_of = |v: usize| edges.neighbors_of(v);
+
+        assert_eq!(self.hull.len(), edges.nr_vertices());
+        assert_eq!(min_cop_dist.len(), edges.nr_vertices());
+
+        let hull = &mut self.hull[..];
+        debug_assert!(hull.iter().all(|&h| h.finished_construction() && h != InSet::OnBoundary));
+
+        self.flat_boundary_segments.clear();
+        self.safe_segments.clear();
+
+        // after we discovered something vertex `v` is on the boundary, we set `hull[v] == InSet::OnBoundary`.
+        // what is considered as outside id defined as our input.
+        let inside_next_to = |v: usize, hull: &[InSet], outside: InSet| -> Option<usize> {
+            if hull[v] == InSet::Interieur {
+                neighs_of(v).find(|&n| hull[n] == outside)
+            } else {
+                None
+            }
+        };
+
+        let new_on_boundary =
+            |v: usize, hull: &[InSet]| inside_next_to(v, hull, InSet::No).is_some();
+
+        // mark boundary vertices that are not safe
+        for cop in cops {
+            if !cop.is_active() {
+                continue;
+            }
+            let cop_v = cop.vertex();
+            for v in std::iter::once(cop_v).chain(neighs_of(cop_v)) {
+                if new_on_boundary(v, hull) {
+                    debug_assert!(min_cop_dist[v] <= 1);
+                    hull[v] = InSet::OnBoundary;
+                    self.flat_boundary_segments.push(v);
+                }
+            }
+        }
+
+        const BND_WITHNESS: InSet = InSet::Unknown;
+        // we guarantee to find every safe boundary component by iterating trough every vertex.
+        // how far we have iterated previously, is remembered here.
+        let mut search_start = 0;
+        loop {
+            // find first not-yet handled vertex of a winning boundary component
+            let (fst_on_boundary, fst_withness) = 'find_new_component: {
+                for v in search_start..hull.len() {
+                    if let Some(fst_withness) = inside_next_to(v, hull, InSet::No) {
+                        if min_cop_dist[v] > 1 {
+                            search_start = v + 1;
+                            break 'find_new_component (v, fst_withness);
+                        } else {
+                            debug_assert_eq!(hull[v], InSet::OnBoundary);
+                        }
+                    }
+                }
+                return;
+            };
+            // mark every suitable withness vertex as withness
+            debug_assert!(queue.is_empty());
+            queue.push_back(fst_withness);
+            while let Some(w) = queue.pop_front() {
+                if hull[w] == InSet::No && is_edge(fst_on_boundary, w) {
+                    hull[w] = BND_WITHNESS;
+                    queue.extend(neighs_of(w));
+                }
+            }
+            for w in neighs_of(fst_on_boundary) {
+                if hull[w] == BND_WITHNESS {
+                    for ww in neighs_of(w) {
+                        if hull[ww] == InSet::No {
+                            hull[ww] = BND_WITHNESS;
+                        }
+                    }
+                }
+            }
+
+            let segment_index_start = self.flat_boundary_segments.len();
+            let mut guard_cops_vec = smallvec::SmallVec::<[&Character; 6]>::new();
+
+            debug_assert!(queue.is_empty());
+            queue.push_back(fst_on_boundary);
+            while let Some(v) = queue.pop_front() {
+                // a vertex is on the boundary, if there exists withness next to him, that was discovered earlier.
+                let Some(mut withness) = inside_next_to(v, hull, BND_WITHNESS) else {
+                    continue;
+                };
+
+                // update withness state
+                for w in neighs_of(v) {
+                    if hull[w] == BND_WITHNESS {
+                        withness = w;
+                        let mut find_front_withness = || -> bool {
+                            for ww in neighs_of(withness) {
+                                if hull[ww] == InSet::No && is_edge(v, ww) {
+                                    hull[ww] = BND_WITHNESS;
+                                    withness = ww;
+                                    return true;
+                                }
+                            }
+                            false
+                        };
+                        // we advance the withness as fast as possible while still neighboring v.
+                        // this is both needed on square grids and on outher corners of triangle grids
+                        if find_front_withness() {
+                            while find_front_withness() {}
+                            break;
+                        }
+                    }
+                }
+                // this part is only needed on square grids.
+                'mark_withness_withness: loop {
+                    for n in neighs_of(withness) {
+                        if hull[n] == InSet::No {
+                            hull[n] = BND_WITHNESS;
+                        }
+                    }
+                    // this is needed for an outher corner on a quad grid
+                    for w in neighs_of(v) {
+                        if hull[w] == InSet::No {
+                            for ww in neighs_of(w) {
+                                if hull[ww] == BND_WITHNESS {
+                                    hull[w] = BND_WITHNESS;
+                                    withness = w;
+                                    continue 'mark_withness_withness;
+                                }
+                            }
+                        }
+                    }
+                    break 'mark_withness_withness;
+                }
+
+                // push to queue, update boundary state
+                self.flat_boundary_segments.push(v);
+                hull[v] = InSet::OnBoundary;
+                'test_neighbors: for n in neighs_of(v) {
+                    // add new guarding cops that are near by
+                    if hull[n] == InSet::OnBoundary && min_cop_dist[n] <= 1 {
+                        debug_assert_eq!(min_cop_dist[n], 1);
+                        'find_guard_cop: for nn in neighs_of(n) {
+                            if min_cop_dist[nn] == 0 {
+                                if guard_cops_vec.iter().any(|cop| cop.vertex() == nn) {
+                                    continue 'find_guard_cop;
+                                }
+                                for cop in cops {
+                                    if cop.vertex() == nn {
+                                        guard_cops_vec.push(cop);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if hull[n] != InSet::Interieur {
+                        continue 'test_neighbors;
+                    }
+                    queue.push_back(n);
+
+                    // if n is an "inner corner" on the quad torus, we need this dance here.
+                    if neighs_of(n).any(|nn| matches!(hull[nn], BND_WITHNESS | InSet::No)) {
+                        continue 'test_neighbors;
+                    }
+                    let mut nn_withnesses_vec = smallvec::SmallVec::<[_; 8]>::new();
+                    nn_withnesses_vec.extend(
+                        neighs_of(v).filter(|&w| hull[w] == BND_WITHNESS && !is_edge(n, w)),
+                    );
+                    let nn_withnesses = &nn_withnesses_vec[..];
+                    for nn in neighs_of(n) {
+                        if nn != v
+                            && hull[nn] == InSet::Interieur
+                            && !is_edge(v, nn)
+                            && nn_withnesses.iter().any(|&w| is_edge(nn, w))
+                        {
+                            self.flat_boundary_segments.push(n);
+                            queue.push_back(nn);
+                            continue 'test_neighbors;
+                        }
+                    }
+                }
+            }
+
+            // unmark withnesses
+            debug_assert!(queue.is_empty());
+            queue.push_back(fst_withness);
+            while let Some(w) = queue.pop_front() {
+                if hull[w] == BND_WITHNESS {
+                    hull[w] = InSet::No;
+                    queue.extend(neighs_of(w));
+                }
+            }
+            debug_assert!(!BND_WITHNESS.finished_construction());
+            debug_assert!(hull.iter().copied().all(InSet::finished_construction));
+
+            let guard_cops = &guard_cops_vec[..];
+            if guard_cops.is_empty() {
+                // abort of somehow no officer was found
+                self.flat_boundary_segments.truncate(segment_index_start);
+                continue;
+            }
+            // compute the resulting segment
+            let segment = {
+                let mut max_dist = -1;
+                let mut guards = (guard_cops[0], guard_cops[0]);
+                // decide which pair of cops will be responsible
+                for i1 in 0..guard_cops.len() {
+                    for i2 in (i1 + 1)..guard_cops.len() {
+                        let cop1 = guard_cops[i1];
+                        let cop2 = guard_cops[i2];
+                        let pair_dist = cop1.dists()[cop2.vertex()];
+                        debug_assert_eq!(cop2.dists()[cop1.vertex()], pair_dist);
+                        if pair_dist > max_dist {
+                            max_dist = pair_dist;
+                            guards = (cop1, cop2);
+                        }
+                    }
+                }
+
+                // order vertices such that they actually form a path
+                let indices = segment_index_start..self.flat_boundary_segments.len();
+                let new_segment = &mut self.flat_boundary_segments[indices.clone()];
+                let dist_guard_0 = guards.0.dists();
+                new_segment.sort_by_key(|&v| dist_guard_0[v]);
+                // most of the time sorting should be sufficient,
+                // this is only required in special cases on tori.
+                for i in 0..(new_segment.len() - 1) {
+                    let vi = new_segment[i];
+                    if is_edge(vi, new_segment[i + 1]) {
+                        continue;
+                    }
+                    for (j, &vj) in izip!((i + 2).., &new_segment[(i + 2)..]) {
+                        if is_edge(vi, vj) {
+                            new_segment.swap(i + 1, j);
+                            debug_assert!(is_edge(vi, new_segment[i + 1]));
+                            break;
+                        }
+                    }
+                }
+                // TODO: there are some cases on quad tori where the above is not sufficient.
+                // debug_assert!(edges.has_path(new_segment));
+
+                SafeSegment {
+                    boundary_indices: indices,
+                    guards: (guards.0.vertex(), guards.1.vertex()),
+                }
+            };
+
+            self.safe_segments.push(segment);
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        cops: &[Character],
+        edges: &EdgeList,
+        queue: &mut VecDeque<usize>,
+        vertices_outside_hull: &[usize],
+        min_cop_dist: &[isize],
+    ) {
+        self.update_inside(cops, edges, queue, vertices_outside_hull);
+        self.find_boundary(cops, edges, queue, min_cop_dist);
+    }
+}
+
+#[allow(dead_code)]
 /// geodesic convex hull over some vertices with respect to some graph
 pub struct ConvexHullData {
     /// one entry per vertex in graph
@@ -38,6 +421,7 @@ pub struct ConvexHullData {
     guards: Vec<(usize, usize)>,
 }
 
+#[allow(dead_code)]
 impl ConvexHullData {
     pub fn new() -> Self {
         Self {
@@ -52,9 +436,8 @@ impl ConvexHullData {
         &self.hull
     }
 
-    #[allow(dead_code)]
-    pub fn boundary(&self) -> &[usize] {
-        &self.boundary
+    pub fn boundary(&self) -> impl Iterator<Item = usize> + '_ {
+        self.boundary.iter().copied()
     }
 
     /// each segment consists of vertices on boundary, segments are divided by cops

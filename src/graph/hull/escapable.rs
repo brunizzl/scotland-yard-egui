@@ -217,7 +217,7 @@ impl EscapableNodes {
         &mut self,
         _shape: Shape,
         cops: &[Character],
-        hull_data: &ConvexHullData,
+        hull_data: &CopsHull,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
@@ -226,7 +226,7 @@ impl EscapableNodes {
 
         //owners of boundary vertices where chosen as what the vertice's index in this vector was
         //  -> new owners can start after all valid vector indices
-        let mut owner = hull_data.boundary.len();
+        let mut owner = hull_data.flat_boundary_segments.len();
         queue.clear();
         let iter = izip!(
             0..,
@@ -350,15 +350,8 @@ impl EscapableNodes {
                     //step 4: find escapable region for each cop pair and paint it with KeepVertex::Yes
                     let mut escapable = std::mem::take(&mut self.escapable);
                     let inner_boundaries = std::mem::take(&mut self.some_inner_boundaries);
-                    for ((&c1, &c2), safe_segment) in izip!(
-                        cops_line.iter().tuple_windows(),
-                        inner_boundaries.iter().map(|b| &b[..])
-                    ) {
+                    for safe_segment in inner_boundaries.iter().map(|b| &b[..]) {
                         let max_escapable_dist = safe_segment.len() as isize - 1;
-                        debug_assert_eq!(
-                            max_escapable_dist.max(0),
-                            (c1.dists()[c2.vertex()] - 4).max(0)
-                        );
                         let mut last_owner = None;
                         for &v in safe_segment {
                             if last_owner.is_some() {
@@ -451,7 +444,7 @@ impl EscapableNodes {
         &mut self,
         _shape: Shape,
         cops: &[Character],
-        hull_data: &ConvexHullData,
+        hull_data: &CopsHull,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
@@ -543,7 +536,7 @@ impl EscapableNodes {
         &mut self,
         shape: Shape,
         cops: &[Character],
-        hull_data: &ConvexHullData,
+        hull_data: &CopsHull,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {

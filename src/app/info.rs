@@ -446,7 +446,7 @@ pub struct Info {
     currently_marked: Vec<bool>,
 
     //state kept for each node in map
-    cop_hull_data: graph::ConvexHullData,
+    cop_hull_data: graph::CopsHull,
     escapable: graph::EscapableNodes,
     escapable_grid: graph::EscapableDirections,
     dilemma: graph::DilemmaNodes,
@@ -491,7 +491,7 @@ impl Default for Info {
             tool: MouseTool::Drag,
             currently_marked: Vec::new(),
 
-            cop_hull_data: graph::ConvexHullData::new(),
+            cop_hull_data: graph::CopsHull::new(),
             escapable: graph::EscapableNodes::new(),
             escapable_grid: graph::EscapableDirections::new(),
             dilemma: graph::DilemmaNodes::new(),
@@ -536,7 +536,7 @@ impl Info {
             tool: MouseTool::Drag,
             currently_marked: Vec::new(),
 
-            cop_hull_data: graph::ConvexHullData::new(),
+            cop_hull_data: graph::CopsHull::new(),
             escapable: graph::EscapableNodes::new(),
             escapable_grid: graph::EscapableDirections::new(),
             dilemma: graph::DilemmaNodes::new(),
@@ -789,10 +789,17 @@ impl Info {
         self.cop_hull_data.update(
             self.characters.cops(),
             con.edges,
-            &self.min_cop_dist,
             &mut self.queue,
             vertices_outside_hull,
+            &self.min_cop_dist,
         );
+        //self.cop_hull_data.update(
+        //    self.characters.cops(),
+        //    con.edges,
+        //    &self.min_cop_dist,
+        //    &mut self.queue,
+        //    vertices_outside_hull,
+        //);
     }
 
     fn update_escapable(&mut self, con: &DrawContext<'_>) {
@@ -1209,8 +1216,8 @@ impl Info {
         }
         if self.options.show_hull_boundary {
             let color = self.options.hull_boundary_style.colors[0];
-            let size = con.scale * 2.0 * self.options.hull_boundary_style.size;
-            for &v in self.cop_hull_data.boundary() {
+            let size = con.scale * 4.0 * self.options.hull_boundary_style.size;
+            for v in self.cop_hull_data.boundary() {
                 if con.visible[v] {
                     let draw_pos = con.vertex_draw_pos(v);
                     let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
@@ -1247,7 +1254,7 @@ impl Info {
         self.currently_marked.resize(con.edges.nr_vertices(), false);
         let utils_iter = izip!(&mut self.currently_marked, con.positions, con.visible);
 
-        let size = 6.0 * self.options.automatic_marker_style.size * con.scale;
+        let size = 12.0 * self.options.automatic_marker_style.size * con.scale;
         let draw_circle_at = |pos, color| {
             let draw_pos = con.cam().transform(pos);
             let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
@@ -1448,9 +1455,46 @@ impl Info {
                 //        }
                 //    }
                 //}
-                for (&esc, util) in izip!(&self.dilemma.overlap, utils_iter) {
-                    let color = || color::u32_marker_color(esc, colors);
-                    draw_if!(esc != 0, util, color);
+                //for (&esc, util) in izip!(&self.dilemma.overlap, utils_iter) {
+                //    let color = || color::u32_marker_color(esc, colors);
+                //    draw_if!(esc != 0, util, color);
+                //}
+
+                let mut bnd = crate::graph::CopsHull::new();
+                let mut temp = [usize::MAX];
+                let vertices_outside_hull = if !con.extreme_vertices.is_empty() {
+                    con.extreme_vertices
+                } else {
+                    debug_assert_eq!(con.positions.len(), self.min_cop_dist.len());
+                    let (furthest_vertex, _) =
+                        self.min_cop_dist.iter().enumerate().fold((0, 0), |best, (v, &dist)| {
+                            if dist > best.1 {
+                                (v, dist)
+                            } else {
+                                best
+                            }
+                        });
+                    temp[0] = furthest_vertex;
+                    &temp
+                };
+                let mut queue = VecDeque::new();
+                bnd.update(
+                    self.characters.cops(),
+                    con.edges,
+                    &mut queue,
+                    vertices_outside_hull,
+                    &self.min_cop_dist,
+                );
+                for (segment, &f32color) in izip!(bnd.safe_boundary_parts(), colors.iter().cycle())
+                {
+                    let color: Color32 = f32color.into();
+                    for &v in segment {
+                        if con.visible[v] {
+                            let draw_pos = con.vertex_draw_pos(v);
+                            let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
+                            con.painter.add(marker_circle);
+                        }
+                    }
                 }
             },
             VertexColorInfo::SafeOutside => {

@@ -292,7 +292,7 @@ impl DilemmaNodes {
         self.overlap_dirs.clear();
         self.overlap_dirs.resize(edges.nr_vertices(), Dirs::EMPTY);
 
-        if !esc_dirs.graph.represents_current_map {
+        if !esc_dirs.graph.represents_current_map || esc_dirs.graph.data.norm != Norm::Hex {
             return;
         }
 
