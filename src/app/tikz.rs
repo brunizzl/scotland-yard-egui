@@ -186,8 +186,11 @@ impl TikzPicture {
                     ));
                 },
                 Shape::Path(ps) => {
+                    if !ps.closed {
+                        unimplemented!("So far only closed paths can be turned into tikz.");
+                    }
                     let color = self.color_name(ps.fill);
-                    let mut command = format!("\\filldraw[color={color}] ");
+                    let mut command = format!("\\fill[{color}] ");
                     for &point in &ps.points {
                         let Pos2 { x, y } = self.to_tikz.transform_pos(point);
                         command += &format!("({x}, {y}) -- ");

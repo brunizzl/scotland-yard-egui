@@ -36,6 +36,9 @@ pub struct CopsHull {
     /// one entry per vertex in graph
     hull: Vec<InSet>,
 
+    /// one entry per vertex in graph
+    dist_to_hull: Vec<isize>,
+
     /// all winning boundary segments are stored in direct succession
     flat_boundary_segments: Vec<usize>,
 
@@ -47,6 +50,7 @@ impl CopsHull {
     pub fn new() -> Self {
         Self {
             hull: Vec::new(),
+            dist_to_hull: Vec::new(),
             flat_boundary_segments: Vec::new(),
             safe_segments: Vec::new(),
         }
@@ -54,6 +58,10 @@ impl CopsHull {
 
     pub fn hull(&self) -> &[InSet] {
         &self.hull
+    }
+
+    pub fn dist_to_hull(&self) -> &[isize] {
+        &self.dist_to_hull
     }
 
     /// each segment consists of vertices on boundary, segments are divided by cops
@@ -237,7 +245,7 @@ impl CopsHull {
                             }
                             false
                         };
-                        // we advance the withness as fast as possible while still neighboring v.
+                        // we advance the withness as far as possible while still neighboring v.
                         // this is both needed on square grids and on outher corners of triangle grids
                         if find_front_withness() {
                             while find_front_withness() {}
@@ -385,6 +393,23 @@ impl CopsHull {
         }
     }
 
+    fn compute_dist_to_hull(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        assert_eq!(edges.nr_vertices(), self.hull.len());
+        debug_assert!(self.hull.iter().copied().all(InSet::finished_construction));
+
+        queue.clear();
+        self.dist_to_hull.clear();
+        self.dist_to_hull.resize(edges.nr_vertices(), isize::MAX);
+
+        for (v, &h, d) in izip!(0.., &self.hull, &mut self.dist_to_hull) {
+            if h.contained() {
+                *d = 0;
+                queue.push_back(v);
+            }
+        }
+        edges.calc_distances_to(queue, &mut self.dist_to_hull);
+    }
+
     pub fn update(
         &mut self,
         cops: &[Character],
@@ -394,6 +419,7 @@ impl CopsHull {
         min_cop_dist: &[isize],
     ) {
         self.update_inside(cops, edges, queue, vertices_outside_hull);
+        self.compute_dist_to_hull(edges, queue);
         self.find_boundary(cops, edges, queue, min_cop_dist);
     }
 }

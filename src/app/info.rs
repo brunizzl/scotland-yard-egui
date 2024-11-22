@@ -34,6 +34,7 @@ pub enum VertexColorInfo {
     Escape1,
     Escape2,
     Escape2Grid,
+    EscapeConeGrid,
     Escape3Grid,
     Escape23Grid,
     BruteForceRes,
@@ -66,6 +67,8 @@ impl VertexColorInfo {
             Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
             als die Cops diesen Abschnitt dicht machen können.",
             Escape2Grid => "Variante von Escape2 die nur auf Gittern (Zerschnitten + Tori) funktioniert",
+            EscapeConeGrid => "Knoten, an denen ein Kegel aus mindestens zwei Richtungen hervorgeht, 
+            so dass der Kegel keinen Cop oder Nachbarn eines Cops enthält. (Funktioniert nur auf Gittern)",
             Escape3Grid => "Knoten von denen aus ein \"Fluchtoption 2\" Knoten erreicht werden kann, weil \
             sich mehrere von denen überlappen (funzt noch bei weitem nicht immer. \
             Diese Schätzung kann sowohl zu konservativ, als auch zu generös sein.)",
@@ -100,11 +103,12 @@ impl VertexColorInfo {
             NearNodes => "für Räuber nähere Knoten",
             SafeOutside => "Sicherer Außenbereich",
             SafeBoundary => "Sicherere Grenze",
-            Escape1 => "Fluchtoption 1",
-            Escape2 => "Fluchtoption 2 (Komponenten)",
-            Escape2Grid => "Fluchtoption 2 (Richtungen)",
-            Escape3Grid => "Fluchtoption 3 (Gitter)",
-            Escape23Grid => "Fluchtoption 2 + 3 (Gitter)",
+            Escape1 => "Flucht 1",
+            Escape2 => "Flucht 2 (Komponenten)",
+            Escape2Grid => "Flucht 2 (Richtungen)",
+            EscapeConeGrid => "Flucht Kegel (Gitter)",
+            Escape3Grid => "Flucht 3 (Gitter)",
+            Escape23Grid => "Flucht 2 + 3 (Gitter)",
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
@@ -128,6 +132,7 @@ pub enum VertexSymbolInfo {
     RobberAdvantage,
     Escape2,
     Escape2Grid,
+    EscapeConeGrid,
     Escape3Grid,
     Escape23Grid,
     MinCopDist,
@@ -147,8 +152,8 @@ impl VertexSymbolInfo {
             RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
             Escape2 => "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
             Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
-            Escape2Grid => "jede Fluchtrichtung hat einen Namen in { 0 .. 6 }. \
-            Der Marker listet alle Richtungen, in die der Räuber fliehen kann.",
+            Escape2Grid => "alle Richtungen, in die der Räuber fliehen kann.",
+            EscapeConeGrid => "jede Richtung, die in einem Fluchtkegel enthalten ist als Pfeil.",
             Escape23Grid => "Kombination aus Fluchtoption 2 + 3 auf Gitter.",
             Escape3Grid => "eine dieser Richtungen führt garantiert wieder auf einen Dilemmaknoten",
             MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
@@ -168,11 +173,12 @@ impl VertexSymbolInfo {
         match self {
             None => "Keine",
             Indices => "Knotenindizes",
-            RobberAdvantage => "Marker Fluchtoption 1",
-            Escape2 => "Marker Fluchtoption 2",
-            Escape2Grid => "Pfeile Fluchtoption 2 (Gitter)",
-            Escape3Grid => "Pfeile Fluchtoption 3 (Gitter)",
-            Escape23Grid => "Pfeile Fluchtoption 2 & 3 (Gitter)",
+            RobberAdvantage => "Marker Flucht 1",
+            Escape2 => "Marker Flucht 2",
+            Escape2Grid => "Pfeile Flucht 2 (Gitter)",
+            EscapeConeGrid => "Pfeile Flucht Kegel (Gitter)",
+            Escape3Grid => "Pfeile Flucht 3 (Gitter)",
+            Escape23Grid => "Pfeile Flucht 2 & 3 (Gitter)",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
             VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
@@ -907,8 +913,14 @@ impl Info {
         let update_esc_grid = show_debug
             || update_plane_cop_strat
             || update_dilemma
-            || matches!(color, Color::Escape2Grid | Color::Escape2)
-            || matches!(symbol, Symbol::Escape2Grid | Symbol::Escape2);
+            || matches!(
+                color,
+                Color::Escape2Grid | Color::Escape2 | Color::EscapeConeGrid
+            )
+            || matches!(
+                symbol,
+                Symbol::Escape2Grid | Symbol::Escape2 | Symbol::EscapeConeGrid
+            );
 
         debug_assert_eq!(self.cop_hull_data.hull().len(), nr_vertices);
         let update_hull = show_debug
@@ -1347,6 +1359,21 @@ impl Info {
                     draw_if!(esc_shown != 0, util, color);
                 }
             },
+            VertexColorInfo::EscapeConeGrid => {
+                let sat = if dark { 750 } else { 350 };
+                let colors = color::sample_color_wheel::<6>(sat, 4);
+                let shown = self.options.shown_escape_directions;
+                for (&esc_cone, &esc, &h, util) in izip!(
+                    &self.escapable_grid.cone_esc_directions,
+                    &self.escapable_grid.esc_directions,
+                    self.cop_hull_data.hull(),
+                    utils_iter
+                ) {
+                    let esc_shown = (if h.contained() { esc_cone.0 } else { esc.0 }) & shown;
+                    let color = || color::u8_marker_color(esc_shown, &colors);
+                    draw_if!(esc_shown != 0, util, color);
+                }
+            },
             VertexColorInfo::Escape3Grid => {
                 for (&esc, util) in izip!(&self.dilemma.dilemma_regions, utils_iter) {
                     let color = || color::u32_marker_color(esc, colors);
@@ -1500,9 +1527,11 @@ impl Info {
                 }
             },
             VertexColorInfo::SafeOutside => {
-                for (&in_hull, &dist, util) in
-                    izip!(self.cop_hull_data.hull(), &self.min_cop_dist, utils_iter)
-                {
+                for (&in_hull, &dist, util) in izip!(
+                    self.cop_hull_data.hull(),
+                    self.cop_hull_data.dist_to_hull(),
+                    utils_iter
+                ) {
                     draw_if!(in_hull.outside() && dist >= 2, util);
                 }
             },
@@ -1677,6 +1706,17 @@ impl Info {
                 let mask = self.options.shown_escape_directions;
                 let directions = &self.escapable_grid.esc_directions;
                 draw_arrows(directions, Dirs(mask));
+            },
+            VertexSymbolInfo::EscapeConeGrid => {
+                let mask = self.options.shown_escape_directions;
+                let combined = izip!(
+                    &self.escapable_grid.cone_esc_directions,
+                    &self.escapable_grid.esc_directions,
+                    self.cop_hull_data.hull()
+                )
+                .map(|(&cone, &esc, &h)| if h.contained() { cone } else { esc })
+                .collect_vec();
+                draw_arrows(&combined, Dirs(mask));
             },
             VertexSymbolInfo::Escape3Grid => {
                 let directions = &self.dilemma.dilemma_dirs;

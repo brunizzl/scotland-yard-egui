@@ -116,7 +116,9 @@ impl EscapableDirections {
             for &inside_dir in &inside_dirs {
                 for &bv in boundary_section {
                     let mut cone_dirs = boundary_dirs;
-                    self.cone_esc_directions[bv].unionize(cone_dirs);
+                    if cone_dirs.0.count_ones() > 1 {
+                        self.cone_esc_directions[bv].unionize(cone_dirs);
+                    }
 
                     let bv_coords = g.coordinates_of(bv);
                     let mut dirs_left = center_dirs;
