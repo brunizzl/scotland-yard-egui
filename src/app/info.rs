@@ -42,6 +42,7 @@ pub enum VertexColorInfo {
     MaxCopDist,
     AnyCopDist,
     RobberDist,
+    RobberCone,
     VertexEquivalenceClasses,
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
@@ -79,6 +80,7 @@ impl VertexColorInfo {
             die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.",
             MinCopDist | MaxCopDist | AnyCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
             RobberDist => "Alle Punkte die eingestellten Abstand zu Räuber haben",
+            RobberCone => "Kegel beginnend an Räuber in eingestellten Richtungen",
             VertexEquivalenceClasses => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
             Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
             Das macht Bruteforce etwas weniger speicherintensiv.",
@@ -105,7 +107,7 @@ impl VertexColorInfo {
             SafeBoundary => "Sicherere Grenze",
             Escape1 => "Flucht 1",
             Escape2 => "Flucht 2 (Komponenten)",
-            Escape2Grid => "Flucht 2 (Richtungen)",
+            Escape2Grid => "Flucht 2 (Gitter)",
             EscapeConeGrid => "Flucht Kegel (Gitter)",
             Escape3Grid => "Flucht 3 (Gitter)",
             Escape23Grid => "Flucht 2 + 3 (Gitter)",
@@ -114,6 +116,7 @@ impl VertexColorInfo {
             MaxCopDist => "maximaler Cop Abstand",
             AnyCopDist => "jeder Cop Abstand",
             RobberDist => "Räuberabstand",
+            RobberCone => "Kegel von Räuber (Gitter)",
             VertexEquivalenceClasses => "Symmetrieäquivalenzklassen",
             RobberVertexClass => "Äquivalenzklasse Räuberknoten",
             CopsRotatedToEquivalence => "Rotierte Coppositionen",
@@ -342,25 +345,35 @@ impl Options {
                 }).response.on_hover_text("rotiere durch letzte mit [Q] + [1]/[2]/[3]/[4]");
             match self.vertex_color_info() {
                 VertexColorInfo::MinCopDist | VertexColorInfo::MaxCopDist | VertexColorInfo::AnyCopDist => {
-                    add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", (0, 1000), 1)
+                    add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", (0, 1000), 1);
                 },
                 VertexColorInfo::RobberDist => {
-                    add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", (0, 1000), 1)
+                    add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", (0, 1000), 1);
                 },
                 VertexColorInfo::SpecificVertex => {
                     ui.horizontal(|ui| {
                         ui.add(DragValue::new(&mut self.specific_shown_vertex));
                         ui.label("Index");
                     });
-                    false
                 },
-                VertexColorInfo::Escape2Grid | VertexColorInfo::EscapeConeGrid => {
-                    let mut shown_f = self.shown_escape_directions as f32;
-                    let resp = add_drag_value(ui, &mut shown_f, "Richtungen (Bits)", (1.0, 63.0), 2);
-                    self.shown_escape_directions = shown_f as u8;
-                    resp
+                VertexColorInfo::Escape2Grid | VertexColorInfo::EscapeConeGrid | VertexColorInfo::RobberCone => {
+                    let mut shown = crate::graph::grid::Dirs(self.shown_escape_directions);
+                    ui.horizontal(|ui| {
+                        if ui.button(" - ").clicked() {
+                            shown = shown.rotate_left_hex();
+                        }
+                        ui.add(egui::DragValue::new(&mut shown.0).range(0..=63));
+                        if ui.button(" + ").clicked() {
+                            shown = shown.rotate_right_hex();
+                        }
+                        ui.label("Richtungen (Bits)").on_hover_text("Richtungen werden als Bitset gespeichert. \
+                        Bits für Richtungen e₃ und -e₃ werden auf Vierecksgitter ignoriert.");
+                    });
+                    self.shown_escape_directions = shown.0;
                 },
-                _ => add_disabled_drag_value(ui),
+                _ => {
+                    add_disabled_drag_value(ui);
+                },
             };
 
 
@@ -1496,6 +1509,19 @@ impl Info {
                     }
                 }
             },
+            VertexColorInfo::RobberCone => {
+                if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
+                    if let Some(r) = self.characters.active_robber() {
+                        let robber_coords = g.coordinates_of(r.vertex());
+                        let shown = graph::grid::Dirs(self.options.shown_escape_directions);
+                        for (v, util) in izip!(0.., utils_iter) {
+                            let v_coords = g.coordinates_of(v);
+                            let dirs_to_v = (v_coords - robber_coords).dirs(g.norm);
+                            draw_if!(shown.intersection(dirs_to_v) == dirs_to_v, util);
+                        }
+                    }
+                }
+            },
             VertexColorInfo::Debugging => {
                 //for &v in self.escapable.inner_connecting_line() {
                 //    if con.visible[v] {
@@ -1514,18 +1540,6 @@ impl Info {
                 //                    draw_circle_at(con.positions[n], color);
                 //                }
                 //            }
-                //        }
-                //    }
-                //}
-                //if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
-                //    if let Some(r) = self.characters.active_robber() {
-                //        let robber_coords = g.coordinates_of(r.vertex());
-                //        let sector =
-                //            graph::grid::Sector(self.escapable_grid.esc_directions[r.vertex()]);
-                //        for (v, util) in izip!(0.., utils_iter) {
-                //            let v_coords = g.coordinates_of(v);
-                //            let dir = g.norm.canonical_coords(v_coords - robber_coords);
-                //            draw_if!(sector.contains(&dir), util);
                 //        }
                 //    }
                 //}

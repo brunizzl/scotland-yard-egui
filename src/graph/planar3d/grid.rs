@@ -23,6 +23,41 @@ impl Coords {
     pub const fn line_e3_index(&self) -> isize {
         -self.x + self.y
     }
+
+    /// these three coordinates are not line coordinates.
+    /// instead they say how many steps in each direction one needs to
+    /// take on a shortest path from the origin to self.
+    /// the returned value is (e1, e2, e3) in non-thesis coorinates.
+    pub const fn shortest_path_dirs(self, norm: Norm) -> (isize, isize, isize) {
+        let Coords { x, y } = self;
+        match norm {
+            Norm::Hex => {
+                // again: the coordinate system in use here has
+                // the y-axis flipped when compared to the system
+                // chosen in the thesis.
+                if x * y <= 0 {
+                    (x, y, 0)
+                } else if y.abs() > x.abs() {
+                    (0, y - x, -x)
+                } else {
+                    (x - y, 0, -y)
+                }
+            },
+            Norm::Quad => (x, y, 0),
+        }
+    }
+
+    pub const fn dirs(self, norm: Norm) -> Dirs {
+        let (e1, e2, e3) = self.shortest_path_dirs(norm);
+        // this works for both hex and quad, as in the quad case we have `e3 == 0`.
+        let e1pos = (e1 > 0) as u8;
+        let e3neg = (e3 < 0) as u8 * (1 << 1);
+        let e2pos = (e2 > 0) as u8 * (1 << 2);
+        let e1neg = (e1 < 0) as u8 * (1 << 3);
+        let e3pos = (e3 > 0) as u8 * (1 << 4);
+        let e2neg = (e2 < 0) as u8 * (1 << 5);
+        Dirs(e1pos | e3neg | e2pos | e1neg | e3pos | e2neg)
+    }
 }
 
 impl std::ops::Add<Coords> for Coords {
@@ -127,6 +162,8 @@ pub struct Dirs(pub u8);
 
 impl Dirs {
     const MASK: u8 = (1 << 6) - 1;
+    const FST_BIT: u8 = 1 << 0;
+    const LST_BIT: u8 = 1 << 5;
 
     pub const fn all(norm: Norm) -> Self {
         match norm {
@@ -172,32 +209,34 @@ impl Dirs {
         Self(self.0 & !other.0)
     }
 
+    #[inline(always)]
+    pub const fn rotate_right_hex(self) -> Self {
+        let mut raw = self.0 >> 1;
+        if self.0 & Self::FST_BIT != 0 {
+            raw |= Self::LST_BIT;
+        }
+        debug_assert!(raw & Self::MASK == raw);
+        Self(raw)
+    }
+
+    #[inline(always)]
+    pub const fn rotate_left_hex(self) -> Self {
+        let mut raw = self.0 << 1;
+        if self.0 & Self::LST_BIT != 0 {
+            raw |= Self::FST_BIT;
+            raw &= Self::MASK;
+        }
+        debug_assert!(raw & Self::MASK == raw);
+        Self(raw)
+    }
+
     pub const fn add_adjacent_on_hex(self) -> Self {
-        let mut res = (self.0 << 1) | self.0 | (self.0 >> 1);
-        const FST_BIT: u8 = 1 << 0;
-        const LST_BIT: u8 = 1 << 5;
-        if self.0 & FST_BIT != 0 {
-            res |= LST_BIT;
-        }
-        if self.0 & LST_BIT != 0 {
-            res |= FST_BIT;
-        }
-        Self(res & Self::MASK)
+        self.union(self.rotate_left_hex()).union(self.rotate_right_hex())
     }
 
     pub const fn keep_inner_on_hex(self) -> Self {
-        let mut shift_right = self.0 >> 1;
-        let mut shift_left = self.0 << 1;
-        const FST_BIT: u8 = 1 << 0;
-        const LST_BIT: u8 = 1 << 5;
-        if self.0 & FST_BIT != 0 {
-            shift_right |= LST_BIT;
-        }
-        if self.0 & LST_BIT != 0 {
-            shift_left |= FST_BIT;
-        }
-        let res = shift_right & self.0 & shift_left;
-        Self(res & Self::MASK)
+        self.intersection(self.rotate_left_hex())
+            .intersection(self.rotate_right_hex())
     }
 
     /// same order as [`Norm::unit_directions`]
@@ -374,6 +413,15 @@ mod test {
         assert_eq!(Norm::Hex.unit_directions().len(), 6);
         for &dir in Norm::Hex.unit_directions() {
             assert_eq!(1, Norm::Hex.apply(dir));
+        }
+    }
+
+    #[test]
+    fn shift_round_trip() {
+        for raw in 0..Dirs::MASK {
+            let dirs = Dirs(raw);
+            assert_eq!(dirs.rotate_left_hex().rotate_right_hex(), dirs);
+            assert_eq!(dirs.rotate_right_hex().rotate_left_hex(), dirs);
         }
     }
 }
