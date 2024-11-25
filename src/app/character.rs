@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{add_drag_value, color::*, map, DrawContext};
+use super::{add_drag_value, map, style::Style, DrawContext};
 
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub enum Id {
@@ -31,20 +31,6 @@ impl Id {
         match self {
             Id::Cop(_) => "Cop",
             Id::Robber => "Räuber",
-        }
-    }
-
-    pub fn color(&self) -> Color32 {
-        match self {
-            Id::Cop(_) => Color32::from_rgb(10, 50, 170),
-            Id::Robber => Color32::from_rgb(170, 40, 40),
-        }
-    }
-
-    pub fn glow(&self) -> Color32 {
-        match self {
-            Id::Cop(_) => Color32::from_rgb(60, 120, 235),
-            Id::Robber => Color32::from_rgb(235, 120, 120),
         }
     }
 
@@ -96,6 +82,59 @@ enum Pos {
     /// position to where is is currently held while dragging,
     /// only active while dragging (coordinates are in the intermediate system of ToScreen)
     OnScreen(Pos2),
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq)]
+pub struct CharactersStyle(pub Style<3>);
+
+impl CharactersStyle {
+    pub const DEFAULT_COLORS: [Color32; 3] = [
+        Color32::from_rgb(10, 50, 170),
+        Color32::WHITE,
+        Color32::from_rgb(170, 40, 40),
+    ];
+
+    pub const DEFAULT: Self = Self(Style {
+        colors: CharactersStyle::DEFAULT_COLORS,
+        size: 1.0,
+    });
+
+    pub fn symbol_color(&self) -> Color32 {
+        self.0.colors[1]
+    }
+
+    pub fn base_color(&self, id: Id) -> Color32 {
+        match id {
+            Id::Cop(_) => self.0.colors[0],
+            Id::Robber => self.0.colors[2],
+        }
+    }
+
+    pub fn glow_color(&self, id: Id) -> Color32 {
+        let base = self.base_color(id);
+        // continuous function, choosen to produce the same results as
+        // the hard coded values before, given the inputs are the default colors.
+        let brighter = |channel: u8| -> u8 {
+            match channel {
+                0..=40 => 2 * channel + 40,
+                41..=55 => 120,
+                56..=175 => channel + 65,
+                176..=255 => 240,
+            }
+        };
+        let [r, g, b, _] = base.to_array();
+        Color32::from_rgb(brighter(r), brighter(g), brighter(b))
+    }
+
+    pub fn size(&self) -> f32 {
+        self.0.size
+    }
+}
+
+impl Default for CharactersStyle {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 //denotes eighter a cop or the robber as node on screen
@@ -161,13 +200,19 @@ impl Character {
         }
     }
 
-    fn draw_large_at(&self, draw_pos: Pos2, painter: &Painter, character_size: f32) {
+    fn draw_large_at(
+        &self,
+        draw_pos: Pos2,
+        painter: &Painter,
+        character_size: f32,
+        style: &CharactersStyle,
+    ) {
         //draw circles
         let character_circle =
-            egui::Shape::circle_filled(draw_pos, character_size, self.id.color());
+            egui::Shape::circle_filled(draw_pos, character_size, style.base_color(self.id));
         painter.add(character_circle);
         if self.on_node {
-            let stroke = Stroke::new(character_size * 0.375, self.id.glow());
+            let stroke = Stroke::new(character_size * 0.375, style.glow_color(self.id));
             let marker_circle = egui::Shape::circle_stroke(draw_pos, character_size, stroke);
             painter.add(marker_circle);
         }
@@ -175,22 +220,24 @@ impl Character {
         let font = egui::FontId::proportional(character_size * 2.0);
         let emoji_pos = draw_pos - character_size * vec2(0.0, 1.35);
         let emoji_str = self.id.emoji().to_string();
-        let mut layout_job = egui::text::LayoutJob::simple(emoji_str, font, WHITE, 100.0);
+        let mut layout_job =
+            egui::text::LayoutJob::simple(emoji_str, font, style.symbol_color(), 100.0);
         layout_job.halign = egui::Align::Center;
         let galley = painter.ctx().fonts(|f| f.layout_job(layout_job));
-        let emoji = egui::Shape::Text(egui::epaint::TextShape::new(emoji_pos, galley, WHITE));
+        let emoji = egui::Shape::Text(egui::epaint::TextShape::new(
+            emoji_pos,
+            galley,
+            style.symbol_color(),
+        ));
         painter.add(emoji);
     }
 
-    fn draw_small_at_node(&self, con: &DrawContext<'_>) {
-        let character_size = f32::max(4.0, con.scale * 4.0);
+    fn draw_small_at_node(&self, con: &DrawContext<'_>, style: &CharactersStyle) {
+        let character_size = f32::max(4.0, con.scale * 4.0 * style.size());
         let draw_pos = con.vertex_draw_pos(self.nearest_vertex);
-        let character_circle = egui::Shape::circle_filled(draw_pos, character_size, self.id.glow());
+        let character_circle =
+            egui::Shape::circle_filled(draw_pos, character_size, style.glow_color(self.id));
         con.painter.add(character_circle);
-    }
-
-    pub fn draw_size(con: &DrawContext<'_>) -> f32 {
-        f32::max(6.0, con.scale * 15.0)
     }
 
     /// returns true iff character was just released and has changed its node
@@ -200,9 +247,10 @@ impl Character {
         con: &DrawContext<'_>,
         nr_others_at_same_pos: usize,
         drag_enabled: bool,
+        style: &CharactersStyle,
     ) -> bool {
         let move_rect = con.cam().to_screen().move_rect;
-        let character_size = Self::draw_size(con);
+        let character_size = f32::max(6.0, con.scale * 15.0) * style.size();
 
         let draw_screen_pos = match self.pos {
             Pos::OnScreen(p2) => move_rect.transform_pos(p2),
@@ -214,7 +262,7 @@ impl Character {
             },
         };
 
-        self.draw_large_at(draw_screen_pos, &con.painter, character_size);
+        self.draw_large_at(draw_screen_pos, &con.painter, character_size, style);
         if !drag_enabled {
             return false;
         }
@@ -784,7 +832,13 @@ impl State {
     }
 
     /// returns a menu change (e.g. a new character was added, one removed...)
-    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, queue: &mut VecDeque<usize>) -> bool {
+    pub fn draw_menu(
+        &mut self,
+        ui: &mut Ui,
+        style: &mut CharactersStyle,
+        map: &map::Map,
+        queue: &mut VecDeque<usize>,
+    ) -> bool {
         debug_assert_eq!(
             self.past_moves.len(),
             self.characters
@@ -809,6 +863,7 @@ impl State {
                     self.create_character_at(pos, map);
                     change = true;
                 }
+                style.0.draw_options(ui, &CharactersStyle::DEFAULT_COLORS);
             });
             let nr_cops = self.cops().len();
             let draw_cops = |ui: &mut Ui| {
@@ -926,7 +981,13 @@ impl State {
         change
     }
 
-    pub fn draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>, drag_enabled: bool) {
+    pub fn draw(
+        &mut self,
+        ui: &mut Ui,
+        style: &CharactersStyle,
+        con: &DrawContext<'_>,
+        drag_enabled: bool,
+    ) {
         type PosVec = smallvec::SmallVec<[usize; 20]>;
         let positions = PosVec::from_iter(self.characters.iter().map(|c| c.nearest_vertex));
 
@@ -935,23 +996,24 @@ impl State {
                 positions[..i].iter().filter(|&&p| p == ch.nearest_vertex).count();
             //always allow to drag, except character sits on backside of graph
             if !ch.on_node || con.visible[ch.nearest_vertex] {
-                let finished_move = ch.drag_and_draw(ui, con, nr_others_at_same_pos, drag_enabled);
+                let finished_move =
+                    ch.drag_and_draw(ui, con, nr_others_at_same_pos, drag_enabled, style);
                 if finished_move {
                     self.past_moves.push((i, ch.nearest_vertex));
                     self.future_moves.clear();
                 }
             } else {
-                ch.draw_small_at_node(con);
+                ch.draw_small_at_node(con, style);
             }
         }
     }
 
-    pub fn draw_tails(&self, con: &DrawContext<'_>) {
+    pub fn draw_tails(&self, style: &CharactersStyle, con: &DrawContext<'_>) {
         if !self.show_past_steps {
             return;
         }
         for ch in self.all() {
-            let glow = ch.id().glow();
+            let glow = style.glow_color(ch.id());
             let trans = glow.gamma_multiply(0.3);
 
             let mut size = con.scale * 5.0;
@@ -977,13 +1039,14 @@ impl State {
         }
     }
 
-    pub fn draw_allowed_next_steps(&self, con: &DrawContext<'_>) {
+    pub fn draw_allowed_next_steps(&self, style: &CharactersStyle, con: &DrawContext<'_>) {
         if !self.show_allowed_next_steps {
             return;
         }
         let Some(last_moved_character) = self.last_moved() else {
             return;
         };
+        let radius = style.size() * con.scale * 6.5;
         for ch in self.all() {
             let name = ch.id();
             if !ch.is_active() || name.same_job(last_moved_character.id()) {
@@ -992,12 +1055,11 @@ impl State {
             let Some(&v) = ch.past_vertices().last() else {
                 continue;
             };
+            let stroke = Stroke::new(con.scale * 2.0, style.glow_color(ch.id()));
             for n in con.edges.neighbors_of(v) {
                 if con.visible[n] {
                     let draw_pos = con.vertex_draw_pos(n);
-                    let stroke = Stroke::new(con.scale * 2.0, name.glow());
-                    let marker_circle =
-                        egui::Shape::circle_stroke(draw_pos, con.scale * 6.5, stroke);
+                    let marker_circle = egui::Shape::circle_stroke(draw_pos, radius, stroke);
                     con.painter.add(marker_circle);
                 }
             }

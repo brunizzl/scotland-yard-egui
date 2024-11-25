@@ -56,7 +56,7 @@ fn floats_to_color(cs: [f32; 3], scale: f32, alpha_f: f32) -> Color32 {
     Color32::from_rgba_premultiplied(to_u8(cs[0]), to_u8(cs[1]), to_u8(cs[2]), alpha)
 }
 
-fn blend<'a>(colors: impl Iterator<Item = &'a F32Color>) -> Color32 {
+pub fn blend<'a>(colors: impl IntoIterator<Item = &'a F32Color>) -> Color32 {
     let mut res_rgb = [0.0f32; 3];
     let mut res_alpha = 0.0f32;
     let mut alpha_sum = 0.0f32;

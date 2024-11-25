@@ -17,9 +17,9 @@ use crate::graph::{
 use super::{
     add_disabled_drag_value, add_drag_value,
     bruteforce_state::BruteforceComputationState,
-    character::{self, Character},
+    character::{self, Character, CharactersStyle},
     color, load_or, map,
-    style::Style,
+    style::{self, Style},
     DrawContext, NATIVE,
 };
 
@@ -192,11 +192,13 @@ impl VertexSymbolInfo {
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
     vertex_style: Style<1>,
-    manual_marker_styles: [Style<1>; 8],
+    manual_marker_sizes: [f32; 8],
+    manual_marker_colors: [Color32; 8],
     automatic_marker_style: Style<1>,
     hull_style: Style<1>,
     hull_boundary_style: Style<1>,
     number_style: Style<0>,
+    character_style: CharactersStyle,
 
     active_manual_marker: usize, //expected in 0..8
     shown_manual_markers: u8,    //bitmask
@@ -223,20 +225,13 @@ struct Options {
 
 const DEFAULT_OPTIONS: Options = Options {
     vertex_style: Style::new(&[Color32::GRAY]),
-    manual_marker_styles: [
-        Style::new(&[color::HAND_PICKED_MARKER_COLORS[0]]),
-        Style::new(&[color::HAND_PICKED_MARKER_COLORS[1]]),
-        Style::new(&[color::HAND_PICKED_MARKER_COLORS[2]]),
-        Style::new(&[color::HAND_PICKED_MARKER_COLORS[3]]),
-        Style::new(&[color::HAND_PICKED_MARKER_COLORS[4]]),
-        Style::new(&[color::HAND_PICKED_MARKER_COLORS[5]]),
-        Style::new(&[color::HAND_PICKED_MARKER_COLORS[6]]),
-        Style::new(&[color::HAND_PICKED_MARKER_COLORS[7]]),
-    ],
+    manual_marker_sizes: [1.0; 8],
+    manual_marker_colors: color::HAND_PICKED_MARKER_COLORS,
     automatic_marker_style: Style::new(&[color::GREEN]),
     hull_style: Style::new(&[color::LIGHT_BLUE]),
     hull_boundary_style: Style::new(&[color::WHITE]),
     number_style: Style::new(&[]),
+    character_style: CharactersStyle::DEFAULT,
 
     active_manual_marker: 0,
     shown_manual_markers: u8::MAX,
@@ -359,7 +354,7 @@ impl Options {
                     });
                     false
                 },
-                VertexColorInfo::Escape2Grid => {
+                VertexColorInfo::Escape2Grid | VertexColorInfo::EscapeConeGrid => {
                     let mut shown_f = self.shown_escape_directions as f32;
                     let resp = add_drag_value(ui, &mut shown_f, "Richtungen (Bits)", (1.0, 63.0), 2);
                     self.shown_escape_directions = shown_f as u8;
@@ -377,6 +372,8 @@ impl Options {
             ComboBox::from_id_source(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
+                    super::style::close_options_menu();
+
                     let mut curr = self.vertex_number_info();
                     for val in VertexSymbolInfo::iter() {
                         ui.radio_value(&mut curr, val, val.name_str())
@@ -403,6 +400,7 @@ pub enum MouseTool {
     Drag,
     Draw,
     Erase,
+    Paintbucket,
 }
 
 impl MouseTool {
@@ -411,6 +409,7 @@ impl MouseTool {
             MouseTool::Drag => " ♟ ",
             MouseTool::Draw => " ✏ ",
             MouseTool::Erase => " 📗 ",
+            MouseTool::Paintbucket => " 💦 ",
         }
     }
 
@@ -419,10 +418,11 @@ impl MouseTool {
             MouseTool::Drag => "bewege Figuren ([E] + [1])",
             MouseTool::Draw => "zeichne ([E] + [2])",
             MouseTool::Erase => "radiere ([E] + [3])",
+            MouseTool::Paintbucket => "Farbeimer ([E] + [4])",
         }
     }
 
-    pub const ALL: [Self; 3] = [Self::Drag, Self::Draw, Self::Erase];
+    pub const ALL: [Self; 4] = [Self::Drag, Self::Draw, Self::Erase, Self::Paintbucket];
 
     /// input is old self, result new one. updating stored information must be done elsewhere
     pub fn draw_mouse_tool_controls(self, ui: &mut Ui) -> Self {
@@ -588,7 +588,9 @@ impl Info {
             });
         }
 
-        change |= self.characters.draw_menu(ui, map, &mut self.queue);
+        change |=
+            self.characters
+                .draw_menu(ui, &mut self.options.character_style, map, &mut self.queue);
         if change {
             self.register_change_now();
         }
@@ -616,16 +618,21 @@ impl Info {
             .constrain_to(ctx.screen_rect())
             .show(ctx, |ui| {
                 new_tool = new_tool.draw_mouse_tool_controls(ui);
-                ui.add(Checkbox::new(
-                    &mut opts.combine_manual_marker_colors,
-                    "kombiniere Marker",
-                ))
-                .on_hover_text(
-                    "Die Farben aller Marker eines Knotens werden gemischt angezeigt\n\
-                    und alle Marker haben die Größe des ersten Markers.",
-                );
+                ui.horizontal(|ui| {
+                    ui.add(Checkbox::new(
+                        &mut opts.combine_manual_marker_colors,
+                        "kombiniere Marker",
+                    ))
+                    .on_hover_text(
+                        "Die Farben aller Marker eines Knotens werden gemischt angezeigt\n\
+                        und alle Marker haben die Größe des ersten Markers.",
+                    );
+                    if opts.combine_manual_marker_colors {
+                        style::draw_options(ui, &mut opts.manual_marker_sizes[0], &mut [], &[]);
+                    }
+                });
 
-                for (i, color) in izip!(0.., &mut opts.manual_marker_styles) {
+                for (i, size) in izip!(0.., &mut opts.manual_marker_sizes) {
                     ui.horizontal(|ui| {
                         let bit_i = 1u8 << i;
                         let hover_choose = format!("wähle Farbe (f + {})", i + 1);
@@ -643,8 +650,17 @@ impl Info {
                             debug_assert_eq!(show, (opts.shown_manual_markers & bit_i) != 0);
                         };
 
-                        ui.color_edit_button_srgba(&mut color.colors[0]);
-                        color.draw_options(ui, &[color::HAND_PICKED_MARKER_COLORS[i]]);
+                        {
+                            let color = &mut opts.manual_marker_colors[i];
+                            ui.color_edit_button_srgba(color);
+                            if !opts.combine_manual_marker_colors {
+                                let active = &mut opts.manual_marker_colors[i..(i + 1)];
+                                let default = &color::HAND_PICKED_MARKER_COLORS[i..(i + 1)];
+                                style::draw_options(ui, size, active, default);
+                            } else if ui.button("Reset").clicked() {
+                                *color = color::HAND_PICKED_MARKER_COLORS[i];
+                            }
+                        }
                         if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
                             let mask = u8::MAX - bit_i;
                             for marker in &mut self.marked_manually {
@@ -657,33 +673,40 @@ impl Info {
                             () if hull_shown => "Konvexe Hülle",
                             () => "aktive manuelle Marker",
                         };
-
-                        for operation in [" + ", " · ", " - "] {
-                            let apply = |marker: &mut u8, other: bool| match operation {
-                                " + " => {
-                                    if other {
-                                        *marker |= bit_i;
-                                    }
-                                },
-                                " · " => {
-                                    if !other && (*marker & bit_i != 0) {
-                                        *marker -= bit_i;
-                                    }
-                                },
-                                " - " => {
-                                    if other && (*marker & bit_i != 0) {
-                                        *marker -= bit_i;
-                                    }
-                                },
-                                _ => unreachable!(),
-                            };
+                        enum Op {
+                            Add,
+                            Prod,
+                            Sub,
+                        }
+                        for operation in [Op::Add, Op::Prod, Op::Sub] {
                             let hint = match operation {
-                                " + " => format!("füge {what_set} hinzu (Vereinigung)"),
-                                " · " => format!("behalte nur {what_set} (Schnitt)"),
-                                " - " => format!("entferne {what_set} (Differenz)"),
-                                _ => unreachable!(),
+                                Op::Add => format!("füge {what_set} hinzu (Vereinigung)"),
+                                Op::Prod => format!("behalte nur {what_set} (Schnitt)"),
+                                Op::Sub => format!("entferne {what_set} (Differenz)"),
                             };
-                            if ui.button(operation).on_hover_text(hint).clicked() {
+                            let name = match operation {
+                                Op::Add => " + ",
+                                Op::Prod => " · ",
+                                Op::Sub => " - ",
+                            };
+                            if ui.button(name).on_hover_text(hint).clicked() {
+                                let apply = |marker: &mut u8, other: bool| match operation {
+                                    Op::Add => {
+                                        if other {
+                                            *marker |= bit_i;
+                                        }
+                                    },
+                                    Op::Prod => {
+                                        if !other && (*marker & bit_i != 0) {
+                                            *marker -= bit_i;
+                                        }
+                                    },
+                                    Op::Sub => {
+                                        if other && (*marker & bit_i != 0) {
+                                            *marker -= bit_i;
+                                        }
+                                    },
+                                };
                                 if automatic_markers_shown {
                                     let iter =
                                         izip!(&self.currently_marked, &mut self.marked_manually);
@@ -975,7 +998,7 @@ impl Info {
         let bit = 1u8 << self.options.active_manual_marker;
         if !con.positions.is_empty() {
             let (vertex, dist) = con.find_closest_vertex(screen_pos);
-            if dist <= 25.0 * con.scale {
+            if dist <= 35.0 * con.scale {
                 if set {
                     self.marked_manually[vertex] |= bit;
                 } else if self.marked_manually[vertex] & bit != 0 {
@@ -991,6 +1014,23 @@ impl Info {
 
     fn remove_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
         self.change_marker_at(screen_pos, con, false);
+    }
+
+    fn paint_bucket_at(&mut self, edges: &EdgeList, screen_pos: Pos2, con: &DrawContext<'_>) {
+        let bit = 1u8 << self.options.active_manual_marker;
+        if con.positions.is_empty() {
+            return;
+        }
+        let (v0, dist) = con.find_closest_vertex(screen_pos);
+        if dist > 35.0 * con.scale {
+            return;
+        }
+        let old = self.marked_manually[v0];
+        let new = if old == bit { 0 } else { bit };
+        self.marked_manually[v0] = new;
+        self.queue.clear();
+        self.queue.push_back(v0);
+        edges.recolor_region((old, new), &mut self.marked_manually, &mut self.queue);
     }
 
     fn screenshot_as_tikz(&mut self, con: &DrawContext<'_>) {
@@ -1110,6 +1150,11 @@ impl Info {
             if tool == MouseTool::Erase && mouse_down || info.key_pressed(Key::N) {
                 self.remove_marker_at(pointer_pos, con);
             }
+            if tool == MouseTool::Paintbucket
+                && info.pointer.button_released(PointerButton::Primary)
+            {
+                self.paint_bucket_at(con.edges, pointer_pos, con);
+            }
 
             const NUMS: [Key; 8] = {
                 use egui::Key::*;
@@ -1142,7 +1187,7 @@ impl Info {
                 return Some(Key::F);
             }
             if info.key_down(Key::E) {
-                for (new_tool, &key) in izip!(MouseTool::ALL, &NUMS[..3]) {
+                for (new_tool, &key) in izip!(MouseTool::ALL, &NUMS[..4]) {
                     if info.key_pressed(key) {
                         if new_tool == tool && tool == MouseTool::Drag {
                             self.options.show_manual_marker_window ^= true;
@@ -1187,10 +1232,10 @@ impl Info {
                     },
                     Key::F => {
                         const SIZE: Vec2 = vec2(28.0, 14.0); //14.0 is default text size
-                        for (n, &s) in izip!(1.., &opts.manual_marker_styles) {
+                        for (n, &c) in izip!(1.., &opts.manual_marker_colors) {
                             ui.horizontal(|ui| {
                                 add_unwrapped(ui, format!("{n}: "));
-                                egui::color_picker::show_color(ui, s.colors[0], SIZE);
+                                egui::color_picker::show_color(ui, c, SIZE);
                                 if n - 1 == opts.active_manual_marker {
                                     add_unwrapped(ui, String::from("⬅"));
                                 }
@@ -1818,12 +1863,12 @@ impl Info {
     }
 
     fn draw_manual_markers_combined(&self, con: &DrawContext<'_>) {
-        let size = 4.5 * self.options.manual_marker_styles[0].size * con.scale;
+        let size = 4.5 * self.options.manual_marker_sizes[0] * con.scale;
         let mut f32_colors = [color::F32Color::default(); 8];
         let mask = self.options.shown_manual_markers;
         color::zip_to_f32(
             f32_colors.iter_mut(),
-            self.options.manual_marker_styles.iter().map(|s| &s.colors[0]),
+            self.options.manual_marker_colors.iter(),
         );
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
             let masked = marked & mask;
@@ -1837,19 +1882,21 @@ impl Info {
     }
 
     fn draw_manual_markers_seperated(&self, con: &DrawContext<'_>) {
-        let mut sizes = [0.0f32; 8];
-        for (size, style) in izip!(&mut sizes, &self.options.manual_marker_styles) {
-            *size = 4.5 * con.scale * style.size;
-        }
+        let draw_sizes = {
+            let mut res = self.options.manual_marker_sizes;
+            for s in &mut res {
+                *s *= 4.5 * con.scale;
+            }
+            res
+        };
         let mask = self.options.shown_manual_markers;
         for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
             let masked = marked & mask;
             if vis && masked != 0 {
                 let draw_pos = con.cam().transform(pos);
                 let mut single_mask: u8 = 1;
-                for (style, size) in izip!(&self.options.manual_marker_styles, sizes) {
+                for (&color, &size) in izip!(&self.options.manual_marker_colors, &draw_sizes) {
                     if masked & single_mask != 0 {
-                        let color = style.colors[0];
                         let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
                         con.painter.add(marker_circle);
                     }
@@ -1873,6 +1920,7 @@ impl Info {
                 MouseTool::Drag => egui::CursorIcon::Default,
                 MouseTool::Draw => egui::CursorIcon::Crosshair,
                 MouseTool::Erase => egui::CursorIcon::Crosshair,
+                MouseTool::Paintbucket => egui::CursorIcon::Crosshair,
             };
             ctx.set_cursor_icon(icon);
         }
@@ -1891,11 +1939,12 @@ impl Info {
         self.draw_convex_cop_hull(con);
         self.draw_green_circles(ui, con);
         self.draw_manual_markers(con);
-        self.characters.draw_tails(con);
-        self.characters.draw_allowed_next_steps(con);
+        let ch_style = &self.options.character_style;
+        self.characters.draw_tails(ch_style, con);
+        self.characters.draw_allowed_next_steps(ch_style, con);
         self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
-        self.characters.draw(ui, con, self.tool == MouseTool::Drag);
+        self.characters.draw(ui, ch_style, con, self.tool == MouseTool::Drag);
         self.screenshot_as_tikz(con);
 
         self.frame_number += 1;
