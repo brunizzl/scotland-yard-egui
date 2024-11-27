@@ -270,6 +270,72 @@ impl Options {
         self.last_selected_vertex_number_infos[0]
     }
 
+    fn draw_drag_value(&mut self, ui: &mut Ui, draw_color_val: bool) {
+        #[derive(PartialEq, Eq, PartialOrd, Ord)]
+        enum ShownValue {
+            None,
+            MarkedCopDist,
+            MarkedRobberDist,
+            VertexIndex,
+            DirectionBits,
+        }
+        let val = if draw_color_val {
+            match self.vertex_color_info() {
+                VertexColorInfo::MinCopDist
+                | VertexColorInfo::MaxCopDist
+                | VertexColorInfo::AnyCopDist => ShownValue::MarkedCopDist,
+                VertexColorInfo::RobberDist => ShownValue::MarkedRobberDist,
+                VertexColorInfo::SpecificVertex => ShownValue::VertexIndex,
+                VertexColorInfo::Escape2Grid
+                | VertexColorInfo::EscapeConeGrid
+                | VertexColorInfo::RobberCone => ShownValue::DirectionBits,
+                _ => ShownValue::None,
+            }
+        } else {
+            match self.vertex_number_info() {
+                VertexSymbolInfo::Escape2Grid
+                | VertexSymbolInfo::Escape3Grid
+                | VertexSymbolInfo::EscapeConeGrid
+                | VertexSymbolInfo::Escape23Grid => ShownValue::DirectionBits,
+                _ => ShownValue::None,
+            }
+        };
+        match val {
+            ShownValue::MarkedCopDist => {
+                add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", (0, 1000), 1);
+            },
+            ShownValue::MarkedRobberDist => {
+                add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", (0, 1000), 1);
+            },
+            ShownValue::VertexIndex => {
+                ui.horizontal(|ui| {
+                    ui.add(DragValue::new(&mut self.specific_shown_vertex));
+                    ui.label("Index");
+                });
+            },
+            ShownValue::DirectionBits => {
+                let mut shown = crate::graph::grid::Dirs(self.shown_escape_directions);
+                ui.horizontal(|ui| {
+                    if ui.button(" - ").clicked() {
+                        shown = shown.rotate_left_hex();
+                    }
+                    ui.add(egui::DragValue::new(&mut shown.0).range(0..=63).binary(6, true));
+                    if ui.button(" + ").clicked() {
+                        shown = shown.rotate_right_hex();
+                    }
+                    ui.label("Richtungen").on_hover_text(
+                        "Richtungen werden als Bitset gespeichert. \
+                        Bits für Richtungen e₃ und -e₃ werden auf Vierecksgitter ignoriert.",
+                    );
+                });
+                self.shown_escape_directions = shown.0;
+            },
+            ShownValue::None => {
+                add_disabled_drag_value(ui);
+            },
+        }
+    }
+
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut menu_change = false;
         ui.collapsing("Knoteninfo", |ui| {
@@ -343,38 +409,7 @@ impl Options {
                         menu_change = true;
                     }
                 }).response.on_hover_text("rotiere durch letzte mit [Q] + [1]/[2]/[3]/[4]");
-            match self.vertex_color_info() {
-                VertexColorInfo::MinCopDist | VertexColorInfo::MaxCopDist | VertexColorInfo::AnyCopDist => {
-                    add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", (0, 1000), 1);
-                },
-                VertexColorInfo::RobberDist => {
-                    add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", (0, 1000), 1);
-                },
-                VertexColorInfo::SpecificVertex => {
-                    ui.horizontal(|ui| {
-                        ui.add(DragValue::new(&mut self.specific_shown_vertex));
-                        ui.label("Index");
-                    });
-                },
-                VertexColorInfo::Escape2Grid | VertexColorInfo::EscapeConeGrid | VertexColorInfo::RobberCone => {
-                    let mut shown = crate::graph::grid::Dirs(self.shown_escape_directions);
-                    ui.horizontal(|ui| {
-                        if ui.button(" - ").clicked() {
-                            shown = shown.rotate_left_hex();
-                        }
-                        ui.add(egui::DragValue::new(&mut shown.0).range(0..=63).binary(6, true));
-                        if ui.button(" + ").clicked() {
-                            shown = shown.rotate_right_hex();
-                        }
-                        ui.label("Richtungen (Bits)").on_hover_text("Richtungen werden als Bitset gespeichert. \
-                        Bits für Richtungen e₃ und -e₃ werden auf Vierecksgitter ignoriert.");
-                    });
-                    self.shown_escape_directions = shown.0;
-                },
-                _ => {
-                    add_disabled_drag_value(ui);
-                },
-            };
+            self.draw_drag_value(ui, true);
 
 
             ui.add_space(8.0);
@@ -402,6 +437,7 @@ impl Options {
                         menu_change = true;
                     }
                 }).response.on_hover_text("rotiere durch letzte mit [W] + [1]/[2]/[3]/[4]");
+            self.draw_drag_value(ui, false);
         });
 
         menu_change
@@ -482,6 +518,8 @@ pub struct Info {
     /// outside hull interieur == -min_cop_dist, then expanded into interieur via [`EdgeList::calc_distances_to`]
     /// the robber can escape lazy cops on a continuous hull, if cop_advantage on robber's position is <= -2
     /// as a cop's position has value 0 and a cops neighbors value >= -1.
+    /// as it turns out, values <= -2 are found at exactly those vertices,
+    /// which are contained in "winning stage II vertices" defined in the thesis.
     cop_advantage: Vec<isize>,
     /// each bit represents one marker color -> there are 8 distinct manual markers
     pub marked_manually: Vec<u8>,
@@ -786,32 +824,40 @@ impl Info {
         self.max_cop_dist = max_cop_dist;
     }
 
+    /// this is not a direct implementation of the characterisation of
+    /// "winning stage II vertices" given in the thesis,
+    /// but instead an equilavent formulation which gives rise to a linear time algorithm:
+    /// the function `f: vertices -> N` is computed as follows.
+    /// `
+    /// f(v) := if not v in cop hull interior {
+    ///     -min dist(v, cop) over all cops
+    /// } else {
+    ///     (min f(v') over all v' neighbors of v) + 1
+    /// }
+    /// `
     fn update_cop_advantage(&mut self, edges: &EdgeList) {
-        let cop_hull = &self.cop_hull_data.hull();
-        let mut advantage = std::mem::take(&mut self.cop_advantage);
-        advantage.resize(edges.nr_vertices(), isize::MAX);
-        let mut queue = std::mem::take(&mut self.queue);
-        queue.clear();
+        assert_eq!(edges.nr_vertices(), self.cop_hull_data.hull().len());
+        assert_eq!(edges.nr_vertices(), self.min_cop_dist.len());
 
-        let zipped = itertools::izip!(
+        self.cop_advantage.clear();
+        self.cop_advantage.resize(edges.nr_vertices(), isize::MAX);
+        self.queue.clear();
+
+        let iter = izip!(
             0..,
-            cop_hull.iter(),
-            advantage.iter_mut(),
+            self.cop_hull_data.hull(),
+            self.cop_advantage.iter_mut(),
             self.min_cop_dist.iter(),
         );
-        for (node, &hull, adv, &cop_dist) in zipped {
+        for (v, &hull, adv, &cop_dist) in iter {
             if hull.on_boundary() {
-                queue.push_back(node);
+                self.queue.push_back(v);
             }
-            *adv = if hull.in_interieur() {
-                isize::MAX
-            } else {
-                -cop_dist
-            };
+            if !hull.in_interieur() {
+                *adv = -cop_dist;
+            }
         }
-        edges.calc_distances_to(&mut queue, &mut advantage);
-        self.cop_advantage = advantage;
-        self.queue = queue;
+        edges.calc_distances_to(&mut self.queue, &mut self.cop_advantage);
     }
 
     fn update_convex_cop_hull(&mut self, con: &DrawContext<'_>) {
