@@ -362,7 +362,7 @@ impl Options {
                         if ui.button(" - ").clicked() {
                             shown = shown.rotate_left_hex();
                         }
-                        ui.add(egui::DragValue::new(&mut shown.0).range(0..=63));
+                        ui.add(egui::DragValue::new(&mut shown.0).range(0..=63).binary(6, true));
                         if ui.button(" + ").clicked() {
                             shown = shown.rotate_right_hex();
                         }
@@ -431,7 +431,11 @@ impl MouseTool {
             MouseTool::Drag => "bewege Figuren ([E] + [1])",
             MouseTool::Draw => "zeichne ([E] + [2])",
             MouseTool::Erase => "radiere ([E] + [3])",
-            MouseTool::Paintbucket => "Farbeimer ([E] + [4])",
+            MouseTool::Paintbucket => {
+                "Farbeimer ([E] + [4])\n\
+                Verschiedene Farben interagieren nicht miteinander.\n\
+                Klicken auf eine bereits markierte Region löscht diese."
+            },
         }
     }
 
@@ -1038,12 +1042,25 @@ impl Info {
         if dist > 35.0 * con.scale {
             return;
         }
-        let old = self.marked_manually[v0];
-        let new = if old == bit { 0 } else { bit };
-        self.marked_manually[v0] = new;
-        self.queue.clear();
-        self.queue.push_back(v0);
-        edges.recolor_region((old, new), &mut self.marked_manually, &mut self.queue);
+        // the action will eighter remove a connected component or fill it in,
+        // depending on the current state on the vertex which is clicked.
+        let erase = self.marked_manually[v0] & bit != 0;
+        let mut queue = std::mem::take(&mut self.queue);
+        queue.push_back(v0);
+        while let Some(v) = queue.pop_front() {
+            let is_colored = self.marked_manually[v] & bit != 0;
+            if erase && is_colored {
+                // we act as if we have eight independent canvasses wich just two colors each.
+                self.marked_manually[v] -= bit;
+                queue.extend(edges.neighbors_of(v));
+            }
+            if !erase && !is_colored {
+                // we act as if we have eight independent canvasses wich just two colors each.
+                self.marked_manually[v] |= bit;
+                queue.extend(edges.neighbors_of(v));
+            }
+        }
+        self.queue = queue;
     }
 
     fn screenshot_as_tikz(&mut self, con: &DrawContext<'_>) {
