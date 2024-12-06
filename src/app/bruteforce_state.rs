@@ -608,13 +608,15 @@ impl BruteforceComputationState {
             if let Some(r) = &mut worker.manager {
                 ui.add(Label::new(r.last_log()).wrap_mode(egui::TextWrapMode::Extend));
                 ui.horizontal(|ui| {
-                    let (label, cmd) = if paused {
-                        (" ▶ ", Command::Work)
-                    } else {
-                        (" ⏸ ", Command::Pause)
-                    };
-                    if ui.button(label).clicked() {
-                        r.send_command(cmd).ok();
+                    {
+                        let (label, cmd) = if paused {
+                            (" ▶ ", Command::Work)
+                        } else {
+                            (" ⏸ ", Command::Pause)
+                        };
+                        if ui.button(label).clicked() {
+                            r.send_command(cmd).ok();
+                        }
                     }
                     let abort_button = ui.add_enabled(paused, Button::new("abbrechen"));
                     if abort_button.contains_pointer() && paused && mouse_down {
@@ -624,7 +626,7 @@ impl BruteforceComputationState {
                                 let ratio = time_since_click.as_secs_f32() / 5.0;
                                 if ratio < 1.0 {
                                     let text = format!("{}%", (ratio * 100.0) as isize);
-                                    let id = egui::Id::new(r as *const _);
+                                    let id = egui::Id::new((r as *const _, "abort animation"));
                                     egui::show_tooltip_text(ui.ctx(), ui.layer_id(), id, text);
                                 } else {
                                     r.send_command(Command::Abort).ok();

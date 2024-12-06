@@ -4,10 +4,7 @@ use itertools::{izip, Itertools};
 
 use strum::IntoEnumIterator;
 
-use egui::{
-    text::LayoutJob, vec2, Button, Checkbox, Color32, ComboBox, Context, DragValue, Id, Label,
-    Pos2, RichText, Ui, Vec2, Window,
-};
+use egui::{Checkbox, Color32, ComboBox, Label, Pos2, Ui, Vec2};
 
 use crate::geo::Pos3;
 use crate::graph::{
@@ -309,7 +306,7 @@ impl Options {
             },
             ShownValue::VertexIndex => {
                 ui.horizontal(|ui| {
-                    ui.add(DragValue::new(&mut self.specific_shown_vertex));
+                    ui.add(egui::DragValue::new(&mut self.specific_shown_vertex));
                     ui.label("Index");
                 });
             },
@@ -488,7 +485,7 @@ impl MouseTool {
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird."
             );
             for t in MouseTool::ALL {
-                let button = Button::new(t.symbol()).selected(self == t);
+                let button = egui::Button::new(t.symbol()).selected(self == t);
                 if ui.add(button).on_hover_text(t.what()).clicked() {
                     new = t;
                 }
@@ -663,12 +660,12 @@ impl Info {
         self.change_tool_to(new);
     }
 
-    pub fn draw_windows(&mut self, ctx: &Context) {
+    pub fn draw_windows(&mut self, ctx: &egui::Context) {
         let opts = &mut self.options;
         let automatic_markers_shown = opts.vertex_color_info() != VertexColorInfo::None;
         let hull_shown = opts.show_convex_hull;
         let mut new_tool = self.tool;
-        Window::new("Manuelle Marker")
+        egui::Window::new("Manuelle Marker")
             .open(&mut opts.show_manual_marker_window)
             .constrain_to(ctx.screen_rect())
             .show(ctx, |ui| {
@@ -969,8 +966,8 @@ impl Info {
         use VertexSymbolInfo as Symbol;
 
         let nr_vertices = con.edges.nr_vertices();
-        let robber_moved = self.characters.robber_updated();
-        let cop_moved = self.characters.cop_updated();
+        let robber_moved = self.characters.robber_changed;
+        let cop_moved = self.characters.cop_changed;
 
         let color = self.options.vertex_color_info();
         let symbol = self.options.vertex_number_info();
@@ -1213,7 +1210,7 @@ impl Info {
                 let (v, dist) = con.find_closest_vertex(pointer_pos);
                 if dist <= 25.0 * con.scale {
                     if !self.characters.remove_cop_at_vertex(v) {
-                        self.characters.create_character_at(pointer_pos, con.map);
+                        self.characters.new_character_at(pointer_pos, con.map);
                     }
                     change = true;
                 }
@@ -1277,7 +1274,7 @@ impl Info {
         });
 
         if let Some(key) = held_key {
-            let id = Id::new((&self.options as *const _, "tooltip-fast-switch"));
+            let id = egui::Id::new((&self.options as *const _, "tooltip-fast-switch"));
             egui::show_tooltip(ui.ctx(), ui.layer_id(), id, |ui| {
                 let opts = &self.options;
                 let add_unwrapped = |ui: &mut Ui, txt| {
@@ -1307,7 +1304,7 @@ impl Info {
                         }
                     },
                     Key::F => {
-                        const SIZE: Vec2 = vec2(28.0, 14.0); //14.0 is default text size
+                        const SIZE: Vec2 = Vec2::new(28.0, 14.0); //14.0 is default text size
                         for (n, &c) in izip!(1.., &opts.manual_marker_colors) {
                             ui.horizontal(|ui| {
                                 add_unwrapped(ui, format!("{n}: "));
@@ -1320,7 +1317,7 @@ impl Info {
                     },
                     Key::E => {
                         ui.add(
-                            Label::new(RichText::new(tool.symbol()).size(30.0))
+                            Label::new(egui::RichText::new(tool.symbol()).size(30.0))
                                 .wrap_mode(egui::TextWrapMode::Extend),
                         );
                     },
@@ -1722,13 +1719,14 @@ impl Info {
         };
         let draw_text_at = |pos: Pos3, txt: String| {
             if !txt.is_empty() {
+                use egui::text::LayoutJob;
                 let mut layout_job = LayoutJob::simple_singleline(txt, font.clone(), color);
                 layout_job.halign = egui::Align::Center;
                 let galley = ui.fonts(|f| f.layout_job(layout_job));
                 let screen_pos = con.cam().transform(pos);
                 // shift pos upwards (negative y direction), so text is centered on vertex
                 // why the heck is the best value not 0.5 btw?
-                let above_pos = screen_pos - font.size * vec2(0.0, 0.53);
+                let above_pos = screen_pos - font.size * Vec2::new(0.0, 0.53);
                 let text =
                     egui::Shape::Text(egui::epaint::TextShape::new(above_pos, galley, color));
                 con.painter.add(text);
@@ -2006,12 +2004,14 @@ impl Info {
     pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         self.choose_pointer_symbol(ui.ctx(), con);
         self.process_general_input(ui, con);
-        self.characters.start_new_frame(con, &mut self.queue);
         if self.last_change_frame == self.frame_number {
             self.definitely_update(con);
         } else {
             self.maybe_update(con);
         }
+        self.characters.robber_changed = false;
+        self.characters.cop_changed = false;
+
         self.draw_vertices(con);
         self.draw_convex_cop_hull(con);
         self.draw_green_circles(ui, con);
@@ -2021,7 +2021,10 @@ impl Info {
         self.characters.draw_allowed_next_steps(ch_style, con);
         self.draw_best_cop_moves(con);
         self.draw_numbers(ui, con);
-        self.characters.draw(ui, ch_style, con, self.tool == MouseTool::Drag);
+
+        let drag = self.tool == MouseTool::Drag;
+        self.characters.update_and_draw(ui, ch_style, con, drag, &mut self.queue);
+
         self.screenshot_as_tikz(con);
 
         self.frame_number += 1;

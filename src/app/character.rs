@@ -80,7 +80,8 @@ enum Pos {
     /// closest to where he was before.
     OnVertex(Pos3),
     /// position to where is is currently held while dragging,
-    /// only active while dragging (coordinates are in the intermediate system of ToScreen)
+    /// only active while dragging or while sitting outside of graph
+    /// (coordinates are in the intermediate system of ToScreen).
     OnScreen(Pos2),
 }
 
@@ -156,8 +157,13 @@ pub struct Character {
     enabled: bool,
     /// currently close to node, can also be true while dragging.
     on_node: bool,
-    /// [`Self::nearest_vertex`] or [`Self::distances`] changed this frame
-    updated: bool,
+}
+
+pub enum Change {
+    Released,
+    NewPos,
+    ToggleActive,
+    Delete,
 }
 
 impl Character {
@@ -196,7 +202,6 @@ impl Character {
             nearest_vertex: 0,
             on_node: false,
             enabled: true,
-            updated: true,
         }
     }
 
@@ -240,7 +245,6 @@ impl Character {
         con.painter.add(character_circle);
     }
 
-    /// returns true iff character was just released and has changed its node
     fn drag_and_draw(
         &mut self,
         ui: &Ui,
@@ -248,7 +252,7 @@ impl Character {
         nr_others_at_same_pos: usize,
         drag_enabled: bool,
         style: &CharactersStyle,
-    ) -> bool {
+    ) -> Option<Change> {
         let move_rect = con.cam().to_screen().move_rect;
         let character_size = f32::max(6.0, con.scale * 15.0) * style.size();
 
@@ -264,38 +268,58 @@ impl Character {
 
         self.draw_large_at(draw_screen_pos, &con.painter, character_size, style);
         if !drag_enabled {
-            return false;
+            return None;
         }
 
-        let point_response = {
-            let len = if nr_others_at_same_pos > 0 { 1.0 } else { 3.0 } * character_size;
-            let full_rect = Rect::from_center_size(draw_screen_pos, vec2(len, len));
-            // make sure that the character interaction area does not overlap the side menu
-            let point_rect = con.screen().intersect(full_rect);
-
-            let character_id = con.response.id.with(self as *const Self);
-            ui.interact(point_rect, character_id, Sense::drag())
-        };
-
-        // change a cop's apperance on right click.
-        // this has no actual meaning, so no need to tell anyone something changed.
-        if let Id::Cop(i) = &mut self.id {
-            point_response.context_menu(|ui| {
-                ui.set_max_width(0.0);
-                for (emoji_i, &emoji) in izip!(0.., Id::COP_EMOJIES) {
-                    ui.radio_value(i, emoji_i, emoji);
-                }
-            });
-        }
-
-        let now_dragging = point_response.dragged_by(egui::PointerButton::Primary);
         let was_dragging = matches!(self.pos, Pos::OnScreen(_));
-        //dragging starts -> update actual position to match drawn position
-        if now_dragging {
-            let new_screen_pos = draw_screen_pos + point_response.drag_delta();
-            let new_pos = move_rect.inverse().transform_pos(new_screen_pos);
-            self.pos = Pos::OnScreen(new_pos);
-        }
+        let now_dragging = 'handle_interaction: {
+            let resp = {
+                let len = if nr_others_at_same_pos > 0 { 1.0 } else { 3.0 } * character_size;
+                let full_rect = Rect::from_center_size(draw_screen_pos, vec2(len, len));
+                // only create interaction rectangle if character is actually visible.
+                if !con.screen().intersects(full_rect) {
+                    break 'handle_interaction false;
+                }
+                // make sure that the character interaction area does not overlap the side menu
+                let point_rect = con.screen().intersect(full_rect);
+
+                let character_id = con.response.id.with(self as *const Self);
+                ui.interact(point_rect, character_id, Sense::drag())
+            };
+
+            // change a cop's apperance or status in right click menu.
+            if let Id::Cop(i) = &mut self.id {
+                let mut change = None;
+                resp.context_menu(|ui| {
+                    if ui
+                        .checkbox(&mut self.enabled, "Aktiv")
+                        .on_hover_text("berücksichte Cop bei Berechnungen")
+                        .clicked()
+                    {
+                        change = Some(Change::ToggleActive);
+                    };
+                    if ui.button("🗑 löschen").clicked() {
+                        change = Some(Change::Delete);
+                    }
+                    ui.set_max_width(0.0);
+                    ui.separator();
+                    for (emoji_i, &emoji) in izip!(0.., Id::COP_EMOJIES) {
+                        ui.radio_value(i, emoji_i, emoji);
+                    }
+                });
+                if change.is_some() {
+                    return change;
+                }
+            }
+            let now_dragging = resp.dragged_by(egui::PointerButton::Primary);
+            if now_dragging {
+                // update actual position to match drawn position
+                let new_screen_pos = draw_screen_pos + resp.drag_delta();
+                let new_pos = move_rect.inverse().transform_pos(new_screen_pos);
+                self.pos = Pos::OnScreen(new_pos);
+            }
+            now_dragging
+        };
 
         // gurantee that release on a new node guarantees _at least two_
         // vertices in self.past_vertices, such that a line depicting this movement can succesfully be drawn.
@@ -303,17 +327,19 @@ impl Character {
             self.past_vertices.push(self.nearest_vertex);
         }
 
-        //test if character was just released. doing this ourselfs allows to simulate release whenever we like
-        //(e.g. just set dragging to true and we snap to position)
         if !now_dragging && was_dragging && self.on_node {
             self.pos = Pos::OnVertex(con.positions[self.nearest_vertex]);
             if Some(&self.nearest_vertex) != self.past_vertices.last() {
                 //position changed and drag released -> new step
                 self.past_vertices.push(self.nearest_vertex);
-                return true;
+                return Some(Change::Released);
             }
         }
-        false
+        if self.update_nearest_vertex(con) {
+            return Some(Change::NewPos);
+        }
+
+        None
     }
 
     pub fn adjust_to_new_map(&mut self, map: &Embedding3D, queue: &mut VecDeque<usize>) {
@@ -328,34 +354,31 @@ impl Character {
         self.update_distances(map.edges(), queue);
     }
 
-    /// this function is expensive to call,
-    /// if the character is beeing dragged or if the character is placed outside the map.
-    /// the former one is ok, only up to a single character can be dragged at the same time,
-    /// the latter one is bad and needs fixing (TODO!)
-    fn update_nearest_vertex(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>) {
+    fn update_nearest_vertex(&mut self, con: &DrawContext<'_>) -> bool {
         let Pos::OnScreen(pos2) = self.pos else {
-            return;
+            return false;
         };
         let to_plane = con.cam().to_screen().to_plane;
-        let mut best_dist_sq = f32::MAX;
-        let mut best_vertex = 0; //start at valid position in case no vertices are visible
-        for (v, &vis, &pos) in izip!(0.., con.visible, con.positions) {
-            if vis {
-                let new_dist_sq = (to_plane.project_pos(pos) - pos2).length_sq();
-                if new_dist_sq < best_dist_sq {
-                    best_dist_sq = new_dist_sq;
-                    best_vertex = v;
-                }
+        let potential = |v: usize| -> f32 {
+            if con.visible[v] {
+                (to_plane.project_pos(con.positions[v]) - pos2).length_sq()
+            } else {
+                f32::MAX
             }
+        };
+        // try on the cheap if we can improve the current position.
+        // if not, we return immediately without running the expensive part below
+        let (local_best, _) = con.edges.find_local_minimum(potential, self.nearest_vertex);
+        if local_best == self.nearest_vertex {
+            return false;
         }
-        let now_on_node = best_dist_sq <= con.tolerance * con.tolerance;
+        let (best_vertex, dist_sq) = con.edges.find_global_minimum(potential);
+        let now_on_node = dist_sq <= con.tolerance * con.tolerance;
 
         let change = best_vertex != self.nearest_vertex || now_on_node != self.on_node;
         self.nearest_vertex = best_vertex;
         self.on_node = now_on_node;
-        if change || self.distances.len() != con.positions.len() {
-            self.update_distances(con.edges, queue);
-        }
+        change
     }
 
     pub fn update_distances(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
@@ -365,15 +388,12 @@ impl Character {
         self.distances.resize(edges.nr_vertices(), isize::MAX);
         self.distances[self.nearest_vertex] = 0;
         edges.calc_distances_to(queue, &mut self.distances);
-
-        self.updated = true;
     }
 
     fn clone_without_distances(&self) -> Self {
         Self {
             past_vertices: self.past_vertices.clone(),
             distances: Vec::new(),
-            updated: true,
             ..*self
         }
     }
@@ -410,9 +430,24 @@ pub struct State {
     nr_random_steps_at_once: usize,
     #[serde(skip)]
     random_update_period: Duration,
+
+    #[serde(skip)]
+    pub robber_changed: bool,
+    #[serde(skip)]
+    pub cop_changed: bool,
 }
 
 impl State {
+    fn update_character(&mut self, i: usize, edges: &EdgeList, queue: &mut VecDeque<usize>) {
+        let ch = &mut self.characters[i];
+        ch.update_distances(edges, queue);
+        if ch.id().is_robber() {
+            self.robber_changed = true;
+        } else {
+            self.cop_changed = true;
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             characters: vec![
@@ -428,6 +463,9 @@ impl State {
             random_steps: None,
             nr_random_steps_at_once: 1,
             random_update_period: Duration::ZERO,
+
+            robber_changed: false,
+            cop_changed: false,
         }
     }
 
@@ -470,8 +508,7 @@ impl State {
 
     pub fn undo_move(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
         if let Some(i) = self.undo_move_without_update(positions) {
-            let ch = &mut self.characters[i];
-            ch.update_distances(edges, queue);
+            self.update_character(i, edges, queue);
         }
     }
 
@@ -486,9 +523,9 @@ impl State {
         for i in std::iter::from_fn(|| self.undo_move_without_update(positions)).take(number) {
             need_update[i] = true;
         }
-        for (&up, ch) in izip!(&need_update, &mut self.characters) {
-            if up {
-                ch.update_distances(edges, queue);
+        for (i, need_up) in izip!(0.., need_update) {
+            if need_up {
+                self.update_character(i, edges, queue);
             }
         }
     }
@@ -505,8 +542,7 @@ impl State {
 
     pub fn redo_move(&mut self, edges: &EdgeList, positions: &[Pos3], queue: &mut VecDeque<usize>) {
         if let Some(i) = self.redo_move_without_update(positions) {
-            let ch = &mut self.characters[i];
-            ch.update_distances(edges, queue);
+            self.update_character(i, edges, queue);
         }
     }
 
@@ -521,9 +557,9 @@ impl State {
         for i in std::iter::from_fn(|| self.redo_move_without_update(positions)).take(number) {
             need_update[i] = true;
         }
-        for (&up, ch) in izip!(&need_update, &mut self.characters) {
-            if up {
-                ch.update_distances(edges, queue);
+        for (i, need_up) in izip!(0.., need_update) {
+            if need_up {
+                self.update_character(i, edges, queue);
             }
         }
     }
@@ -639,7 +675,7 @@ impl State {
         };
 
         ch.set_vertex_no_dist_update(next_v, positions);
-        ch.update_distances(edges, queue);
+        self.update_character(character_index, edges, queue);
 
         self.past_moves.push((character_index, next_v));
         self.future_moves.clear();
@@ -668,7 +704,7 @@ impl State {
         if character_options.is_empty() {
             return false;
         }
-        let update_distances_directly = self.nr_random_steps_at_once <= character_options.len();
+        let mut need_update = vec![false; self.characters.len()];
 
         let mut change = false;
         let mut with_right_job = Vec::new();
@@ -712,19 +748,16 @@ impl State {
 
             // update state
             ch.set_vertex_no_dist_update(next_v, positions);
-            if update_distances_directly {
-                ch.update_distances(edges, queue);
-            }
-
+            need_update[ch_index] = true;
             self.past_moves.push((ch_index, next_v));
             self.future_moves.clear();
 
             change = true;
         }
 
-        if !update_distances_directly && change {
-            for i in character_options {
-                self.characters[i].update_distances(edges, queue);
+        for (i, need_up) in izip!(0.., need_update) {
+            if need_up {
+                self.update_character(i, edges, queue);
             }
         }
 
@@ -781,21 +814,6 @@ impl State {
         smallvec::SmallVec::from_iter(self.active_cops().map(|c| c.nearest_vertex))
     }
 
-    pub fn robber_updated(&self) -> bool {
-        self.active_robber().map_or(false, |r| r.updated)
-    }
-
-    pub fn cop_updated(&self) -> bool {
-        self.cops().iter().any(|c| c.updated)
-    }
-
-    pub fn start_new_frame(&mut self, con: &DrawContext<'_>, queue: &mut VecDeque<usize>) {
-        for c in &mut self.characters {
-            c.updated = false;
-            c.update_nearest_vertex(con, queue);
-        }
-    }
-
     fn next_id(&self) -> Id {
         if self.characters.is_empty() {
             return Id::Robber;
@@ -809,7 +827,7 @@ impl State {
         Id::Cop(cops_used.iter().position_min().unwrap())
     }
 
-    pub fn create_character_at(&mut self, screen_pos: Pos2, map: &map::Map) {
+    pub fn new_character_at(&mut self, screen_pos: Pos2, map: &map::Map) {
         let pos = map.camera().screen_to_intermediary(screen_pos);
         self.characters.push(Character::new(self.next_id(), pos));
     }
@@ -860,7 +878,7 @@ impl State {
                 }
                 if ui.button(plus_text).on_hover_text("F2").clicked() {
                     let pos = map.camera().in_front_of_cam();
-                    self.create_character_at(pos, map);
+                    self.new_character_at(pos, map);
                     change = true;
                 }
                 style.0.draw_options(ui, &CharactersStyle::DEFAULT_COLORS);
@@ -981,30 +999,51 @@ impl State {
         change
     }
 
-    pub fn draw(
+    /// return true if something changed
+    pub fn update_and_draw(
         &mut self,
         ui: &mut Ui,
         style: &CharactersStyle,
         con: &DrawContext<'_>,
         drag_enabled: bool,
+        queue: &mut VecDeque<usize>,
     ) {
         type PosVec = smallvec::SmallVec<[usize; 20]>;
         let positions = PosVec::from_iter(self.characters.iter().map(|c| c.nearest_vertex));
+        let mut delete = None;
 
-        for (i, ch) in self.characters.iter_mut().enumerate() {
+        for i in 0..self.characters.len() {
+            let ch = &mut self.characters[i];
             let nr_others_at_same_pos =
                 positions[..i].iter().filter(|&&p| p == ch.nearest_vertex).count();
+
             //always allow to drag, except character sits on backside of graph
-            if !ch.on_node || con.visible[ch.nearest_vertex] {
-                let finished_move =
-                    ch.drag_and_draw(ui, con, nr_others_at_same_pos, drag_enabled, style);
-                if finished_move {
+            if ch.on_node && !con.visible[ch.nearest_vertex] {
+                ch.draw_small_at_node(con, style);
+                continue;
+            }
+
+            let res = ch.drag_and_draw(ui, con, nr_others_at_same_pos, drag_enabled, style);
+            let Some(change) = res else {
+                continue;
+            };
+            match change {
+                Change::ToggleActive => {},
+                Change::Delete => {
+                    delete = Some(i);
+                },
+                Change::NewPos => {},
+                Change::Released => {
                     self.past_moves.push((i, ch.nearest_vertex));
                     self.future_moves.clear();
-                }
-            } else {
-                ch.draw_small_at_node(con, style);
+                },
             }
+            self.update_character(i, con.edges, queue);
+        }
+
+        if let Some(i) = delete {
+            self.forget(i);
+            self.characters.remove(i);
         }
     }
 
