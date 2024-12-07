@@ -570,10 +570,5 @@ impl EscapableNodes {
 
         self.consider_boundary_cops(shape, cops, hull_data, edges, queue);
         self.consider_interior_cops(shape, cops, hull_data, edges, queue);
-
-        println!("-------- groups in escapable ------------");
-        for group in &self.cop_groups {
-            println!("{}", group.debug_string(cops));
-        }
     }
 }

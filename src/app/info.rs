@@ -4,7 +4,7 @@ use itertools::{izip, Itertools};
 
 use strum::IntoEnumIterator;
 
-use egui::{Checkbox, Color32, ComboBox, Label, Pos2, Ui, Vec2};
+use egui::{Checkbox, Color32, ComboBox, Label, Ui, Vec2};
 
 use crate::geo::Pos3;
 use crate::graph::{
@@ -15,8 +15,10 @@ use super::{
     add_disabled_drag_value, add_drag_value,
     bruteforce_state::BruteforceComputationState,
     character::{self, Character, CharactersStyle},
-    color, load_or, map,
-    style::{self, Style},
+    color, load_or,
+    manual_markers::{ManualMarkerOptions, ManualMarkers},
+    map,
+    style::Style,
     DrawContext, NATIVE,
 };
 
@@ -192,16 +194,12 @@ impl VertexSymbolInfo {
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Options {
     vertex_style: Style<1>,
-    manual_marker_sizes: [f32; 8],
-    manual_marker_colors: [Color32; 8],
     automatic_marker_style: Style<1>,
     hull_style: Style<1>,
     hull_boundary_style: Style<1>,
     number_style: Style<0>,
     character_style: CharactersStyle,
-
-    active_manual_marker: usize, //expected in 0..8
-    shown_manual_markers: u8,    //bitmask
+    manual: ManualMarkerOptions,
 
     /// currently selected one at index 0
     last_selected_vertex_color_infos: [VertexColorInfo; 7],
@@ -220,21 +218,21 @@ struct Options {
     draw_vertices: bool,
     show_cop_strat: bool,
     show_manual_marker_window: bool,
-    combine_manual_marker_colors: bool,
 }
 
 const DEFAULT_OPTIONS: Options = Options {
     vertex_style: Style::new(&[Color32::GRAY]),
-    manual_marker_sizes: [1.0; 8],
-    manual_marker_colors: color::HAND_PICKED_MARKER_COLORS,
     automatic_marker_style: Style::new(&[color::GREEN]),
     hull_style: Style::new(&[color::LIGHT_BLUE]),
     hull_boundary_style: Style::new(&[color::WHITE]),
     number_style: Style::new(&[]),
     character_style: CharactersStyle::DEFAULT,
-
-    active_manual_marker: 0,
-    shown_manual_markers: u8::MAX,
+    manual: ManualMarkerOptions {
+        sizes: [1.0; 8],
+        colors: color::HAND_PICKED_MARKER_COLORS,
+        shown: u8::MAX,
+        combine_colors: true,
+    },
 
     marked_cop_dist: 10,
     marked_robber_dist: 10,
@@ -249,7 +247,6 @@ const DEFAULT_OPTIONS: Options = Options {
     draw_vertices: false,
     show_cop_strat: false,
     show_manual_marker_window: false,
-    combine_manual_marker_colors: true,
 };
 
 impl Default for Options {
@@ -450,7 +447,7 @@ pub enum MouseTool {
 }
 
 impl MouseTool {
-    fn symbol(self) -> &'static str {
+    pub fn symbol(self) -> &'static str {
         match self {
             MouseTool::Drag => " ♟ ",
             MouseTool::Draw => " ✏ ",
@@ -518,8 +515,7 @@ pub struct Info {
     /// as it turns out, values <= -2 are found at exactly those vertices,
     /// which are contained in "winning stage II vertices" defined in the thesis.
     cop_advantage: Vec<isize>,
-    /// each bit represents one marker color -> there are 8 distinct manual markers
-    pub marked_manually: Vec<u8>,
+    pub manual_markers: ManualMarkers,
 
     /// this is only used as intermediary variable during computations.
     /// to not reallocate between frames/ algorithms, the storage is kept and passed to where needed.
@@ -557,7 +553,7 @@ impl Default for Info {
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
-            marked_manually: Vec::new(),
+            manual_markers: ManualMarkers::new(),
 
             queue: VecDeque::new(),
 
@@ -579,7 +575,7 @@ impl Info {
         use storage_keys::*;
         eframe::set_value(storage, OPTIONS, &self.options);
         eframe::set_value(storage, CHARACTERS, &self.characters);
-        let rle_manually = crate::rle::encode(&self.marked_manually);
+        let rle_manually = crate::rle::encode(self.manual_markers.curr());
         eframe::set_value(storage, MARKED_MANUALLY, &rle_manually);
     }
 
@@ -602,7 +598,7 @@ impl Info {
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
-            marked_manually,
+            manual_markers: ManualMarkers::new_init(marked_manually),
 
             queue: VecDeque::new(),
 
@@ -661,126 +657,22 @@ impl Info {
     }
 
     pub fn draw_windows(&mut self, ctx: &egui::Context) {
-        let opts = &mut self.options;
-        let automatic_markers_shown = opts.vertex_color_info() != VertexColorInfo::None;
-        let hull_shown = opts.show_convex_hull;
+        let automatic_shown = self.options.vertex_color_info() != VertexColorInfo::None;
+        let hull_shown = self.options.show_convex_hull;
         let mut new_tool = self.tool;
         egui::Window::new("Manuelle Marker")
-            .open(&mut opts.show_manual_marker_window)
+            .open(&mut self.options.show_manual_marker_window)
             .constrain_to(ctx.screen_rect())
             .show(ctx, |ui| {
                 new_tool = new_tool.draw_mouse_tool_controls(ui);
-                ui.horizontal(|ui| {
-                    ui.add(Checkbox::new(
-                        &mut opts.combine_manual_marker_colors,
-                        "kombiniere Marker",
-                    ))
-                    .on_hover_text(
-                        "Die Farben aller Marker eines Knotens werden gemischt angezeigt\n\
-                        und alle Marker haben die Größe des ersten Markers.",
-                    );
-                    if opts.combine_manual_marker_colors {
-                        style::draw_options(ui, &mut opts.manual_marker_sizes[0], &mut [], &[]);
-                    }
-                });
-
-                for (i, size) in izip!(0.., &mut opts.manual_marker_sizes) {
-                    ui.horizontal(|ui| {
-                        let bit_i = 1u8 << i;
-                        let hover_choose = format!("wähle Farbe (f + {})", i + 1);
-                        if ui
-                            .radio(opts.active_manual_marker == i, "")
-                            .on_hover_text(hover_choose)
-                            .clicked()
-                        {
-                            opts.active_manual_marker = i;
-                            opts.shown_manual_markers |= bit_i;
-                        }
-                        let mut show = opts.shown_manual_markers & bit_i != 0;
-                        if ui.checkbox(&mut show, "").on_hover_text("Anzeigen").clicked() {
-                            opts.shown_manual_markers ^= bit_i;
-                            debug_assert_eq!(show, (opts.shown_manual_markers & bit_i) != 0);
-                        };
-
-                        {
-                            let color = &mut opts.manual_marker_colors[i];
-                            ui.color_edit_button_srgba(color);
-                            if !opts.combine_manual_marker_colors {
-                                let active = &mut opts.manual_marker_colors[i..(i + 1)];
-                                let default = &color::HAND_PICKED_MARKER_COLORS[i..(i + 1)];
-                                style::draw_options(ui, size, active, default);
-                            } else if ui.button("Reset").clicked() {
-                                *color = color::HAND_PICKED_MARKER_COLORS[i];
-                            }
-                        }
-                        if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
-                            let mask = u8::MAX - bit_i;
-                            for marker in &mut self.marked_manually {
-                                *marker &= mask;
-                            }
-                        }
-
-                        let what_set = match () {
-                            () if automatic_markers_shown => "automatische Marker",
-                            () if hull_shown => "Konvexe Hülle",
-                            () => "aktive manuelle Marker",
-                        };
-                        enum Op {
-                            Add,
-                            Prod,
-                            Sub,
-                        }
-                        for operation in [Op::Add, Op::Prod, Op::Sub] {
-                            let hint = match operation {
-                                Op::Add => format!("füge {what_set} hinzu (Vereinigung)"),
-                                Op::Prod => format!("behalte nur {what_set} (Schnitt)"),
-                                Op::Sub => format!("entferne {what_set} (Differenz)"),
-                            };
-                            let name = match operation {
-                                Op::Add => " + ",
-                                Op::Prod => " · ",
-                                Op::Sub => " - ",
-                            };
-                            if ui.button(name).on_hover_text(hint).clicked() {
-                                let apply = |marker: &mut u8, other: bool| match operation {
-                                    Op::Add => {
-                                        if other {
-                                            *marker |= bit_i;
-                                        }
-                                    },
-                                    Op::Prod => {
-                                        if !other && (*marker & bit_i != 0) {
-                                            *marker -= bit_i;
-                                        }
-                                    },
-                                    Op::Sub => {
-                                        if other && (*marker & bit_i != 0) {
-                                            *marker -= bit_i;
-                                        }
-                                    },
-                                };
-                                if automatic_markers_shown {
-                                    let iter =
-                                        izip!(&self.currently_marked, &mut self.marked_manually);
-                                    for (&set, marker) in iter {
-                                        apply(marker, set);
-                                    }
-                                } else if hull_shown {
-                                    let iter =
-                                        izip!(self.cop_hull_data.hull(), &mut self.marked_manually);
-                                    for (&hull, marker) in iter {
-                                        apply(marker, hull.contained());
-                                    }
-                                } else {
-                                    let mask = 1u8 << opts.active_manual_marker;
-                                    for marker in &mut self.marked_manually {
-                                        apply(marker, *marker & mask != 0);
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
+                self.manual_markers.draw_selection_window_contents(
+                    ui,
+                    &mut self.options.manual,
+                    automatic_shown,
+                    hull_shown,
+                    &self.currently_marked,
+                    self.cop_hull_data.hull(),
+                );
             });
         self.change_tool_to(new_tool);
     }
@@ -882,13 +774,6 @@ impl Info {
             vertices_outside_hull,
             &self.min_cop_dist,
         );
-        //self.cop_hull_data.update(
-        //    self.characters.cops(),
-        //    con.edges,
-        //    &self.min_cop_dist,
-        //    &mut self.queue,
-        //    vertices_outside_hull,
-        //);
     }
 
     fn update_escapable(&mut self, con: &DrawContext<'_>) {
@@ -939,10 +824,9 @@ impl Info {
         }
 
         let nr_vertices = map.nr_vertices();
-        if self.marked_manually.len() != nr_vertices {
+        if self.manual_markers.curr().len() != nr_vertices {
             self.characters.forget_move_history();
-            self.marked_manually.clear();
-            self.marked_manually.resize(nr_vertices, 0);
+            self.manual_markers.update_len(nr_vertices);
         }
         self.register_change_now();
     }
@@ -1054,58 +938,6 @@ impl Info {
         }
     }
 
-    fn change_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>, set: bool) {
-        let bit = 1u8 << self.options.active_manual_marker;
-        if !con.positions.is_empty() {
-            let (vertex, dist) = con.find_closest_vertex(screen_pos);
-            if dist <= 35.0 * con.scale {
-                if set {
-                    self.marked_manually[vertex] |= bit;
-                } else if self.marked_manually[vertex] & bit != 0 {
-                    self.marked_manually[vertex] -= bit;
-                }
-            }
-        }
-    }
-
-    fn add_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
-        self.change_marker_at(screen_pos, con, true);
-    }
-
-    fn remove_marker_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
-        self.change_marker_at(screen_pos, con, false);
-    }
-
-    fn paint_bucket_at(&mut self, edges: &EdgeList, screen_pos: Pos2, con: &DrawContext<'_>) {
-        let bit = 1u8 << self.options.active_manual_marker;
-        if con.positions.is_empty() {
-            return;
-        }
-        let (v0, dist) = con.find_closest_vertex(screen_pos);
-        if dist > 35.0 * con.scale {
-            return;
-        }
-        // the action will eighter remove a connected component or fill it in,
-        // depending on the current state on the vertex which is clicked.
-        let erase = self.marked_manually[v0] & bit != 0;
-        let mut queue = std::mem::take(&mut self.queue);
-        queue.push_back(v0);
-        while let Some(v) = queue.pop_front() {
-            let is_colored = self.marked_manually[v] & bit != 0;
-            if erase && is_colored {
-                // we act as if we have eight independent canvasses wich just two colors each.
-                self.marked_manually[v] -= bit;
-                queue.extend(edges.neighbors_of(v));
-            }
-            if !erase && !is_colored {
-                // we act as if we have eight independent canvasses wich just two colors each.
-                self.marked_manually[v] |= bit;
-                queue.extend(edges.neighbors_of(v));
-            }
-        }
-        self.queue = queue;
-    }
-
     fn screenshot_as_tikz(&mut self, con: &DrawContext<'_>) {
         if !self.take_screenshot || !NATIVE {
             return;
@@ -1187,15 +1019,24 @@ impl Info {
             if info.key_pressed(Key::F4) {
                 self.characters.show_past_steps ^= true;
             }
+            let drag_active = tool == MouseTool::Drag;
             if info.modifiers.ctrl && info.key_pressed(Key::Z) {
-                self.characters.undo_move(con.edges, con.positions, &mut self.queue);
-                change = true;
+                if drag_active {
+                    self.characters.undo_move(con.edges, con.positions, &mut self.queue);
+                    change = true;
+                } else {
+                    self.manual_markers.undo();
+                }
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
-                self.characters.redo_move(con.edges, con.positions, &mut self.queue);
-                change = true;
+                if drag_active {
+                    self.characters.redo_move(con.edges, con.positions, &mut self.queue);
+                    change = true;
+                } else {
+                    self.manual_markers.redo();
+                }
             }
-            if info.modifiers.ctrl && info.key_pressed(Key::R) {
+            if info.modifiers.ctrl && info.key_pressed(Key::R) && drag_active {
                 self.characters
                     .continue_move_pattern(con.edges, con.positions, &mut self.queue);
                 change = true;
@@ -1218,15 +1059,15 @@ impl Info {
 
             let mouse_down = info.pointer.button_down(PointerButton::Primary);
             if tool == MouseTool::Draw && mouse_down || info.key_pressed(Key::M) {
-                self.add_marker_at(pointer_pos, con);
+                self.manual_markers.add_at(pointer_pos, con);
             }
             if tool == MouseTool::Erase && mouse_down || info.key_pressed(Key::N) {
-                self.remove_marker_at(pointer_pos, con);
+                self.manual_markers.remove_at(pointer_pos, con);
             }
             if tool == MouseTool::Paintbucket
                 && info.pointer.button_released(PointerButton::Primary)
             {
-                self.paint_bucket_at(con.edges, pointer_pos, con);
+                self.manual_markers.paint_bucket_at(pointer_pos, con, &mut self.queue);
             }
 
             const NUMS: [Key; 8] = {
@@ -1254,7 +1095,7 @@ impl Info {
             if info.key_down(Key::F) {
                 for (n, key) in izip!(0.., NUMS) {
                     if info.key_pressed(key) {
-                        self.options.active_manual_marker = n;
+                        self.manual_markers.active_bit = n;
                     }
                 }
                 return Some(Key::F);
@@ -1262,7 +1103,7 @@ impl Info {
             if info.key_down(Key::E) {
                 for (new_tool, &key) in izip!(MouseTool::ALL, &NUMS[..4]) {
                     if info.key_pressed(key) {
-                        if new_tool == tool && tool == MouseTool::Drag {
+                        if new_tool == tool && drag_active {
                             self.options.show_manual_marker_window ^= true;
                         }
                         self.change_tool_to(new_tool);
@@ -1305,11 +1146,11 @@ impl Info {
                     },
                     Key::F => {
                         const SIZE: Vec2 = Vec2::new(28.0, 14.0); //14.0 is default text size
-                        for (n, &c) in izip!(1.., &opts.manual_marker_colors) {
+                        for (n, &c) in izip!(1.., &opts.manual.colors) {
                             ui.horizontal(|ui| {
                                 add_unwrapped(ui, format!("{n}: "));
                                 egui::color_picker::show_color(ui, c, SIZE);
-                                if n - 1 == opts.active_manual_marker {
+                                if n - 1 == self.manual_markers.active_bit {
                                     add_unwrapped(ui, String::from("⬅"));
                                 }
                             });
@@ -1937,65 +1778,13 @@ impl Info {
         }
     }
 
-    fn draw_manual_markers_combined(&self, con: &DrawContext<'_>) {
-        let size = 4.5 * self.options.manual_marker_sizes[0] * con.scale;
-        let mut f32_colors = [color::F32Color::default(); 8];
-        let mask = self.options.shown_manual_markers;
-        color::zip_to_f32(
-            f32_colors.iter_mut(),
-            self.options.manual_marker_colors.iter(),
-        );
-        for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
-            let masked = marked & mask;
-            if vis && masked != 0 {
-                let draw_pos = con.cam().transform(pos);
-                let color = color::u8_marker_color(masked, &f32_colors);
-                let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
-                con.painter.add(marker_circle);
-            }
-        }
-    }
-
-    fn draw_manual_markers_seperated(&self, con: &DrawContext<'_>) {
-        let draw_sizes = {
-            let mut res = self.options.manual_marker_sizes;
-            for s in &mut res {
-                *s *= 4.5 * con.scale;
-            }
-            res
-        };
-        let mask = self.options.shown_manual_markers;
-        for (&vis, &marked, &pos) in izip!(con.visible, &self.marked_manually, con.positions) {
-            let masked = marked & mask;
-            if vis && masked != 0 {
-                let draw_pos = con.cam().transform(pos);
-                let mut single_mask: u8 = 1;
-                for (&color, &size) in izip!(&self.options.manual_marker_colors, &draw_sizes) {
-                    if masked & single_mask != 0 {
-                        let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
-                        con.painter.add(marker_circle);
-                    }
-                    single_mask <<= 1;
-                }
-            }
-        }
-    }
-
-    fn draw_manual_markers(&self, con: &DrawContext<'_>) {
-        if self.options.combine_manual_marker_colors {
-            self.draw_manual_markers_combined(con);
-        } else {
-            self.draw_manual_markers_seperated(con);
-        }
-    }
-
-    fn choose_pointer_symbol(&mut self, ctx: &egui::Context, con: &DrawContext<'_>) {
+    fn choose_pointer_symbol(&self, ctx: &egui::Context, con: &DrawContext<'_>) {
         if con.response.contains_pointer() {
             let icon = match self.tool {
                 MouseTool::Drag => egui::CursorIcon::Default,
-                MouseTool::Draw => egui::CursorIcon::Crosshair,
-                MouseTool::Erase => egui::CursorIcon::Crosshair,
-                MouseTool::Paintbucket => egui::CursorIcon::Crosshair,
+                MouseTool::Draw | MouseTool::Erase | MouseTool::Paintbucket => {
+                    egui::CursorIcon::Crosshair
+                },
             };
             ctx.set_cursor_icon(icon);
         }
@@ -2015,7 +1804,7 @@ impl Info {
         self.draw_vertices(con);
         self.draw_convex_cop_hull(con);
         self.draw_green_circles(ui, con);
-        self.draw_manual_markers(con);
+        self.manual_markers.draw(con, &self.options.manual);
         let ch_style = &self.options.character_style;
         self.characters.draw_tails(ch_style, con);
         self.characters.draw_allowed_next_steps(ch_style, con);

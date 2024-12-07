@@ -9,6 +9,7 @@ mod cam;
 pub mod character;
 mod color;
 mod info;
+mod manual_markers;
 pub mod map;
 mod saves;
 mod style;

@@ -9,7 +9,7 @@ use itertools::{izip, Itertools};
 use egui::{vec2, Ui};
 use serde::{Deserialize, Serialize};
 
-use super::{character, info, load_or, map, NATIVE};
+use super::{character, info, load_or, manual_markers::ManualMarkers, map, NATIVE};
 
 #[derive(Deserialize, Serialize)]
 struct SavedState {
@@ -25,7 +25,7 @@ impl SavedState {
     fn set(&mut self, map: &mut map::Map, info: &mut info::Info) {
         map.change_to(self.shape, self.resolution);
         info.characters = self.characters.clone_without_distances();
-        info.marked_manually = crate::rle::decode(&self.manual_markers);
+        info.manual_markers = ManualMarkers::new_init(crate::rle::decode(&self.manual_markers));
         info.adjust_to_new_map(map.data());
     }
 
@@ -199,7 +199,7 @@ impl SavedStates {
         let map_shape = map.shape();
         let map_resolution = map.resolution() as isize;
         let characters = info.characters.clone_without_distances();
-        let manual_markers = crate::rle::encode(&info.marked_manually);
+        let manual_markers = crate::rle::encode(info.manual_markers.curr());
         let new_save = SavedState {
             name,
             saved_at,

@@ -419,18 +419,11 @@ impl Triangualtion {
         //start with square with unit circle in middle
         let mut res = Self::new_wheel(circumference);
 
-        use crate::rand;
-        let mut rng = rand::Lcg::new(seed as u64);
+        let mut rng = crate::rand::Lcg::new(seed as u64);
         rng.waste(10);
-        let mut rand_unit_range = || {
-            const SCALE: f32 = 2.0 / (u32::MAX as f32);
-            let res = (rng.next() as f32) * SCALE - 1.0;
-            debug_assert!(((-1.0)..=1.0).contains(&res));
-            res
-        };
         let mut random_point = || loop {
-            let x = rand_unit_range();
-            let y = rand_unit_range();
+            let x = rng.next_in_unit_range();
+            let y = rng.next_in_unit_range();
             if x * x + y * y < 1.0 {
                 return pos2(x, y);
             }
@@ -444,30 +437,6 @@ impl Triangualtion {
                 break;
             }
         }
-
-        //test random number generator, but only after graph has been build to
-        //ensure same graph in debug and release builds
-        debug_assert!({
-            let mut max = -1e10;
-            let mut min = 1e10;
-            let mut avg = 0.0;
-            let mut sig2 = 0.0;
-            const N: usize = 5000;
-            for _ in 0..N {
-                let x = rand_unit_range();
-                max = x.max(max);
-                min = x.min(min);
-                avg += x;
-                sig2 += x * x;
-            }
-            avg /= N as f32;
-            sig2 /= N as f32;
-            debug_assert!((0.9..=1.0).contains(&max));
-            debug_assert!((-1.0..-0.9).contains(&min));
-            debug_assert!(avg.abs() < 0.1);
-            debug_assert!((sig2 - 0.33333).abs() < 0.1);
-            true
-        });
         res
     }
 } //impl Triangulation
@@ -491,7 +460,6 @@ pub fn random_triangulated(radius: usize, nr_refine_steps: usize, seed: u32) -> 
     }
     tri.graph.edges.maybe_shrink_capacity(0);
     tri.graph.sort_neigbors();
-    dbg!(tri.graph.edges.max_neighbors());
     tri.graph
 }
 

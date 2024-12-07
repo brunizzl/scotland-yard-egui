@@ -18,9 +18,43 @@ impl Lcg {
         (old >> 16) as u32 //bits in middle have highest quality
     }
 
+    /// produces random value from uniform distribution over interval `-1.0..1.0`
+    pub fn next_in_unit_range(&mut self) -> f32 {
+        const SCALE: f32 = 2.0 / (u32::MAX as f32);
+        (self.next() as f32) * SCALE - 1.0
+    }
+
     pub fn waste(&mut self, nr: usize) {
         for _ in 0..nr {
             self.next();
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn unit_range_distribution() {
+        let mut rng = Lcg::new(1337);
+        let mut max = -1e10;
+        let mut min = 1e10;
+        let mut avg = 0.0;
+        let mut sig2 = 0.0;
+        const N: usize = 10_000;
+        for _ in 0..N {
+            let x = rng.next_in_unit_range();
+            max = x.max(max);
+            min = x.min(min);
+            avg += x;
+            sig2 += x * x;
+        }
+        avg /= N as f32;
+        sig2 /= N as f32;
+        assert!((0.99..=1.0).contains(&max));
+        assert!((-1.0..-0.99).contains(&min));
+        assert!(avg.abs() < 0.01);
+        assert!((sig2 - 0.33333).abs() < 0.01);
     }
 }
