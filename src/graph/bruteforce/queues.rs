@@ -20,8 +20,7 @@ impl BitQueue {
     /// fails if not enough memory is available
     pub fn new(length: usize) -> Option<Self> {
         let mut data = Vec::new();
-        // guarantee data is nonempty to simplify access
-        let data_len = (length + BITS - 1) / BITS;
+        let data_len = length.div_ceil(BITS);
         let data_cap = usize::max(data_len, 1);
         data.try_reserve_exact(data_cap).ok()?;
         data.resize(data_len, usize::MAX);

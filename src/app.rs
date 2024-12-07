@@ -31,7 +31,7 @@ pub struct DrawContext<'a> {
     pub response: egui::Response,
 }
 
-impl<'a> DrawContext<'a> {
+impl DrawContext<'_> {
     pub fn cam(&self) -> &Camera3D {
         self.map.camera()
     }
