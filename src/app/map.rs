@@ -181,13 +181,13 @@ impl Map {
                 });
             match &mut new_shape {
                 Shape::DividedIcosahedron(pressure) => {
-                    add_drag_value(ui, pressure, "Druck", (0, self.resolution), 1);
+                    add_drag_value(ui, pressure, "Druck", 0..=self.resolution, 1);
                 },
                 Shape::RegularPolygon2D(nr_sides) => {
-                    add_drag_value(ui, nr_sides, "Seiten", (3, 10), 1);
+                    add_drag_value(ui, nr_sides, "Seiten", 3..=10, 1);
                 },
                 Shape::Random2D(seed) => {
-                    add_drag_value(ui, seed, "Seed", (0, u32::MAX), 1);
+                    add_drag_value(ui, seed, "Seed", 0..=u32::MAX, 1);
                 },
                 Shape::SquareGrid => {
                     if ui.button(" ↪↩ ").on_hover_text("klebe zu Torus").clicked() {
@@ -217,7 +217,7 @@ impl Map {
             ui.add_space(8.0);
             let min = new_shape.min_res();
             let max = new_shape.max_res();
-            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", (min, max), 1);
+            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", min..=max, 1);
             if change {
                 self.recompute(new_shape);
             }

@@ -148,12 +148,12 @@ impl OrderedColWise {
 }
 
 /// on hexagonal coordinates, the first 6 bits are in use and represent the different sectors as follows:
-/// - positive e1 coordiante (x in [``Coords`])
+/// - positive e1 coordiante (x in [`Coords`])
 /// - negative e3 coordinate
-/// - positive e2 coordinate (-y in [``Coords`])
-/// - negative e1 coordinate (-x in [``Coords`])
+/// - positive e2 coordinate (-y in [`Coords`])
+/// - negative e1 coordinate (-x in [`Coords`])
 /// - positive e3 coordinate
-/// - negative e2 coordinate (y in [``Coords`])
+/// - negative e2 coordinate (y in [`Coords`])
 ///
 /// The same is done with square coordinates, therefore bits 1 and 4 are always 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

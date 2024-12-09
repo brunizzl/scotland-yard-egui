@@ -29,7 +29,7 @@ pub const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
 pub fn draw_size_menu(ui: &mut Ui, size: &mut f32) {
     ui.horizontal(|ui| {
         ui.label("Größe: ");
-        super::add_drag_value(ui, size, "", (0.125, 8.0), FIFTH_ROOT_OF_TWO);
+        super::add_drag_value(ui, size, "", 0.125..=8.0, FIFTH_ROOT_OF_TWO);
     });
 }
 

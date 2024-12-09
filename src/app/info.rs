@@ -207,11 +207,17 @@ struct Options {
     last_selected_vertex_number_infos: [VertexSymbolInfo; 7],
 
     //these are only used, when the respective VertexColorInfo(s) is/are active
-    marked_cop_dist: isize, //determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
-    marked_robber_dist: isize, //determines max dist marked in VertexColorInfo::RobberDist
+    /// determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
+    marked_cop_dist: isize,
+    /// determines max dist marked in [`VertexColorInfo::RobberDist`]
+    marked_robber_dist: isize,
     #[serde(skip)]
     specific_shown_vertex: usize,
+    /// the last two bits are always zero, therefore valid value for [`crate::graph::grid::Dirs`]
     shown_escape_directions: u8,
+    /// escpected in `0..=32`. if 0, all bits are shown, else just the chosen one
+    #[serde(skip)]
+    shown_u32_bit: isize,
 
     show_convex_hull: bool,
     show_hull_boundary: bool,
@@ -238,6 +244,7 @@ const DEFAULT_OPTIONS: Options = Options {
     marked_robber_dist: 10,
     specific_shown_vertex: 0,
     shown_escape_directions: 63,
+    shown_u32_bit: 0,
 
     last_selected_vertex_color_infos: [VertexColorInfo::None; 7],
     last_selected_vertex_number_infos: [VertexSymbolInfo::None; 7],
@@ -272,6 +279,7 @@ impl Options {
             MarkedRobberDist,
             VertexIndex,
             DirectionBits,
+            U32Bits,
         }
         let val = if draw_color_val {
             match self.vertex_color_info() {
@@ -283,6 +291,7 @@ impl Options {
                 VertexColorInfo::Escape2Grid
                 | VertexColorInfo::EscapeConeGrid
                 | VertexColorInfo::RobberCone => ShownValue::DirectionBits,
+                VertexColorInfo::Escape3Grid | VertexColorInfo::Escape2 => ShownValue::U32Bits,
                 _ => ShownValue::None,
             }
         } else {
@@ -296,10 +305,10 @@ impl Options {
         };
         match val {
             ShownValue::MarkedCopDist => {
-                add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", (0, 1000), 1);
+                add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", 0..=1000, 1);
             },
             ShownValue::MarkedRobberDist => {
-                add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", (0, 1000), 1);
+                add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", 0..=1000, 1);
             },
             ShownValue::VertexIndex => {
                 ui.horizontal(|ui| {
@@ -323,6 +332,28 @@ impl Options {
                     );
                 });
                 self.shown_escape_directions = shown.0;
+            },
+            ShownValue::U32Bits => {
+                ui.horizontal(|ui| {
+                    if ui.button(" - ").clicked() {
+                        self.shown_u32_bit = isize::max(self.shown_u32_bit - 1, 0);
+                    }
+                    ui.add(
+                        egui::DragValue::new(&mut self.shown_u32_bit)
+                            .range(0..=32)
+                            .custom_formatter(|x, _| {
+                                if x == 0.0 {
+                                    "Alle".to_string()
+                                } else {
+                                    x.to_string()
+                                }
+                            }),
+                    );
+                    if ui.button(" + ").clicked() {
+                        self.shown_u32_bit = isize::min(self.shown_u32_bit + 1, 32);
+                    }
+                    ui.label("Komponente");
+                });
             },
             ShownValue::None => {
                 add_disabled_drag_value(ui);
@@ -1222,6 +1253,11 @@ impl Info {
         } else {
             &color::BRIGHT_MARKER_COLORS_F32
         };
+        let u32_mask = if self.options.shown_u32_bit > 0 {
+            1u32 << (self.options.shown_u32_bit - 1)
+        } else {
+            u32::MAX
+        };
 
         self.currently_marked.clear();
         self.currently_marked.resize(con.edges.nr_vertices(), false);
@@ -1304,8 +1340,9 @@ impl Info {
                     self.escapable.escapable()
                 };
                 for (&esc, util) in izip!(escs, utils_iter) {
-                    let color = || color::u32_marker_color(esc, colors);
-                    draw_if!(esc != 0, util, color);
+                    let masked_esc = esc & u32_mask;
+                    let color = || color::u32_marker_color(masked_esc, colors);
+                    draw_if!(masked_esc != 0, util, color);
                 }
             },
             VertexColorInfo::Escape2Grid => {
@@ -1335,8 +1372,9 @@ impl Info {
             },
             VertexColorInfo::Escape3Grid => {
                 for (&esc, util) in izip!(&self.dilemma.dilemma_regions, utils_iter) {
-                    let color = || color::u32_marker_color(esc, colors);
-                    draw_if!(esc != 0, util, color);
+                    let masked_esc = esc & u32_mask;
+                    let color = || color::u32_marker_color(masked_esc, colors);
+                    draw_if!(masked_esc != 0, util, color);
                 }
             },
             VertexColorInfo::Escape23Grid => {

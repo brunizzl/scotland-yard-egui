@@ -65,11 +65,18 @@ impl DrawContext<'_> {
 /// returns if val was changed.
 /// step is a multiplier for floats and is added / subtracted for ints.
 /// thus for floats, step is expected to be of form `1.0 + delta` for small growth rates
-fn add_drag_value<T, U>(ui: &mut Ui, val: &mut T, name: &str, (min, max): (T, T), step: U) -> bool
+fn add_drag_value<T, U>(
+    ui: &mut Ui,
+    val: &mut T,
+    name: &str,
+    range: std::ops::RangeInclusive<T>,
+    step: U,
+) -> bool
 where
     T: egui::emath::Numeric,
     U: Into<f64>,
 {
+    let (min, max) = range.into_inner();
     ui.horizontal(|ui| {
         let prev = *val;
         let f_val = val.to_f64();

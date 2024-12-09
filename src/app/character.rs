@@ -979,11 +979,11 @@ impl State {
             ));
             {
                 let nr = &mut self.nr_random_steps_at_once;
-                add_drag_value(ui, nr, "Züge pro Update", (1, 100), 1);
+                add_drag_value(ui, nr, "Züge pro Update", 1..=100, 1);
 
                 let mut period = self.random_update_period.as_secs_f32();
                 const STEP: f32 = std::f32::consts::SQRT_2;
-                add_drag_value(ui, &mut period, "Updaterate [s]", (0.125, 16.0), STEP);
+                add_drag_value(ui, &mut period, "Updaterate [s]", 0.125..=16.0, STEP);
                 self.random_update_period = Duration::from_secs_f32(period);
             }
             if make_random_steps != self.random_steps.is_some() {
