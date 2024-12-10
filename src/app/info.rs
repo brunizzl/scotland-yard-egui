@@ -272,7 +272,6 @@ impl Options {
     }
 
     fn draw_drag_value(&mut self, ui: &mut Ui, draw_color_val: bool) {
-        #[derive(PartialEq, Eq, PartialOrd, Ord)]
         enum ShownValue {
             None,
             MarkedCopDist,

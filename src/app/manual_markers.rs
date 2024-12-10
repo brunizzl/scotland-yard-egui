@@ -5,14 +5,35 @@ use itertools::izip;
 
 use crate::graph::InSet;
 
-use super::{color, info::MouseTool, style, DrawContext};
+use super::{color, style, DrawContext};
 
 /// maximum number of entries in history
-const HISTORY_LEN: usize = 12;
+const HISTORY_LEN: usize = 32;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DrawTool {
+    None,
+    Draw,
+    Erase,
+    Paintbucket,
+    SetOp,
+}
+
+impl DrawTool {
+    fn symbol(&self) -> &'static str {
+        match self {
+            Self::None => " ",
+            Self::Draw => "✏",
+            Self::Erase => "📗",
+            Self::Paintbucket => "💦",
+            Self::SetOp => "✨",
+        }
+    }
+}
 
 /// copy of canvas at some point in time + last tool / active bit that was used at that point
 struct HistoryEntry {
-    tool: MouseTool,
+    tool: DrawTool,
     bit: usize,
     /// each bit represents one marker color -> there are 8 distinct manual markers
     state: Vec<u8>,
@@ -21,7 +42,7 @@ struct HistoryEntry {
 impl HistoryEntry {
     fn new(state: Vec<u8>) -> Self {
         HistoryEntry {
-            tool: MouseTool::Drag,
+            tool: DrawTool::None,
             bit: 0,
             state,
         }
@@ -71,7 +92,7 @@ impl ManualMarkers {
     /// `tool` and [`Self::active_bit`], we construct a new current history entry.
     /// Note: this function should only be called if something is about to happen.
     /// E.g. if some vertex is erased, drawn, paintbucket is called ...
-    fn log_action(&mut self, tool: MouseTool) {
+    fn log_action(&mut self, tool: DrawTool) {
         let nr_vertices = {
             let curr_entry = &mut self.history[self.index];
             // if action is performed with same tool as before: no need to make new history entry
@@ -211,7 +232,9 @@ impl ManualMarkers {
                     }
                 }
                 if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
-                    self.log_action(MouseTool::Drag);
+                    let active = std::mem::replace(&mut self.active_bit, i);
+                    self.log_action(DrawTool::SetOp);
+                    self.active_bit = active;
                     let mask = u8::MAX - bit_i;
                     for marker in self.curr_mut() {
                         *marker &= mask;
@@ -240,7 +263,9 @@ impl ManualMarkers {
                         Op::Sub => " - ",
                     };
                     if ui.button(name).on_hover_text(hint).clicked() {
-                        self.log_action(MouseTool::Drag);
+                        let active = std::mem::replace(&mut self.active_bit, i);
+                        self.log_action(DrawTool::SetOp);
+                        self.active_bit = active;
                         let apply = |marker: &mut u8, other: bool| match operation {
                             Op::Add => {
                                 if other {
@@ -334,23 +359,24 @@ impl ManualMarkers {
         if !con.positions.is_empty() {
             let (vertex, dist) = con.find_closest_vertex(screen_pos);
             if dist <= 35.0 * con.scale {
-                let canvas = self.curr_mut();
-                if set {
-                    canvas[vertex] |= bit;
-                } else if canvas[vertex] & bit != 0 {
-                    canvas[vertex] -= bit;
+                let is_set = self.curr_mut()[vertex] & bit != 0;
+                if set && !is_set {
+                    self.log_action(DrawTool::Draw);
+                    self.curr_mut()[vertex] |= bit;
+                }
+                if !set && is_set {
+                    self.log_action(DrawTool::Erase);
+                    self.curr_mut()[vertex] -= bit;
                 }
             }
         }
     }
 
     pub fn add_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
-        self.log_action(MouseTool::Draw);
         self.change_marker_at(screen_pos, con, true);
     }
 
     pub fn remove_at(&mut self, screen_pos: Pos2, con: &DrawContext<'_>) {
-        self.log_action(MouseTool::Erase);
         self.change_marker_at(screen_pos, con, false);
     }
 
@@ -367,7 +393,7 @@ impl ManualMarkers {
         if dist > 35.0 * con.scale {
             return;
         }
-        self.log_action(MouseTool::Paintbucket);
+        self.log_action(DrawTool::Paintbucket);
 
         let bit = 1u8 << self.active_bit;
         let canvas = self.curr_mut();
