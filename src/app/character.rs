@@ -360,17 +360,19 @@ impl Character {
         };
         let to_plane = con.cam().to_screen().to_plane;
         let potential = |v: usize| -> f32 {
-            if con.visible[v] {
-                (to_plane.project_pos(con.positions[v]) - pos2).length_sq()
-            } else {
-                f32::MAX
-            }
+            let visible_weight = if con.visible[v] { 0.0 } else { 1000.0 };
+            let dist_weight = (to_plane.project_pos(con.positions[v]) - pos2).length_sq();
+            visible_weight + dist_weight
         };
-        // try on the cheap if we can improve the current position.
-        // if not, we return immediately without running the expensive part below
-        let (local_best, _) = con.edges.find_local_minimum(potential, self.nearest_vertex);
-        if local_best == self.nearest_vertex {
-            return false;
+        {
+            // try on the cheap if we can improve the current position.
+            // if not, we return immediately without running the expensive part below
+            let (local_best, dist_sq) =
+                con.edges.find_local_minimum(potential, self.nearest_vertex);
+            let now_on_node = dist_sq <= con.tolerance * con.tolerance;
+            if local_best == self.nearest_vertex && now_on_node == self.on_node {
+                return false;
+            }
         }
         let (best_vertex, dist_sq) = con.edges.find_global_minimum(potential);
         let now_on_node = dist_sq <= con.tolerance * con.tolerance;
