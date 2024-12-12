@@ -21,7 +21,6 @@ pub struct ConvexHull {
 }
 
 impl ConvexHull {
-    #[allow(dead_code)]
     pub fn nr_vertices(&self) -> usize {
         self.vertices.len()
     }

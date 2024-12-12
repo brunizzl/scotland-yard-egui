@@ -841,7 +841,6 @@ impl CopStrategy {
     }
 }
 
-#[allow(dead_code)]
 pub fn compute_cop_strategy<S>(
     nr_cops: usize,
     edges: EdgeList,

@@ -22,11 +22,6 @@ impl Embedding2D {
         (self.positions, self.edges)
     }
 
-    #[allow(dead_code)]
-    pub fn edges(&self) -> &EdgeList {
-        &self.edges
-    }
-
     pub fn nr_vertices(&self) -> usize {
         debug_assert_eq!(self.positions.len(), self.edges.nr_vertices());
         self.positions.len()
@@ -114,7 +109,7 @@ impl Embedding2D {
         (nearest, nearest_dist)
     }
 
-    //assumes point to be in convex face.
+    /// assumes point to be in convex face.
     #[allow(dead_code)]
     pub fn find_face_of(&self, point: Pos2) -> Vec<usize> {
         //caution: nearest node may not be on face boundary

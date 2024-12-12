@@ -156,11 +156,6 @@ impl Embedding3D {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn surface(&self) -> &ConvexHull {
-        &self.surface
-    }
-
     #[inline(always)]
     fn add_vertex(&mut self, pos: Pos3) -> usize {
         let new_index = self.nr_vertices();

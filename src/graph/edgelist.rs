@@ -59,8 +59,9 @@ fn take_active(xs: &[Index]) -> Map<Iter<'_, Index>, fn(&Index) -> usize> {
 
 /// works great if most vertices have degree close to the maximum degree, as every vertex
 /// allocates the same space for potential neighbors
-/// CAUTION: if not most vertices have close to the maximum degree (e.g. with one central vertex),
+/// CAUTION: if only few vertices have close to the maximum degree (e.g. with one central vertex),
 /// this structure is way worse than using a vector for each vertices' neighbors.
+/// The more flexible approach is a use of [`crate::graph::bool_csr::BoolCSR`] to store edges.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EdgeList {
     next_shrink_check_len: usize,
@@ -88,7 +89,6 @@ impl EdgeList {
         self.neighbors().fold(0, |acc, neighs| usize::max(acc, neighs.len()))
     }
 
-    #[allow(dead_code)]
     pub fn min_degree(&self) -> usize {
         self.neighbors()
             .fold(usize::MAX, |acc, neighs| usize::min(acc, neighs.len()))
@@ -187,7 +187,6 @@ impl EdgeList {
         self.potential_neighbors().map(take_active)
     }
 
-    #[allow(dead_code)]
     pub fn count_entries(&self) -> usize {
         self.neighbors().fold(0, |acc, neigh| acc + neigh.len())
     }
@@ -197,7 +196,6 @@ impl EdgeList {
         self.entries.chunks_mut(self.max_neighbors.max(1))
     }
 
-    #[allow(dead_code)]
     pub fn neighbors_mut(&mut self) -> impl ExactSizeIterator<Item = &mut [Index]> + '_ {
         self.potential_neighbors_mut().map(|chunk| {
             let end = chunk.iter().position(Index::is_none).unwrap_or(chunk.len());
@@ -230,7 +228,6 @@ impl EdgeList {
         res
     }
 
-    #[allow(dead_code)]
     pub fn has_path(&self, path: &[usize]) -> bool {
         path.iter().tuple_windows().all(|(&v1, &v2)| self.has_edge(v1, v2))
     }
@@ -246,7 +243,6 @@ impl EdgeList {
             .unwrap()
     }
 
-    #[allow(dead_code)]
     pub fn all_valid_edge_indices(&self) -> Vec<bool> {
         self.entries.iter().map(|e| !e.is_none()).collect()
     }
