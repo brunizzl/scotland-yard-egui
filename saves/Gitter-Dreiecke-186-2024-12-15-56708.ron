@@ -1,0 +1,105 @@
+(
+	name: "standardpositionen polizei 4",
+	saved_at: (
+		secs_since_epoch: 1734273908,
+		nanos_since_epoch: 511105200,
+	),
+	shape: TriangGrid,
+	resolution: 186,
+	characters: (
+		characters: [(
+			id: Robber,
+			pos: OnVertex((
+				x: 0.21791445,
+				y: -0.13198781,
+				z: 0.5,
+			)),
+			past_vertices: [],
+			nearest_vertex: 22385,
+			enabled: true,
+			on_node: true,
+), (
+			id: Cop(0),
+			pos: OnVertex((
+				x: 0.038770065,
+				y: -0.02547133,
+				z: 0.5,
+			)),
+			past_vertices: [],
+			nearest_vertex: 18316,
+			enabled: true,
+			on_node: true,
+), (
+			id: Cop(1),
+			pos: OnVertex((
+				x: -0.012032092,
+				y: 0.0069467425,
+				z: 0.5,
+			)),
+			past_vertices: [],
+			nearest_vertex: 17207,
+			enabled: true,
+			on_node: true,
+), (
+			id: Cop(2),
+			pos: OnVertex((
+				x: 0.094919786,
+				y: -0.020840168,
+				z: 0.5,
+			)),
+			past_vertices: [],
+			nearest_vertex: 20363,
+			enabled: true,
+			on_node: true,
+), (
+			id: Cop(4),
+			pos: OnVertex((
+				x: -0.0013369024,
+				y: 0.034733653,
+				z: 0.5,
+			)),
+			past_vertices: [],
+			nearest_vertex: 18143,
+			enabled: true,
+			on_node: true,
+), (
+			id: Cop(3),
+			pos: OnVertex((
+				x: 0.0334225,
+				y: 0.030102491,
+				z: 0.5,
+			)),
+			past_vertices: [],
+			nearest_vertex: 19258,
+			enabled: true,
+			on_node: true,
+), (
+			id: Cop(8),
+			pos: OnVertex((
+				x: 0.057486653,
+				y: 0.02547136,
+				z: 0.5,
+			)),
+			past_vertices: [],
+			nearest_vertex: 20001,
+			enabled: true,
+			on_node: true,
+), (
+			id: Cop(5),
+			pos: OnVertex((
+				x: 0.046791434,
+				y: -0.011577874,
+				z: 0.5,
+			)),
+			past_vertices: [],
+			nearest_vertex: 18877,
+			enabled: true,
+			on_node: true,
+)],
+		past_moves: [],
+		future_moves: [],
+		show_past_steps: true,
+		show_allowed_next_steps: false,
+),
+	manual_markers: [(34596, 0)],
+)
