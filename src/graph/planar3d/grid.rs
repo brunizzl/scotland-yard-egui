@@ -239,6 +239,42 @@ impl Dirs {
             .intersection(self.rotate_right_hex())
     }
 
+    pub const fn connected_on(self, norm: Norm) -> bool {
+        const fn compute_connected(square: bool) -> [bool; 64] {
+            let mut res = [false; 64];
+            let mut union: u8 = 0;
+            while union < 64 {
+                let mut nr_flips = 0;
+                let fst_bit = union & 1 != 0;
+                let mut last_bit = fst_bit;
+                let mut i = 1;
+                while i < 6 {
+                    // bits 1 and 4 on a square grid are not used, because
+                    // this is where we store how any steps we took in direction e3.
+                    // -> skip these
+                    if !square || (i != 1 && i != 4) {
+                        let curr_bit = (union & (1 << i)) != 0;
+                        if curr_bit != last_bit {
+                            nr_flips += 1;
+                        }
+                        last_bit = curr_bit;
+                    }
+                    i += 1;
+                }
+                assert!((fst_bit == last_bit) == (nr_flips % 2 == 0));
+                res[union as usize] = nr_flips <= 2;
+                union += 1;
+            }
+            res
+        }
+        const HEX_CONNECTED: [bool; 64] = compute_connected(false);
+        const QUAD_CONNECTED: [bool; 64] = compute_connected(true);
+        match norm {
+            Norm::Hex => HEX_CONNECTED[self.0 as usize],
+            Norm::Quad => QUAD_CONNECTED[self.0 as usize],
+        }
+    }
+
     /// same order as [`Norm::unit_directions`]
     pub const fn unit_bits(norm: Norm) -> &'static [Dirs] {
         match norm {
@@ -263,7 +299,7 @@ impl Dirs {
 
     pub fn all_bits_and_directions(
         norm: Norm,
-    ) -> impl Iterator<Item = (&'static Self, &'static Coords)> {
+    ) -> impl Iterator<Item = (&'static Self, &'static Coords)> + Clone {
         izip!(Self::unit_bits(norm), norm.unit_directions())
     }
 

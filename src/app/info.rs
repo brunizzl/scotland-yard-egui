@@ -827,13 +827,12 @@ impl Info {
     }
 
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {
-        let active_cops = self.characters.active_cops().collect_vec();
         self.dilemma.update(
             con.edges,
             self.cop_hull_data.hull(),
             &self.escapable_grid,
             &mut self.queue,
-            &active_cops,
+            &self.min_cop_dist,
         );
     }
 
@@ -931,6 +930,7 @@ impl Info {
         debug_assert_eq!(self.min_cop_dist.len(), nr_vertices);
         let update_min_cop_dist = show_debug
             || update_hull
+            || update_dilemma
             || matches!(
                 color,
                 Color::MinCopDist | Color::NearNodes | Color::CopsVoronoi
@@ -1679,9 +1679,9 @@ impl Info {
             VertexSymbolInfo::Debugging => {
                 //draw!(self.escapable.owners());
                 //draw_arrows(&self.dilemma.shadow_dirs, Dirs(u8::MAX));
-                draw_arrows(&self.dilemma.overlap_dirs, Dirs(u8::MAX));
                 //draw_arrows(&self.escapable_grid.strong_esc_directions, Dirs(u8::MAX));
-                draw_isize_slice(&self.dilemma.taken_steps);
+                let show = |&&num: &&_| num != isize::MIN;
+                draw!(&self.dilemma.energy, show);
             },
             VertexSymbolInfo::Escape2 => {
                 let escs = if self.escapable_grid.graph.represents_current_map {

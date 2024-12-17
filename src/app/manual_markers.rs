@@ -175,7 +175,7 @@ impl ManualMarkers {
                     end = len;
                 }
                 debug_assert!((0..len).contains(&start));
-                debug_assert!((0..len).contains(&end));
+                debug_assert!((0..=len).contains(&end));
                 (start as usize, end as usize)
             };
             for (i, entry) in izip!(start.., &self.history[start..end]) {
