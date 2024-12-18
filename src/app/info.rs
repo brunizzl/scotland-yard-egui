@@ -1481,46 +1481,9 @@ impl Info {
                 //        }
                 //    }
                 //}
-                //for (&esc, util) in izip!(&self.dilemma.overlap, utils_iter) {
-                //    let color = || color::u32_marker_color(esc, colors);
-                //    draw_if!(esc != 0, util, color);
-                //}
-
-                let mut bnd = crate::graph::CopsHull::new();
-                let mut temp = [usize::MAX];
-                let vertices_outside_hull = if !con.extreme_vertices.is_empty() {
-                    con.extreme_vertices
-                } else {
-                    debug_assert_eq!(con.positions.len(), self.min_cop_dist.len());
-                    let (furthest_vertex, _) =
-                        self.min_cop_dist.iter().enumerate().fold((0, 0), |best, (v, &dist)| {
-                            if dist > best.1 {
-                                (v, dist)
-                            } else {
-                                best
-                            }
-                        });
-                    temp[0] = furthest_vertex;
-                    &temp
-                };
-                let mut queue = VecDeque::new();
-                bnd.update(
-                    self.characters.cops(),
-                    con.edges,
-                    &mut queue,
-                    vertices_outside_hull,
-                    &self.min_cop_dist,
-                );
-                for (segment, &f32color) in izip!(bnd.safe_boundary_parts(), colors.iter().cycle())
-                {
-                    let color: Color32 = f32color.into();
-                    for &v in segment {
-                        if con.visible[v] {
-                            let draw_pos = con.vertex_draw_pos(v);
-                            let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
-                            con.painter.add(marker_circle);
-                        }
-                    }
+                for (&esc, util) in izip!(&self.dilemma.overlap, utils_iter) {
+                    let color = || color::u32_marker_color(esc, colors);
+                    draw_if!(esc != 0, util, color);
                 }
             },
             VertexColorInfo::SafeOutside => {

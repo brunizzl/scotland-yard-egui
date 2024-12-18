@@ -24,6 +24,11 @@ pub struct DilemmaNodes {
     pub energy_dirs: Vec<Dirs>,
 }
 
+/// stage 1: just consider cones for overlap.
+/// stage: n + 1: consider cones and results of all previous n stages for overlap.
+/// any value above 1 is higly experimental and not guaranteed to yield a continuous construct.
+const MAX_STAGES: usize = 1;
+
 impl DilemmaNodes {
     pub fn new() -> Self {
         Self {
@@ -41,30 +46,30 @@ impl DilemmaNodes {
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
         cops_hull: &[InSet],
-        cone_esc_dirs: &[Dirs],
-    ) {
+    ) -> std::ops::Range<usize> {
+        let esc_dirs = &self.dilemma_dirs[..];
         // guarentee only vertices where multiple escape options exist are marked as escapeable.
         // not tested here: every marked direction must lead on a straight line to
         // the boundary and every vertex in between must also have the direction marked.
-        debug_assert!(cone_esc_dirs.iter().all(|&dirs| dirs.count() != 1));
+        debug_assert!(esc_dirs.iter().all(|&dirs| dirs.count() != 1));
 
-        self.region_info.clear();
+        let fst_new_region_index = self.region_info.len();
 
         let mut search_start = 0;
-        for overlap_nr in 0.. {
+        'find_regions: for overlap_nr in fst_new_region_index.. {
             // find first not-yet handled vertex of an overlap region
             let (region_v, region_dirs) = 'find_new_region: {
                 let v0 = search_start;
                 for (v, h, &marker) in izip!(v0.., &cops_hull[v0..], &self.overlap[v0..]) {
                     if h.contained() && marker == 0 {
-                        let dirs = cone_esc_dirs[v];
+                        let dirs = esc_dirs[v];
                         if dirs.count() == 4 && dirs.connected_on(Norm::Hex) {
                             search_start = v + 1;
                             break 'find_new_region (v, dirs);
                         }
                     }
                 }
-                return;
+                break 'find_regions;
             };
             let region_bit = 1u32 << (overlap_nr % 32);
             self.region_info.push((region_v, region_bit, region_dirs));
@@ -73,7 +78,7 @@ impl DilemmaNodes {
             queue.push_back(region_v);
             while let Some(v) = queue.pop_front() {
                 if cops_hull[v].contained() && (self.overlap[v] & region_bit == 0) {
-                    let dirs = cone_esc_dirs[v];
+                    let dirs = esc_dirs[v];
                     if dirs.contains(region_dirs) {
                         self.overlap[v] |= region_bit;
                         queue.extend(edges.neighbors_of(v));
@@ -81,6 +86,8 @@ impl DilemmaNodes {
                 }
             }
         }
+
+        fst_new_region_index..self.region_info.len()
     }
 
     fn mark_dilemma(
@@ -90,18 +97,18 @@ impl DilemmaNodes {
         queue: &mut VecDeque<usize>,
         cops_hull: &[InSet],
         min_cop_dist: &[isize],
+        new_regions: std::ops::Range<usize>,
     ) {
         let g = escape_directions.graph.data;
         if !escape_directions.graph.represents_current_map || g.norm != Norm::Hex {
             return;
         }
-        let cone_dirs = &escape_directions.cone_esc_directions[..];
+        let old_dirs = self.dilemma_dirs.clone();
 
         // helps to find regions.
         let mut overlapping_left = self.overlap.clone();
-        self.dilemma_regions.copy_from_slice(&self.overlap);
 
-        for &(component_v, component_bit, component_dirs) in &self.region_info {
+        for &(component_v, component_bit, component_dirs) in &self.region_info[new_regions] {
             debug_assert!(overlapping_left[component_v] & component_bit != 0);
             debug_assert!(component_dirs.connected_on(Norm::Hex));
             debug_assert_eq!(component_dirs.count(), 4);
@@ -196,12 +203,12 @@ impl DilemmaNodes {
                 if self.energy[v] != isize::MIN || min_cop_dist[v] < 2 || cops_hull[v].outside() {
                     continue 'compute_energy;
                 }
-                if cone_dirs[v].contains(component_dirs) {
+                if old_dirs[v].contains(component_dirs) {
                     // v is part of the original overlap
                     self.energy[v] = thickness;
                     self.energy_dirs[v] = escape_dirs;
                     self.dilemma_regions[v] |= component_bit;
-                    self.dilemma_dirs[v].unionize(component_dirs);
+                    debug_assert!(self.dilemma_dirs[v].contains(component_dirs));
 
                     queue.extend(edges.neighbors_of(v));
                     continue 'compute_energy;
@@ -270,7 +277,7 @@ impl DilemmaNodes {
                     let Some(vi) = g.index_of(vi_coords) else {
                         continue 'update_row;
                     };
-                    let in_cone = cone_dirs[vi].intersection(component_dirs).count() >= 2;
+                    let in_old_cone = old_dirs[vi].intersection(component_dirs).count() >= 2;
 
                     let new_step_energy = {
                         let mut energies = [isize::MIN; 2];
@@ -278,12 +285,12 @@ impl DilemmaNodes {
                             izip!(fwd_steps, fwd_dirs, &mut energies)
                         {
                             if let Some(n) = g.index_of(vi_coords + step_fwd) {
-                                if !in_cone || row_dirs.contains(step_dir) {
+                                if !in_old_cone || row_dirs.contains(step_dir) {
                                     *energy = self.energy[n];
                                 }
                             }
                         }
-                        if in_cone {
+                        if in_old_cone {
                             // in cone -> enough to have one neighbor with same function value
                             isize::max(energies[0], energies[1])
                         } else {
@@ -295,8 +302,9 @@ impl DilemmaNodes {
                     if new_step_energy >= 0 {
                         self.energy_dirs[vi] = row_dirs;
                         self.dilemma_regions[vi] |= component_bit;
-                        let dirs = if in_cone { row_dirs } else { escape_dirs };
-                        self.dilemma_dirs[vi].unionize(dirs);
+                        if MAX_STAGES == 1 || !in_old_cone {
+                            self.dilemma_dirs[vi].unionize(escape_dirs);
+                        }
                     }
                     if new_step_energy > self.energy[vi] {
                         self.energy[vi] = new_step_energy;
@@ -305,7 +313,6 @@ impl DilemmaNodes {
                 }
             }
         }
-        debug_assert!(overlapping_left.iter().all(|&overlap| overlap == 0));
     }
 
     pub fn update(
@@ -328,8 +335,8 @@ impl DilemmaNodes {
         self.energy.clear();
         self.energy.resize(edges.nr_vertices(), isize::MIN);
 
-        self.dilemma_dirs.clear();
         self.dilemma_dirs.resize(edges.nr_vertices(), Dirs::EMPTY);
+        self.dilemma_dirs.copy_from_slice(&esc_dirs.cone_esc_directions);
 
         self.energy_dirs.clear();
         self.energy_dirs.resize(edges.nr_vertices(), Dirs::EMPTY);
@@ -338,7 +345,13 @@ impl DilemmaNodes {
             return;
         }
 
-        self.mark_overlapping_dirs(edges, queue, hull, &esc_dirs.cone_esc_directions);
-        self.mark_dilemma(esc_dirs, edges, queue, hull, min_cop_dist);
+        self.region_info.clear();
+        for _ in 0..MAX_STAGES {
+            let new_regions = self.mark_overlapping_dirs(edges, queue, hull);
+            if new_regions.is_empty() {
+                break;
+            }
+            self.mark_dilemma(esc_dirs, edges, queue, hull, min_cop_dist, new_regions);
+        }
     }
 }
