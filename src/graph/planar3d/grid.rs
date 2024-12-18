@@ -184,6 +184,17 @@ impl Dirs {
         self.0 != 0
     }
 
+    /// cardinatity of set
+    #[inline(always)]
+    pub const fn count(self) -> u32 {
+        self.0.count_ones()
+    }
+
+    #[inline(always)]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
     #[inline(always)]
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)

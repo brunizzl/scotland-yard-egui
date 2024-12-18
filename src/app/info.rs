@@ -1682,6 +1682,7 @@ impl Info {
                 //draw_arrows(&self.escapable_grid.strong_esc_directions, Dirs(u8::MAX));
                 let show = |&&num: &&_| num != isize::MIN;
                 draw!(&self.dilemma.energy, show);
+                draw_arrows(&self.dilemma.energy_dirs, Dirs(u8::MAX));
             },
             VertexSymbolInfo::Escape2 => {
                 let escs = if self.escapable_grid.graph.represents_current_map {

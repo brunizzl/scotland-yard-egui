@@ -19,6 +19,9 @@ pub struct DilemmaNodes {
 
     /// temporary value, only stored here to allow visual debugging (and to save on allocations).
     pub energy: Vec<isize>,
+
+    /// temporary value, only stored here to allow visual debugging (and to save on allocations).
+    pub energy_dirs: Vec<Dirs>,
 }
 
 impl DilemmaNodes {
@@ -29,6 +32,7 @@ impl DilemmaNodes {
             dilemma_regions: Vec::new(),
             overlap: Vec::new(),
             energy: Vec::new(),
+            energy_dirs: Vec::new(),
         }
     }
 
@@ -42,7 +46,7 @@ impl DilemmaNodes {
         // guarentee only vertices where multiple escape options exist are marked as escapeable.
         // not tested here: every marked direction must lead on a straight line to
         // the boundary and every vertex in between must also have the direction marked.
-        debug_assert!(cone_esc_dirs.iter().all(|&dirs| dirs.0.count_ones() != 1));
+        debug_assert!(cone_esc_dirs.iter().all(|&dirs| dirs.count() != 1));
 
         self.region_info.clear();
 
@@ -54,7 +58,7 @@ impl DilemmaNodes {
                 for (v, h, &marker) in izip!(v0.., &cops_hull[v0..], &self.overlap[v0..]) {
                     if h.contained() && marker == 0 {
                         let dirs = cone_esc_dirs[v];
-                        if dirs.0.count_ones() == 4 && dirs.connected_on(Norm::Hex) {
+                        if dirs.count() == 4 && dirs.connected_on(Norm::Hex) {
                             search_start = v + 1;
                             break 'find_new_region (v, dirs);
                         }
@@ -70,7 +74,7 @@ impl DilemmaNodes {
             while let Some(v) = queue.pop_front() {
                 if cops_hull[v].contained() && (self.overlap[v] & region_bit == 0) {
                     let dirs = cone_esc_dirs[v];
-                    if dirs.intersection(region_dirs) == region_dirs {
+                    if dirs.contains(region_dirs) {
                         self.overlap[v] |= region_bit;
                         queue.extend(edges.neighbors_of(v));
                     }
@@ -84,6 +88,7 @@ impl DilemmaNodes {
         escape_directions: &EscapableDirections,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
+        cops_hull: &[InSet],
         min_cop_dist: &[isize],
     ) {
         let g = escape_directions.graph.data;
@@ -99,11 +104,11 @@ impl DilemmaNodes {
         for &(component_v, component_bit, component_dirs) in &self.region_info {
             debug_assert!(overlapping_left[component_v] & component_bit != 0);
             debug_assert!(component_dirs.connected_on(Norm::Hex));
-            debug_assert_eq!(component_dirs.0.count_ones(), 4);
+            debug_assert_eq!(component_dirs.count(), 4);
 
             let escape_dirs = component_dirs.keep_inner_on_hex();
             debug_assert!(escape_dirs.connected_on(Norm::Hex));
-            debug_assert_eq!(escape_dirs.0.count_ones(), 2);
+            debug_assert_eq!(escape_dirs.count(), 2);
 
             overlapping_left[component_v] -= component_bit;
             queue.push_back(component_v);
@@ -165,30 +170,36 @@ impl DilemmaNodes {
                     debug_assert!(component_dirs.intersection(dir).nonempty());
                     *ptr = val;
                 }
-                debug_assert!(res
-                    .iter()
-                    .tuple_windows()
-                    .all(|(&d1, &d2)| Norm::Hex.apply(d1 - d2) == 1));
+                let adjacent = |(&d1, &d2)| Norm::Hex.apply(d1 - d2) == 1;
+                debug_assert!(res.iter().tuple_windows().all(adjacent));
                 res
             };
             // the coordinates of the two directions in escape_dirs
-            let esc_dir_coords = [all_relevant_coords[1], all_relevant_coords[2]];
+            let fwd_steps = [all_relevant_coords[1], all_relevant_coords[2]];
+            let [left_step_fwd, right_step_fwd] = fwd_steps;
+            let fwd_dirs = [
+                left_step_fwd.dirs(Norm::Hex),
+                right_step_fwd.dirs(Norm::Hex),
+            ];
+            let [left_dir_fwd, right_dir_fwd] = fwd_dirs;
+            debug_assert_eq!(left_dir_fwd.count(), 1);
+            debug_assert_eq!(right_dir_fwd.count(), 1);
+            debug_assert_eq!(left_dir_fwd.union(right_dir_fwd), escape_dirs);
             // the two "outher" directions
-            let parallel_dir_coords = [all_relevant_coords[0], all_relevant_coords[3]];
-            debug_assert_eq!(parallel_dir_coords[0], -parallel_dir_coords[1]);
+            let [left_step, right_step] = [all_relevant_coords[0], all_relevant_coords[3]];
+            debug_assert_eq!(left_step, -right_step);
 
             self.energy.fill(isize::MIN);
+            self.energy_dirs.fill(Dirs::EMPTY);
             queue.push_back(component_v);
             'compute_energy: while let Some(v) = queue.pop_front() {
-                if self.energy[v] != isize::MIN {
+                if self.energy[v] != isize::MIN || min_cop_dist[v] < 2 || cops_hull[v].outside() {
                     continue 'compute_energy;
                 }
-                if min_cop_dist[v] < 2 {
-                    continue 'compute_energy;
-                }
-                if cone_dirs[v].intersection(component_dirs) == component_dirs {
+                if cone_dirs[v].contains(component_dirs) {
                     // v is part of the original overlap
                     self.energy[v] = thickness;
+                    self.energy_dirs[v] = escape_dirs;
                     self.dilemma_regions[v] |= component_bit;
                     self.dilemma_dirs[v].unionize(component_dirs);
 
@@ -201,84 +212,95 @@ impl DilemmaNodes {
                 // this row is thus the longest connected subset of the
                 // grid line in parallel_dir_coords directions containing v,
                 // where every vertex has a neighbor in a esc_dir_coords direction with positive energy.
-                let (row_start, row_len) = {
+                let (row_fst, row_len, row_dirs) = {
                     let v_coords = g.coordinates_of(v);
                     let mut v_left = v_coords;
                     let mut v_right = v_coords;
-                    let mut row_len = 0;
-                    let [left_step, right_step] = parallel_dir_coords;
-                    let [right_step_fwd, left_step_fwd] = esc_dir_coords;
-                    loop {
+                    let mut row_len = 1;
+                    let mut row_dirs = escape_dirs;
+                    for _ in 0..g.grid.len {
                         let Some(next_left) = g.try_wrap(v_left + left_step) else {
                             break;
                         };
                         if min_cop_dist[g.unchecked_index_of(next_left)] < 2 {
+                            row_dirs = row_dirs.setminus(right_dir_fwd);
+                            debug_assert!(row_dirs.count() <= 1);
                             break;
                         }
-                        let Some(index_fwd) = g.index_of(next_left + left_step_fwd) else {
+                        let Some(index_fwd) = g.index_of(next_left + right_step_fwd) else {
                             break;
                         };
                         if self.energy[index_fwd] < 0 {
                             break;
                         }
+                        row_dirs.intersect(self.energy_dirs[index_fwd]);
                         v_left = next_left;
                         row_len += 1;
                     }
-                    loop {
+                    for _ in 0..g.grid.len {
                         let Some(next_right) = g.try_wrap(v_right + right_step) else {
                             break;
                         };
                         if min_cop_dist[g.unchecked_index_of(next_right)] < 2 {
+                            row_dirs = row_dirs.setminus(left_dir_fwd);
+                            debug_assert!(row_dirs.count() <= 1);
                             break;
                         }
-                        let Some(index_fwd) = g.index_of(next_right + right_step_fwd) else {
+                        let Some(index_fwd) = g.index_of(next_right + left_step_fwd) else {
                             break;
                         };
                         if self.energy[index_fwd] < 0 {
                             break;
                         }
+                        row_dirs.intersect(self.energy_dirs[index_fwd]);
                         v_right = next_right;
                         row_len += 1;
                     }
-                    debug_assert_eq!(g.try_wrap(v_left + row_len * right_step), Some(v_right));
-                    (v_left, row_len)
+                    debug_assert_eq!(
+                        g.try_wrap(v_left + (row_len - 1) * right_step),
+                        Some(v_right)
+                    );
+                    (v_left, row_len, row_dirs)
                 };
 
                 // we update the energy of all vertices of the row at once,
                 // because now we know the row width.
-                'update_row: for i in 0..=row_len {
-                    let vi_coords = row_start + i * parallel_dir_coords[1];
+                'update_row: for i in 0..row_len {
+                    let vi_coords = row_fst + i * right_step;
                     let Some(vi) = g.index_of(vi_coords) else {
                         continue 'update_row;
                     };
+                    let in_cone = cone_dirs[vi].intersection(component_dirs).count() >= 2;
 
-                    // what value shout this have,
-                    // based on what values the neighbors in esc_dirs directions have
-                    let Some(new_step_energy) = ({
-                        let n1 = g.index_of(vi_coords + esc_dir_coords[0]).map(|n| self.energy[n]);
-                        let n2 = g.index_of(vi_coords + esc_dir_coords[1]).map(|n| self.energy[n]);
-                        if cone_dirs[vi].intersection(component_dirs).0.count_ones() >= 2 {
+                    let new_step_energy = {
+                        let mut energies = [isize::MIN; 2];
+                        for (step_fwd, step_dir, energy) in
+                            izip!(fwd_steps, fwd_dirs, &mut energies)
+                        {
+                            if let Some(n) = g.index_of(vi_coords + step_fwd) {
+                                if !in_cone || row_dirs.contains(step_dir) {
+                                    *energy = self.energy[n];
+                                }
+                            }
+                        }
+                        if in_cone {
                             // in cone -> enough to have one neighbor with same function value
-                            Option::max(n1, n2)
+                            isize::max(energies[0], energies[1])
                         } else {
                             // outside cone -> both neighbors must have energy and we lose energy
-                            Option::min(n1, n2).map(|e| e.saturating_sub(1))
+                            isize::min(energies[0], energies[1]).saturating_sub(1)
                         }
-                    }) else {
-                        continue 'update_row;
                     };
 
-                    let new_energy = isize::min(new_step_energy, row_len + 1);
-                    if new_energy > self.energy[vi] {
-                        self.energy[vi] = new_energy;
-                        if new_energy >= 0 {
-                            self.dilemma_regions[vi] |= component_bit;
-                            self.dilemma_dirs[vi].unionize(escape_dirs);
-                        }
-
-                        queue.extend(
-                            esc_dir_coords.iter().filter_map(|&c| g.index_of(vi_coords - c)),
-                        );
+                    if new_step_energy >= 0 {
+                        self.energy_dirs[vi] = row_dirs;
+                        self.dilemma_regions[vi] |= component_bit;
+                        let dirs = if in_cone { row_dirs } else { escape_dirs };
+                        self.dilemma_dirs[vi].unionize(dirs);
+                    }
+                    if new_step_energy > self.energy[vi] {
+                        self.energy[vi] = new_step_energy;
+                        queue.extend(fwd_steps.iter().filter_map(|&c| g.index_of(vi_coords - c)));
                     }
                 }
             }
@@ -309,11 +331,14 @@ impl DilemmaNodes {
         self.dilemma_dirs.clear();
         self.dilemma_dirs.resize(edges.nr_vertices(), Dirs::EMPTY);
 
+        self.energy_dirs.clear();
+        self.energy_dirs.resize(edges.nr_vertices(), Dirs::EMPTY);
+
         if !esc_dirs.graph.represents_current_map || esc_dirs.graph.data.norm != Norm::Hex {
             return;
         }
 
         self.mark_overlapping_dirs(edges, queue, hull, &esc_dirs.cone_esc_directions);
-        self.mark_dilemma(esc_dirs, edges, queue, min_cop_dist);
+        self.mark_dilemma(esc_dirs, edges, queue, hull, min_cop_dist);
     }
 }

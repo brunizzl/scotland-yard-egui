@@ -94,12 +94,12 @@ impl EscapableDirections {
                 dirs
             };
             self.component_directions[component_nr % 32] = boundary_dirs;
-            debug_assert!(g.wrap || boundary_dirs.0.count_ones() > 0);
+            debug_assert!(g.wrap || boundary_dirs.count() > 0);
 
             // if a boundary has three escape directions,
             // it is sufficient to only walk (the opposite of) the center direction
             // to reach every vertex of the component from some boundary vertex.
-            let center_dirs = if boundary_dirs.0.count_ones() <= 2 {
+            let center_dirs = if boundary_dirs.count() <= 2 {
                 boundary_dirs
             } else {
                 // we do not consider what happens on tori, because on there,
@@ -116,7 +116,7 @@ impl EscapableDirections {
             for &inside_dir in &inside_dirs {
                 for &bv in boundary_section {
                     let mut cone_dirs = boundary_dirs;
-                    if cone_dirs.0.count_ones() > 1 {
+                    if cone_dirs.count() > 1 {
                         self.cone_esc_directions[bv].unionize(cone_dirs);
                     }
 
@@ -138,7 +138,7 @@ impl EscapableDirections {
 
                         // mark cone
                         cone_dirs.intersect(self.esc_directions[v]);
-                        if cone_dirs.0.count_ones() > 1 {
+                        if cone_dirs.count() > 1 {
                             self.cone_esc_directions[v].unionize(cone_dirs);
                         }
                     }
