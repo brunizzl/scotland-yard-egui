@@ -147,6 +147,113 @@ impl EscapableDirections {
         }
     }
 
+    #[allow(dead_code)]
+    fn directly_compute_cones(&mut self, min_cop_dist: &[isize]) {
+        if !self.graph.represents_current_map || self.graph.data.wrap {
+            return;
+        }
+        self.cone_esc_directions.clear();
+        self.cone_esc_directions.resize(self.graph.nr_vertices(), Dirs::EMPTY);
+
+        assert_eq!(self.graph.nr_vertices(), min_cop_dist.len());
+        let g = self.graph.data;
+
+        let iter = {
+            let iter_coords = |mut start: Coords, stop: Coords| {
+                let diff = stop - start;
+                let coord_step = |c: isize| match 0.cmp(&c) {
+                    std::cmp::Ordering::Equal => 0,
+                    std::cmp::Ordering::Less => 1,
+                    std::cmp::Ordering::Greater => -1,
+                };
+                let step = Coords {
+                    x: coord_step(diff.x),
+                    y: coord_step(diff.y),
+                };
+                let mut done = false;
+                let take_step = move || {
+                    if done {
+                        None
+                    } else {
+                        let res = Some(start);
+                        if start == stop {
+                            done = true;
+                        } else {
+                            start = start + step;
+                        }
+                        res
+                    }
+                };
+                std::iter::from_fn(take_step)
+            };
+            let max = g.side_len() - 1;
+            // corners
+            let c1 = Coords { x: 0, y: 0 };
+            let c2 = Coords { x: max, y: 0 };
+            let c3 = Coords { x: max, y: max };
+            let c4 = Coords { x: 0, y: max };
+            // unit directions
+            let e1 = Coords { x: 1, y: 0 };
+            let e2 = Coords { x: 1, y: 1 };
+            let e3 = Coords { x: 0, y: 1 };
+            let e4 = -e1;
+            let e5 = -e2;
+            let e6 = -e3;
+
+            let walk = |a, b, c| iter_coords(a, b).chain(iter_coords(b, c));
+            match g.norm {
+                Norm::Hex => {
+                    vec![
+                        (walk(c1, c2, c2), e5, e6),
+                        (walk(c2, c2, c3), e6, e1),
+                        (walk(c2, c3, c4), e1, e2),
+                        (walk(c3, c4, c4), e2, e3),
+                        (walk(c4, c1, c1), e3, e4),
+                        (walk(c4, c1, c2), e4, e5),
+                    ]
+                },
+                Norm::Quad => {
+                    vec![
+                        (walk(c1, c2, c2), e4, e6),
+                        (walk(c2, c2, c3), e6, e1),
+                        (walk(c3, c4, c4), e1, e3),
+                        (walk(c4, c1, c1), e3, e4),
+                    ]
+                },
+            }
+        };
+
+        // idea: walk through edges in lines,
+        // add current vertex to cone if last vertex of line was added and
+        // if vertex in second cone directions was added as well.
+        for (boundary_section, step_a, step_b) in iter {
+            let dirs = step_a.dirs(Norm::Hex).union(step_b.dirs(Norm::Hex));
+            for mut v_coords in boundary_section {
+                let _v = g.unchecked_index_of(v_coords);
+                debug_assert!(g.try_wrap(v_coords + step_b).is_none());
+                loop {
+                    let v = g.unchecked_index_of(v_coords);
+                    if min_cop_dist[v] < 2 {
+                        break;
+                    }
+                    let in_cone = if let Some(n) = g.index_of(v_coords + step_a) {
+                        self.cone_esc_directions[n].contains(dirs)
+                    } else {
+                        true
+                    };
+                    if !in_cone {
+                        break;
+                    }
+                    self.cone_esc_directions[v].unionize(dirs);
+                    let Some(next_coords) = g.try_wrap(v_coords - step_b) else {
+                        break;
+                    };
+                    v_coords = next_coords;
+                }
+            }
+        }
+    }
+
     /// sometimes we failed to unmark some escape directions on tori.
     /// we take a conservative approach here and only keep the directions of the corresponding components.
     /// this is extra conservative, because which directions belong to a boundary section on a torus,

@@ -471,4 +471,58 @@ mod test {
             assert_eq!(dirs.rotate_right_hex().rotate_left_hex(), dirs);
         }
     }
+
+    #[test]
+    fn connected_sections() {
+        {
+            let norm = Norm::Hex;
+            let [a, b, c, d, e, f] = [1, 2, 4, 8, 16, 32];
+            assert!(Dirs(a | b | d | e | f).connected_on(norm));
+            assert!(Dirs(a | b | c).connected_on(norm));
+            assert!(Dirs(a | b).connected_on(norm));
+            assert!(Dirs(c | d | e).connected_on(norm));
+            assert!(Dirs(f | a).connected_on(norm));
+            assert!(Dirs::EMPTY.connected_on(norm));
+            assert!(Dirs(d).connected_on(norm));
+
+            assert!(!Dirs(a | c | d).connected_on(norm));
+            assert!(!Dirs(a | c | d | f).connected_on(norm));
+            assert!(!Dirs(a | d).connected_on(norm));
+        }
+        {
+            let norm = Norm::Quad;
+            let [a, b, c, d] = [1, 4, 8, 32];
+            assert!(Dirs(a | c | d).connected_on(norm));
+            assert!(Dirs(a | b | d).connected_on(norm));
+            assert!(Dirs(a | b | c).connected_on(norm));
+            assert!(Dirs(a | b).connected_on(norm));
+            assert!(Dirs(c | d).connected_on(norm));
+            assert!(Dirs(d | a).connected_on(norm));
+            assert!(Dirs::EMPTY.connected_on(norm));
+            assert!(Dirs(d).connected_on(norm));
+
+            assert!(!Dirs(a | c).connected_on(norm));
+            assert!(!Dirs(b | d).connected_on(norm));
+        }
+    }
+
+    #[test]
+    fn adjacent_directions_are_connected() {
+        for i in 0..6 {
+            let single_dir = Dirs(1 << i);
+            let three_dirs = single_dir.add_adjacent_on_hex();
+            assert!(three_dirs.0.count_ones() == 3);
+            assert!(three_dirs.connected_on(Norm::Hex));
+        }
+    }
+
+    #[test]
+    fn unit_directions_in_same_order() {
+        for norm in [Norm::Hex, Norm::Quad] {
+            for (&dirs, &v) in Dirs::all_bits_and_directions(norm) {
+                let v_dirs = v.dirs(norm);
+                assert_eq!(dirs, v_dirs);
+            }
+        }
+    }
 }

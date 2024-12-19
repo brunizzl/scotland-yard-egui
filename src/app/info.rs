@@ -747,13 +747,12 @@ impl Info {
     /// "winning stage II vertices" given in the thesis,
     /// but instead an equilavent formulation which gives rise to a linear time algorithm:
     /// the function `f: vertices -> N` is computed as follows.
-    /// `
+    ///
     /// f(v) := if not v in cop hull interior {
     ///     -min dist(v, cop) over all cops
     /// } else {
-    ///     (min f(v') over all v' neighbors of v) + 1
+    ///     (min f(u) over all u neighbors of v) + 1
     /// }
-    /// `
     fn update_cop_advantage(&mut self, edges: &EdgeList) {
         assert_eq!(edges.nr_vertices(), self.cop_hull_data.hull().len());
         assert_eq!(edges.nr_vertices(), self.min_cop_dist.len());
@@ -879,7 +878,6 @@ impl Info {
         use VertexSymbolInfo as Symbol;
 
         let nr_vertices = con.edges.nr_vertices();
-        let robber_moved = self.characters.robber_changed;
         let cop_moved = self.characters.cop_changed;
 
         let color = self.options.vertex_color_info();
@@ -960,7 +958,7 @@ impl Info {
         if cop_moved && update_dilemma {
             self.update_dilemma(con);
         }
-        if (cop_moved || robber_moved) && update_cop_advantage {
+        if cop_moved && update_cop_advantage {
             self.update_cop_advantage(con.edges);
         }
         if cop_moved && update_plane_cop_strat {
