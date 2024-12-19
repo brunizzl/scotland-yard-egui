@@ -826,12 +826,13 @@ impl Info {
     }
 
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {
+        let active_cops = self.characters.active_cops().collect_vec();
         self.dilemma.update(
             con.edges,
             self.cop_hull_data.hull(),
             &self.escapable_grid,
             &mut self.queue,
-            &self.min_cop_dist,
+            &active_cops,
         );
     }
 
@@ -1643,7 +1644,6 @@ impl Info {
                 //draw_arrows(&self.escapable_grid.strong_esc_directions, Dirs(u8::MAX));
                 let show = |&&num: &&_| num != isize::MIN;
                 draw!(&self.dilemma.energy, show);
-                draw_arrows(&self.dilemma.energy_dirs, Dirs(u8::MAX));
             },
             VertexSymbolInfo::Escape2 => {
                 let escs = if self.escapable_grid.graph.represents_current_map {
