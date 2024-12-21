@@ -9,6 +9,8 @@ pub struct Coords {
 }
 
 impl Coords {
+    pub const MAX: Self = Coords { x: isize::MAX, y: isize::MAX };
+
     /// only valid on [`Norm::Hex`], SAME COORDINATE SYSTEM AS THESIS
     pub const fn line_e1_index(&self) -> isize {
         -self.y

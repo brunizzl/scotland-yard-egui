@@ -826,13 +826,12 @@ impl Info {
     }
 
     fn update_dilemma(&mut self, con: &DrawContext<'_>) {
-        let active_cops = self.characters.active_cops().collect_vec();
         self.dilemma.update(
             con.edges,
             self.cop_hull_data.hull(),
             &self.escapable_grid,
             &mut self.queue,
-            &active_cops,
+            self.characters.active_cops(),
         );
     }
 

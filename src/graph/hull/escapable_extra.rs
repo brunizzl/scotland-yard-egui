@@ -2,8 +2,15 @@ use grid::*;
 
 use super::*;
 
-fn cone_contains(v: Coords, cone_corner: Coords, cone_dirs: Dirs) -> bool {
-    cone_dirs.contains((v - cone_corner).dirs(Norm::Hex))
+struct Cone(Coords, Dirs);
+
+impl Cone {
+    #[inline(always)]
+    fn contains(&self, v: Coords) -> bool {
+        let Cone(corner, dirs) = *self;
+        debug_assert!(dirs.connected_on(Norm::Hex));
+        dirs.contains((v - corner).dirs(Norm::Hex))
+    }
 }
 
 /// when two escapable cones overlap, they allow the robber to approach both at once and thus
@@ -17,7 +24,7 @@ pub struct DilemmaNodes {
     /// union of [`EscapableDirections::cone_esc_directions`] and [`Self::dilemma_dirs`].
     pub all_dirs: Vec<Dirs>,
 
-    /// has the same vertices marked as [`Self::dilemma_regions`], 
+    /// has the same vertices marked as [`Self::dilemma_regions`],
     /// but remembers the escape directions instead of the component number.
     pub dilemma_dirs: Vec<Dirs>,
 
@@ -30,7 +37,7 @@ pub struct DilemmaNodes {
     pub overlap: Vec<u32>,
 
     /// temporary value, only stored here to allow visual debugging (and to save on allocations).
-    /// this tells us at the time where a given region is found, 
+    /// this tells us at the time where a given region is found,
     /// how many more steps away from a cone we can safely take.
     pub energy: Vec<isize>,
 }
@@ -38,7 +45,7 @@ pub struct DilemmaNodes {
 /// stage 1: just consider cones for overlap.
 /// stage: n + 1: consider cones and results of all previous n stages for overlap.
 /// any value above 1 is higly experimental and not guaranteed to yield a continuous construct.
-const MAX_STAGES: usize = 100;
+const MAX_STAGES: usize = 1;
 
 impl DilemmaNodes {
     pub fn new() -> Self {
@@ -107,29 +114,30 @@ impl DilemmaNodes {
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
         cops_hull: &[InSet],
-        active_cops: &[&Character],
+        active_cops_coords: &[Coords],
         new_regions: std::ops::Range<usize>,
     ) {
+        use Norm::Hex;
         let g = escape_directions.graph.data;
-        if !escape_directions.graph.represents_current_map || g.norm != Norm::Hex {
+        if !escape_directions.graph.represents_current_map || g.norm != Hex || g.wrap {
             return;
         }
 
         for &(component_v, component_bit, component_dirs) in &self.region_info[new_regions] {
             debug_assert!(self.overlap[component_v] & component_bit != 0);
-            debug_assert!(component_dirs.connected_on(Norm::Hex));
+            debug_assert!(component_dirs.connected_on(Hex));
             debug_assert_eq!(component_dirs.count(), 4);
 
             let escape_dirs = component_dirs.keep_inner_on_hex();
-            debug_assert!(escape_dirs.connected_on(Norm::Hex));
+            debug_assert!(escape_dirs.connected_on(Hex));
             debug_assert_eq!(escape_dirs.count(), 2);
-
-            queue.push_back(component_v);
 
             // one extreme vertex per direction.
             let mut extreme_vertices = [g.coordinates_of(component_v); 6];
             // find extreme vertices of overlap.
-            // note: this assumes the overlapping region to be convex.
+            // note: this procedure assumes the overlapping region to be convex.
+            // (or at least not spiral-shaped or something like that.)
+            queue.push_back(component_v);
             while let Some(v) = queue.pop_front() {
                 for n in edges.neighbors_of(v) {
                     if self.overlap[n] & component_bit == 0 {
@@ -159,93 +167,101 @@ impl DilemmaNodes {
                 }
             }
 
+            // a measure of how many police moves the overlap is guranteed to persist.
             let thickness = {
-                let mut min_diff = isize::MAX;
-                let (fst_half, snd_half) = extreme_vertices.split_at(3);
-                for (i, &ex_1, &ex_2) in izip!(0..3, fst_half, snd_half) {
-                    let diff = ex_1 - ex_2;
-                    let diff_dir = match i {
-                        0 => diff.line_e1_index(),
-                        1 => diff.line_e2_index(),
-                        2 => diff.line_e3_index(),
-                        _ => unreachable!(),
-                    };
-                    min_diff = isize::min(min_diff, diff_dir.abs());
-                }
-                min_diff
+                let [ex1, ex2, ex3, ex4, ex5, ex6] = extreme_vertices;
+                let diff_1_4 = (ex1 - ex4).line_e1_index();
+                let diff_2_5 = (ex2 - ex5).line_e2_index();
+                let diff_3_6 = (ex3 - ex6).line_e3_index();
+                debug_assert!(diff_1_4 >= 0);
+                debug_assert!(diff_2_5 >= 0);
+                debug_assert!(diff_3_6 >= 0);
+                isize::min(diff_1_4, diff_2_5).min(diff_3_6)
             };
 
-            // these are the four directions of component_dirs as coords and
-            // always ordered such that directions at neighboring indices are adjacent
-            let all_relevant_coords = {
-                let mut res = [Coords { x: isize::MAX, y: isize::MAX }; 4];
-                let vals = Dirs::all_bits_and_directions(Norm::Hex)
+            // these are the four directions of component_dirs as coords (called steps) and as direction sets
+            let [(left_step, left_dir), (left_step_fwd, left_dir_fwd), (rght_step_fwd, rght_dir_fwd), (rght_step, rght_dir)] = {
+                let mut res = [(Coords::MAX, Dirs::EMPTY); 4];
+                // gurantee to have all values ordered not by absolute direction index,
+                // but such that two following values are also geometrically adjacent.
+                let vals = Dirs::all_bits_and_directions(Hex)
                     .cycle()
                     .skip_while(|(&dir, _)| component_dirs.intersection(dir).nonempty())
                     .skip_while(|(&dir, _)| component_dirs.intersection(dir).is_empty());
                 for (ptr, (&dir, &val)) in izip!(&mut res, vals) {
                     debug_assert!(component_dirs.intersection(dir).nonempty());
-                    *ptr = val;
+                    *ptr = (val, dir);
                 }
-                let adjacent = |(&d1, &d2)| Norm::Hex.apply(d1 - d2) == 1;
-                debug_assert!(res.iter().tuple_windows().all(adjacent));
+                debug_assert!(res.iter().tuple_windows().all(|(&(s1, d1), &(s2, d2))| {
+                    let steps_adjacent = Hex.apply(s1 - s2) == 1;
+                    let dirs_adjacent = Dirs::union(d1, d2).connected_on(Hex);
+                    steps_adjacent && dirs_adjacent
+                }));
                 res
             };
-            // the coordinates of the two directions in escape_dirs
-            let fwd_steps = [all_relevant_coords[1], all_relevant_coords[2]];
-            let [left_step_fwd, right_step_fwd] = fwd_steps;
-            let fwd_dirs = [
-                left_step_fwd.dirs(Norm::Hex),
-                right_step_fwd.dirs(Norm::Hex),
-            ];
-            let [left_dir_fwd, right_dir_fwd] = fwd_dirs;
-            debug_assert_eq!(left_dir_fwd.count(), 1);
-            debug_assert_eq!(right_dir_fwd.count(), 1);
-            debug_assert_eq!(left_dir_fwd.union(right_dir_fwd), escape_dirs);
-            // the two "outher" directions
-            let [left_step, right_step] = [all_relevant_coords[0], all_relevant_coords[3]];
-            debug_assert_eq!(left_step, -right_step);
+            debug_assert_eq!(left_step, -rght_step);
+            let fwd_steps = [left_step_fwd, rght_step_fwd];
 
-            let cops_dirs = Dirs::all(Norm::Hex).setminus(component_dirs);
+            // the two sets of connected directions of the original cones which caused the overlap.
+            let left_cone_dirs = Dirs::union(left_dir, left_dir_fwd);
+            let rght_cone_dirs = Dirs::union(rght_dir_fwd, rght_dir);
+            debug_assert_eq!(Dirs::union(left_dir_fwd, rght_dir_fwd), escape_dirs);
+            debug_assert_eq!(Dirs::union(left_cone_dirs, rght_cone_dirs), component_dirs);
+            // the two directions not contained in the two cones (the opposite of escape_dirs)
+            let cops_dirs = Dirs::all(Hex).setminus(component_dirs);
+            debug_assert!(Dirs::intersection(left_cone_dirs, rght_cone_dirs).is_empty());
+            debug_assert!(Dirs::intersection(left_cone_dirs, cops_dirs).is_empty());
+            debug_assert!(Dirs::intersection(cops_dirs, rght_cone_dirs).is_empty());
+
+            // these is the smallest subset of "close" (e.g. not beyond the overlap) cop positions,
+            // such that every close cop is contained in the union
+            // over the cones in cops_dirs from the subset vertices.
+            // this subset however does not contain the cop positions directly,
+            // but shifted in such a manner that also exactly the boundary outside each
+            // cop cone is contained in the shifted cone.
             let dangerous_cop_cone_corners = {
                 let v0 = g.coordinates_of(component_v);
-                debug_assert!(cone_contains(v0 + left_step_fwd, v0, escape_dirs));
-                debug_assert!(cone_contains(v0 + right_step_fwd, v0, escape_dirs));
-                debug_assert!(!cone_contains(v0 + left_step, v0, escape_dirs));
-                debug_assert!(!cone_contains(v0 + right_step, v0, escape_dirs));
+                debug_assert!(Cone(v0, escape_dirs).contains(v0 + left_step_fwd));
+                debug_assert!(Cone(v0, escape_dirs).contains(v0 + rght_step_fwd));
+                debug_assert!(!Cone(v0, escape_dirs).contains(v0 + left_step));
+                debug_assert!(!Cone(v0, escape_dirs).contains(v0 + rght_step));
 
-                debug_assert!(cone_contains(v0 - left_step_fwd, v0, cops_dirs));
-                debug_assert!(cone_contains(v0 - right_step_fwd, v0, cops_dirs));
-                debug_assert!(!cone_contains(v0 + left_step, v0, cops_dirs));
-                debug_assert!(!cone_contains(v0 + right_step, v0, cops_dirs));
+                debug_assert!(Cone(v0, cops_dirs).contains(v0 - left_step_fwd));
+                debug_assert!(Cone(v0, cops_dirs).contains(v0 - rght_step_fwd));
+                debug_assert!(!Cone(v0, cops_dirs).contains(v0 + left_step));
+                debug_assert!(!Cone(v0, cops_dirs).contains(v0 + rght_step));
 
-                debug_assert!(cone_contains(v0 + left_step, v0, component_dirs));
-                debug_assert!(cone_contains(v0 + right_step, v0, component_dirs));
-                debug_assert!(!cone_contains(v0 - left_step_fwd, v0, component_dirs));
-                debug_assert!(!cone_contains(v0 - right_step_fwd, v0, component_dirs));
+                debug_assert!(Cone(v0, component_dirs).contains(v0 + left_step));
+                debug_assert!(Cone(v0, component_dirs).contains(v0 + rght_step));
+                debug_assert!(!Cone(v0, component_dirs).contains(v0 - left_step_fwd));
+                debug_assert!(!Cone(v0, component_dirs).contains(v0 - rght_step_fwd));
 
-                let mut dangerous_cops = smallvec::SmallVec::<[_; 8]>::new();
-                for &cop in active_cops {
-                    let cop_coords = g.coordinates_of(cop.vertex());
-                    let cop_not_dangerous = cone_contains(cop_coords, v0, escape_dirs);
+                // find the minimum set of cops that create all dangerous cones
+                let mut danger = smallvec::SmallVec::<[_; 8]>::new();
+                for &new_cop in active_cops_coords {
+                    let cop_not_dangerous = Cone(v0, escape_dirs).contains(new_cop);
                     if cop_not_dangerous {
                         continue;
                     }
-                    if !dangerous_cops.iter().any(|&cc| cone_contains(cop_coords, cc, cops_dirs)) {
-                        dangerous_cops.retain(|&mut cc| !cone_contains(cc, cop_coords, cops_dirs));
-                        dangerous_cops.push(cop_coords);
+                    if !danger.iter().any(|&old| Cone(old, cops_dirs).contains(new_cop)) {
+                        danger.retain(|&mut old| !Cone(new_cop, cops_dirs).contains(old));
+                        danger.push(new_cop);
                     }
                 }
-                // shift every cone by two units such that both boundaries now are in the interior.
-                for v_coords in &mut dangerous_cops {
-                    *v_coords = *v_coords + left_step_fwd + right_step_fwd;
+                // shift every cone by two units such that both boundaries are now in the interior.
+                let shift = left_step_fwd + rght_step_fwd;
+                debug_assert_eq!((-shift).dirs(Hex), cops_dirs);
+                for v_coords in &mut danger {
+                    *v_coords = *v_coords + shift;
                 }
-                dangerous_cops
+                danger
             };
             let dangerous_cop_cone_corners = &dangerous_cop_cone_corners[..];
             let in_danger = |v: Coords| -> bool {
                 dangerous_cop_cone_corners.iter().any(|&cone_corner| {
-                    cone_contains(v, cone_corner, cops_dirs) && v != cone_corner
+                    // because every cone was shifted, we only need to test if v is in shifted cone,
+                    // and is not identical to the very tip.
+                    Cone(cone_corner, cops_dirs).contains(v) && v != cone_corner
                 })
             };
 
@@ -271,11 +287,14 @@ impl DilemmaNodes {
                     continue 'compute_energy;
                 }
 
-                let in_old_cone = self.all_dirs[v].intersection(component_dirs).count() >= 2;
+                let in_old_cone = {
+                    let dirs = self.all_dirs[v];
+                    dirs.contains(left_cone_dirs) || dirs.contains(rght_cone_dirs)
+                };
                 let new_step_energy = {
                     let get = |n| g.index_of(n).map_or(isize::MIN, |n| self.energy[n]);
                     let e1 = get(v_coords + left_step_fwd);
-                    let e2 = get(v_coords + right_step_fwd);
+                    let e2 = get(v_coords + rght_step_fwd);
                     if in_old_cone {
                         // in cone -> enough to have one neighbor with same function value
                         isize::max(e1, e2)
@@ -302,13 +321,13 @@ impl DilemmaNodes {
         }
     }
 
-    pub fn update(
+    pub fn update<'a>(
         &mut self,
         edges: &EdgeList,
         hull: &[InSet],
         esc_dirs: &EscapableDirections,
         queue: &mut VecDeque<usize>,
-        active_cops: &[&Character],
+        active_cops: impl Iterator<Item = &'a Character>,
     ) {
         assert_eq!(hull.len(), edges.nr_vertices());
         assert_eq!(esc_dirs.esc_directions.len(), edges.nr_vertices());
@@ -332,13 +351,24 @@ impl DilemmaNodes {
             return;
         }
 
+        let active_cops_coords = active_cops
+            .map(|c| esc_dirs.graph.data.coordinates_of(c.vertex()))
+            .collect_vec();
+
         self.region_info.clear();
         for _ in 0..MAX_STAGES {
             let new_regions = self.mark_overlapping_dirs(edges, queue, hull);
             if new_regions.is_empty() {
                 break;
             }
-            self.mark_dilemma(esc_dirs, edges, queue, hull, active_cops, new_regions);
+            self.mark_dilemma(
+                esc_dirs,
+                edges,
+                queue,
+                hull,
+                &active_cops_coords,
+                new_regions,
+            );
         }
 
         // esc_dirs.cone_esc_directions are only marked inside hull -> add rest now
