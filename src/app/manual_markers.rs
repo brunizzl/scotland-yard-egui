@@ -97,6 +97,7 @@ impl HistoryEntry {
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ManualMarkerOptions {
+    /// not directly one size per color / marker, but one size per layer.
     pub sizes: [f32; 8],
     pub colors: [Color32; 8],
     /// bitmask which markers are actually painted on screen
@@ -246,7 +247,7 @@ impl ManualMarkers {
             }
         });
 
-        for (i, size, layer) in izip!(0.., &mut opts.sizes, &mut opts.layers) {
+        for (i, layer) in izip!(0..8, &mut opts.layers) {
             ui.horizontal(|ui| {
                 let bit_i = 1u8 << i;
                 {
@@ -260,7 +261,11 @@ impl ManualMarkers {
                 egui::ComboBox::from_id_source(layer as *const _)
                     .width(0.0)
                     .show_index(ui, layer, 8, |i| i.to_string())
-                    .on_hover_text("Layer");
+                    .on_hover_text(
+                        "Ebene\n(Die Größe wird per Ebene eingestellt und \
+                        Farben auf der selben Ebene werden gemischt, \
+                        sofern gemeinsam an einem Knoten vorhanden.)",
+                    );
 
                 let mut show = opts.shown & bit_i != 0;
                 if ui.checkbox(&mut show, "").on_hover_text("Anzeigen").clicked() {
@@ -271,7 +276,8 @@ impl ManualMarkers {
                 {
                     let active = &mut opts.colors[i..(i + 1)];
                     let default = &color::HAND_PICKED_MARKER_COLORS[i..(i + 1)];
-                    style::draw_options(ui, size, active, default);
+                    let size = &mut opts.sizes[*layer];
+                    style::draw_options(ui, size, active, default, i);
                 }
                 if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
                     let active = std::mem::replace(&mut self.active_bit, i);
@@ -364,8 +370,7 @@ impl ManualMarkers {
                     .fold(0, std::ops::BitOr::bitor);
                 if mask != 0 {
                     masks[free_index] = mask;
-                    let fst_i = opts.layers.iter().position(|&l| l == layer).unwrap();
-                    sizes[free_index] = 4.5 * opts.sizes[fst_i] * con.scale;
+                    sizes[free_index] = 4.5 * opts.sizes[layer] * con.scale;
                     free_index += 1;
                 }
             }

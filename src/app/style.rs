@@ -20,7 +20,7 @@ where
     }
 
     pub fn draw_options(&mut self, ui: &mut Ui, default_colors: &[Color32; N]) {
-        draw_options(ui, &mut self.size, &mut self.colors, default_colors);
+        draw_options(ui, &mut self.size, &mut self.colors, default_colors, 0);
     }
 }
 
@@ -48,10 +48,11 @@ pub fn draw_options(
     size: &mut f32,
     colors: &mut [Color32],
     default_colors: &[Color32],
+    salt: usize,
 ) {
     {
         let curr_open = OPEN_MENU.load(Ordering::Acquire);
-        let this = size as *const _ as usize;
+        let this = (size as *const _ as usize) ^ (colors.as_ptr() as usize) ^ salt;
         let this_is_open = curr_open == this;
         if ui.button(" ⛭ ").clicked() {
             let new_val = if this_is_open { 0 } else { this };
