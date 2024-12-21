@@ -7,6 +7,52 @@ use crate::graph::InSet;
 
 use super::{color, style, DrawContext};
 
+/// stripped down copy of [`egui::RadioButton`], but with added ability to directly decide the background color
+fn radio_button(checked: bool, fill: Color32, ui: &mut Ui) -> egui::Response {
+    let spacing = &ui.spacing();
+    let icon_width = spacing.icon_width;
+
+    let mut desired_size = egui::Vec2::splat(spacing.interact_size.y);
+    desired_size.y = desired_size.y.max(icon_width);
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), checked, "")
+    });
+
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+
+        let (small_icon_rect, big_icon_rect) = ui.spacing().icon_rectangles(rect);
+
+        let painter = ui.painter();
+
+        painter.add(egui::epaint::CircleShape {
+            center: big_icon_rect.center(),
+            radius: big_icon_rect.width() / 2.0 + visuals.expansion,
+            fill,
+            stroke: visuals.bg_stroke,
+        });
+
+        if checked {
+            painter.add(egui::epaint::CircleShape {
+                center: small_icon_rect.center(),
+                radius: small_icon_rect.width() / 2.3,
+                fill: Color32::BLACK,
+                stroke: Default::default(),
+            });
+            painter.add(egui::epaint::CircleShape {
+                center: small_icon_rect.center(),
+                radius: small_icon_rect.width() / 3.0,
+                fill: Color32::WHITE,
+                stroke: Default::default(),
+            });
+        }
+    }
+
+    response
+}
+
 /// maximum number of entries in history
 const HISTORY_LEN: usize = 32;
 
@@ -203,10 +249,13 @@ impl ManualMarkers {
         for (i, size, layer) in izip!(0.., &mut opts.sizes, &mut opts.layers) {
             ui.horizontal(|ui| {
                 let bit_i = 1u8 << i;
-                let hover_choose = format!("wähle Farbe (f + {})", i + 1);
-                if ui.radio(self.active_bit == i, "").on_hover_text(hover_choose).clicked() {
-                    self.active_bit = i;
-                    opts.shown |= bit_i;
+                {
+                    let button = radio_button(self.active_bit == i, opts.colors[i], ui);
+                    let hover_choose = format!("wähle Farbe (f + {})", i + 1);
+                    if button.on_hover_text(hover_choose).clicked() {
+                        self.active_bit = i;
+                        opts.shown |= bit_i;
+                    }
                 }
                 egui::ComboBox::from_id_source(layer as *const _)
                     .width(0.0)
@@ -220,8 +269,6 @@ impl ManualMarkers {
                 };
 
                 {
-                    let color = &mut opts.colors[i];
-                    ui.color_edit_button_srgba(color);
                     let active = &mut opts.colors[i..(i + 1)];
                     let default = &color::HAND_PICKED_MARKER_COLORS[i..(i + 1)];
                     style::draw_options(ui, size, active, default);
