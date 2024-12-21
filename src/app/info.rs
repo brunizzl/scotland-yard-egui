@@ -237,7 +237,7 @@ const DEFAULT_OPTIONS: Options = Options {
         sizes: [1.0; 8],
         colors: color::HAND_PICKED_MARKER_COLORS,
         shown: u8::MAX,
-        combine_colors: true,
+        layers: [0; 8],
     },
 
     marked_cop_dist: 10,
@@ -1375,14 +1375,13 @@ impl Info {
                 }
             },
             VertexColorInfo::Escape23Grid => {
-                for (&esc2, &esc3, util) in izip!(
-                    &self.escapable_grid.esc_components,
-                    &self.dilemma.dilemma_regions,
-                    utils_iter
-                ) {
-                    let esc = esc2 | esc3;
-                    let color = || color::blend_picked(colors, [esc2 != 0, esc3 != 0].into_iter());
-                    draw_if!(esc != 0, util, color);
+                let sat = if dark { 750 } else { 350 };
+                let colors = color::sample_color_wheel::<6>(sat, 4);
+                let shown = self.options.shown_escape_directions;
+                for (&esc, util) in izip!(&self.dilemma.all_dirs, utils_iter) {
+                    let esc_shown = esc.0 & shown;
+                    let color = || color::u8_marker_color(esc_shown, &colors);
+                    draw_if!(esc_shown != 0, util, color);
                 }
             },
             VertexColorInfo::BruteForceRes => {
@@ -1678,17 +1677,19 @@ impl Info {
                 draw_arrows(&combined, Dirs(mask));
             },
             VertexSymbolInfo::Escape3Grid => {
+                let mask = self.options.shown_escape_directions;
                 let directions = &self.dilemma.dilemma_dirs;
-                draw_arrows(directions, Dirs(u8::MAX));
+                draw_arrows(directions, Dirs(mask));
             },
             VertexSymbolInfo::Escape23Grid => {
+                let mask = self.options.shown_escape_directions;
                 let combined = izip!(
                     &self.dilemma.dilemma_dirs,
                     &self.escapable_grid.esc_directions
                 )
                 .map(|(&a, &b)| a.union(b))
                 .collect_vec();
-                draw_arrows(&combined, Dirs(u8::MAX));
+                draw_arrows(&combined, Dirs(mask));
             },
             VertexSymbolInfo::MaxCopDist => {
                 draw_isize_slice(&self.max_cop_dist);

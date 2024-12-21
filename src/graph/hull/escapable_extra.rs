@@ -371,11 +371,9 @@ impl DilemmaNodes {
             );
         }
 
-        // esc_dirs.cone_esc_directions are only marked inside hull -> add rest now
-        for (all, h, &esc) in izip!(&mut self.all_dirs, hull, &esc_dirs.esc_directions,) {
-            if !h.contained() {
-                all.unionize(esc);
-            }
+        // add the directions found via other means (and those outside hull)
+        for (all, &esc) in izip!(&mut self.all_dirs, &esc_dirs.esc_directions,) {
+            all.unionize(esc);
         }
     }
 }

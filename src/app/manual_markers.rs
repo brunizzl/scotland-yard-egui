@@ -55,8 +55,10 @@ pub struct ManualMarkerOptions {
     pub colors: [Color32; 8],
     /// bitmask which markers are actually painted on screen
     pub shown: u8,
-    /// mush all colors of manual markers at given vertex together
-    pub combine_colors: bool,
+    /// order in which markers are rendered. smallest values are rendered furthest behind.
+    /// if multiple share a layer, their colors are combined
+    /// and the combined circle is drawn with the size of the first of the group.
+    pub layers: [usize; 8],
 }
 
 pub struct ManualMarkers {
@@ -161,6 +163,15 @@ impl ManualMarkers {
             if ui.button(" ⟲ ").on_hover_text("zurück (strg + z)").clicked() {
                 self.undo();
             }
+            if ui.button(" ⟳ ").on_hover_text("vorwärts (strg + y)").clicked() {
+                self.redo();
+            }
+            if ui.button(" 🗑 ").on_hover_text("vergesse Vergangenheit").clicked() {
+                let current = self.history.remove(self.index);
+                self.index = 0;
+                self.history.clear();
+                self.history.push(current);
+            }
             // show part of history, including current entry
             let (start, end) = {
                 let len = self.history.len() as isize;
@@ -187,26 +198,9 @@ impl ManualMarkers {
                 let rich = egui::RichText::new(text).color(opts.colors[entry.bit]);
                 ui.add(egui::Label::new(rich));
             }
-            if ui.button(" ⟳ ").on_hover_text("vorwärts (strg + y)").clicked() {
-                self.redo();
-            }
         });
 
-        ui.horizontal(|ui| {
-            ui.add(egui::Checkbox::new(
-                &mut opts.combine_colors,
-                "kombiniere Marker",
-            ))
-            .on_hover_text(
-                "Die Farben aller Marker eines Knotens werden gemischt angezeigt\n\
-                und alle Marker haben die Größe des ersten Markers.",
-            );
-            if opts.combine_colors {
-                style::draw_options(ui, &mut opts.sizes[0], &mut [], &[]);
-            }
-        });
-
-        for (i, size) in izip!(0.., &mut opts.sizes) {
+        for (i, size, layer) in izip!(0.., &mut opts.sizes, &mut opts.layers) {
             ui.horizontal(|ui| {
                 let bit_i = 1u8 << i;
                 let hover_choose = format!("wähle Farbe (f + {})", i + 1);
@@ -214,6 +208,11 @@ impl ManualMarkers {
                     self.active_bit = i;
                     opts.shown |= bit_i;
                 }
+                egui::ComboBox::from_id_source(layer as *const _)
+                    .width(0.0)
+                    .show_index(ui, layer, 8, |i| i.to_string())
+                    .on_hover_text("Layer");
+
                 let mut show = opts.shown & bit_i != 0;
                 if ui.checkbox(&mut show, "").on_hover_text("Anzeigen").clicked() {
                     opts.shown ^= bit_i;
@@ -223,13 +222,9 @@ impl ManualMarkers {
                 {
                     let color = &mut opts.colors[i];
                     ui.color_edit_button_srgba(color);
-                    if !opts.combine_colors {
-                        let active = &mut opts.colors[i..(i + 1)];
-                        let default = &color::HAND_PICKED_MARKER_COLORS[i..(i + 1)];
-                        style::draw_options(ui, size, active, default);
-                    } else if ui.button("Reset").clicked() {
-                        *color = color::HAND_PICKED_MARKER_COLORS[i];
-                    }
+                    let active = &mut opts.colors[i..(i + 1)];
+                    let default = &color::HAND_PICKED_MARKER_COLORS[i..(i + 1)];
+                    style::draw_options(ui, size, active, default);
                 }
                 if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
                     let active = std::mem::replace(&mut self.active_bit, i);
@@ -305,52 +300,52 @@ impl ManualMarkers {
         }
     }
 
-    fn draw_combined(&self, con: &DrawContext<'_>, opts: &ManualMarkerOptions) {
-        let size = 4.5 * opts.sizes[0] * con.scale;
+    pub fn draw(&self, con: &DrawContext<'_>, opts: &ManualMarkerOptions) {
         let mut f32_colors = [color::F32Color::default(); 8];
-        let mask = opts.shown;
         color::zip_to_f32(f32_colors.iter_mut(), opts.colors.iter());
-        for (&vis, &marked, &pos) in izip!(con.visible, self.curr(), con.positions) {
-            let masked = marked & mask;
-            if vis && masked != 0 {
-                let draw_pos = con.cam().transform(pos);
-                let color = color::u8_marker_color(masked, &f32_colors);
-                let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
-                con.painter.add(marker_circle);
-            }
-        }
-    }
 
-    fn draw_seperated(&self, con: &DrawContext<'_>, opts: &ManualMarkerOptions) {
-        let draw_sizes = {
-            let mut res = opts.sizes;
-            for s in &mut res {
-                *s *= 4.5 * con.scale;
+        let (masks_data, sizes_data, nr_active_layers) = {
+            let mut masks = [0u8; 8];
+            let mut sizes = [0f32; 8];
+            let mut free_index = 0;
+            for layer in 0..8 {
+                let mask = (0..8)
+                    .filter_map(|i| {
+                        let mask_i = 1u8 << i;
+                        (opts.shown & mask_i != 0 && opts.layers[i] == layer).then_some(mask_i)
+                    })
+                    .fold(0, std::ops::BitOr::bitor);
+                if mask != 0 {
+                    masks[free_index] = mask;
+                    let fst_i = opts.layers.iter().position(|&l| l == layer).unwrap();
+                    sizes[free_index] = 4.5 * opts.sizes[fst_i] * con.scale;
+                    free_index += 1;
+                }
             }
-            res
+            (masks, sizes, free_index)
         };
-        let mask = opts.shown;
+        let masks = &masks_data[..nr_active_layers];
+        let sizes = &sizes_data[..nr_active_layers];
+        let global_mask = opts.shown;
+
+        // no two masks have the same same bits, as every mask represents a different layer
+        // and as every marker can only be on a single layer at once.
+        debug_assert!(izip!(0.., masks)
+            .all(|(i, &mask_i)| masks[(i + 1)..].iter().all(|&mask_j| mask_i & mask_j == 0)));
+        debug_assert_eq!(masks.iter().fold(0, |a, &b| a | b), global_mask);
+
         for (&vis, &marked, &pos) in izip!(con.visible, self.curr(), con.positions) {
-            let masked = marked & mask;
-            if vis && masked != 0 {
+            if vis && marked & global_mask != 0 {
                 let draw_pos = con.cam().transform(pos);
-                let mut single_mask: u8 = 1;
-                for (&color, &size) in izip!(&opts.colors, &draw_sizes) {
-                    if masked & single_mask != 0 {
+                for (&mask, &size) in izip!(masks, sizes) {
+                    let masked = marked & mask;
+                    if masked != 0 {
+                        let color = color::u8_marker_color(masked, &f32_colors);
                         let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
                         con.painter.add(marker_circle);
                     }
-                    single_mask <<= 1;
                 }
             }
-        }
-    }
-
-    pub fn draw(&self, con: &DrawContext<'_>, opts: &ManualMarkerOptions) {
-        if opts.combine_colors {
-            self.draw_combined(con, opts);
-        } else {
-            self.draw_seperated(con, opts);
         }
     }
 
