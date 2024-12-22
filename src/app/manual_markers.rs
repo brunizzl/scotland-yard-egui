@@ -277,7 +277,8 @@ impl ManualMarkers {
                     let active = &mut opts.colors[i..(i + 1)];
                     let default = &color::HAND_PICKED_MARKER_COLORS[i..(i + 1)];
                     let size = &mut opts.sizes[*layer];
-                    style::draw_options(ui, size, active, default, i);
+                    let salt = crate::rand::Lcg::usize_hash(i);
+                    style::draw_options(ui, size, active, default, salt);
                 }
                 if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
                     let active = std::mem::replace(&mut self.active_bit, i);

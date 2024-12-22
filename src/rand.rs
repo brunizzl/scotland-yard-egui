@@ -18,6 +18,26 @@ impl Lcg {
         (old >> 16) as u32 //bits in middle have highest quality
     }
 
+    pub fn next_u64(&mut self) -> u64 {
+        let val1 = self.next() as u64;
+        let val2 = self.next() as u64;
+        (val1 << 32) | val2
+    }
+
+    pub fn next_usize(&mut self) -> usize {
+        if cfg!(target_pointer_width = "64") {
+            self.next_u64() as usize
+        } else {
+            self.next() as usize
+        }
+    }
+
+    pub fn usize_hash(seed: usize) -> usize {
+        let mut hasher = Self::new(seed as u64);
+        hasher.waste(3);
+        hasher.next_usize()
+    }
+
     /// produces random value from uniform distribution over interval `-1.0..1.0`
     pub fn next_in_unit_range(&mut self) -> f32 {
         const SCALE: f32 = 2.0 / (u32::MAX as f32);

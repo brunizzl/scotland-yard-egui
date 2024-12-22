@@ -52,7 +52,7 @@ pub fn draw_options(
 ) {
     {
         let curr_open = OPEN_MENU.load(Ordering::Acquire);
-        let this = (size as *const _ as usize) ^ (colors.as_ptr() as usize) ^ salt;
+        let this = (size as *const _ as usize) ^ salt;
         let this_is_open = curr_open == this;
         if ui.button(" ⛭ ").clicked() {
             let new_val = if this_is_open { 0 } else { this };
