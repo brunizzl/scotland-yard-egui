@@ -125,6 +125,29 @@ impl VertexColorInfo {
             SpecificVertex => "einzelner Knoten",
         }
     }
+
+    fn selectable_with(self, map: &map::Map) -> bool {
+        use graph::Shape::*;
+        let shape = map.shape();
+        match self {
+            VertexColorInfo::Escape2Grid | VertexColorInfo::EscapeConeGrid => {
+                matches!(shape, TriangTorus | TriangGrid | SquareTorus | SquareGrid)
+            },
+            VertexColorInfo::Escape3Grid
+            | VertexColorInfo::Escape23Grid
+            | VertexColorInfo::RobberCone => shape == TriangGrid,
+            VertexColorInfo::RobberVertexClass | VertexColorInfo::VertexEquivalenceClasses => {
+                matches!(map.data().sym_group(), SymGroup::Explicit(_))
+            },
+            VertexColorInfo::CopsRotatedToEquivalence => {
+                !matches!(map.data().sym_group(), SymGroup::None(_))
+            },
+            // don't ever show this info (obsolete)
+            VertexColorInfo::CopStratPlaneDanger => false,
+            // show the remaining options all the time
+            _ => true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize, strum_macros::EnumIter)]
@@ -187,6 +210,22 @@ impl VertexSymbolInfo {
             RobberDist => "Räuberabstand",
             BruteforceCopMoves => "Bruteforce Cop Züge",
             Debugging => "Debugging",
+        }
+    }
+
+    fn selectable_with(self, map: &map::Map) -> bool {
+        use graph::Shape::*;
+        let shape = map.shape();
+        match self {
+            VertexSymbolInfo::Escape2Grid | VertexSymbolInfo::EscapeConeGrid => {
+                matches!(shape, TriangTorus | TriangGrid | SquareTorus | SquareGrid)
+            },
+            VertexSymbolInfo::Escape3Grid | VertexSymbolInfo::Escape23Grid => shape == TriangGrid,
+            VertexSymbolInfo::VertexEquivalenceClass => {
+                matches!(map.data().sym_group(), SymGroup::Explicit(_))
+            },
+            // show the remaining options all the time
+            _ => true,
         }
     }
 }
@@ -360,7 +399,7 @@ impl Options {
         }
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
+    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) -> bool {
         let mut menu_change = false;
         ui.collapsing("Knoteninfo", |ui| {
             //obv. whether to draw vertices or not has no influence over any actual information -> no need to update menu change
@@ -420,8 +459,10 @@ impl Options {
 
                     let mut curr = self.vertex_color_info();
                     for val in VertexColorInfo::iter() {
-                        ui.radio_value(&mut curr, val, val.name_str())
-                            .on_hover_text(val.description());
+                        if val.selectable_with(map) {
+                            ui.radio_value(&mut curr, val, val.name_str())
+                                .on_hover_text(val.description());
+                        }
                     }
                     if curr != self.vertex_color_info() {
                         let infos = &mut self.last_selected_vertex_color_infos;
@@ -448,8 +489,10 @@ impl Options {
 
                     let mut curr = self.vertex_number_info();
                     for val in VertexSymbolInfo::iter() {
-                        ui.radio_value(&mut curr, val, val.name_str())
-                            .on_hover_text(val.description());
+                        if val.selectable_with(map) {
+                            ui.radio_value(&mut curr, val, val.name_str())
+                                .on_hover_text(val.description());
+                        }
                     }
                     if curr != self.vertex_number_info() {
                         let infos = &mut self.last_selected_vertex_number_infos;
@@ -649,7 +692,7 @@ impl Info {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
-        let mut change = self.options.draw_menu(ui);
+        let mut change = self.options.draw_menu(ui, map);
 
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed

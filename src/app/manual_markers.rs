@@ -68,7 +68,7 @@ enum DrawTool {
 impl DrawTool {
     fn symbol(&self) -> &'static str {
         match self {
-            Self::None => " ",
+            Self::None => "-",
             Self::Draw => "✏",
             Self::Erase => "📗",
             Self::Paintbucket => "💦",
@@ -214,7 +214,8 @@ impl ManualMarkers {
                 self.redo();
             }
             if ui.button(" 🗑 ").on_hover_text("vergesse Vergangenheit").clicked() {
-                let current = self.history.remove(self.index);
+                let mut current = self.history.remove(self.index);
+                current.tool = DrawTool::None;
                 self.index = 0;
                 self.history.clear();
                 self.history.push(current);
@@ -222,8 +223,8 @@ impl ManualMarkers {
             // show part of history, including current entry
             let (start, end) = {
                 let len = self.history.len() as isize;
-                let mut start = self.index as isize - 3;
-                let mut end = start + 7.min(len);
+                let mut start = self.index as isize - 2;
+                let mut end = start + 5.min(len);
                 if start < 0 {
                     end -= start;
                     start = 0;
@@ -242,7 +243,10 @@ impl ManualMarkers {
                 } else {
                     entry.tool.symbol().to_string()
                 };
-                let rich = egui::RichText::new(text).color(opts.colors[entry.bit]);
+                let mut rich = egui::RichText::new(text);
+                if entry.tool != DrawTool::None {
+                    rich = rich.color(opts.colors[entry.bit]);
+                }
                 ui.add(egui::Label::new(rich));
             }
         });
