@@ -459,10 +459,12 @@ impl Options {
 
                     let mut curr = self.vertex_color_info();
                     for val in VertexColorInfo::iter() {
-                        if val.selectable_with(map) {
-                            ui.radio_value(&mut curr, val, val.name_str())
-                                .on_hover_text(val.description());
+                        let mut text = egui::RichText::new(val.name_str());
+                        if !val.selectable_with(map) {
+                            text = text.weak();
                         }
+                        ui.radio_value(&mut curr, val, text)
+                            .on_hover_text(val.description());
                     }
                     if curr != self.vertex_color_info() {
                         let infos = &mut self.last_selected_vertex_color_infos;
@@ -489,10 +491,12 @@ impl Options {
 
                     let mut curr = self.vertex_number_info();
                     for val in VertexSymbolInfo::iter() {
-                        if val.selectable_with(map) {
-                            ui.radio_value(&mut curr, val, val.name_str())
-                                .on_hover_text(val.description());
+                        let mut text = egui::RichText::new(val.name_str());
+                        if !val.selectable_with(map) {
+                            text = text.weak();
                         }
+                        ui.radio_value(&mut curr, val, text)
+                            .on_hover_text(val.description());
                     }
                     if curr != self.vertex_number_info() {
                         let infos = &mut self.last_selected_vertex_number_infos;
