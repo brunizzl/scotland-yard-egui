@@ -248,8 +248,14 @@ impl BruteforceComputationState {
         }
         if let Some(i) = done {
             let worker = self.workers.remove(i);
-            if let Ok(ok) = worker.handle.join() {
-                self.process_result(worker.game_type, ok);
+            match worker.handle.join() {
+                Ok(ok) => {
+                    self.process_result(worker.game_type, ok);
+                },
+                Err(_) => {
+                    let msg = "Thread hatte Panik :(".into();
+                    self.errors.push((worker.game_type, msg));
+                },
             }
         }
     }
