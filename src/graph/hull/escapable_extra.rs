@@ -79,12 +79,48 @@ impl DilemmaNodes {
             let (region_v, region_dirs) = 'find_new_region: {
                 let v0 = search_start;
                 for (v, h, &marker) in izip!(v0.., &cops_hull[v0..], &self.overlap[v0..]) {
-                    if h.contained() && marker == 0 {
-                        let dirs = all_dirs[v];
-                        if dirs.count() == 4 && dirs.connected_on(Norm::Hex) {
-                            search_start = v + 1;
-                            break 'find_new_region (v, dirs);
-                        }
+                    if !h.contained() {
+                        continue;
+                    }
+                    let dirs = all_dirs[v];
+                    let dirs_count = dirs.count();
+                    if dirs_count == 4 && marker == 0 && dirs.connected_on(Norm::Hex) {
+                        search_start = v + 1;
+                        break 'find_new_region (v, dirs);
+                    }
+                    if dirs_count == 5 {
+                        // to handle this is only required in very niche cases:
+                        // only if every vertex of a region is also contained in
+                        // some other region.
+                        let nr_markers = marker.count_ones();
+                        let new_dirs = match nr_markers {
+                            0 => dirs.intersection(dirs.rotate_left_hex()),
+                            1 => {
+                                let other_overlap_nr = marker.ilog2() as usize;
+                                let other_dirs = self.region_info[other_overlap_nr].2;
+                                debug_assert!(dirs.contains(other_dirs));
+                                let left_dirs = dirs.intersection(dirs.rotate_left_hex());
+                                let right_dirs = dirs.intersection(dirs.rotate_right_hex());
+                                if other_dirs == left_dirs {
+                                    right_dirs
+                                } else {
+                                    debug_assert_eq!(other_dirs, right_dirs);
+                                    left_dirs
+                                }
+                            },
+                            _ => continue,
+                        };
+                        debug_assert_eq!(new_dirs.count(), 4);
+                        debug_assert!(new_dirs.connected_on(Norm::Hex));
+                        search_start = v;
+                        break 'find_new_region (v, new_dirs);
+                    }
+                    if dirs_count == 6 {
+                        // in principle, one should also handle this case, however
+                        // the case above is already highly unlikely.
+                        // this case `dirs_count == 6` must only be considered if every vertex
+                        // of a region is also contained in TWO other regions.
+                        // i have a hard time imagining this to occur in an interesting cop setup.
                     }
                 }
                 break 'find_regions;
