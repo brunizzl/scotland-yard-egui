@@ -580,7 +580,7 @@ impl BruteforceComputationState {
         let mouse_down = ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
 
         for worker in &mut self.workers {
-            let paused = worker.manager.as_ref().map_or(false, |m| m.is_paused());
+            let paused = worker.manager.as_ref().is_some_and(|m| m.is_paused());
             let animation = match (ui.input(|i| i.time) * 5.0) as isize % 9 {
                 _ if paused => " . . ",
                 0 => ".    ",
