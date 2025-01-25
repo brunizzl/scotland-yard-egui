@@ -515,10 +515,12 @@ where
 
     let max_degree_less_than_nr_cops = edges.max_degree() < nr_cops;
 
-    manager.update("initialisiere Räuberstrategiefunktion")?;
     for (i, index) in izip!(0.., cop_moves.all_positions()) {
         if i % 4096 == 0 {
-            manager.recieve()?;
+            manager.update(format!(
+                "initialisiere Räuberstrategiefunktion: {:.2}%",
+                100.0 * (i as f32) / (cop_moves.nr_configurations() as f32)
+            ))?;
         }
 
         // test round trip
@@ -565,7 +567,7 @@ where
     let start = std::time::Instant::now();
     let _on_return = OnDrop(|| {
         println!(
-            "beende rechnung nach {:?} fuer {nr_cops} cops auf {nr_map_vertices} knoten",
+            "beende Rechnung nach {:?} fuer {nr_cops} Cops auf {nr_map_vertices} Knoten",
             std::time::Instant::now() - start
         );
     });
@@ -575,13 +577,15 @@ where
     while let Some(curr_cop_positions) = queue.pop() {
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
+            let nr_safe = f.robber_safe_when(curr_cop_positions).count_ones();
             manager.update(format!(
-                "berechne Räuberstrategie:\n{:.2}% in Queue ({}), Runde {}",
+                "berechne Räuberstrategie:\n{:.2}% in Queue ({}), Runde {}, {:.2}% sicher",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len(),
                 queue.rounds_complete(),
+                100.0 * (nr_safe as f32) / (nr_map_vertices as f32),
             ))?;
-            time_until_log_refresh = 1000;
+            time_until_log_refresh = 10_000;
         }
 
         //line 6
