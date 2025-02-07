@@ -1059,7 +1059,9 @@ impl State {
 
             let mut size = con.scale * 5.0;
             for (&v1, &v2) in ch.past_vertices().iter().rev().tuple_windows() {
-                if !con.visible[v1] || !con.visible[v2] {
+                // botch: we don't store if an edge is visible, only if a vertex is.
+                // thus: to avoid drawing edges of non-screen-facing faces, we are overzelaous in 3d.
+                if con.map.is_3d() && (!con.visible[v1] || !con.visible[v2]) {
                     continue;
                 }
 
