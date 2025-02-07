@@ -1013,7 +1013,7 @@ impl Info {
         }
     }
 
-    fn screenshot_as_tikz(&mut self, con: &DrawContext<'_>) {
+    fn screenshot_as_tikz(&mut self, con: &DrawContext<'_>, text_shift: Vec2) {
         if !self.take_screenshot || !NATIVE {
             return;
         }
@@ -1079,6 +1079,7 @@ impl Info {
             header,
             &con.painter,
             *con.screen(),
+            text_shift,
             character::emojis_as_latex_commands(),
         );
     }
@@ -1593,10 +1594,14 @@ impl Info {
         }
     }
 
-    fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) {
+    /// returns how the drawn text is shifted relatve to the vertex, in screen coordinates
+    fn draw_numbers(&self, ui: &Ui, con: &DrawContext<'_>) -> Vec2 {
         use graph::grid::Dirs;
 
         let font = egui::FontId::proportional(12.0 * self.options.number_style.size * con.scale);
+        // shift pos upwards (negative y direction), so text is centered on vertex
+        // why the heck is the best value not 0.5 btw?
+        let text_shift = font.size * Vec2::new(0.0, -0.53);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::WHITE
         } else {
@@ -1609,9 +1614,7 @@ impl Info {
                 layout_job.halign = egui::Align::Center;
                 let galley = ui.fonts(|f| f.layout_job(layout_job));
                 let screen_pos = con.cam().transform(pos);
-                // shift pos upwards (negative y direction), so text is centered on vertex
-                // why the heck is the best value not 0.5 btw?
-                let above_pos = screen_pos - font.size * Vec2::new(0.0, 0.53);
+                let above_pos = screen_pos + text_shift;
                 let text =
                     egui::Shape::Text(egui::epaint::TextShape::new(above_pos, galley, color));
                 con.painter.add(text);
@@ -1759,6 +1762,8 @@ impl Info {
             },
             VertexSymbolInfo::None => {},
         }
+
+        text_shift
     }
 
     fn draw_best_cop_moves(&self, con: &DrawContext<'_>) {
@@ -1855,12 +1860,12 @@ impl Info {
         self.characters.draw_tails(ch_style, con);
         self.characters.draw_allowed_next_steps(ch_style, con);
         self.draw_best_cop_moves(con);
-        self.draw_numbers(ui, con);
+        let text_shift = self.draw_numbers(ui, con);
 
         let drag = self.tool == MouseTool::Drag;
         self.characters.update_and_draw(ui, ch_style, con, drag, &mut self.queue);
 
-        self.screenshot_as_tikz(con);
+        self.screenshot_as_tikz(con, text_shift);
 
         self.frame_number += 1;
     }

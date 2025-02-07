@@ -96,7 +96,7 @@ impl TikzPicture {
         }
     }
 
-    fn add_shapes(&mut self, shapes: &[Shape]) {
+    fn add_shapes(&mut self, shapes: &[Shape], text_shift: egui::Vec2) {
         let coord_scale = self.coord_scale();
         let text_scale = |t: &TextShape| {
             let font_size = t.galley.job.sections[0].format.font_id.size;
@@ -178,11 +178,11 @@ impl TikzPicture {
                     } else {
                         original_text
                     };
-                    let Pos2 { x, y } = self.to_tikz.transform_pos(t.pos);
+                    let Pos2 { x, y } = self.to_tikz.transform_pos(t.pos - text_shift);
                     let scale = text_scale(t);
                     let color = self.color_name(t.fallback_color);
                     self.add_command(&format!(
-                        "\\node[color={color}, scale={scale}, anchor=north] at ({x},{y}) {{{content}}};"
+                        "\\node[color={color}, scale={scale}] at ({x},{y}) {{{content}}};"
                     ));
                 },
                 Shape::Path(ps) => {
@@ -236,6 +236,7 @@ pub fn draw_to_file(
     header: String,
     content: &egui::Painter,
     clip: Rect,
+    text_shift: egui::Vec2,
     replace: StrMap,
 ) {
     let mut pic = TikzPicture::new(file_name, header, clip, replace);
@@ -246,5 +247,5 @@ pub fn draw_to_file(
             all_visible_shapes.push(clipped.shape.clone());
         }
     });
-    pic.add_shapes(&all_visible_shapes);
+    pic.add_shapes(&all_visible_shapes, text_shift);
 }
