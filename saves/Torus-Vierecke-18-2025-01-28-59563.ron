@@ -1,0 +1,72 @@
+(
+	name: "optimales spiel auf quad-torus",
+	saved_at: (
+		secs_since_epoch: 1738078363,
+		nanos_since_epoch: 270191815,
+	),
+	shape: SquareTorus,
+	resolution: 18,
+	characters: (
+		characters: [(
+			id: Robber,
+			pos: OnVertex((
+				x: -0.078947365,
+				y: -0.078947365,
+				z: 0.5,
+			)),
+			past_vertices: [152],
+			nearest_vertex: 152,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(3),
+			pos: OnVertex((
+				x: -0.078947365,
+				y: 0.2368421,
+				z: 0.5,
+			)),
+			past_vertices: [158],
+			nearest_vertex: 158,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(4),
+			pos: OnVertex((
+				x: 0.2368421,
+				y: -0.2368421,
+				z: 0.5,
+			)),
+			past_vertices: [257],
+			nearest_vertex: 257,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(1),
+			pos: OnVertex((
+				x: -0.18421054,
+				y: -0.39473683,
+				z: 0.5,
+			)),
+			past_vertices: [110],
+			nearest_vertex: 110,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(0),
+			pos: OnVertex((
+				x: -0.4473684,
+				y: 0.078947365,
+				z: 0.5,
+			)),
+			past_vertices: [29],
+			nearest_vertex: 29,
+			enabled: true,
+			on_node: true,
+		)],
+		past_moves: [],
+		future_moves: [(2, 97), (0, 80), (3, 60), (0, 79), (2, 115), (2, 133), (0, 80), (2, 151), (0, 98), (2, 169), (0, 99), (1, 119), (0, 100), (4, 63), (0, 99), (1, 137), (0, 98), (2, 187), (0, 97), (4, 62), (0, 79), (4, 44), (0, 61), (4, 45), (0, 62), (3, 59), (0, 61), (3, 77), (0, 79), (3, 95), (0, 97), (3, 113), (0, 115), (3, 131), (0, 133), (4, 27), (0, 151), (4, 9), (0, 169), (3, 149), (0, 168), (3, 131), (0, 169), (3, 113), (0, 151), (2, 205), (0, 152), (4, 315), (0, 153), (1, 155), (3, 95), (0, 171), (2, 223), (0, 153), (3, 77), (4, 297), (0, 135), (3, 95), (0, 117), (2, 241), (0, 116), (2, 240), (4, 298), (3, 113), (1, 137), (0, 134), (1, 155), (0, 152), (3, 131), (0, 170), (2, 258), (0, 171), (1, 173), (0, 189), (3, 130), (0, 207), (4, 299), (0, 208), (4, 317), (0, 190), (4, 11), (1, 174), (3, 129), (0, 189), (1, 175), (0, 171), (1, 157), (0, 170), (3, 111)],
+		show_past_steps: true,
+		show_allowed_next_steps: false,
+	),
+	manual_markers: [(324, 0)],
+)
