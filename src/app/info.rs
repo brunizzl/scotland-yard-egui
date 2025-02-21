@@ -97,19 +97,20 @@ impl VertexColorInfo {
             SpecificVertex => "Knoten mit bestimmten Index, nur relevant für Debugging",
         }
     }
+
     const fn name_str(self) -> &'static str {
         use VertexColorInfo::*;
         match self {
             None => "Keine",
             NearNodes => "für Räuber nähere Knoten",
-            SafeOutside => "Sicherer Außenbereich",
-            SafeBoundary => "Sicherere Grenze",
-            Escape1 => "Flucht 1",
-            Escape2 => "Flucht 2 (Komponenten)",
-            Escape2Grid => "Flucht 2 (Gitter)",
-            EscapeConeGrid => "Flucht Kegel (Gitter)",
-            Escape3Grid => "Flucht 3 (Gitter)",
-            Escape23Grid => "Flucht 2 + 3 (Gitter)",
+            SafeOutside => "Winning Outside",
+            SafeBoundary => "Winning Stage I",
+            Escape1 => "Winning Stage II",
+            Escape2 => "Winning Proximity",
+            Escape2Grid => "Winning Direction (Gitter)",
+            EscapeConeGrid => "Winning Cones (Gitter)",
+            Escape3Grid => "Winning Dilemma (Gitter)",
+            Escape23Grid => "Winning Cones + Dilemma (Gitter)",
             BruteForceRes => "Bruteforce Räuberstrategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
@@ -357,11 +358,11 @@ impl Options {
             ShownValue::DirectionBits => {
                 let mut shown = crate::graph::grid::Dirs(self.shown_escape_directions);
                 ui.horizontal(|ui| {
-                    if ui.button(" - ").clicked() {
+                    if ui.button(" << ").clicked() {
                         shown = shown.rotate_left_hex();
                     }
                     ui.add(egui::DragValue::new(&mut shown.0).range(0..=63).binary(6, true));
-                    if ui.button(" + ").clicked() {
+                    if ui.button(" >> ").clicked() {
                         shown = shown.rotate_right_hex();
                     }
                     ui.label("Richtungen").on_hover_text(
