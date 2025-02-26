@@ -8,7 +8,7 @@ use egui::{
 
 use crate::geo;
 
-fn to_unique_str(mut nr: usize) -> String {
+pub fn to_unique_str(mut nr: usize) -> String {
     const ALPHABET_LEN: usize = 26;
     const ALPHABET: [char; ALPHABET_LEN] = [
         'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',

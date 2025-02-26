@@ -86,7 +86,7 @@ impl EscapableDirections {
                             continue;
                         }
                         let neigh = g.index_of(bv_coords + coords);
-                        if neigh.map_or(true, |n| hull[n].outside()) {
+                        if neigh.is_none_or(|n| hull[n].outside()) {
                             dirs.unionize(bits);
                         }
                     }

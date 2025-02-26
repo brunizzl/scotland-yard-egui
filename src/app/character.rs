@@ -212,15 +212,17 @@ impl Character {
         character_size: f32,
         style: &CharactersStyle,
     ) {
-        //draw circles
-        let character_circle =
-            egui::Shape::circle_filled(draw_pos, character_size, style.base_color(self.id));
-        painter.add(character_circle);
-        if self.on_node {
-            let stroke = Stroke::new(character_size * 0.375, style.glow_color(self.id));
-            let marker_circle = egui::Shape::circle_stroke(draw_pos, character_size, stroke);
-            painter.add(marker_circle);
+        //draw circle
+        {
+            use egui::epaint::CircleShape;
+            let mut circle =
+                CircleShape::filled(draw_pos, character_size, style.base_color(self.id));
+            if self.on_node {
+                circle.stroke = Stroke::new(character_size * 0.375, style.glow_color(self.id));
+            }
+            painter.add(egui::Shape::Circle(circle));
         }
+
         //draw emoji
         let font = egui::FontId::proportional(character_size * 2.0);
         let emoji_pos = draw_pos - character_size * vec2(0.0, 1.35);

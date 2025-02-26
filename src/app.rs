@@ -6,6 +6,7 @@ use crate::graph::{EdgeList, SymGroup};
 use self::cam::Camera3D;
 
 mod cam;
+mod cetz;
 pub mod character;
 mod color;
 mod info;

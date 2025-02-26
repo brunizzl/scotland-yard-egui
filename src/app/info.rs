@@ -607,7 +607,8 @@ pub struct Info {
 
     worker: BruteforceComputationState,
 
-    take_screenshot: bool,
+    take_tikz_screenshot: bool,
+    take_cetz_screenshot: bool,
     screenshot_name: String,
 }
 
@@ -642,7 +643,8 @@ impl Default for Info {
 
             worker: BruteforceComputationState::new(),
 
-            take_screenshot: false,
+            take_tikz_screenshot: false,
+            take_cetz_screenshot: false,
             screenshot_name: String::new(),
         }
     }
@@ -687,7 +689,8 @@ impl Info {
 
             worker: BruteforceComputationState::new(),
 
-            take_screenshot: false,
+            take_tikz_screenshot: false,
+            take_cetz_screenshot: false,
             screenshot_name: String::new(),
         }
     }
@@ -709,7 +712,11 @@ impl Info {
                     ui.label("Name: ");
                     ui.text_edit_singleline(&mut self.screenshot_name);
                 });
-                self.take_screenshot = ui.button("Aufnehmen").clicked();
+                ui.horizontal(|ui| {
+                    ui.label("Aufnehmen: ");
+                    self.take_tikz_screenshot = ui.button("TikZ").clicked();
+                    self.take_cetz_screenshot = ui.button("CeTZ").clicked();
+                });
                 ui.add_space(5.0);
             });
         }
@@ -1014,21 +1021,25 @@ impl Info {
         }
     }
 
-    fn screenshot_as_tikz(&mut self, con: &DrawContext<'_>, text_shift: Vec2) {
-        if !self.take_screenshot || !NATIVE {
+    fn take_screenshot(&mut self, con: &DrawContext<'_>, text_shift: Vec2) {
+        if !NATIVE || (!self.take_tikz_screenshot && !self.take_cetz_screenshot) {
             return;
         }
-        let name = &self.screenshot_name[..];
-        let file_name = if name.is_empty() {
-            use chrono::{Datelike, Local, Timelike};
-            let now = Local::now();
-            let date = now.date_naive();
-            let date_str = format!("{}-{}-{}", date.year(), date.month(), date.day());
-            let time = now.time();
-            let time_str = format!("{}-{}-{}", time.hour(), time.minute(), time.second());
-            std::path::PathBuf::from(format!("screenshots/{date_str}--{time_str}.tex"))
-        } else {
-            std::path::PathBuf::from(format!("screenshots/{name}.tex",))
+        let is_tikz = self.take_tikz_screenshot;
+        let file_name = {
+            let name = &self.screenshot_name[..];
+            let file_end = if is_tikz { "tex" } else { "typ" };
+            if name.is_empty() {
+                use chrono::{Datelike, Local, Timelike};
+                let now = Local::now();
+                let date = now.date_naive();
+                let date_str = format!("{}-{}-{}", date.year(), date.month(), date.day());
+                let time = now.time();
+                let time_str = format!("{}-{}-{}", time.hour(), time.minute(), time.second());
+                std::path::PathBuf::from(format!("screenshots/{date_str}--{time_str}.{file_end}"))
+            } else {
+                std::path::PathBuf::from(format!("screenshots/{name}.{file_end}",))
+            }
         };
         let header = {
             let shape = con.map.shape().to_sting();
@@ -1061,28 +1072,33 @@ impl Info {
                 .all()
                 .first()
                 .map_or("<Keiner>".to_string(), |r| r.vertex().to_string());
+            let comment = if is_tikz { "% " } else { "//" };
             format!(
                 "\n\
-                % Form: {shape}\n\
-                % Auflösung: {res}\n\
-                % gezeigte Infopunkte: {color_info}\n\
-                % gezeige Infozahlen: {number_info}\n\
-                % Kameraposition: ({cam_x}, {cam_y}) Winkel: {angle} Zoom: {zoom}\n\
-                % Positionen aktiver Polizisten: [{active_police_vertices}]\n\
-                % Positionen inaktiver Polizisten: [{inactive_police_vertices}]\n\
-                % Räuberknoten: {robber_vertex}\n\
+                {comment} Form: {shape}\n\
+                {comment} Auflösung: {res}\n\
+                {comment} gezeigte Infopunkte: {color_info}\n\
+                {comment} gezeige Infozahlen: {number_info}\n\
+                {comment} Kameraposition: ({cam_x}, {cam_y}) Winkel: {angle} Zoom: {zoom}\n\
+                {comment} Positionen aktiver Polizisten: [{active_police_vertices}]\n\
+                {comment} Positionen inaktiver Polizisten: [{inactive_police_vertices}]\n\
+                {comment} Räuberknoten: {robber_vertex}\n\
                 \n\
                 \n"
             )
         };
-        super::tikz::draw_to_file(
-            file_name,
-            header,
-            &con.painter,
-            *con.screen(),
-            text_shift,
-            character::emojis_as_latex_commands(),
-        );
+        if is_tikz {
+            super::tikz::draw_to_file(
+                file_name,
+                header,
+                &con.painter,
+                *con.screen(),
+                text_shift,
+                character::emojis_as_latex_commands(),
+            );
+        } else {
+            super::cetz::draw_to_file(file_name, header, &con.painter, *con.screen(), text_shift);
+        }
     }
 
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
@@ -1866,7 +1882,7 @@ impl Info {
         let drag = self.tool == MouseTool::Drag;
         self.characters.update_and_draw(ui, ch_style, con, drag, &mut self.queue);
 
-        self.screenshot_as_tikz(con, text_shift);
+        self.take_screenshot(con, text_shift);
 
         self.frame_number += 1;
     }

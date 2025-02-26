@@ -500,7 +500,7 @@ fn retain_safe_inner_boundary(
     debug_assert_eq!(edges.nr_vertices(), keep.len());
     //boundary is expected to be filtered vertices of convex hull of cop pair,
     //where vertices are ordered the same as when discovered in convex hull.
-    debug_assert!(boundary.first().map_or(true, |&v| cop_dist[v] == 2));
+    debug_assert!(boundary.first().is_none_or(|&v| cop_dist[v] == 2));
     debug_assert!(boundary.iter().tuple_windows().all(|(&v1, &v2)| {
         let d1 = cop_dist[v1];
         let d2 = cop_dist[v2];
@@ -603,6 +603,6 @@ fn retain_safe_inner_boundary(
     }
     boundary.truncate(retain_end);
 
-    debug_assert!(boundary.first().map_or(true, |&v| cop_dist[v] == 2));
+    debug_assert!(boundary.first().is_none_or(|&v| cop_dist[v] == 2));
     debug_assert!(edges.has_path(boundary));
 }
