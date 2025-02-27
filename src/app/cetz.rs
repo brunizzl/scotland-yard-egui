@@ -5,7 +5,6 @@ use egui::{
     epaint::{ColorMode, TextShape},
     *,
 };
-use itertools::izip;
 
 use super::tikz::to_unique_str;
 use crate::geo;
@@ -17,6 +16,7 @@ struct CetzPicture {
     color_names: HashMap<[u8; 4], String>,
     to_cetz: RectTransform,
     curr_stroke: egui::Stroke,
+    curr_fill: Color32,
     border: geo::BoundedRect,
 }
 
@@ -72,6 +72,7 @@ impl CetzPicture {
             color_names: HashMap::new(),
             to_cetz: RectTransform::from_to(clip_rect, tikz_rect),
             curr_stroke: Stroke::NONE,
+            curr_fill: Color32::TRANSPARENT,
             border,
         }
     }
@@ -91,6 +92,27 @@ impl CetzPicture {
         }
     }
 
+    fn update_fill(&mut self, fill: Color32, next_shape: Option<&Shape>, command: &mut String) {
+        let fill_of = |s: &Shape| -> Option<Color32> {
+            match s {
+                Shape::Circle(c) => Some(c.fill),
+                Shape::Path(p) => Some(p.fill),
+                Shape::Text(t) => Some(t.fallback_color),
+                _ => None,
+            }
+        };
+        if fill == self.curr_fill {
+            return;
+        }
+        let fill_name = self.color_name(fill);
+        if next_shape.is_none_or(|s2| fill_of(s2) != Some(fill)) {
+            command.push_str(&format!(", fill: {fill_name}"));
+        } else {
+            self.curr_fill = fill;
+            self.add_command(&format!("fill({fill_name});"));
+        }
+    }
+
     fn add_shapes(&mut self, shapes: &[Shape], text_shift: egui::Vec2) {
         let coord_scale = self.coord_scale();
         let text_scale = |t: &TextShape| {
@@ -98,7 +120,7 @@ impl CetzPicture {
             font_size * coord_scale * 22.0
         };
 
-        for (i, shape) in izip!(0.., shapes) {
+        for (i, shape) in shapes.iter().enumerate() {
             match shape {
                 Shape::Circle(c) => {
                     self.update_stroke(c.stroke.width, c.stroke.color);
@@ -107,10 +129,7 @@ impl CetzPicture {
                         let r = c.radius * coord_scale;
                         format!("circle(({x:+.6}, {y:+.6}), radius: {r:.6}")
                     };
-                    if c.fill.a() != 0 {
-                        let fill_color = self.color_name(c.fill);
-                        command += &format!(", fill: {fill_color}");
-                    }
+                    self.update_fill(c.fill, shapes.get(i + 1), &mut command);
                     command += ");";
                     self.add_command(&command);
                 },
@@ -131,31 +150,21 @@ impl CetzPicture {
                 },
                 Shape::Text(t) => {
                     let Pos2 { x, y } = self.to_cetz.transform_pos(t.pos - text_shift);
-                    // special case: if we draw the character emoji,
-                    // the position can be the empty tuple.
-                    let pos = 'get_pos: {
-                        if i > 0 {
-                            if let Shape::Circle(c) = &shapes[i - 1] {
-                                if c.center.x == x {
-                                    break 'get_pos String::new();
-                                }
-                            }
-                        };
-                        format!("{x:+.6}, {y:+.6}")
-                    };
                     let scale = text_scale(t);
-                    let color = self.color_name(t.fallback_color);
-                    let content: &str = &t.galley.job.text;
-                    self.add_command(&format!(
-                        "content(({pos}), text(fill: {color}, size: {scale:.6}pt)[{content}]);"
-                    ));
+                    let mut command =
+                        format!("content(({x:+.6}, {y:+.6}), text(size: {scale:.6}pt");
+                    self.update_fill(t.fallback_color, shapes.get(i + 1), &mut command);
+                    command += &format!(")[{}]);", t.galley.job.text);
+                    self.add_command(&command);
                 },
                 Shape::Path(ps) => {
                     let mut command = String::from("line(");
 
+                    let mut sep = "";
                     for &point in &ps.points {
                         let Pos2 { x, y } = self.to_cetz.transform_pos(point);
-                        command += &format!("({x:+.6}, {y:+.6}), ");
+                        command += &format!("{sep}({x:+.6}, {y:+.6})");
+                        sep = ", ";
                     }
 
                     if let ColorMode::Solid(color) = ps.stroke.color {
@@ -164,9 +173,9 @@ impl CetzPicture {
                         self.update_stroke(0.0, Color32::TRANSPARENT);
                     }
 
+                    self.update_fill(ps.fill, shapes.get(i + 1), &mut command);
                     if ps.closed {
-                        let color = self.color_name(ps.fill);
-                        command += &format!("fill: {color}, closed: true");
+                        command += ", closed: true";
                     }
                     command += ");";
                     self.add_command(&command);
@@ -205,6 +214,59 @@ impl Drop for CetzPicture {
     }
 }
 
+/// order sub-slices of same color by shape.
+/// this can decrease the line count of the resulting picture,
+/// as otherwise stroke commands need to be interspersed more often.
+/// at the same time, the result is not visually altered,
+/// as shapes of same color can be drawn in any order.
+/// (this is somewhat false, as only stroke and not fill is considered)
+fn sort_color_slices(shapes: &mut [Shape]) {
+    // note: as sort is stable, no two shapes of different colors are mixed up,
+    // as long as this function and the key function below cover the same cases.
+    // note further, how only stroke color matters,
+    // as only change in stroke generates an extra stroke command.
+    let color_of = |s: &Shape| -> Color32 {
+        let ps_color = |ps: &egui::epaint::PathStroke| {
+            if let ColorMode::Solid(color) = ps.color {
+                color
+            } else {
+                Color32::TRANSPARENT
+            }
+        };
+        match s {
+            Shape::Circle(c) => c.stroke.color,
+            Shape::LineSegment { points: _, stroke } => ps_color(stroke),
+            Shape::Text(t) => t.fallback_color,
+            Shape::Path(p) => {
+                if p.stroke.is_empty() {
+                    p.fill
+                } else {
+                    ps_color(&p.stroke)
+                }
+            },
+            _ => Color32::TRANSPARENT,
+        }
+    };
+    let mut i = 0;
+    while i < shapes.len() {
+        let i_color = color_of(&shapes[i]);
+        let mut j = i + 1;
+        while j < shapes.len() && color_of(&shapes[j]) == i_color {
+            j += 1;
+        }
+        let same_color_slice = &mut shapes[i..j];
+        // make sure, to cover the same cases, as the color_of function above!
+        same_color_slice.sort_by_key(|s: &Shape| match s {
+            Shape::Circle(_) => 0,
+            Shape::LineSegment { points: _, stroke: _ } => 1,
+            Shape::Text(_) => 2,
+            Shape::Path(_) => 3,
+            _ => 4,
+        });
+        i = j;
+    }
+}
+
 pub fn draw_to_file(
     file_name: std::path::PathBuf,
     header: String,
@@ -220,5 +282,6 @@ pub fn draw_to_file(
             all_visible_shapes.push(clipped.shape.clone());
         }
     });
+    sort_color_slices(&mut all_visible_shapes);
     pic.add_shapes(&all_visible_shapes, text_shift);
 }
