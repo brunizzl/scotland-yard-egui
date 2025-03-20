@@ -7,7 +7,7 @@ use web_time::{Duration, Instant};
 
 use itertools::{izip, Itertools};
 
-use egui::{epaint::PathStroke, pos2, vec2, Color32, Painter, Pos2, Rect, Sense, Stroke, Ui};
+use egui::{pos2, vec2, Color32, Painter, Pos2, Rect, Sense, Stroke, Ui};
 
 use crate::{
     app::bruteforce_state::GameType,
@@ -225,7 +225,7 @@ impl Character {
 
         //draw emoji
         let font = egui::FontId::proportional(character_size * 2.0);
-        let emoji_pos = draw_pos - character_size * vec2(0.0, 1.35);
+        let emoji_pos = draw_pos - character_size * vec2(0.0, 1.25);
         let emoji_str = self.id.emoji().to_string();
         let mut layout_job =
             egui::text::LayoutJob::simple(emoji_str, font, style.symbol_color(), 100.0);
@@ -1072,7 +1072,7 @@ impl State {
                     let space_dist = (con.positions[v2] - con.positions[v1]).length();
                     let max = con.map.data().max_shown_edge_length();
                     let color = if space_dist < max { glow } else { trans };
-                    PathStroke::new(size * 0.75, color)
+                    egui::Stroke::new(size * 0.75, color)
                 };
                 let line = egui::Shape::LineSegment { points, stroke };
                 con.painter.add(line);

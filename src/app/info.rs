@@ -453,7 +453,7 @@ impl Options {
                 ui.label("Marker:");
                 self.automatic_marker_style.draw_options(ui, &[color::GREEN]);
             });
-            ComboBox::from_id_source(&self.last_selected_vertex_color_infos as *const _)
+            ComboBox::from_id_salt(&self.last_selected_vertex_color_infos as *const _)
                 .selected_text(self.vertex_color_info().name_str())
                 .show_ui(ui, |ui| {
                     super::style::close_options_menu();
@@ -485,7 +485,7 @@ impl Options {
                 ui.label("Symbole:");
                 self.number_style.draw_options(ui, &[]);
             });
-            ComboBox::from_id_source(&self.last_selected_vertex_number_infos as *const _)
+            ComboBox::from_id_salt(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
                     super::style::close_options_menu();

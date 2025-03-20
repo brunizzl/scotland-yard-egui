@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 
 use bool_csr::BoolCSR;
-use egui::{epaint::PathStroke, Painter};
 use itertools::{izip, Itertools};
 use smallvec::{smallvec, SmallVec};
 
@@ -819,8 +818,8 @@ impl Embedding3D {
     fn draw_visible_hull_edges(
         &self,
         to_screen: &geo::ToScreen,
-        painter: &Painter,
-        stroke: PathStroke,
+        painter: &egui::Painter,
+        stroke: egui::Stroke,
         visible: &mut [bool],
         draw_inner_fast: bool,
     ) {
@@ -842,10 +841,7 @@ impl Embedding3D {
 
         let draw_line = |vertices: &[Pos3], v1, v2| {
             let edge = [to_screen.apply(vertices[v1]), to_screen.apply(vertices[v2])];
-            let line = egui::Shape::LineSegment {
-                points: edge,
-                stroke: stroke.clone(),
-            };
+            let line = egui::Shape::LineSegment { points: edge, stroke };
             painter.add(line);
         };
         let iter = itertools::izip!(
@@ -915,8 +911,8 @@ impl Embedding3D {
     fn draw_torus_edges(
         &self,
         to_screen: &geo::ToScreen,
-        painter: &Painter,
-        stroke: PathStroke,
+        painter: &egui::Painter,
+        stroke: egui::Stroke,
         draw_diagonals: bool,
     ) {
         debug_assert!(matches!(
@@ -931,7 +927,7 @@ impl Embedding3D {
             let p1 = self.vertices[v1];
             let p2 = self.vertices[v2];
             let points = [to_screen.apply(p1), to_screen.apply(p2)];
-            painter.add(egui::Shape::LineSegment { points, stroke: stroke.clone() });
+            painter.add(egui::Shape::LineSegment { points, stroke });
         };
 
         // draw lines stored als blocks
@@ -968,20 +964,25 @@ impl Embedding3D {
         }
     }
 
-    fn draw_all_edges(&self, to_screen: &geo::ToScreen, painter: &Painter, stroke: PathStroke) {
+    fn draw_all_edges(
+        &self,
+        to_screen: &geo::ToScreen,
+        painter: &egui::Painter,
+        stroke: egui::Stroke,
+    ) {
         self.edges.for_each_edge(|v1, v2| {
             let p1 = self.vertices[v1];
             let p2 = self.vertices[v2];
             let points = [to_screen.apply(p1), to_screen.apply(p2)];
-            painter.add(egui::Shape::LineSegment { points, stroke: stroke.clone() });
+            painter.add(egui::Shape::LineSegment { points, stroke });
         });
     }
 
     pub fn draw_edges_and_update_visibility(
         &self,
         to_screen: &geo::ToScreen,
-        painter: &Painter,
-        stroke: PathStroke,
+        painter: &egui::Painter,
+        stroke: egui::Stroke,
         visible: &mut [bool],
     ) {
         let visible_needs_update = match self.shape {

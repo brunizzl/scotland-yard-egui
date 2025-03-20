@@ -632,8 +632,7 @@ impl BruteforceComputationState {
                                 let ratio = time_since_click.as_secs_f32() / 5.0;
                                 if ratio < 1.0 {
                                     let text = format!("{}%", (ratio * 100.0) as isize);
-                                    let id = egui::Id::new((r as *const _, "abort animation"));
-                                    egui::show_tooltip_text(ui.ctx(), ui.layer_id(), id, text);
+                                    abort_button.on_hover_text(text);
                                 } else {
                                     r.send_command(Command::Abort).ok();
                                 }

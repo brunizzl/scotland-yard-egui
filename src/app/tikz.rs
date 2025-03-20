@@ -1,10 +1,6 @@
 use std::{collections::HashMap, fs::File, io::Write};
 
-use egui::{
-    emath::RectTransform,
-    epaint::{ColorMode, TextShape},
-    *,
-};
+use egui::{emath::RectTransform, epaint::TextShape, *};
 
 use crate::geo;
 
@@ -158,17 +154,15 @@ impl TikzPicture {
                         let a = self.to_tikz.transform_pos(points[0]);
                         let b = self.to_tikz.transform_pos(points[1]);
 
-                        if let ColorMode::Solid(color) = stroke.color {
-                            let name = self.color_name(color);
-                            self.add_command(&format!(
-                                "\\draw[color={name}, line width={}] ({},{}) -- ({},{});",
-                                stroke.width * self.width_scale(),
-                                a.x,
-                                a.y,
-                                b.x,
-                                b.y
-                            ));
-                        }
+                        let color = self.color_name(stroke.color);
+                        self.add_command(&format!(
+                            "\\draw[color={color}, line width={}] ({},{}) -- ({},{});",
+                            stroke.width * self.width_scale(),
+                            a.x,
+                            a.y,
+                            b.x,
+                            b.y
+                        ));
                     }
                 },
                 Shape::Text(t) => {

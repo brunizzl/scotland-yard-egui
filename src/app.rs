@@ -234,8 +234,7 @@ impl eframe::App for State {
                     }
                 });
                 ui.horizontal(|ui| {
-                    //egui::widgets::global_theme_preference_switch(ui); //name in newer egui versions
-                    egui::widgets::global_dark_light_mode_switch(ui);
+                    egui::widgets::global_theme_preference_switch(ui);
                     self.dark_mode = ui.visuals().dark_mode;
 
                     draw_usage_info(ui);

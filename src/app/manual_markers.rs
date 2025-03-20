@@ -262,7 +262,7 @@ impl ManualMarkers {
                         opts.shown |= bit_i;
                     }
                 }
-                egui::ComboBox::from_id_source(layer as *const _)
+                egui::ComboBox::from_id_salt(layer as *const _)
                     .width(0.0)
                     .show_index(ui, layer, 8, |i| i.to_string())
                     .on_hover_text(

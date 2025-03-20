@@ -8,38 +8,39 @@ default-run = "scotland-yard-egui"
 
 
 [dependencies]
-egui = "0.28.1"
-eframe = { version = "0.28.1", default-features = false, features = [
+egui = "0.31.1"
+eframe = { version = "0.31.1", default-features = false, features = [
     #"accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
     "default_fonts", # Embed the default egui fonts.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
     "persistence",   # Enable restoring app state when restarting the app.
+    "wayland",
 ] }
 log = "0.4"
 
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }
-itertools = "0.11.0"
+itertools = "0.14.0"
 compile-time = "0.2.0"
 bitvec = { version = "1.0.1", features = ["alloc", "serde"] }
-smallvec = "1.13.0"
+smallvec = "1.14.0"
 rmp-serde = "1.1.2"
 chrono = "0.4.33"
-strum = "=0.26.2"
-strum_macros = "0.26"
+strum = "0.27.1"
+strum_macros = "0.27.1"
 ron = "0.8.1"
-time = "0.3.36"
+time = "0.3.40"
 web-time = "1.1.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger = "0.10"
+env_logger = "0.11"
 nix = { version = "0.26.4", features = ["fs"] }
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4"
-web-sys = "=0.3.69"
+web-sys = "0.3.70"
 
 
 [profile.release]

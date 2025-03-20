@@ -140,12 +140,10 @@ impl CetzPicture {
                         let Pos2 { x: ax, y: ay } = self.to_cetz.transform_pos(points[0]);
                         let Pos2 { x: bx, y: by } = self.to_cetz.transform_pos(points[1]);
 
-                        if let ColorMode::Solid(color) = stroke.color {
-                            self.update_stroke(stroke.width, color);
-                            self.add_command(&format!(
-                                "line(({ax:+.6},{ay:+.6}), ({bx:+.6},{by:+.6}));",
-                            ));
-                        }
+                        self.update_stroke(stroke.width, stroke.color);
+                        self.add_command(&format!(
+                            "line(({ax:+.6},{ay:+.6}), ({bx:+.6},{by:+.6}));",
+                        ));
                     }
                 },
                 Shape::Text(t) => {
@@ -226,22 +224,17 @@ fn sort_color_slices(shapes: &mut [Shape]) {
     // note further, how only stroke color matters,
     // as only change in stroke generates an extra stroke command.
     let color_of = |s: &Shape| -> Color32 {
-        let ps_color = |ps: &egui::epaint::PathStroke| {
-            if let ColorMode::Solid(color) = ps.color {
-                color
-            } else {
-                Color32::TRANSPARENT
-            }
-        };
         match s {
             Shape::Circle(c) => c.stroke.color,
-            Shape::LineSegment { points: _, stroke } => ps_color(stroke),
+            Shape::LineSegment { points: _, stroke } => stroke.color,
             Shape::Text(t) => t.fallback_color,
             Shape::Path(p) => {
                 if p.stroke.is_empty() {
                     p.fill
+                } else if let ColorMode::Solid(color) = p.stroke.color {
+                    color
                 } else {
-                    ps_color(&p.stroke)
+                    Color32::TRANSPARENT
                 }
             },
             _ => Color32::TRANSPARENT,

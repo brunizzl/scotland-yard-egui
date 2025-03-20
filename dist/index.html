@@ -1,18 +1,31 @@
-<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<!DOCTYPE html>
+<html>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 
 <!-- Disable zooming: -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
-
+<head>
     <!-- change this to your project name -->
     <title>Scotland Yard</title>
 
     <!-- config for our rust wasm binary. go to https://trunkrs.dev/assets/#rust for more customization -->
-    <script type="module">import init from '/scotland-yard-egui-7a66c16068551e55.js';init('/scotland-yard-egui-7a66c16068551e55_bg.wasm');</script>
-    <!-- this is the base url relative to which other urls will be constructed. trunk will insert this from the public-url option -->
-    <base href="/">
+    
+<script type="module">
+import init, * as bindings from '/scotland-yard-egui-6aff53fdbd9b2246.js';
+const wasm = await init({ module_or_path: '/scotland-yard-egui-6aff53fdbd9b2246_bg.wasm' });
 
-    <link rel="icon" href="/favicon-f66d7c2e1f83a67f.ico">
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    <!-- this is the base url relative to which other urls will be constructed. trunk will insert this from the public-url option -->
+    <base href="/" />
+
+    <link rel="icon" href="/favicon-f66d7c2e1f83a67f.ico" integrity="sha384-8s00I8p7x4gbcrIWcmhR2GoK6BJd7wkNzep9s57YHufbr2mQ9lwVSQ+IJCiRx+vQ"/>
 
 
     
@@ -114,9 +127,7 @@
             }
         }
     </style>
-
-<link rel="preload" href="/scotland-yard-egui-7a66c16068551e55_bg.wasm" as="fetch" type="application/wasm" crossorigin="">
-<link rel="modulepreload" href="/scotland-yard-egui-7a66c16068551e55.js"></head>
+<link rel="modulepreload" href="/scotland-yard-egui-6aff53fdbd9b2246.js" crossorigin="anonymous" integrity="sha384-RDqJPXSet9ub9v5MXW5hZSTX67A+a+8ESDIilWxiP6avLA+A5PJxe3R4brPKWsF/"><link rel="preload" href="/scotland-yard-egui-6aff53fdbd9b2246_bg.wasm" crossorigin="anonymous" integrity="sha384-94BCKzTSng8fh0Px/cgiSgWBL4xjXdfK6AE3XADsGlbGeWmM7IbAEVlGmFXU4qFv" as="fetch" type="application/wasm"></head>
 
 <body>
     <!-- The WASM code will resize the canvas dynamically -->
@@ -141,36 +152,8 @@
             });
         }
     </script>
+</body>
 
+</html>
 
-
-
-
-<script>(function () {
-    var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    var url = protocol + '//' + window.location.host + '/_trunk/ws';
-    var poll_interval = 5000;
-    var reload_upon_connect = () => {
-        window.setTimeout(
-            () => {
-                // when we successfully reconnect, we'll force a
-                // reload (since we presumably lost connection to
-                // trunk due to it being killed, so it will have
-                // rebuilt on restart)
-                var ws = new WebSocket(url);
-                ws.onopen = () => window.location.reload();
-                ws.onclose = reload_upon_connect;
-            },
-            poll_interval);
-    };
-
-    var ws = new WebSocket(url);
-    ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        if (msg.reload) {
-            window.location.reload();
-        }
-    };
-    ws.onclose = reload_upon_connect;
-})()
-</script></body></html><!-- Powered by egui: https://github.com/emilk/egui/ -->
+<!-- Powered by egui: https://github.com/emilk/egui/ -->
