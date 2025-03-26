@@ -1,0 +1,105 @@
+(
+	name: "regenbogen spirale",
+	saved_at: (
+		secs_since_epoch: 1734648290,
+		nanos_since_epoch: 98846300,
+	),
+	shape: TriangGrid,
+	resolution: 100,
+	characters: (
+		characters: [(
+			id: Robber,
+			pos: OnVertex((
+				x: 0.11633666,
+				y: -0.14147937,
+				z: 0.5,
+			)),
+			past_vertices: [5434],
+			nearest_vertex: 5434,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(0),
+			pos: OnVertex((
+				x: -0.081683174,
+				y: -0.1586284,
+				z: 0.5,
+			)),
+			past_vertices: [3332],
+			nearest_vertex: 3332,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(2),
+			pos: OnVertex((
+				x: 0.0024752468,
+				y: -0.33869308,
+				z: 0.5,
+			)),
+			past_vertices: [3111],
+			nearest_vertex: 3111,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(3),
+			pos: OnVertex((
+				x: 0.0074257553,
+				y: -0.038585275,
+				z: 0.5,
+			)),
+			past_vertices: [4946],
+			nearest_vertex: 4946,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(4),
+			pos: OnVertex((
+				x: 0.1658416,
+				y: -0.12433037,
+				z: 0.5,
+			)),
+			past_vertices: [6036],
+			nearest_vertex: 6036,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(7),
+			pos: OnVertex((
+				x: 0.12128714,
+				y: -0.04715979,
+				z: 0.5,
+			)),
+			past_vertices: [6045],
+			nearest_vertex: 6045,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(1),
+			pos: OnVertex((
+				x: 0.08663367,
+				y: -0.1586284,
+				z: 0.5,
+			)),
+			past_vertices: [5032],
+			nearest_vertex: 5032,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(5),
+			pos: OnVertex((
+				x: 0.13613863,
+				y: -0.1586284,
+				z: 0.5,
+			)),
+			past_vertices: [5532],
+			nearest_vertex: 5532,
+			enabled: true,
+			on_node: true,
+		)],
+		past_moves: [],
+		future_moves: [],
+		show_past_steps: true,
+		show_allowed_next_steps: false,
+),
+	manual_markers: [(10000, 0)],
+)
