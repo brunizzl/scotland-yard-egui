@@ -139,6 +139,49 @@ fn pack_rest(nr_vertices: usize, other_cops: &[usize]) -> usize {
     positions
 }
 
+/// returns all cop configurations reachable in a single lazy-cop move from [`cops`],
+/// except the do-nothing move.
+/// the resulting iterator will not yield configurations as stored, but as they are actually reachable.
+pub fn raw_lazy_cop_moves_from(
+    edges: &EdgeList,
+    cops: RawCops,
+) -> impl Iterator<Item = RawCops> + '_ + Clone {
+    (0..cops.nr_cops).flat_map(move |i| {
+        let cop_i_pos = cops[i];
+        edges.neighbors_of(cop_i_pos).map(move |n| {
+            let mut unpacked_neigh = cops;
+            unpacked_neigh[i] = n;
+            unpacked_neigh
+        })
+    })
+}
+
+#[allow(dead_code)]
+pub fn raw_general_cop_moves_from(
+    edges: &EdgeList,
+    cops: RawCops,
+    max_moving_cops: u32,
+) -> impl Iterator<Item = Vec<usize>> + '_ + Clone {
+    let moving_cop_bits = 1..(1 << (cops.len()));
+    let allowed_moving_combinations =
+        moving_cop_bits.filter(move |&bits: &i32| bits.count_ones() <= max_moving_cops);
+
+    allowed_moving_combinations.flat_map(move |select_moving| {
+        let is_selected = |i| select_moving & (1 << i) != 0;
+
+        let non_moving_cops = (0..cops.len())
+            .filter_map(|i| (!is_selected(i)).then_some(cops[i]))
+            .collect_vec();
+        let moving_cops = (0..cops.len())
+            .filter_map(|i| is_selected(i).then_some(edges.neighbors_of(cops[i])))
+            .multi_cartesian_product();
+        moving_cops.map(move |mut cops| {
+            cops.extend(&non_moving_cops);
+            cops
+        })
+    })
+}
+
 impl CopConfigurations {
     fn nr_configurations(&self) -> usize {
         self.configurations.values().map(|c| c.len()).sum()
@@ -301,24 +344,6 @@ impl CopConfigurations {
         )
     }
 
-    /// returns all cop configurations reachable in a single lazy-cop move from [`cops`],
-    /// except the do-nothing move.
-    /// the resulting iterator will not yield configurations as stored, but as they are actually reachable.
-    pub fn raw_lazy_cop_moves_from<'a>(
-        &'a self,
-        edges: &'a EdgeList,
-        cops: RawCops,
-    ) -> impl Iterator<Item = RawCops> + 'a + Clone {
-        (0..self.nr_cops).flat_map(move |i| {
-            let cop_i_pos = cops[i];
-            edges.neighbors_of(cop_i_pos).map(move |n| {
-                let mut unpacked_neigh = cops;
-                unpacked_neigh[i] = n;
-                unpacked_neigh
-            })
-        })
-    }
-
     /// returns all cop positions reachable in a single lazy-cop move from positions, except the do-nothing move.
     /// because these positions may be stored in a different rotation and / or flipped, that rotation + flip to get from
     /// the move as rotated in the input to the output is also returned (see [`Self::pack`])
@@ -328,8 +353,27 @@ impl CopConfigurations {
         sym: &'a S,
         positions: CompactCopsIndex,
     ) -> impl Iterator<Item = (SmallVec<[&'a S::Auto; 4]>, CompactCopsIndex)> + 'a + Clone {
-        self.raw_lazy_cop_moves_from(edges, self.eager_unpack(positions))
+        raw_lazy_cop_moves_from(edges, self.eager_unpack(positions))
             .map(|mut cops| self.pack(sym, &mut cops))
+    }
+
+    /// returns all cop positions reachable in a single round from `cops`,
+    /// given up to `max_moving_cops` are allowed to move in a single round.
+    /// note: this is currently more of a proof of concept due to a lot of unessecairy allocations.
+    #[allow(dead_code)]
+    pub fn general_cop_moves_from<'a, S: SymmetryGroup>(
+        &'a self,
+        edges: &'a EdgeList,
+        sym: &'a S,
+        positions: CompactCopsIndex,
+        max_moving_cops: u32,
+    ) -> impl Iterator<Item = (SmallVec<[&'a S::Auto; 4]>, CompactCopsIndex)> + 'a + Clone {
+        raw_general_cop_moves_from(edges, self.eager_unpack(positions), max_moving_cops).map(
+            |cops_vec| {
+                let mut cops = RawCops::new(&cops_vec);
+                self.pack(sym, &mut cops)
+            },
+        )
     }
 
     pub fn all_positions(&self) -> impl Iterator<Item = CompactCopsIndex> + '_ {
@@ -375,7 +419,7 @@ impl SafeRobberPositions {
         for (&fst_index, indices) in &cop_moves.configurations {
             let nr_entries = indices.len().checked_mul(nr_map_vertices)?;
 
-            let vec_data_len = (nr_entries + 31) / 32;
+            let vec_data_len = nr_entries.div_ceil(32);
             let mut bit_vec_data = Vec::<u32>::new();
             bit_vec_data.try_reserve(vec_data_len).ok()?;
             bit_vec_data.resize(vec_data_len, u32::MAX);
@@ -744,7 +788,7 @@ pub fn verify_continuity(
 
         // verify for every possible previous cop arrangement,
         // a vertex marked safe there still has a safe neighbor here (safe neighbors precomputed).
-        for mut cops_neighs in data.cop_moves.raw_lazy_cop_moves_from(edges, cops) {
+        for mut cops_neighs in raw_lazy_cop_moves_from(edges, cops) {
             for (v, &safe_before_curr, safe_last_move) in izip!(
                 0..,
                 &safe_should_cops_move_to_curr,

@@ -31,7 +31,7 @@ struct SafeSegment {
 ///  - every vertex on a shortest path between two policemen is contained.
 ///  - if the vertex furthest away from any officer is not on such a shortest path, it is not contained.
 ///  - in the graph without the path vertices,
-///     every connected component other than the one with the vertex furthest away is also contained.
+///    every connected component other than the one with the vertex furthest away is also contained.
 pub struct CopsHull {
     /// one entry per vertex in graph
     hull: Vec<InSet>,

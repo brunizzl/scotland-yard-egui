@@ -47,7 +47,7 @@ impl DelimitingGroup {
         let emoji = |v| cops.iter().find(|c| c.vertex() == v).unwrap().id().emoji();
         let inner = {
             let nr_seps = self.inner.len().saturating_sub(1);
-            let seps = std::iter::repeat(", ").take(nr_seps);
+            let seps = std::iter::repeat_n(", ", nr_seps);
             String::from_iter(self.inner.iter().map(|&v| emoji(v)).interleave(seps))
         };
         let (c0, c1) = self.pair;

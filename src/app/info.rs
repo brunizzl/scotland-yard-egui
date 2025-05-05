@@ -1053,7 +1053,7 @@ impl Info {
             let active_police_vertices = {
                 let vertices = self.characters.active_cop_vertices();
                 let nr_seps = vertices.len().saturating_sub(1);
-                let seps = std::iter::repeat(", ".to_string()).take(nr_seps);
+                let seps = std::iter::repeat_n(", ".to_string(), nr_seps);
                 String::from_iter(vertices.iter().map(|&v| v.to_string()).interleave(seps))
             };
             let inactive_police_vertices = {
@@ -1064,7 +1064,7 @@ impl Info {
                     .filter_map(|c| (!c.is_active()).then_some(c.vertex().to_string()))
                     .collect_vec();
                 let nr_seps = vertices.len().saturating_sub(1);
-                let seps = std::iter::repeat(", ".to_string()).take(nr_seps);
+                let seps = std::iter::repeat_n(", ".to_string(), nr_seps);
                 String::from_iter(vertices.into_iter().interleave(seps))
             };
             let robber_vertex = self
@@ -1810,7 +1810,7 @@ impl Info {
             return;
         }
 
-        for neigh_cops in strat.cop_moves.raw_lazy_cop_moves_from(con.edges, curr_repr) {
+        for neigh_cops in bf::raw_lazy_cop_moves_from(con.edges, curr_repr) {
             let (neigh_transforms, neigh_index) = strat.pack(&neigh_cops);
             let transformed_robber_v = neigh_transforms[0].apply_forward(robber_v_in_curr);
             let nr_moves_left = strat.time_to_win.nr_moves_left(neigh_index);

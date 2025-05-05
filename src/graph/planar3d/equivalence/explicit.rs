@@ -227,7 +227,7 @@ impl ExplicitClasses {
             //divisions == 2 => two inner vertices => one class
             //divisions == 3 => three inner vertices => two classes
             //...
-            let nr_edge_classes = (divisions + 1) / 2;
+            let nr_edge_classes = divisions.div_ceil(2);
             nr_classes += nr_edge_classes;
             //this loop relies on each edge beeing iterated over once in each direction
             for &(mut edge) in &graph.edge_dividing_vertices {

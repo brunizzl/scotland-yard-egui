@@ -23,7 +23,7 @@ pub fn encode<T: Eq + Clone>(input: &[T]) -> Vec<(usize, T)> {
 
 pub fn decode<T: Clone>(msg: &[(usize, T)]) -> Vec<T> {
     msg.iter()
-        .flat_map(|(run, val)| std::iter::repeat(val.clone()).take(*run))
+        .flat_map(|(run, val)| std::iter::repeat_n(val.clone(), *run))
         .collect_vec()
 }
 

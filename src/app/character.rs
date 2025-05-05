@@ -492,7 +492,7 @@ impl State {
     /// moves are both `self.past_moves` and `self.future_moves`.
     /// result is rounded up to return something greater than zero if moves exist
     fn five_percent_of_moves(&self) -> usize {
-        (self.past_moves.len() + self.future_moves.len() + 19) / 20
+        (self.past_moves.len() + self.future_moves.len()).div_ceil(20)
     }
 
     /// undoes move but will not update character distances.
