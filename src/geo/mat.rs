@@ -101,7 +101,6 @@ impl Matrix3x3 {
 
 impl std::ops::Mul<Vec3> for &Matrix3x3 {
     type Output = Vec3;
-    #[must_use]
     #[inline(always)]
     fn mul(self, rhs: Vec3) -> Self::Output {
         Vec3 {
@@ -114,7 +113,6 @@ impl std::ops::Mul<Vec3> for &Matrix3x3 {
 
 impl std::ops::Mul<&Matrix3x3> for &Matrix3x3 {
     type Output = Matrix3x3;
-    #[must_use]
     #[inline(always)]
     fn mul(self, rhs: &Matrix3x3) -> Self::Output {
         Matrix3x3 {
@@ -183,7 +181,6 @@ impl Matrix2x2 {
 
 impl std::ops::Mul<Vec2> for Matrix2x2 {
     type Output = Vec2;
-    #[must_use]
     #[inline(always)]
     fn mul(self, rhs: Vec2) -> Self::Output {
         Vec2 {
@@ -195,7 +192,6 @@ impl std::ops::Mul<Vec2> for Matrix2x2 {
 
 impl std::ops::Mul<Matrix2x2> for f32 {
     type Output = Matrix2x2;
-    #[must_use]
     #[inline(always)]
     fn mul(self, rhs: Matrix2x2) -> Self::Output {
         let [a, b, c, d] = rhs.to_array();
