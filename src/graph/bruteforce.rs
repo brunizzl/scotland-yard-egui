@@ -11,13 +11,6 @@ pub mod thread_manager;
 
 mod queues;
 use queues::{CopStratQueue, RobberStratQueue};
-struct OnDrop<F: Fn()>(F);
-
-impl<F: Fn()> Drop for OnDrop<F> {
-    fn drop(&mut self) {
-        self.0()
-    }
-}
 
 /// maximum number of cops for which a bruteforce computation can be started.
 /// is not too detrimental, that this number is small,
@@ -607,14 +600,6 @@ where
     let mut safe_should_cops_move_to_curr = vec![false; nr_map_vertices];
     //intersection of `safe_should_cops_move_to_curr` and the vertices previously marked as safe for gamestate bevor curr
     let mut f_temp = vec![false; nr_map_vertices];
-
-    let start = std::time::Instant::now();
-    let _on_return = OnDrop(|| {
-        println!(
-            "beende Rechnung nach {:?} fuer {nr_cops} Cops auf {nr_map_vertices} Knoten",
-            std::time::Instant::now() - start
-        );
-    });
 
     //lines 4 + 5
     let mut time_until_log_refresh: usize = 1;

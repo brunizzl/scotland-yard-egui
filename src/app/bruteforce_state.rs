@@ -270,9 +270,10 @@ impl BruteforceComputationState {
         let (here, mut there) = bf::thread_manager::build_managers();
         let here = Some(here);
         macro_rules! employ {
-            ($sym: expr) => {
-                let sym = $sym;
+            ($sym: expr, $transform_sym: expr) => {
+                let cloned_sym = $sym.clone();
                 let work = move || {
+                    let sym = $transform_sym(cloned_sym);
                     let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
                     (res, Confidence::SymmetryOnly).into()
                 };
@@ -281,16 +282,16 @@ impl BruteforceComputationState {
         }
         match map.data().sym_group() {
             SymGroup::Explicit(equiv) => {
-                employ!(equiv.clone());
+                employ!(equiv, |x| x);
             },
             SymGroup::Torus6(torus) => {
-                employ!(ExplicitClasses::from(torus));
+                employ!(torus, |t| ExplicitClasses::from(&t));
             },
             SymGroup::Torus4(torus) => {
-                employ!(ExplicitClasses::from(torus));
+                employ!(torus, |t| ExplicitClasses::from(&t));
             },
             SymGroup::None(none) => {
-                employ!(*none);
+                employ!(*none, |x| x);
             },
         }
     }
