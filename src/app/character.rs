@@ -873,7 +873,7 @@ impl State {
         ui.collapsing("Figuren / Züge", |ui| {
             ui.horizontal(|ui| {
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
-                let minus_text = format!("- Figur ({})", minus_emoji);
+                let minus_text = format!("- Figur ({minus_emoji})");
                 let plus_text = format!("+ Figur ({})", self.next_id().emoji());
                 if ui.button(minus_text).on_hover_text("F2").clicked() {
                     self.characters.pop();
@@ -911,7 +911,7 @@ impl State {
                 }
             };
             ui.add_space(5.0);
-            ui.menu_button(format!("alle Cops ({})", nr_cops), |ui| {
+            ui.menu_button(format!("alle Cops ({nr_cops})"), |ui| {
                 egui::ScrollArea::vertical().show(ui, draw_cops);
             });
             ui.add_space(8.0);

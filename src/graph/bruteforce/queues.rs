@@ -293,7 +293,7 @@ pub mod test {
 
             let is = [0, 1, 2, 4, 8, 16, 20, 30, 40, 50, 77, 127];
             for &i in is.iter().take_while(|&&i| i < length) {
-                assert_eq!(false, q.set(i));
+                assert!(!q.set(i));
             }
             q.wrap_back();
             for &i in is.iter().take_while(|&&i| i < length) {

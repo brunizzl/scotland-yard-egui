@@ -27,7 +27,7 @@ impl CetzPicture {
             return name.clone();
         }
         let identifier = to_unique_str(self.color_names.len() + 1);
-        let new_name = format!("c{}", identifier);
+        let new_name = format!("c{identifier}");
         self.color_names.insert(color_array, new_name.clone());
         new_name
     }
@@ -189,7 +189,7 @@ impl Drop for CetzPicture {
         let mut file = match File::create(&self.file_name) {
             Ok(f) => f,
             Err(e) => {
-                println!("{}", e);
+                println!("{e}");
                 return;
             },
         };
