@@ -222,8 +222,8 @@ impl DilemmaNodes {
                 // but such that two following values are also geometrically adjacent.
                 let vals = Dirs::all_bits_and_directions(Hex)
                     .cycle()
-                    .skip_while(|(&dir, _)| component_dirs.intersection(dir).nonempty())
-                    .skip_while(|(&dir, _)| component_dirs.intersection(dir).is_empty());
+                    .skip_while(|&(&dir, _)| component_dirs.intersection(dir).nonempty())
+                    .skip_while(|&(&dir, _)| component_dirs.intersection(dir).is_empty());
                 for (ptr, (&dir, &val)) in izip!(&mut res, vals) {
                     debug_assert!(component_dirs.intersection(dir).nonempty());
                     *ptr = (val, dir);

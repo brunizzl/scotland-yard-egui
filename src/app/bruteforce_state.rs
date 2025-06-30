@@ -270,7 +270,7 @@ impl BruteforceComputationState {
         let (here, mut there) = bf::thread_manager::build_managers();
         let here = Some(here);
         macro_rules! employ {
-            ($sym: expr, $transform_sym: expr) => {
+            ($sym: expr_2021, $transform_sym: expr_2021) => {
                 let cloned_sym = $sym.clone();
                 let work = move || {
                     let sym = $transform_sym(cloned_sym);

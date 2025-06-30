@@ -295,7 +295,7 @@ impl CopConfigurations {
     }
 
     /// returns the configuration stored at index
-    pub fn unpack(&self, index: CompactCopsIndex) -> impl Iterator<Item = usize> + Clone {
+    pub fn unpack(&self, index: CompactCopsIndex) -> impl Iterator<Item = usize> + Clone + use<> {
         let mut positions = self.rest_positions_at(index);
         let nr_vertices = self.nr_map_vertices();
 
@@ -484,7 +484,7 @@ where
 }
 
 impl RobberWinData {
-    pub fn safe_vertices(&self, cops: &mut RawCops) -> impl ExactSizeIterator<Item = bool> + '_ {
+    pub fn safe_vertices(&self, cops: &mut RawCops) -> impl ExactSizeIterator<Item = bool> + '_ + use<'_> {
         let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, cops);
         let safe_vertices = self.safe.robber_safe_when(cop_positions);
         autos[0].forward().map(|v| safe_vertices[v])

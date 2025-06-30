@@ -535,7 +535,7 @@ fn retain_safe_inner_boundary(
                     break 'next_vertex check_vals[0];
                 }
                 macro_rules! take_if_unique {
-                    ($f:expr) => {{
+                    ($f:expr_2021) => {{
                         let mut iter = check_vals.iter().filter($f);
                         if let (Some(&v), None) = (iter.next(), iter.next()) {
                             break 'next_vertex v;
@@ -571,7 +571,7 @@ fn retain_safe_inner_boundary(
                         .collect_vec(),
                 );
                 macro_rules! take_largest {
-                    ($f:expr) => {{
+                    ($f:expr_2021) => {{
                         let mut best_nr = 0;
                         let mut best_val = usize::MAX;
                         for &val in &check_vals {
