@@ -1335,7 +1335,7 @@ impl Info {
             con.painter.add(marker_circle);
         };
         macro_rules! draw_if {
-            ($cond:expr_2021, $util:expr_2021, $f_color:expr_2021) => {
+            ($cond:expr, $util:expr, $f_color:expr) => {
                 if $cond {
                     let (re, &pos, &vis) = $util;
                     *re = true;
@@ -1345,7 +1345,7 @@ impl Info {
                     }
                 }
             };
-            ($cond:expr_2021, $util:expr_2021) => {
+            ($cond:expr, $util:expr) => {
                 let c = self.options.automatic_marker_style.colors[0];
                 draw_if!($cond, $util, || c);
             };
@@ -1641,14 +1641,14 @@ impl Info {
             }
         };
         macro_rules! draw {
-            ($iter:expr_2021, $is_shown:expr_2021) => {
+            ($iter:expr, $is_shown:expr) => {
                 for (val, &pos, &vis) in izip!($iter, con.positions, con.visible) {
                     if vis && $is_shown(&val) {
                         draw_text_at(pos, val.to_string());
                     }
                 }
             };
-            ($iter:expr_2021) => {
+            ($iter:expr) => {
                 let show = |_: &_| true;
                 draw!($iter, show);
             };

@@ -693,7 +693,7 @@ impl State {
     ) -> bool {
         let mut last_id = self.last_moved().map_or(Id::Robber, |c| c.id());
 
-        let Some((ref mut r#gen, ref mut step_time)) = self.random_steps else {
+        let Some((ref mut gentor, ref mut step_time)) = self.random_steps else {
             return false;
         };
         let now = Instant::now();
@@ -729,7 +729,7 @@ impl State {
             }
 
             let ch_index = {
-                let choice = r#gen.next() as usize % with_right_job.len();
+                let choice = gentor.next() as usize % with_right_job.len();
                 with_right_job[choice]
             };
             let ch = &mut self.characters[ch_index];
@@ -747,7 +747,7 @@ impl State {
             if step_options.is_empty() {
                 continue;
             }
-            let next_v_index = r#gen.next() as usize % step_options.len();
+            let next_v_index = gentor.next() as usize % step_options.len();
             let next_v = step_options[next_v_index];
 
             // update state

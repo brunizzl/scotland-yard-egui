@@ -73,6 +73,14 @@ impl std::fmt::Debug for RawCops {
     }
 }
 
+impl std::hash::Hash for RawCops {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for &c in &self[..] {
+            state.write_usize(c);
+        }
+    }
+}
+
 /// returns the number of distinct mutlisets with [`cardinality`] many elements
 /// chosen from a set with [`universe_size`] many elements.
 fn multiset_count(universe_size: usize, cardinality: usize) -> Option<usize> {
@@ -149,12 +157,14 @@ pub fn raw_lazy_cop_moves_from(
     })
 }
 
+/// this function does not allocate, just like the [`raw_lazy_cop_moves_from`] specialisation.
 #[allow(dead_code)]
 pub fn raw_general_cop_moves_from(
     edges: &EdgeList,
     cops: RawCops,
     max_moving_cops: u32,
-) -> impl Iterator<Item = Vec<usize>> + '_ + Clone {
+) -> impl Iterator<Item = RawCops> + '_ + Clone {
+    use arrayvec::ArrayVec;
     let moving_cop_bits = 1..(1 << (cops.len()));
     let allowed_moving_combinations =
         moving_cop_bits.filter(move |&bits: &i32| bits.count_ones() <= max_moving_cops);
@@ -162,16 +172,52 @@ pub fn raw_general_cop_moves_from(
     allowed_moving_combinations.flat_map(move |select_moving| {
         let is_selected = |i| select_moving & (1 << i) != 0;
 
-        let non_moving_cops = (0..cops.len())
-            .filter_map(|i| (!is_selected(i)).then_some(cops[i]))
-            .collect_vec();
-        let moving_cops = (0..cops.len())
-            .filter_map(|i| is_selected(i).then_some(edges.neighbors_of(cops[i])))
-            .multi_cartesian_product();
-        moving_cops.map(move |mut cops| {
-            cops.extend(&non_moving_cops);
-            cops
-        })
+        let non_moving_cops = RawCops::from_iter(
+            (0..cops.len()).filter_map(|i| (!is_selected(i)).then_some(cops[i])),
+        );
+
+        // idea: curr_moving is kinda like a c++ iterator array,
+        // as in we can take the current value of the iterator (slice index 0)
+        // whilst also advancing the iterator (set slice to subslice of itself).
+        // if the subslice is empty, all move options for this cop are exausted,
+        // thus we advance the cop further down the list and reset ouselfs to the full list of options.
+        // the moving_cops_neighs variable is read every time a part of curr_moving is reset.
+        // because this process should stop after the options for the last cop are exausted (and not reset)
+        // we set the "refreshing value" for the last cop to length 0.
+        let mut moving_cops_neighs: ArrayVec<_, MAX_COPS> = (0..cops.len())
+            .filter_map(|i| is_selected(i).then_some(edges.raw_neighbors_of(cops[i])))
+            .collect();
+        let mut curr_moving = moving_cops_neighs.clone();
+        if let Some(l) = moving_cops_neighs.last_mut() {
+            // set the "refreshing value" to be empty
+            *l = &l[0..0];
+        }
+
+        let yield_next = move || -> Option<_> {
+            let mut res = non_moving_cops;
+            for (i, step_options) in izip!(res.nr_cops.., &curr_moving) {
+                // this can only be any other than the step_options of the last cop,
+                // if some cop stands on an isolated vertex.
+                if step_options.is_empty() {
+                    return None;
+                }
+                res.cops[i] = step_options[0].get().unwrap();
+            }
+            res.nr_cops = cops.nr_cops;
+            // advance to the next value (this is like a counter, except every digit potentially has a different base)
+            for (all_steps, left_steps) in izip!(&moving_cops_neighs, &mut curr_moving) {
+                *left_steps = &left_steps[1..];
+                if left_steps.is_empty() {
+                    *left_steps = all_steps;
+                } else {
+                    break;
+                }
+            }
+
+            Some(res)
+        };
+
+        std::iter::from_fn(yield_next)
     })
 }
 
@@ -361,12 +407,8 @@ impl CopConfigurations {
         positions: CompactCopsIndex,
         max_moving_cops: u32,
     ) -> impl Iterator<Item = (SmallVec<[&'a S::Auto; 4]>, CompactCopsIndex)> + 'a + Clone {
-        raw_general_cop_moves_from(edges, self.eager_unpack(positions), max_moving_cops).map(
-            |cops_vec| {
-                let mut cops = RawCops::new(&cops_vec);
-                self.pack(sym, &mut cops)
-            },
-        )
+        raw_general_cop_moves_from(edges, self.eager_unpack(positions), max_moving_cops)
+            .map(|mut cops| self.pack(sym, &mut cops))
     }
 
     pub fn all_positions(&self) -> impl Iterator<Item = CompactCopsIndex> + '_ {
@@ -1014,4 +1056,99 @@ where
     res.compute_serde_skipped();
 
     Ok(res)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::graph::{Embedding3D, Shape};
+
+    fn lazy_cop_number(g: &Embedding3D) -> Option<usize> {
+        let mut nr = 1;
+        let sym = g.sym_group().to_explicit();
+        let (_, manager) = thread_manager::build_managers();
+        loop {
+            let robber_strat =
+                compute_safe_robber_positions(nr, g.edges().clone(), sym.clone(), &manager).ok()?;
+            if let Outcome::CopsWin = robber_strat {
+                return Some(nr);
+            }
+            nr += 1;
+        }
+    }
+
+    #[test]
+    fn test_lazy_cop_numbers() {
+        let c_l = |s, res| lazy_cop_number(&Embedding3D::new_map_from(s, res));
+
+        assert_eq!(c_l(Shape::Cube, 0), Some(2));
+        assert_eq!(c_l(Shape::Dodecahedron, 0), Some(3));
+        assert_eq!(c_l(Shape::Icosahedron, 1), Some(3));
+        assert_eq!(c_l(Shape::TriangTorus, 3), Some(2));
+        assert_eq!(c_l(Shape::TriangTorus, 4), Some(3));
+        assert_eq!(c_l(Shape::SquareGrid, 5), Some(2));
+    }
+
+    #[test]
+    fn test_raw_general_cop_moves_from() {
+        let q10 = Embedding3D::new_map_from(Shape::SquareGrid, 10);
+        assert_eq!(q10.nr_vertices(), 100);
+        let old_cops = RawCops::new(&[0, 13, 70, 85]);
+        let neighborss = old_cops
+            .iter()
+            .map(|&c| q10.edges().neighbors_of(c).collect_vec())
+            .collect_vec();
+        debug_assert_eq!(&neighborss[0], &[1, 10]);
+        debug_assert_eq!(&neighborss[1], &[3, 12, 14, 23]);
+        debug_assert_eq!(&neighborss[2], &[60, 71, 80]);
+        debug_assert_eq!(&neighborss[3], &[75, 84, 86, 95]);
+
+        let sort_cops = |mut cops: RawCops| {
+            cops.sort();
+            cops
+        };
+
+        // test case 1: lazy cops means a single cop can move
+        let mut lazy_1 =
+            raw_lazy_cop_moves_from(q10.edges(), old_cops).map(sort_cops).collect_vec();
+        let mut lazy_2 = raw_general_cop_moves_from(q10.edges(), old_cops, 1)
+            .map(sort_cops)
+            .collect_vec();
+        lazy_1.sort_by(|a, b| (&a[..]).cmp(&b[..]));
+        lazy_2.sort_by(|a, b| (&a[..]).cmp(&b[..]));
+        assert_eq!(lazy_1, lazy_2);
+
+        // test case 2: eager cops means all cops can move.
+        let mut eager_1 = raw_general_cop_moves_from(q10.edges(), old_cops, 4)
+            .map(sort_cops)
+            .collect_vec();
+        eager_1.push(old_cops);
+        let mut eager_2 = Vec::new();
+        let all_eager_options = izip!(&old_cops[..], &neighborss).map(|(&c, ns)| {
+            let mut res = ns.clone();
+            res.push(c);
+            res
+        });
+        for combo in all_eager_options.multi_cartesian_product() {
+            let cops_step = RawCops::new(&combo);
+            eager_2.push(sort_cops(cops_step));
+        }
+        eager_1.sort_by(|a, b| (&a[..]).cmp(&b[..]));
+        eager_2.sort_by(|a, b| (&a[..]).cmp(&b[..]));
+        assert_eq!(eager_1.len(), eager_2.len());
+        assert_eq!(eager_1, eager_2);
+
+        // between the extremes: if more cops are allowed to move,
+        // all moves with fewer moving cops should still be contained.
+        let mut allowed_moves: std::collections::HashSet<_> =
+            raw_general_cop_moves_from(q10.edges(), old_cops, 0).collect();
+        assert!(allowed_moves.is_empty());
+        for max_moving_cops in 1..=4 {
+            let moves: std::collections::HashSet<_> =
+                raw_general_cop_moves_from(q10.edges(), old_cops, max_moving_cops).collect();
+            assert!(moves.is_superset(&allowed_moves));
+            assert!(allowed_moves.len() < moves.len());
+            allowed_moves = moves;
+        }
+    }
 }

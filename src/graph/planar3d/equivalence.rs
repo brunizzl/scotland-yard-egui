@@ -197,6 +197,16 @@ impl SymGroup {
             Self::None(n) => n.power_repr(cops).1,
         }
     }
+
+    #[allow(dead_code)]
+    pub fn to_explicit(&self) -> ExplicitClasses {
+        match self {
+            Self::Explicit(e) => e.clone(),
+            Self::Torus6(t) => ExplicitClasses::from(t),
+            Self::Torus4(t) => ExplicitClasses::from(t),
+            Self::None(n) => ExplicitClasses::from(n),
+        }
+    }
 }
 
 pub fn compare<I, J>(f: I, g: J) -> std::cmp::Ordering

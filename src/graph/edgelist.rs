@@ -211,6 +211,14 @@ impl EdgeList {
         take_active(&self.entries[start..storage_end])
     }
 
+    pub fn raw_neighbors_of(&self, v: usize) -> &[Index] {
+        let start = self.max_neighbors * v;
+        let storage_end = self.max_neighbors * (v + 1);
+        let storage = &self.entries[start..storage_end];
+        let logic_end = storage.iter().position(Index::is_none).unwrap_or(storage.len());
+        &storage[..logic_end]
+    }
+
     pub fn neighbors_mut_of(&mut self, v: usize) -> &mut [Index] {
         debug_assert!(v < self.length);
         let start = self.max_neighbors * v;

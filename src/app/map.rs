@@ -155,7 +155,7 @@ impl Map {
                 .selected_text(self.shape().name_str())
                 .show_ui(ui, |ui| {
                     macro_rules! radio {
-                        ($repr:expr_2021, $case:pat) => {
+                        ($repr:expr, $case:pat) => {
                             let selected = matches!(new_shape, $case);
                             let name = $repr.name_str();
                             let button = egui::RadioButton::new(selected, name);
