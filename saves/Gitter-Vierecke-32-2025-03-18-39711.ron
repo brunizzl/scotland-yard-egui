@@ -1,0 +1,82 @@
+(
+	name: "bruteforce-Q32",
+	saved_at: (
+		secs_since_epoch: 1742292111,
+		nanos_since_epoch: 231068300,
+	),
+	shape: SquareGrid,
+	resolution: 32,
+	characters: (
+		characters: [(
+			id: Robber,
+			pos: OnScreen((
+				x: 1.9191757,
+				y: 0.29598,
+			)),
+			past_vertices: [],
+			nearest_vertex: 1018,
+			enabled: true,
+			on_node: false,
+), (
+			id: Cop(1),
+			pos: OnVertex((
+				x: -0.19696969,
+				y: -0.22727272,
+				z: 0.5,
+			)),
+			past_vertices: [31, 499, 329],
+			nearest_vertex: 329,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(0),
+			pos: OnVertex((
+				x: 0.19696975,
+				y: -0.3181818,
+				z: 0.5,
+			)),
+			past_vertices: [992, 617, 742],
+			nearest_vertex: 742,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(6),
+			pos: OnVertex((
+				x: -0.045454532,
+				y: -0.43939394,
+				z: 0.5,
+			)),
+			past_vertices: [0, 166, 483, 482],
+			nearest_vertex: 482,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(2),
+			pos: OnVertex((
+				x: -0.3181818,
+				y: -0.015151501,
+				z: 0.5,
+			)),
+			past_vertices: [1023, 628, 208],
+			nearest_vertex: 208,
+			enabled: true,
+			on_node: true,
+		), (
+			id: Cop(8),
+			pos: OnVertex((
+				x: 0.16666669,
+				y: -0.045454532,
+				z: 0.5,
+			)),
+			past_vertices: [719],
+			nearest_vertex: 719,
+			enabled: true,
+			on_node: true,
+		)],
+		past_moves: [(1, 499), (4, 628), (2, 617), (3, 166), (3, 483), (3, 482), (1, 329), (4, 208), (2, 742)],
+		future_moves: [],
+		show_past_steps: false,
+		show_allowed_next_steps: false,
+),
+	manual_markers: [(176, 32), (1, 0), (30, 32), (3, 0), (30, 32), (1, 0), (56, 32), (1, 0), (30, 32), (3, 0), (30, 32), (3, 0), (29, 32), (3, 0), (28, 32), (3, 0), (23, 32), (1, 0), (4, 32), (3, 0), (23, 32), (3, 0), (2, 32), (3, 0), (25, 32), (1, 0), (2, 32), (3, 0), (29, 32), (3, 0), (30, 32), (3, 0), (30, 32), (3, 0), (30, 32), (2, 0), (30, 32), (1, 0), (6, 32), (1, 0), (22, 32), (2, 0), (6, 32), (3, 0), (20, 32), (3, 0), (7, 32), (1, 0), (22, 32), (1, 0), (249, 32)],
+)
