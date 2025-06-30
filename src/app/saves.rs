@@ -4,12 +4,12 @@ use std::{
 };
 
 use chrono::{SubsecRound, Timelike};
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 
-use egui::{vec2, Ui};
+use egui::{Ui, vec2};
 use serde::{Deserialize, Serialize};
 
-use super::{character, info, load_or, manual_markers::ManualMarkers, map, NATIVE};
+use super::{NATIVE, character, info, load_or, manual_markers::ManualMarkers, map};
 
 #[derive(Deserialize, Serialize)]
 struct SavedState {

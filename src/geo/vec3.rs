@@ -49,11 +49,7 @@ impl Vec3 {
     #[inline(always)]
     pub fn normalized(self) -> Self {
         let len = self.length();
-        if len <= 0.0 {
-            self
-        } else {
-            self / len
-        }
+        if len <= 0.0 { self } else { self / len }
     }
 
     pub fn is_normalized(self) -> bool {

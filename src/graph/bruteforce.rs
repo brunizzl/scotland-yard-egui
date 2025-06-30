@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use bitvec::prelude as bv;
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
@@ -484,7 +484,10 @@ where
 }
 
 impl RobberWinData {
-    pub fn safe_vertices(&self, cops: &mut RawCops) -> impl ExactSizeIterator<Item = bool> + '_ + use<'_> {
+    pub fn safe_vertices(
+        &self,
+        cops: &mut RawCops,
+    ) -> impl ExactSizeIterator<Item = bool> + '_ + use<'_> {
         let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, cops);
         let safe_vertices = self.safe.robber_safe_when(cop_positions);
         autos[0].forward().map(|v| safe_vertices[v])
@@ -638,9 +641,11 @@ where
         {
             //if it only takes a single move to go from curr_cop_positions to rotated_neigh_cop_positions, so
             //should the other direction.
-            debug_assert!(cop_moves
-                .lazy_cop_moves_from(&edges, &sym, rotated_neigh_cop_positions)
-                .any(|(_, pos)| pos == curr_cop_positions));
+            debug_assert!(
+                cop_moves
+                    .lazy_cop_moves_from(&edges, &sym, rotated_neigh_cop_positions)
+                    .any(|(_, pos)| pos == curr_cop_positions)
+            );
             debug_assert!(!neigh_rotations.is_empty());
 
             let mut f_neighbor_changed_some_rotation = false;

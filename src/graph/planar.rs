@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
-use egui::{pos2, Pos2, Vec2};
+use egui::{Pos2, Vec2, pos2};
 use itertools::Itertools;
 
 use super::*;
-use crate::geo::{vec3, Pos3, Vec3};
+use crate::geo::{Pos3, Vec3, vec3};
 
 pub struct Embedding2D {
     positions: Vec<Pos2>,

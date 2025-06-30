@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 
 use super::*;
 use crate::app::character::Character;

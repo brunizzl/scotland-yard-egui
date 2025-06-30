@@ -216,7 +216,12 @@ impl DilemmaNodes {
             };
 
             // these are the four directions of component_dirs as coords (called steps) and as direction sets
-            let [(left_step, left_dir), (left_step_fwd, left_dir_fwd), (rght_step_fwd, rght_dir_fwd), (rght_step, rght_dir)] = {
+            let [
+                (left_step, left_dir),
+                (left_step_fwd, left_dir_fwd),
+                (rght_step_fwd, rght_dir_fwd),
+                (rght_step, rght_dir),
+            ] = {
                 let mut res = [(Coords::MAX, Dirs::EMPTY); 4];
                 // gurantee to have all values ordered not by absolute direction index,
                 // but such that two following values are also geometrically adjacent.

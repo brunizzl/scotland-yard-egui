@@ -5,7 +5,7 @@ use itertools::izip;
 
 use crate::graph::InSet;
 
-use super::{color, style, DrawContext};
+use super::{DrawContext, color, style};
 
 /// stripped down copy of [`egui::RadioButton`], but with added ability to directly decide the background color
 fn radio_button(checked: bool, fill: Color32, ui: &mut Ui) -> egui::Response {
@@ -387,8 +387,10 @@ impl ManualMarkers {
 
         // no two masks have the same same bits, as every mask represents a different layer
         // and as every marker can only be on a single layer at once.
-        debug_assert!(izip!(0.., masks)
-            .all(|(i, &mask_i)| masks[(i + 1)..].iter().all(|&mask_j| mask_i & mask_j == 0)));
+        debug_assert!(
+            izip!(0.., masks)
+                .all(|(i, &mask_i)| masks[(i + 1)..].iter().all(|&mask_j| mask_i & mask_j == 0))
+        );
         debug_assert_eq!(masks.iter().fold(0, |a, &b| a | b), global_mask);
 
         for (&vis, &marked, &pos) in izip!(con.visible, self.curr(), con.positions) {

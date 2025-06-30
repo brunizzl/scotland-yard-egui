@@ -5,20 +5,20 @@ use std::{
 
 use web_time::{Duration, Instant};
 
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 
-use egui::{pos2, vec2, Color32, Painter, Pos2, Rect, Sense, Stroke, Ui};
+use egui::{Color32, Painter, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::{
     app::bruteforce_state::GameType,
     geo::{Pos3, Vec3},
     graph::{
-        bruteforce::{RawCops, MAX_COPS},
         EdgeList, Embedding3D,
+        bruteforce::{MAX_COPS, RawCops},
     },
 };
 
-use super::{add_drag_value, map, style::Style, DrawContext};
+use super::{DrawContext, add_drag_value, map, style::Style};
 
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub enum Id {

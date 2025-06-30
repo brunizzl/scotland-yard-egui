@@ -4,7 +4,7 @@ use itertools::izip;
 use serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::graph::{bruteforce as bf, Automorphism, ExplicitClasses, SymmetryGroup};
+use crate::graph::{Automorphism, ExplicitClasses, SymmetryGroup, bruteforce as bf};
 use crate::graph::{Embedding3D, NoSymmetry};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
 use bool_csr::BoolCSR;
-use itertools::{izip, Itertools};
-use smallvec::{smallvec, SmallVec};
+use itertools::{Itertools, izip};
+use smallvec::{SmallVec, smallvec};
 
-use crate::geo::{self, pos3, vec3, Pos3, Vec3};
+use crate::geo::{self, Pos3, Vec3, pos3, vec3};
 
 use crate::graph::*;
 
@@ -145,11 +145,7 @@ impl Embedding3D {
     pub fn max_shown_edge_length(&self) -> f32 {
         if matches!(self.shape, Shape::SquareTorus | Shape::TriangTorus) {
             // just above 0.5 vs just below sqrt(2)
-            if self.nr_vertices() > 4 {
-                0.55
-            } else {
-                1.4
-            }
+            if self.nr_vertices() > 4 { 0.55 } else { 1.4 }
         } else {
             1e10
         }

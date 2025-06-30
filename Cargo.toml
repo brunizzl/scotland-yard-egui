@@ -2,7 +2,7 @@
 name = "scotland-yard-egui"
 version = "0.1.0"
 authors = ["Bruno Borchardt"]
-edition = "2021"
+edition = "2024"
 #rust-version = "1.79.0"
 default-run = "scotland-yard-egui"
 

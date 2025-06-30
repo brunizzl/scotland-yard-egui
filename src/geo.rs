@@ -1,4 +1,4 @@
-use egui::{emath::RectTransform, pos2, Pos2, Rect, Vec2};
+use egui::{Pos2, Rect, Vec2, emath::RectTransform, pos2};
 
 pub mod vec3;
 pub use vec3::*;

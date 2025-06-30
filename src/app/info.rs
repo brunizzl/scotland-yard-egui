@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 
 use strum::IntoEnumIterator;
 
@@ -8,18 +8,17 @@ use egui::{Checkbox, Color32, ComboBox, Label, Ui, Vec2};
 
 use crate::geo::Pos3;
 use crate::graph::{
-    self, bruteforce as bf, Automorphism, EdgeList, Embedding3D, SymGroup, SymmetryGroup,
+    self, Automorphism, EdgeList, Embedding3D, SymGroup, SymmetryGroup, bruteforce as bf,
 };
 
 use super::{
-    add_disabled_drag_value, add_drag_value,
+    DrawContext, NATIVE, add_disabled_drag_value, add_drag_value,
     bruteforce_state::BruteforceComputationState,
     character::{self, Character, CharactersStyle},
     color, load_or,
     manual_markers::{ManualMarkerOptions, ManualMarkers},
     map,
     style::Style,
-    DrawContext, NATIVE,
 };
 
 #[derive(
@@ -176,21 +175,29 @@ impl VertexSymbolInfo {
             None => "Es werden keine Zahlen angezeigt",
             Indices => "nur relevant für Debugging",
             RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
-            Escape2 => "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
-            Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann.",
+            Escape2 => {
+                "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
+            Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann."
+            },
             Escape2Grid => "alle Richtungen, in die der Räuber fliehen kann.",
             EscapeConeGrid => "jede Richtung, die in einem Fluchtkegel enthalten ist als Pfeil.",
             Escape23Grid => "Kombination aus Fluchtoption 2 + 3 auf Gitter.",
             Escape3Grid => "eine dieser Richtungen führt garantiert wieder auf einen Dilemmaknoten",
             MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
             MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",
-            VertexEquivalenceClass => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
+            VertexEquivalenceClass => {
+                "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
             Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
-            Das macht Bruteforce etwas weniger speicherintensiv.",
+            Das macht Bruteforce etwas weniger speicherintensiv."
+            },
             RobberDist => "Abstand von Räuberposition zu jedem Knoten",
-            BruteforceCopMoves => "Wenn Cops optimal ziehen, lebt Räuber noch maximal so viele Züge",
-            Debugging => "Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
-            gerade spannend zum debuggen war",
+            BruteforceCopMoves => {
+                "Wenn Cops optimal ziehen, lebt Räuber noch maximal so viele Züge"
+            },
+            Debugging => {
+                "Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
+            gerade spannend zum debuggen war"
+            },
         }
     }
 
@@ -841,11 +848,7 @@ impl Info {
             debug_assert_eq!(con.positions.len(), self.min_cop_dist.len());
             let (furthest_vertex, _) =
                 self.min_cop_dist.iter().enumerate().fold((0, 0), |best, (v, &dist)| {
-                    if dist > best.1 {
-                        (v, dist)
-                    } else {
-                        best
-                    }
+                    if dist > best.1 { (v, dist) } else { best }
                 });
             temp[0] = furthest_vertex;
             &temp

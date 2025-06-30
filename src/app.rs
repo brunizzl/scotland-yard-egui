@@ -1,4 +1,4 @@
-use egui::{pos2, Button, Context, Label, Painter, Pos2, Rect, Stroke, Ui, Vec2};
+use egui::{Button, Context, Label, Painter, Pos2, Rect, Stroke, Ui, Vec2, pos2};
 
 use crate::geo::Pos3;
 use crate::graph::{EdgeList, SymGroup};
