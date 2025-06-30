@@ -1148,6 +1148,14 @@ mod test {
                 raw_general_cop_moves_from(q10.edges(), old_cops, max_moving_cops).collect();
             assert!(moves.is_superset(&allowed_moves));
             assert!(allowed_moves.len() < moves.len());
+
+            for &move_ in moves.difference(&allowed_moves) {
+                // works only if no cops where neighbors in old_cops
+                let nr_still = move_.iter().filter(|c| old_cops.contains(c)).count();
+                let nr_moving = old_cops.len() - nr_still;
+                assert_eq!(nr_moving, max_moving_cops as usize);
+            }
+
             allowed_moves = moves;
         }
     }

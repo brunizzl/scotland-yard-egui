@@ -522,6 +522,34 @@ impl Embedding3D {
         self.sym_group = SymGroup::None(NoSymmetry::new(self.vertices.len()));
     }
 
+    /// all neighbors of neighbors become neighbors.
+    ///
+    /// note 1: this means that -unlike with powers of numbers- `n` iterations of squaring yields `self` to the power `n`.
+    ///
+    /// note 2: the symmetry is kept (or increased, but we ignore this possibility) by this operation.
+    #[allow(dead_code)]
+    fn square(&mut self) {
+        let old_edges = &self.edges;
+        let new_neighbors = izip!(0.., old_edges.neighbors())
+            .map(|(v, ns)| {
+                let mut new_neighs = Vec::from_iter(ns.clone());
+                for n in ns {
+                    new_neighs.extend(old_edges.neighbors_of(n));
+                }
+                new_neighs.sort();
+                new_neighs.dedup();
+                new_neighs.retain(|&u| u != v);
+                new_neighs
+            })
+            .collect_vec();
+        let max_neighbors = new_neighbors.iter().map(Vec::len).max().unwrap_or(0);
+        let new_edges = EdgeList::from_iter(
+            new_neighbors.into_iter().map(|ns| ns.into_iter()),
+            max_neighbors,
+        );
+        self.edges = new_edges;
+    }
+
     /// custom subdivision of graph described in Fabian Hamann's masters thesis.
     pub fn new_subdivided_football(divisions: usize, show_hex_mid: bool) -> Self {
         let vertices = Self::football_vertices();
