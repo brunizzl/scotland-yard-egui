@@ -1,4 +1,4 @@
-use crate::graph::Shape;
+use crate::graph::{Shape, shape};
 use itertools::izip;
 
 use crate::app::cam::Camera3D;
@@ -177,6 +177,25 @@ impl Map {
                     radio!(SquareTorus, SquareTorus | SquareGrid);
                     //radio!(RegularPolygon2D(6), RegularPolygon2D(_));
                     radio!(Random2D(1337), Random2D(_));
+
+                    if NATIVE {
+                        let selected = matches!(new_shape, Custom(_));
+                        let name = if selected {
+                            new_shape.name_str()
+                        } else {
+                            "erweitere aktuellen Graph"
+                        };
+                        let button = egui::RadioButton::new(selected, name);
+                        if ui.add(button).clicked() {
+                            let custom_data = shape::CustomBuild {
+                                basis: new_shape.clone(),
+                                build_steps: Vec::new(),
+                                build_steps_string: String::new(),
+                            };
+                            let custom_box = Box::new(custom_data);
+                            new_shape = Custom(custom_box);
+                        }
+                    }
                 });
             match &mut new_shape {
                 Shape::DividedIcosahedron(pressure) => {
@@ -208,6 +227,14 @@ impl Map {
                         new_shape = Shape::TriangGrid;
                     }
                 },
+                Shape::Custom(c) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Bauschritte:").on_hover_text(shape::BuildStep::EXPLAINER);
+                        if ui.text_edit_singleline(&mut c.build_steps_string).lost_focus() {
+                            c.parse_build_steps();
+                        }
+                    });
+                },
                 _ => {
                     add_disabled_drag_value(ui);
                 },
@@ -229,7 +256,7 @@ impl Map {
         let zoom = self.camera.zoom();
 
         let detail = {
-            let max_shown_len = self.data.max_shown_edge_length();
+            let max_shown_len = self.data.max_scaling_edge_length();
             let mut cum_len = 0.0;
             let mut nr_counted = 0;
             let samples = izip!(self.data.edges().neighbors(), self.data.positions());

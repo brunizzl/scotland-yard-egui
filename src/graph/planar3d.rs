@@ -140,12 +140,22 @@ impl Embedding3D {
         &self.sym_group
     }
 
-    /// used only when drawing tori, because those are shown "cut open and streched flat".
-    /// thus some of their edges are not drawn.
-    pub fn max_shown_edge_length(&self) -> f32 {
+    /// returns whih edge lengh should be considered when displaying other features,
+    /// e.g. how large characters and markers are drawn.
+    /// also used to determine on tori which edges are not drawn, because the embedding looks ugly otherwise.
+    pub fn max_scaling_edge_length(&self) -> f32 {
         if matches!(self.shape, Shape::SquareTorus | Shape::TriangTorus) {
             // just above 0.5 vs just below sqrt(2)
             if self.nr_vertices() > 4 { 0.55 } else { 1.4 }
+        } else if !self.vertices.is_empty() {
+            let p0 = self.vertices[0];
+            1.5 * self
+                .edges()
+                .neighbors_of(0)
+                .map(|v1| (self.vertices[v1] - p0).length_sq())
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(1e10)
+                .sqrt()
         } else {
             1e10
         }
@@ -480,13 +490,18 @@ impl Embedding3D {
     /// e.g. `graph.subdivide_all_edges(0)` does nothing
     /// this assumes, that `self.surface` contains the full graph of `self` so far,
     /// especially no edge of `self.surface` may already be divided.
-    fn subdivide_all_edges(&mut self, nr_subdivisions: usize) {
+    ///
+    /// if not `update_faces`, only edge and vertex information is updated,
+    /// not things like the convex hull where the graph is embedded on etc.
+    fn subdivide_all_edges(&mut self, nr_subdivisions: usize, update_faces: bool) {
         if nr_subdivisions == 0 {
             return;
         }
         let nr_og_vertices = self.nr_vertices();
-        assert!(self.surface.nr_vertices() >= self.nr_vertices());
-        debug_assert!(self.surface.vertices[..self.nr_vertices()] == self.vertices[..]);
+        if update_faces {
+            assert!(self.surface.nr_vertices() >= self.nr_vertices());
+            debug_assert!(self.surface.vertices[..self.nr_vertices()] == self.vertices[..]);
+        }
 
         let mut v1_neighbors = Vec::new();
         for v1 in 0..nr_og_vertices {
@@ -494,6 +509,8 @@ impl Embedding3D {
             v1_neighbors.extend(self.edges.neighbors_of(v1));
             for &v2 in &v1_neighbors {
                 if v2 < nr_og_vertices {
+                    // if v2 < v1, then v2 would have been visited first and the edge to v1 would have been cut.
+                    debug_assert!(v2 > v1);
                     let pos1 = self.vertices[v1];
                     let pos2 = self.vertices[v2];
                     let step = (pos2 - pos1) / (nr_subdivisions as f32 + 1.0);
@@ -506,6 +523,10 @@ impl Embedding3D {
                         curr = next;
                     }
                     self.edges.add_edge(curr, v2);
+
+                    if !update_faces {
+                        continue;
+                    }
 
                     let inner_end = curr + 1;
                     let inner = BidirectionalRange::new_forward(fst_inner, inner_end);
@@ -522,31 +543,32 @@ impl Embedding3D {
         self.sym_group = SymGroup::None(NoSymmetry::new(self.vertices.len()));
     }
 
-    /// all neighbors of neighbors become neighbors.
+    /// all vertices with distance <= `n` become meighbors (except no vertex is neighbor of itself).
     ///
-    /// note 1: this means that -unlike with powers of numbers- `n` iterations of squaring yields `self` to the power `n`.
-    ///
-    /// note 2: the symmetry is kept (or increased, but we ignore this possibility) by this operation.
+    /// note: the symmetry is kept (or increased, but we ignore this possibility) by this operation.
     #[allow(dead_code)]
-    fn square(&mut self) {
+    fn edge_pow(&mut self, n: usize) {
         let old_edges = &self.edges;
-        let new_neighbors = izip!(0.., old_edges.neighbors())
-            .map(|(v, ns)| {
-                let mut new_neighs = Vec::from_iter(ns.clone());
-                for n in ns {
-                    new_neighs.extend(old_edges.neighbors_of(n));
-                }
-                new_neighs.sort();
-                new_neighs.dedup();
-                new_neighs.retain(|&u| u != v);
-                new_neighs
-            })
-            .collect_vec();
-        let max_neighbors = new_neighbors.iter().map(Vec::len).max().unwrap_or(0);
-        let new_edges = EdgeList::from_iter(
-            new_neighbors.into_iter().map(|ns| ns.into_iter()),
-            max_neighbors,
-        );
+        let mut new_edges = old_edges.clone();
+        for _ in 0..n {
+            let new_neighbors = izip!(0.., new_edges.neighbors())
+                .map(|(v, ns)| {
+                    let mut new_neighs = Vec::from_iter(ns.clone());
+                    for n in ns {
+                        new_neighs.extend(old_edges.neighbors_of(n));
+                    }
+                    new_neighs.sort();
+                    new_neighs.dedup();
+                    new_neighs.retain(|&u| u != v);
+                    new_neighs
+                })
+                .collect_vec();
+            let max_neighbors = new_neighbors.iter().map(Vec::len).max().unwrap_or(0);
+            new_edges = EdgeList::from_iter(
+                new_neighbors.into_iter().map(|ns| ns.into_iter()),
+                max_neighbors,
+            );
+        }
         self.edges = new_edges;
     }
 
@@ -564,7 +586,7 @@ impl Embedding3D {
             Shape::Football
         };
         let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info, shape);
-        res.subdivide_all_edges(divisions);
+        res.subdivide_all_edges(divisions, true);
         res
     }
 
@@ -618,7 +640,7 @@ impl Embedding3D {
                 Shape::Dodecahedron,
             );
         } else {
-            res.subdivide_all_edges(divisions);
+            res.subdivide_all_edges(divisions, true);
         }
         res
     }
@@ -647,7 +669,7 @@ impl Embedding3D {
         let face_info = [(4, false)];
         let (mut res, faces) =
             Self::embed_archimedian_solid(vertices, edges, &face_info, Shape::Cube);
-        res.subdivide_all_edges(divisions);
+        res.subdivide_all_edges(divisions, true);
 
         // add inner vertices
         res.inner_vertices.clear();
@@ -1002,6 +1024,34 @@ impl Embedding3D {
         });
     }
 
+    fn draw_camera_facing_edges(
+        &self,
+        to_screen: &geo::ToScreen,
+        painter: &egui::Painter,
+        stroke: egui::Stroke,
+        visible: &mut [bool],
+    ) {
+        let screen_dist = |p: Pos3| to_screen.to_plane.signed_dist(p.to_vec3());
+        for (p, vis) in izip!(&self.vertices, visible.iter_mut()) {
+            *vis = screen_dist(*p) > -0.2;
+        }
+        self.edges.for_each_edge(|v1, v2| {
+            if !visible[v1] && !visible[v2] {
+                return;
+            }
+            let p1 = self.vertices[v1];
+            let p2 = self.vertices[v2];
+            let points = [to_screen.apply(p1), to_screen.apply(p2)];
+
+            let p_avg = Pos3::average([p1, p2].into_iter());
+            let opacity = (screen_dist(p_avg).clamp(-0.2, 1.0) + 0.2) / 1.2;
+            let mut stroke = stroke;
+            stroke.color = stroke.color.gamma_multiply(opacity);
+
+            painter.add(egui::Shape::LineSegment { points, stroke });
+        });
+    }
+
     pub fn draw_edges_and_update_visibility(
         &self,
         to_screen: &geo::ToScreen,
@@ -1009,7 +1059,7 @@ impl Embedding3D {
         stroke: egui::Stroke,
         visible: &mut [bool],
     ) {
-        let visible_needs_update = match self.shape {
+        let visible_needs_update = match &self.shape {
             Shape::Octahedron
             | Shape::Tetrahedron
             | Shape::Icosahedron
@@ -1033,6 +1083,10 @@ impl Embedding3D {
             Shape::Random2D(_) => {
                 self.draw_all_edges(to_screen, painter, stroke);
                 true
+            },
+            Shape::Custom(_) => {
+                self.draw_camera_facing_edges(to_screen, painter, stroke, visible);
+                false
             },
         };
 
@@ -1093,6 +1147,21 @@ impl Embedding3D {
             SquareTorus => Self::new_subdivided_squares_grid(res as isize, true),
             TriangGrid => Self::new_subdivided_triangle_grid(res as isize, false),
             SquareGrid => Self::new_subdivided_squares_grid(res as isize, false),
+            Custom(c) => {
+                let mut result = Self::new_map_from(c.basis.clone(), res);
+                for step in &c.build_steps {
+                    match step {
+                        shape::BuildStep::NeighNeihs(n) => {
+                            result.edge_pow(*n);
+                        },
+                        shape::BuildStep::SubdivEdges(n) => {
+                            result.subdivide_all_edges(*n, false);
+                        },
+                    }
+                }
+                result.shape = Custom(c);
+                result
+            },
         }
     }
 

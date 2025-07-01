@@ -1055,6 +1055,7 @@ impl State {
         if !self.show_past_steps {
             return;
         }
+        let max_shown_edge_len = con.map.data().max_scaling_edge_length();
         for ch in self.all() {
             let glow = style.glow_color(ch.id());
             let trans = glow.gamma_multiply(0.3);
@@ -1070,7 +1071,7 @@ impl State {
                 let points = [con.vertex_draw_pos(v1), con.vertex_draw_pos(v2)];
                 let stroke = {
                     let space_dist = (con.positions[v2] - con.positions[v1]).length();
-                    let max = con.map.data().max_shown_edge_length();
+                    let max = max_shown_edge_len;
                     let color = if space_dist < max { glow } else { trans };
                     egui::Stroke::new(size * 0.75, color)
                 };
