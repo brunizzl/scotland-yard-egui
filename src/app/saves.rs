@@ -23,7 +23,7 @@ struct SavedState {
 
 impl SavedState {
     fn set(&mut self, map: &mut map::Map, info: &mut info::Info) {
-        map.change_to(self.shape, self.resolution);
+        map.change_to(self.shape.clone(), self.resolution);
         info.characters = self.characters.clone_without_distances();
         info.manual_markers = ManualMarkers::new_init(crate::rle::decode(&self.manual_markers));
         info.adjust_to_new_map(map.data());
@@ -104,7 +104,7 @@ impl OrdBy {
             //rust std library: please fix. I dislike that clone very much.
             Self::Name => sort_(states, active, |s| s.name.clone()),
             Self::Date => sort_(states, active, |s| s.saved_at),
-            Self::Shape => sort_(states, active, |s| s.shape),
+            Self::Shape => sort_(states, active, |s| s.shape.clone()),
             Self::Res => sort_(states, active, |s| s.resolution),
             Self::NrCops => sort_(states, active, |s| s.characters.all().len()),
         };
@@ -196,7 +196,7 @@ impl SavedStates {
         } else {
             std::time::SystemTime::UNIX_EPOCH
         };
-        let map_shape = map.shape();
+        let map_shape = map.shape().clone();
         let map_resolution = map.resolution() as isize;
         let characters = info.characters.clone_without_distances();
         let manual_markers = crate::rle::encode(info.manual_markers.curr());
@@ -216,7 +216,7 @@ impl SavedStates {
 
     pub fn update(&mut self, ui: &mut Ui, map: &mut map::Map, info: &mut info::Info) {
         if let Some(save) = self.active.and_then(|i| self.saves.get(i)) {
-            let same_shape = save.shape == map.shape();
+            let same_shape = &save.shape == map.shape();
             let same_res = save.resolution == map.resolution() as isize;
             if !same_shape || !same_res {
                 self.active = None;

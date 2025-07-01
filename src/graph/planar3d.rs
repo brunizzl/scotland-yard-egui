@@ -115,8 +115,8 @@ impl Embedding3D {
         !self.surface.vertices.is_empty()
     }
 
-    pub fn shape(&self) -> Shape {
-        self.shape
+    pub fn shape(&self) -> &Shape {
+        &self.shape
     }
 
     pub fn edges(&self) -> &EdgeList {

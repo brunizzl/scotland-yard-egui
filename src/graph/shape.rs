@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum Shape {
     Tetrahedron,
     Octahedron,
@@ -19,7 +19,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const fn name_str(self) -> &'static str {
+    pub const fn name_str(&self) -> &'static str {
         match self {
             Self::Tetrahedron => "Tetraeder",
             Self::Octahedron => "Oktaeder",
@@ -38,7 +38,7 @@ impl Shape {
         }
     }
 
-    pub fn to_sting(self) -> String {
+    pub fn to_sting(&self) -> String {
         match self {
             Self::Cube => "Wuerfel".to_string(),
             Self::DividedIcosahedron(pressure) => format!("Ikosaeder-{pressure}x-aufgepustet"),
@@ -57,7 +57,7 @@ impl Shape {
         }
     }
 
-    pub fn emoji(self) -> &'static str {
+    pub fn emoji(&self) -> &'static str {
         match self {
             Self::Tetrahedron => "🌐Tet",
             Self::Octahedron => "🌐Oct",
@@ -76,7 +76,7 @@ impl Shape {
         }
     }
 
-    pub fn min_res(self) -> isize {
+    pub fn min_res(&self) -> isize {
         match self {
             Self::Tetrahedron
             | Self::Octahedron
@@ -93,7 +93,7 @@ impl Shape {
         }
     }
 
-    pub fn max_res(self) -> isize {
+    pub fn max_res(&self) -> isize {
         match self {
             Self::Tetrahedron
             | Self::Octahedron
@@ -110,7 +110,7 @@ impl Shape {
         }
     }
 
-    pub fn is_3d(self) -> bool {
+    pub fn is_3d(&self) -> bool {
         match self {
             Self::Tetrahedron
             | Self::Octahedron

@@ -1135,7 +1135,7 @@ impl State {
         let game_type = GameType {
             nr_cops: active_cops.len(),
             resolution: con.map.resolution(),
-            shape: con.map.shape(),
+            shape: con.map.shape().clone(),
         };
         (raw_cops, game_type)
     }

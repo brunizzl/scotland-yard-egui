@@ -7,7 +7,7 @@ use super::*;
 use crate::graph::{Automorphism, ExplicitClasses, SymmetryGroup, bruteforce as bf};
 use crate::graph::{Embedding3D, NoSymmetry};
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GameType {
     pub nr_cops: usize,
     pub resolution: usize,
@@ -35,7 +35,7 @@ impl GameType {
     }
 
     fn create_edges(&self) -> EdgeList {
-        let embedding = Embedding3D::new_map_from(self.shape, self.resolution);
+        let embedding = Embedding3D::new_map_from(self.shape.clone(), self.resolution);
         embedding.into_edges()
     }
 }
@@ -202,14 +202,14 @@ impl BruteforceComputationState {
 
     fn process_result(&mut self, game_type: GameType, res: WorkResult) {
         if let Some(err) = res.error {
-            self.errors.push((game_type, err));
+            self.errors.push((game_type.clone(), err));
         }
 
         if let Some(strat) = res.robber_strat {
-            self.robber_strats.insert(game_type, strat);
+            self.robber_strats.insert(game_type.clone(), strat);
         }
         if let Some(strat) = res.police_strat {
-            self.cop_strats.insert(game_type, strat);
+            self.cop_strats.insert(game_type.clone(), strat);
         }
     }
 
@@ -264,7 +264,7 @@ impl BruteforceComputationState {
         let game_type = GameType {
             nr_cops,
             resolution: map.resolution(),
-            shape: map.shape(),
+            shape: map.shape().clone(),
         };
         let edges = map.edges().clone();
         let (here, mut there) = bf::thread_manager::build_managers();
@@ -300,7 +300,7 @@ impl BruteforceComputationState {
         let game_type = GameType {
             nr_cops,
             resolution: map.resolution(),
-            shape: map.shape(),
+            shape: map.shape().clone(),
         };
         let edges = map.edges().clone();
         let (here, there) = bf::thread_manager::build_managers();
@@ -354,6 +354,7 @@ impl BruteforceComputationState {
     }
 
     fn verify_result(&mut self, game_type: GameType, mut outcome: GameOutcome) {
+        let game_type_clone = game_type.clone();
         let (here, there) = bf::thread_manager::build_managers();
         let here = Some(here);
         let work = move || {
@@ -376,10 +377,11 @@ impl BruteforceComputationState {
             };
             WorkResult::new_res(outcome)
         };
-        self.employ_worker(game_type, work, here, WorkTask::Verify);
+        self.employ_worker(game_type_clone, work, here, WorkTask::Verify);
     }
 
     fn save_result(&mut self, game_type: GameType, outcome: GameOutcome) {
+        let game_type_clone = game_type.clone();
         let work = move || {
             let path = game_type.file_name("bruteforce");
             let file = match fs::File::create(path) {
@@ -395,10 +397,11 @@ impl BruteforceComputationState {
             }
             WorkResult::new_res(outcome)
         };
-        self.employ_worker(game_type, work, None, WorkTask::Store);
+        self.employ_worker(game_type_clone, work, None, WorkTask::Store);
     }
 
     fn save_strat(&mut self, game_type: GameType, strat: bf::CopStrategy) {
+        let game_type_clone = game_type.clone();
         let work = move || {
             let path = game_type.file_name("bruteforce-police");
             let file = match fs::File::create(path) {
@@ -414,10 +417,11 @@ impl BruteforceComputationState {
             }
             WorkResult::new_strat(strat)
         };
-        self.employ_worker(game_type, work, None, WorkTask::StoreStrat);
+        self.employ_worker(game_type_clone, work, None, WorkTask::StoreStrat);
     }
 
     fn load_result_from(&mut self, game_type: GameType) {
+        let game_type_clone = game_type.clone();
         let (here, there) = bf::thread_manager::build_managers();
         let work = move || {
             let path = game_type.file_name("bruteforce");
@@ -444,10 +448,11 @@ impl BruteforceComputationState {
                 Err(err) => WorkResult::new_err(err),
             }
         };
-        self.employ_worker(game_type, work, Some(here), WorkTask::Load);
+        self.employ_worker(game_type_clone, work, Some(here), WorkTask::Load);
     }
 
     fn load_strat_from(&mut self, game_type: GameType) {
+        let game_type_clone = game_type.clone();
         let work = move || {
             let path = game_type.file_name("bruteforce-police");
             let file = match fs::File::open(path) {
@@ -463,7 +468,7 @@ impl BruteforceComputationState {
                 Err(err) => WorkResult::new_err(err),
             }
         };
-        self.employ_worker(game_type, work, None, WorkTask::LoadStrat);
+        self.employ_worker(game_type_clone, work, None, WorkTask::LoadStrat);
     }
 
     fn draw_result(ui: &mut Ui, game_type: &GameType, outcome: &GameOutcome) {
@@ -530,13 +535,13 @@ impl BruteforceComputationState {
             Self::draw_result(ui, game_type, outcome);
             ui.horizontal(|ui| {
                 if NATIVE && ui.button("speichern").clicked() {
-                    action = Some((Action::Store, *game_type));
+                    action = Some((Action::Store, game_type.clone()));
                 } else if outcome.confidence == Confidence::SymmetryOnly
                     && ui.button("verifizieren").clicked()
                 {
-                    action = Some((Action::Verify, *game_type));
+                    action = Some((Action::Verify, game_type.clone()));
                 } else if ui.button("löschen").clicked() {
-                    action = Some((Action::Delete, *game_type));
+                    action = Some((Action::Delete, game_type.clone()));
                 }
             });
             ui.add_space(5.0);
@@ -555,9 +560,9 @@ impl BruteforceComputationState {
             Self::draw_strat(ui, game_type, strat);
             ui.horizontal(|ui| {
                 if NATIVE && ui.button("speichern").clicked() {
-                    action = Some((Action::Store, *game_type));
+                    action = Some((Action::Store, game_type.clone()));
                 } else if ui.button("löschen").clicked() {
-                    action = Some((Action::Delete, *game_type));
+                    action = Some((Action::Delete, game_type.clone()));
                 }
                 ui.menu_button("meiste Züge", |ui| {
                     for extreme_pos in &strat.extreme_positions {
@@ -627,9 +632,9 @@ impl BruteforceComputationState {
                     }
                     let abort_button = ui.add_enabled(paused, Button::new("abbrechen"));
                     if abort_button.contains_pointer() && paused && mouse_down {
-                        if let Some((gt, t, start)) = self.abort_worker {
-                            if gt == worker.game_type && t == worker.task {
-                                let time_since_click = Instant::now() - start;
+                        if let Some((gt, t, start)) = &self.abort_worker {
+                            if gt == &worker.game_type && t == &worker.task {
+                                let time_since_click = Instant::now() - *start;
                                 let ratio = time_since_click.as_secs_f32() / 5.0;
                                 if ratio < 1.0 {
                                     let text = format!("{}%", (ratio * 100.0) as isize);
@@ -642,7 +647,7 @@ impl BruteforceComputationState {
                             // only set to this if mouse was released after last abort
                             assert!(self.abort_worker.is_none());
                             self.abort_worker =
-                                Some((worker.game_type, worker.task, Instant::now()));
+                                Some((worker.game_type.clone(), worker.task, Instant::now()));
                         }
                     }
                 });
@@ -683,10 +688,10 @@ impl BruteforceComputationState {
             let game_type = GameType {
                 nr_cops,
                 resolution: map.resolution(),
-                shape: map.shape(),
+                shape: map.shape().clone(),
             };
             if game_type != self.curr_game_type {
-                self.curr_game_type = game_type;
+                self.curr_game_type = game_type.clone();
                 self.robber_strat_stored = NATIVE && game_type.file_name("bruteforce").exists();
                 self.cops_strat_stored =
                     NATIVE && game_type.file_name("bruteforce-police").exists();
@@ -745,7 +750,7 @@ impl BruteforceComputationState {
                 let enable_load = self.robber_strat_stored && !curr_known;
                 let load_button = Button::new("laden 🖴");
                 if ui.add_enabled(enable_load, load_button).clicked() {
-                    self.load_result_from(game_type);
+                    self.load_result_from(game_type.clone());
                 }
             });
             ui.add_space(5.0);

@@ -48,7 +48,7 @@ impl PlaneCopStat {
 
     pub fn update(
         &mut self,
-        shape: Shape,
+        shape: &Shape,
         edges: &EdgeList,
         hull: &[InSet],
         escapable: &[u32],

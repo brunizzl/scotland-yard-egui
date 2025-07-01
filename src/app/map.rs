@@ -23,7 +23,7 @@ mod storage_keys {
 }
 
 impl Map {
-    pub fn shape(&self) -> Shape {
+    pub fn shape(&self) -> &Shape {
         self.data.shape()
     }
 
@@ -149,7 +149,7 @@ impl Map {
         self.camera.draw_menu(ui);
         let mut change = false;
         ui.collapsing("Spielfeld", |ui| {
-            let mut new_shape = self.shape();
+            let mut new_shape = self.shape().clone();
             ui.label("Form:");
             egui::ComboBox::from_id_salt(&self.data as *const _)
                 .selected_text(self.shape().name_str())
@@ -212,7 +212,7 @@ impl Map {
                     add_disabled_drag_value(ui);
                 },
             }
-            change |= new_shape != self.shape();
+            change |= &new_shape != self.shape();
             ui.add_space(8.0);
             let min = new_shape.min_res();
             let max = new_shape.max_res();

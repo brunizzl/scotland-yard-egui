@@ -135,7 +135,7 @@ impl VertexColorInfo {
             },
             VertexColorInfo::Escape3Grid
             | VertexColorInfo::Escape23Grid
-            | VertexColorInfo::RobberCone => shape == TriangGrid,
+            | VertexColorInfo::RobberCone => shape == &TriangGrid,
             VertexColorInfo::RobberVertexClass | VertexColorInfo::VertexEquivalenceClasses => {
                 matches!(map.data().sym_group(), SymGroup::Explicit(_))
             },
@@ -228,7 +228,7 @@ impl VertexSymbolInfo {
             VertexSymbolInfo::Escape2Grid | VertexSymbolInfo::EscapeConeGrid => {
                 matches!(shape, TriangTorus | TriangGrid | SquareTorus | SquareGrid)
             },
-            VertexSymbolInfo::Escape3Grid | VertexSymbolInfo::Escape23Grid => shape == TriangGrid,
+            VertexSymbolInfo::Escape3Grid | VertexSymbolInfo::Escape23Grid => shape == &TriangGrid,
             VertexSymbolInfo::VertexEquivalenceClass => {
                 matches!(map.data().sym_group(), SymGroup::Explicit(_))
             },

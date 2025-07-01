@@ -234,7 +234,7 @@ impl EscapableNodes {
     /// these regions will now be deleted in regions where third cops could otherwise interfere.
     fn consider_interior_cops(
         &mut self,
-        _shape: Shape,
+        _shape: &Shape,
         cops: &[Character],
         hull_data: &CopsHull,
         edges: &EdgeList,
@@ -461,7 +461,7 @@ impl EscapableNodes {
     /// ignores cops in interior of hull, computes safe regions only with respect to boundary cops
     fn consider_boundary_cops(
         &mut self,
-        _shape: Shape,
+        _shape: &Shape,
         cops: &[Character],
         hull_data: &CopsHull,
         edges: &EdgeList,
@@ -553,7 +553,7 @@ impl EscapableNodes {
 
     pub fn update(
         &mut self,
-        shape: Shape,
+        shape: &Shape,
         cops: &[Character],
         hull_data: &CopsHull,
         edges: &EdgeList,
