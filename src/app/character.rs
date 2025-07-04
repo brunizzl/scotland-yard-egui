@@ -12,10 +12,7 @@ use egui::{Color32, Painter, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use crate::{
     app::bruteforce_state::GameType,
     geo::{Pos3, Vec3},
-    graph::{
-        EdgeList, Embedding3D,
-        bruteforce::{MAX_COPS, RawCops},
-    },
+    graph::{EdgeList, Embedding3D, bruteforce as bf},
 };
 
 use super::{DrawContext, add_drag_value, map, style::Style};
@@ -439,6 +436,9 @@ pub struct State {
     pub robber_changed: bool,
     #[serde(skip)]
     pub cop_changed: bool,
+
+    #[serde(skip)]
+    rules: bf::DynRules,
 }
 
 impl State {
@@ -470,7 +470,13 @@ impl State {
 
             robber_changed: false,
             cop_changed: false,
+
+            rules: bf::DynRules::Lazy,
         }
+    }
+
+    pub fn rules(&self) -> bf::DynRules {
+        self.rules
     }
 
     pub fn last_moved(&self) -> Option<&Character> {
@@ -872,6 +878,28 @@ impl State {
         let mut change = false;
         ui.collapsing("Figuren / Züge", |ui| {
             ui.horizontal(|ui| {
+                let mut rules = self.rules;
+                ui.radio_value(&mut rules, bf::DynRules::Lazy, "Lazy")
+                    .on_hover_text("Pro Runde darf ein Cop eine Kante ziehen.");
+                ui.radio_value(&mut rules, bf::DynRules::Eager, "Eager")
+                    .on_hover_text("Pro Runde darf jeder Cop eine Kante ziehen.");
+                let mixed_radio =
+                    ui.radio(matches!(rules, bf::DynRules::GeneralEagerCops(_)), "Mix");
+                if mixed_radio.clicked() {
+                    rules = bf::DynRules::GeneralEagerCops(1);
+                }
+                mixed_radio.on_hover_text(
+                    "Pro Runde dürfen maximal <Anzahl> viele Cops eine Kante ziehen.",
+                );
+                if let bf::DynRules::GeneralEagerCops(n) = &mut rules {
+                    let range = 2..=(self.active_cops().count() as u32).max(2);
+                    let drag = egui::DragValue::new(n).range(range);
+                    ui.add(drag);
+                }
+                self.rules = rules;
+            });
+
+            ui.horizontal(|ui| {
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
                 let minus_text = format!("- Figur ({minus_emoji})");
                 let plus_text = format!("+ Figur ({})", self.next_id().emoji());
@@ -1129,14 +1157,15 @@ impl State {
     /// this function is only really of use, when the [`GameType`] returned as `.1`
     /// is computed as bruteforce thingy.
     /// It is thus ok to return [`RawCops`], because bruteforce also needs to respect `MAX_COPS`.
-    pub fn police_state(&self, con: &DrawContext<'_>) -> (RawCops, GameType) {
+    pub fn police_state(&self, con: &DrawContext<'_>) -> (bf::RawCops, GameType) {
         let active_cops = self.active_cop_vertices();
-        let raw_nr_cops = usize::min(active_cops.len(), MAX_COPS);
-        let raw_cops = RawCops::new(&active_cops[..raw_nr_cops]);
+        let raw_nr_cops = usize::min(active_cops.len(), bf::MAX_COPS);
+        let raw_cops = bf::RawCops::new(&active_cops[..raw_nr_cops]);
         let game_type = GameType {
             nr_cops: active_cops.len(),
             resolution: con.map.resolution(),
             shape: con.map.shape().clone(),
+            rules: self.rules,
         };
         (raw_cops, game_type)
     }

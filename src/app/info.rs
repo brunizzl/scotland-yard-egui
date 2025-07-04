@@ -712,7 +712,7 @@ impl Info {
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
         let nr_cops = self.characters.active_cops().count();
-        self.worker.draw_menu(nr_cops, ui, map);
+        self.worker.draw_menu(nr_cops, self.characters.rules(), ui, map);
         if NATIVE {
             ui.collapsing("📷 Screenshots", |ui| {
                 ui.horizontal(|ui| {
@@ -1787,6 +1787,7 @@ impl Info {
     }
 
     fn draw_best_cop_moves(&self, con: &DrawContext<'_>) {
+        // TODO: not assume the rules to be lazy cops
         if !self.options.show_cop_strat {
             return;
         }
@@ -1813,7 +1814,8 @@ impl Info {
             return;
         }
 
-        for neigh_cops in bf::raw_lazy_cop_moves_from(con.edges, curr_repr) {
+        use bf::Rules;
+        for neigh_cops in bf::LazyCops.raw_cop_moves_from(con.edges, curr_repr) {
             let (neigh_transforms, neigh_index) = strat.pack(&neigh_cops);
             let transformed_robber_v = neigh_transforms[0].apply_forward(robber_v_in_curr);
             let nr_moves_left = strat.time_to_win.nr_moves_left(neigh_index);

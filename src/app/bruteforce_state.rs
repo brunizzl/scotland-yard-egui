@@ -7,27 +7,30 @@ use super::*;
 use crate::graph::{Automorphism, ExplicitClasses, SymmetryGroup, bruteforce as bf};
 use crate::graph::{Embedding3D, NoSymmetry};
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GameType {
     pub nr_cops: usize,
     pub resolution: usize,
     pub shape: crate::graph::Shape,
+    pub rules: bf::DynRules,
 }
 
 impl GameType {
     fn file_name(&self, folder: &str) -> PathBuf {
         PathBuf::from(format!(
-            "{}/{}-{}-{}.msgpack",
+            "{}/{}-{}-{}{}.msgpack",
             folder,
             self.nr_cops,
             self.shape.to_sting(),
-            self.resolution
+            self.resolution,
+            self.rules.id_string(self.nr_cops),
         ))
     }
 
     fn as_tuple_string(&self) -> String {
         format!(
-            "({}, {}, {})",
+            "({}, {}, {}, {})",
+            self.rules.name(),
             self.nr_cops,
             self.shape.to_sting(),
             self.resolution
@@ -183,6 +186,7 @@ impl BruteforceComputationState {
                 nr_cops: usize::MAX,
                 resolution: 0,
                 shape: crate::graph::Shape::Icosahedron,
+                rules: bf::DynRules::Lazy,
             },
             robber_strat_stored: false,
             cops_strat_stored: false,
@@ -260,12 +264,10 @@ impl BruteforceComputationState {
         }
     }
 
-    fn start_computation(&mut self, nr_cops: usize, map: &map::Map) {
-        let game_type = GameType {
-            nr_cops,
-            resolution: map.resolution(),
-            shape: map.shape().clone(),
-        };
+    fn start_computation(&mut self, map: &map::Map) {
+        let game_type = self.curr_game_type.clone();
+        let rules = game_type.rules;
+        let nr_cops = game_type.nr_cops;
         let edges = map.edges().clone();
         let (here, mut there) = bf::thread_manager::build_managers();
         let here = Some(here);
@@ -274,7 +276,7 @@ impl BruteforceComputationState {
                 let cloned_sym = $sym.clone();
                 let work = move || {
                     let sym = $transform_sym(cloned_sym);
-                    let res = bf::compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
+                    let res = rules.compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
                     (res, Confidence::SymmetryOnly).into()
                 };
                 self.employ_worker(game_type, work, here, WorkTask::Compute);
@@ -296,34 +298,32 @@ impl BruteforceComputationState {
         }
     }
 
-    fn start_strat_computation(&mut self, nr_cops: usize, map: &map::Map) {
-        let game_type = GameType {
-            nr_cops,
-            resolution: map.resolution(),
-            shape: map.shape().clone(),
-        };
+    fn start_strat_computation(&mut self, map: &map::Map) {
+        let game_type = self.curr_game_type.clone();
+        let nr_cops = game_type.nr_cops;
+        let rules = game_type.rules;
         let edges = map.edges().clone();
         let (here, there) = bf::thread_manager::build_managers();
         let here = Some(here);
         match map.data().sym_group() {
             SymGroup::Explicit(equiv) => {
                 let sym = equiv.clone();
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &there).into();
+                let work = move || rules.compute_cop_strategy(nr_cops, edges, sym, &there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::Torus6(torus) => {
                 let sym = ExplicitClasses::from(torus);
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &there).into();
+                let work = move || rules.compute_cop_strategy(nr_cops, edges, sym, &there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::Torus4(torus) => {
                 let sym = ExplicitClasses::from(torus);
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &there).into();
+                let work = move || rules.compute_cop_strategy(nr_cops, edges, sym, &there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
             SymGroup::None(none) => {
                 let sym = *none;
-                let work = move || bf::compute_cop_strategy(nr_cops, edges, sym, &there).into();
+                let work = move || rules.compute_cop_strategy(nr_cops, edges, sym, &there).into();
                 self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
             },
         }
@@ -355,6 +355,7 @@ impl BruteforceComputationState {
 
     fn verify_result(&mut self, game_type: GameType, mut outcome: GameOutcome) {
         let game_type_clone = game_type.clone();
+        let rules = game_type_clone.rules;
         let (here, there) = bf::thread_manager::build_managers();
         let here = Some(here);
         let work = move || {
@@ -362,7 +363,7 @@ impl BruteforceComputationState {
             let nr_map_vertices = edges.nr_vertices();
             let sym = NoSymmetry::new(nr_map_vertices);
             let res_without =
-                bf::compute_safe_robber_positions(game_type.nr_cops, edges, sym, &there);
+                rules.compute_safe_robber_positions(game_type.nr_cops, edges, sym, &there);
             let outcome_without = match res_without {
                 Ok(ok) => ok,
                 Err(err) => return WorkResult::new_res_err(outcome, err),
@@ -435,7 +436,7 @@ impl BruteforceComputationState {
                 Ok(res) => {
                     let error = if let bf::Outcome::RobberWins(data) = &res.outcome {
                         let edges = game_type.create_edges();
-                        bf::verify_continuity(data, &edges, &there).err()
+                        game_type.rules.verify_continuity(data, &edges, &there).err()
                     } else {
                         None
                     };
@@ -491,7 +492,8 @@ impl BruteforceComputationState {
         };
         ui.add(
             Label::new(format!(
-                "Räuber {outcome_str} gegen {cops_str} auf {} mit Auflösung {} {confidence_str}",
+                "Räuber {outcome_str} gegen {cops_str} ({}) auf {} mit Auflösung {} {confidence_str}",
+                game_type.rules.name(),
                 game_type.shape.to_sting(),
                 game_type.resolution
             ))
@@ -511,10 +513,8 @@ impl BruteforceComputationState {
 
         ui.add(
             Label::new(format!(
-                "{} {}{} auf {} mit Auflösung {} (max. {} Züge)",
-                cops_str,
-                outcome,
-                outcome_end,
+                "{cops_str} ({}) {outcome}{outcome_end} auf {} mit Auflösung {} (max. {} Züge)",
+                game_type.rules.name(),
                 game_type.shape.to_sting(),
                 game_type.resolution,
                 strat.max_moves,
@@ -682,13 +682,14 @@ impl BruteforceComputationState {
         }
     }
 
-    pub fn draw_menu(&mut self, nr_cops: usize, ui: &mut Ui, map: &map::Map) {
+    pub fn draw_menu(&mut self, nr_cops: usize, rules: bf::DynRules, ui: &mut Ui, map: &map::Map) {
         ui.collapsing("Bruteforce", |ui| {
             self.check_on_workers();
             let game_type = GameType {
                 nr_cops,
                 resolution: map.resolution(),
                 shape: map.shape().clone(),
+                rules,
             };
             if game_type != self.curr_game_type {
                 self.curr_game_type = game_type.clone();
@@ -745,7 +746,7 @@ impl BruteforceComputationState {
                     .on_hover_text(disclaimer)
                     .clicked()
                 {
-                    self.start_computation(nr_cops, map);
+                    self.start_computation(map);
                 }
                 let enable_load = self.robber_strat_stored && !curr_known;
                 let load_button = Button::new("laden 🖴");
@@ -767,7 +768,7 @@ impl BruteforceComputationState {
                     .on_hover_text(disclaimer)
                     .clicked()
                 {
-                    self.start_strat_computation(nr_cops, map);
+                    self.start_strat_computation(map);
                 }
                 let enable_load = self.cops_strat_stored && !curr_known;
                 let load_button = Button::new("laden 🖴");

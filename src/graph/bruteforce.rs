@@ -12,6 +12,9 @@ pub mod thread_manager;
 mod queues;
 use queues::{CopStratQueue, RobberStratQueue};
 
+mod rules;
+pub use rules::*;
+
 /// maximum number of cops for which a bruteforce computation can be started.
 /// is not too detrimental, that this number is small,
 /// because the computation is ungodly expensive anyway.
@@ -106,7 +109,7 @@ fn multiset_count(universe_size: usize, cardinality: usize) -> Option<usize> {
 /// this corresponds to one entry in CopConfigurations:
 /// [`self.fst_cop`] is expected to be a vertex symmetry class representative and the (rotated / mirrored) position of one of the cops.
 /// [`self.rest_cops`] represents the compacted sorted tuple of the other cops positions (obv. rotated the same as fst_cop).
-/// thus `(0..nr_symmetry_classes).contains(&self.fst_cop)` and `self.nr_rest_cops < nr_map_vertices * nr_cops`
+/// thus `(0..nr_symmetry_classes).contains(&self.fst_cop)`
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct CompactCops {
     fst_cop: usize,
@@ -138,87 +141,6 @@ fn pack_rest(nr_vertices: usize, other_cops: &[usize]) -> usize {
         positions += cop;
     }
     positions
-}
-
-/// returns all cop configurations reachable in a single lazy-cop move from [`cops`],
-/// except the do-nothing move.
-/// the resulting iterator will not yield configurations as stored, but as they are actually reachable.
-pub fn raw_lazy_cop_moves_from(
-    edges: &EdgeList,
-    cops: RawCops,
-) -> impl Iterator<Item = RawCops> + '_ + Clone {
-    (0..cops.nr_cops).flat_map(move |i| {
-        let cop_i_pos = cops[i];
-        edges.neighbors_of(cop_i_pos).map(move |n| {
-            let mut unpacked_neigh = cops;
-            unpacked_neigh[i] = n;
-            unpacked_neigh
-        })
-    })
-}
-
-/// this function does not allocate, just like the [`raw_lazy_cop_moves_from`] specialisation.
-#[allow(dead_code)]
-pub fn raw_general_cop_moves_from(
-    edges: &EdgeList,
-    cops: RawCops,
-    max_moving_cops: u32,
-) -> impl Iterator<Item = RawCops> + '_ + Clone {
-    use arrayvec::ArrayVec;
-    let moving_cop_bits = 1..(1 << (cops.len()));
-    let allowed_moving_combinations =
-        moving_cop_bits.filter(move |&bits: &i32| bits.count_ones() <= max_moving_cops);
-
-    allowed_moving_combinations.flat_map(move |select_moving| {
-        let is_selected = |i| select_moving & (1 << i) != 0;
-
-        let non_moving_cops = RawCops::from_iter(
-            (0..cops.len()).filter_map(|i| (!is_selected(i)).then_some(cops[i])),
-        );
-
-        // idea: curr_moving is kinda like a c++ iterator array,
-        // as in we can take the current value of the iterator (slice index 0)
-        // whilst also advancing the iterator (set slice to subslice of itself).
-        // if the subslice is empty, all move options for this cop are exausted,
-        // thus we advance the cop further down the list and reset ouselfs to the full list of options.
-        // the moving_cops_neighs variable is read every time a part of curr_moving is reset.
-        // because this process should stop after the options for the last cop are exausted (and not reset)
-        // we set the "refreshing value" for the last cop to length 0.
-        let mut moving_cops_neighs: ArrayVec<_, MAX_COPS> = (0..cops.len())
-            .filter_map(|i| is_selected(i).then_some(edges.raw_neighbors_of(cops[i])))
-            .collect();
-        let mut curr_moving = moving_cops_neighs.clone();
-        if let Some(l) = moving_cops_neighs.last_mut() {
-            // set the "refreshing value" to be empty
-            *l = &l[0..0];
-        }
-
-        let yield_next = move || -> Option<_> {
-            let mut res = non_moving_cops;
-            for (i, step_options) in izip!(res.nr_cops.., &curr_moving) {
-                // this can only be any other than the step_options of the last cop,
-                // if some cop stands on an isolated vertex.
-                if step_options.is_empty() {
-                    return None;
-                }
-                res.cops[i] = step_options[0].get().unwrap();
-            }
-            res.nr_cops = cops.nr_cops;
-            // advance to the next value (this is like a counter, except every digit potentially has a different base)
-            for (all_steps, left_steps) in izip!(&moving_cops_neighs, &mut curr_moving) {
-                *left_steps = &left_steps[1..];
-                if left_steps.is_empty() {
-                    *left_steps = all_steps;
-                } else {
-                    break;
-                }
-            }
-
-            Some(res)
-        };
-
-        std::iter::from_fn(yield_next)
-    })
 }
 
 impl CopConfigurations {
@@ -383,34 +305,6 @@ impl CopConfigurations {
         )
     }
 
-    /// returns all cop positions reachable in a single lazy-cop move from positions, except the do-nothing move.
-    /// because these positions may be stored in a different rotation and / or flipped, that rotation + flip to get from
-    /// the move as rotated in the input to the output is also returned (see [`Self::pack`])
-    pub fn lazy_cop_moves_from<'a, S: SymmetryGroup>(
-        &'a self,
-        edges: &'a EdgeList,
-        sym: &'a S,
-        positions: CompactCopsIndex,
-    ) -> impl Iterator<Item = (SmallVec<[&'a S::Auto; 4]>, CompactCopsIndex)> + 'a + Clone {
-        raw_lazy_cop_moves_from(edges, self.eager_unpack(positions))
-            .map(|mut cops| self.pack(sym, &mut cops))
-    }
-
-    /// returns all cop positions reachable in a single round from `cops`,
-    /// given up to `max_moving_cops` are allowed to move in a single round.
-    /// note: this is currently more of a proof of concept due to a lot of unessecairy allocations.
-    #[allow(dead_code)]
-    pub fn general_cop_moves_from<'a, S: SymmetryGroup>(
-        &'a self,
-        edges: &'a EdgeList,
-        sym: &'a S,
-        positions: CompactCopsIndex,
-        max_moving_cops: u32,
-    ) -> impl Iterator<Item = (SmallVec<[&'a S::Auto; 4]>, CompactCopsIndex)> + 'a + Clone {
-        raw_general_cop_moves_from(edges, self.eager_unpack(positions), max_moving_cops)
-            .map(|mut cops| self.pack(sym, &mut cops))
-    }
-
     pub fn all_positions(&self) -> impl Iterator<Item = CompactCopsIndex> + '_ {
         self.configurations.iter().flat_map(move |(&k, configs_part)| {
             (0..configs_part.len()).map(move |i| CompactCopsIndex { fst_index: k, rest_index: i })
@@ -564,7 +458,8 @@ pub enum Outcome {
 ///
 /// the whole thing is somewhat more complicated by the fact, that neighboring cop states `c` and `c'` may not both be stored in the same
 /// rotation. therefore one needs to constantly rotate between the two.
-pub fn compute_safe_robber_positions<S>(
+fn compute_safe_robber_positions<S, R>(
+    rules: R,
     nr_cops: usize,
     edges: EdgeList,
     sym: S,
@@ -572,6 +467,7 @@ pub fn compute_safe_robber_positions<S>(
 ) -> Result<Outcome, String>
 where
     S: SymmetryGroup + Serialize,
+    R: Rules,
 {
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
@@ -679,13 +575,13 @@ where
 
         //line 7
         for (neigh_rotations, rotated_neigh_cop_positions) in
-            cop_moves.lazy_cop_moves_from(&edges, &sym, curr_cop_positions)
+            rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions)
         {
             //if it only takes a single move to go from curr_cop_positions to rotated_neigh_cop_positions, so
             //should the other direction.
             debug_assert!(
-                cop_moves
-                    .lazy_cop_moves_from(&edges, &sym, rotated_neigh_cop_positions)
+                rules
+                    .cop_moves_from(&cop_moves, &edges, &sym, rotated_neigh_cop_positions)
                     .any(|(_, pos)| pos == curr_cop_positions)
             );
             debug_assert!(!neigh_rotations.is_empty());
@@ -695,31 +591,33 @@ where
                 //line 8
                 let mut f_neighbor_changed_this_rotation = false;
                 //guarantee that rotations do the right thing
-                debug_assert!({
-                    let mut unpacked_curr = cop_moves.eager_unpack(curr_cop_positions);
-                    //all positions of current cop configuration.
-                    let mut moved_cop_pos = usize::MAX;
-                    for rotated_neigh_pos in cop_moves.unpack(rotated_neigh_cop_positions) {
-                        let unrotated = neigh_rotate.apply_backward(rotated_neigh_pos);
-                        let rerotated = neigh_rotate.apply_forward(unrotated);
-                        debug_assert_eq!(rerotated, rotated_neigh_pos);
-                        //if the neighbor configuration's position is found in curr configuration,
-                        //remove entry from curr configuration.
-                        if let Some(i) = unpacked_curr.iter().position(|&c| c == unrotated) {
-                            unpacked_curr[i] = usize::MAX;
-                        } else {
-                            //position is not found -> that must have been the cop that moved.
-                            //remember for later.
-                            debug_assert!(moved_cop_pos == usize::MAX);
-                            moved_cop_pos = unrotated;
+                debug_assert!(
+                    !R::IS_LAZY || {
+                        let mut unpacked_curr = cop_moves.eager_unpack(curr_cop_positions);
+                        //all positions of current cop configuration.
+                        let mut moved_cop_pos = usize::MAX;
+                        for rotated_neigh_pos in cop_moves.unpack(rotated_neigh_cop_positions) {
+                            let unrotated = neigh_rotate.apply_backward(rotated_neigh_pos);
+                            let rerotated = neigh_rotate.apply_forward(unrotated);
+                            debug_assert_eq!(rerotated, rotated_neigh_pos);
+                            //if the neighbor configuration's position is found in curr configuration,
+                            //remove entry from curr configuration.
+                            if let Some(i) = unpacked_curr.iter().position(|&c| c == unrotated) {
+                                unpacked_curr[i] = usize::MAX;
+                            } else {
+                                //position is not found -> that must have been the cop that moved.
+                                //remember for later.
+                                debug_assert!(moved_cop_pos == usize::MAX);
+                                moved_cop_pos = unrotated;
+                            }
                         }
+                        //now only the curr position of the cop which just moved there should be left in unpacked_curr.
+                        debug_assert!(moved_cop_pos != usize::MAX);
+                        unpacked_curr.iter().all(|&c| {
+                            c == usize::MAX || edges.neighbors_of(c).contains(&moved_cop_pos)
+                        })
                     }
-                    //now only the curr position of the cop which just moved there should be left in unpacked_curr.
-                    debug_assert!(moved_cop_pos != usize::MAX);
-                    unpacked_curr
-                        .iter()
-                        .all(|&c| c == usize::MAX || edges.neighbors_of(c).contains(&moved_cop_pos))
-                });
+                );
 
                 for (v, marked_safe_for_neigh) in izip!(
                     neigh_rotate.backward(),
@@ -760,7 +658,7 @@ where
         safe: f,
         cop_moves,
     };
-    debug_assert!(verify_continuity(&result, &edges, manager).is_ok());
+    debug_assert!(verify_continuity(rules, &result, &edges, manager).is_ok());
 
     Ok(Outcome::RobberWins(result))
 }
@@ -771,7 +669,8 @@ where
 /// Said differently: for every move the police can take, if the robber's vertex is currently marked safe,
 /// the robber must be neighboring a safe vertex next move.
 /// Further: there must exist a safe vertex for every police arrangement.
-pub fn verify_continuity(
+fn verify_continuity(
+    rules: impl Rules,
     data: &RobberWinData,
     edges: &EdgeList,
     manager: &thread_manager::LocalManager,
@@ -820,7 +719,7 @@ pub fn verify_continuity(
 
         // verify for every possible previous cop arrangement,
         // a vertex marked safe there still has a safe neighbor here (safe neighbors precomputed).
-        for mut cops_neighs in raw_lazy_cop_moves_from(edges, cops) {
+        for mut cops_neighs in rules.raw_cop_moves_from(edges, cops) {
             for (v, &safe_before_curr, safe_last_move) in izip!(
                 0..,
                 &safe_should_cops_move_to_curr,
@@ -921,7 +820,8 @@ impl CopStrategy {
     }
 }
 
-pub fn compute_cop_strategy<S>(
+fn compute_cop_strategy<S, R>(
+    rules: R,
     nr_cops: usize,
     edges: EdgeList,
     sym: S,
@@ -929,6 +829,7 @@ pub fn compute_cop_strategy<S>(
 ) -> Result<CopStrategy, String>
 where
     S: SymmetryGroup + Serialize,
+    R: Rules,
 {
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
@@ -1010,7 +911,7 @@ where
         }
 
         for (neigh_rotations, rotated_neigh_cop_positions) in
-            cop_moves.lazy_cop_moves_from(&edges, &sym, curr_cop_positions)
+            rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions)
         {
             let mut f_neighbor_changed = false;
             for neigh_rotate in neigh_rotations {
@@ -1063,13 +964,19 @@ mod test {
     use super::*;
     use crate::graph::{Embedding3D, Shape};
 
-    fn lazy_cop_number(g: &Embedding3D) -> Option<usize> {
+    fn cop_number(rules: impl Rules + Clone, g: Embedding3D) -> Option<usize> {
         let mut nr = 1;
         let sym = g.sym_group().to_explicit();
         let (_, manager) = thread_manager::build_managers();
         loop {
-            let robber_strat =
-                compute_safe_robber_positions(nr, g.edges().clone(), sym.clone(), &manager).ok()?;
+            let robber_strat = compute_safe_robber_positions(
+                rules.clone(),
+                nr,
+                g.edges().clone(),
+                sym.clone(),
+                &manager,
+            )
+            .ok()?;
             if let Outcome::CopsWin = robber_strat {
                 return Some(nr);
             }
@@ -1078,14 +985,19 @@ mod test {
     }
 
     #[test]
-    fn test_lazy_cop_numbers() {
-        let c_l = |s, res| lazy_cop_number(&Embedding3D::new_map_from(s, res));
+    fn test_cop_numbers() {
+        let eager = GeneralEagerCops(MAX_COPS as u32);
+        let c_e = |s, res| cop_number(eager, Embedding3D::new_map_from(s, res));
+        let c_l = |s, res| cop_number(LazyCops, Embedding3D::new_map_from(s, res));
 
         assert_eq!(c_l(Shape::Cube, 0), Some(2));
         assert_eq!(c_l(Shape::Dodecahedron, 0), Some(3));
+        assert_eq!(c_e(Shape::Dodecahedron, 0), Some(3));
         assert_eq!(c_l(Shape::Icosahedron, 1), Some(3));
+        assert_eq!(c_e(Shape::Icosahedron, 1), Some(2));
         assert_eq!(c_l(Shape::TriangTorus, 3), Some(2));
         assert_eq!(c_l(Shape::TriangTorus, 4), Some(3));
+        assert_eq!(c_e(Shape::TriangTorus, 4), Some(2));
         assert_eq!(c_l(Shape::SquareGrid, 5), Some(2));
     }
 
@@ -1109,9 +1021,12 @@ mod test {
         };
 
         // test case 1: lazy cops means a single cop can move
-        let mut lazy_1 =
-            raw_lazy_cop_moves_from(q10.edges(), old_cops).map(sort_cops).collect_vec();
-        let mut lazy_2 = raw_general_cop_moves_from(q10.edges(), old_cops, 1)
+        let mut lazy_1 = LazyCops
+            .raw_cop_moves_from(q10.edges(), old_cops)
+            .map(sort_cops)
+            .collect_vec();
+        let mut lazy_2 = GeneralEagerCops(1)
+            .raw_cop_moves_from(q10.edges(), old_cops)
             .map(sort_cops)
             .collect_vec();
         lazy_1.sort_by(|a, b| (&a[..]).cmp(&b[..]));
@@ -1119,7 +1034,8 @@ mod test {
         assert_eq!(lazy_1, lazy_2);
 
         // test case 2: eager cops means all cops can move.
-        let mut eager_1 = raw_general_cop_moves_from(q10.edges(), old_cops, 4)
+        let mut eager_1 = GeneralEagerCops(4)
+            .raw_cop_moves_from(q10.edges(), old_cops)
             .map(sort_cops)
             .collect_vec();
         eager_1.push(old_cops);
@@ -1141,11 +1057,12 @@ mod test {
         // between the extremes: if more cops are allowed to move,
         // all moves with fewer moving cops should still be contained.
         let mut allowed_moves: std::collections::HashSet<_> =
-            raw_general_cop_moves_from(q10.edges(), old_cops, 0).collect();
+            GeneralEagerCops(0).raw_cop_moves_from(q10.edges(), old_cops).collect();
         assert!(allowed_moves.is_empty());
         for max_moving_cops in 1..=4 {
-            let moves: std::collections::HashSet<_> =
-                raw_general_cop_moves_from(q10.edges(), old_cops, max_moving_cops).collect();
+            let moves: std::collections::HashSet<_> = GeneralEagerCops(max_moving_cops)
+                .raw_cop_moves_from(q10.edges(), old_cops)
+                .collect();
             assert!(moves.is_superset(&allowed_moves));
             assert!(allowed_moves.len() < moves.len());
 
