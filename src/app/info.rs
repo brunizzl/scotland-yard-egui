@@ -1212,7 +1212,12 @@ impl Info {
 
         if let Some(key) = held_key {
             let id = egui::Id::new((&self.options as *const _, "tooltip-fast-switch"));
-            egui::show_tooltip(ui.ctx(), ui.layer_id(), id, |ui| {
+            let anchor = if ui.input(|info| info.pointer.has_pointer()) {
+                egui::PopupAnchor::Pointer
+            } else {
+                egui::PopupAnchor::Position(ui.ctx().screen_rect().center())
+            };
+            egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), id, anchor).show(|ui| {
                 let opts = &self.options;
                 let add_unwrapped = |ui: &mut Ui, txt| {
                     ui.add(Label::new(txt).wrap_mode(egui::TextWrapMode::Extend));
@@ -1513,15 +1518,15 @@ impl Info {
                 }
             },
             VertexColorInfo::RobberCone => {
-                if let Some(g) = graph::grid::GridGraph::try_from(con.map.data()) {
-                    if let Some(r) = self.characters.active_robber() {
-                        let robber_coords = g.coordinates_of(r.vertex());
-                        let shown = graph::grid::Dirs(self.options.shown_escape_directions);
-                        for (v, util) in izip!(0.., utils_iter) {
-                            let v_coords = g.coordinates_of(v);
-                            let dirs_to_v = (v_coords - robber_coords).dirs(g.norm);
-                            draw_if!(shown.intersection(dirs_to_v) == dirs_to_v, util);
-                        }
+                if let Some(g) = graph::grid::GridGraph::try_from(con.map.data())
+                    && let Some(r) = self.characters.active_robber()
+                {
+                    let robber_coords = g.coordinates_of(r.vertex());
+                    let shown = graph::grid::Dirs(self.options.shown_escape_directions);
+                    for (v, util) in izip!(0.., utils_iter) {
+                        let v_coords = g.coordinates_of(v);
+                        let dirs_to_v = (v_coords - robber_coords).dirs(g.norm);
+                        draw_if!(shown.intersection(dirs_to_v) == dirs_to_v, util);
                     }
                 }
             },

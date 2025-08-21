@@ -168,14 +168,14 @@ impl Camera3D {
 
                 let zoom_delta = self.zoom_delta(info);
                 self.zoom *= zoom_delta;
-                if zoom_delta != 1.0 {
-                    if let Some(ptr_pos) = info.pointer.latest_pos() {
-                        //keep fixed point of zoom at mouse pointer
-                        let mid_to_ptr = ptr_pos - screen.center();
-                        let mut zoom_center = self.position.to_vec2() - mid_to_ptr;
-                        zoom_center *= zoom_delta;
-                        self.position = zoom_center.to_pos2() + mid_to_ptr;
-                    }
+                if zoom_delta != 1.0
+                    && let Some(ptr_pos) = info.pointer.latest_pos()
+                {
+                    //keep fixed point of zoom at mouse pointer
+                    let mid_to_ptr = ptr_pos - screen.center();
+                    let mut zoom_center = self.position.to_vec2() - mid_to_ptr;
+                    zoom_center *= zoom_delta;
+                    self.position = zoom_center.to_pos2() + mid_to_ptr;
                 }
             });
         }

@@ -108,17 +108,17 @@ impl TikzPicture {
                     //terrible special case treatment: we know how characters where added and draw character circles
                     //as node with the character symbol in the center.
                     let node_text = 'character_symbol: {
-                        if let Some(Shape::Text(t)) = iter.peek() {
-                            if t.pos.x == c.center.x {
-                                let original_text: &str = &t.galley.job.text;
-                                let color = self.color_name(t.fallback_color);
-                                let scale = text_scale(t);
-                                if let Some(text) = self.text_replacements.get(original_text) {
-                                    let _ = iter.next(); //destroy peeked value as we already use it here
-                                    break 'character_symbol format!(
-                                        " node[color={color}, scale={scale}] {{{text}}}"
-                                    );
-                                }
+                        if let Some(Shape::Text(t)) = iter.peek()
+                            && t.pos.x == c.center.x
+                        {
+                            let original_text: &str = &t.galley.job.text;
+                            let color = self.color_name(t.fallback_color);
+                            let scale = text_scale(t);
+                            if let Some(text) = self.text_replacements.get(original_text) {
+                                let _ = iter.next(); //destroy peeked value as we already use it here
+                                break 'character_symbol format!(
+                                    " node[color={color}, scale={scale}] {{{text}}}"
+                                );
                             }
                         }
                         String::new()

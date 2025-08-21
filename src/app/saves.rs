@@ -253,7 +253,7 @@ impl SavedStates {
                             let nr_chars = s.characters.all().len();
                             format!("{name}\n{nr_chars:2} Figuren auf {shape} ({res}){time}")
                         };
-                        let widget = WidgetText::RichText(RichText::new(text));
+                        let widget = WidgetText::RichText(RichText::new(text).into());
                         widget.into_galley(
                             ui,
                             Some(egui::TextWrapMode::Extend),

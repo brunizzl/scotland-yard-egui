@@ -272,10 +272,10 @@ impl Embedding3D {
             edges,
             sym_group,
         };
-        if is_platonic {
-            if let Some(expl) = ExplicitClasses::new_for_subdivided_platonic(&res, divisions) {
-                res.sym_group = SymGroup::Explicit(expl);
-            }
+        if is_platonic
+            && let Some(expl) = ExplicitClasses::new_for_subdivided_platonic(&res, divisions)
+        {
+            res.sym_group = SymGroup::Explicit(expl);
         }
         res
     }
