@@ -10,6 +10,7 @@ use bruteforce::RawCops;
 
 pub mod explicit;
 pub use explicit::*;
+pub mod skewed_torus;
 pub mod torus;
 
 /// represents a graph automorphism

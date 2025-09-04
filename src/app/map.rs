@@ -174,6 +174,7 @@ impl Map {
                     radio!(Football, Football);
                     radio!(FabianHamann, FabianHamann);
                     radio!(TriangTorus, TriangTorus | TriangGrid);
+                    radio!(TriangTorusSkewed(0), TriangTorusSkewed(_));
                     radio!(SquareTorus, SquareTorus | SquareGrid);
                     //radio!(RegularPolygon2D(6), RegularPolygon2D(_));
                     radio!(Random2D(1337), Random2D(_));
@@ -206,6 +207,9 @@ impl Map {
                 },
                 Shape::Random2D(seed) => {
                     add_drag_value(ui, seed, "Seed", 0..=u32::MAX, 1);
+                },
+                Shape::TriangTorusSkewed(dy) => {
+                    add_drag_value(ui, dy, "Schräglage", 0..=800, 1);
                 },
                 Shape::SquareGrid => {
                     if ui.button(" ↪↩ ").on_hover_text("klebe zu Torus").clicked() {

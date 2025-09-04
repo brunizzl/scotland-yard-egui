@@ -82,6 +82,7 @@ pub enum Shape {
     FabianHamann,
     Dodecahedron,
     TriangTorus,
+    TriangTorusSkewed(isize),
     SquareTorus,
     TriangGrid,
     SquareGrid,
@@ -102,6 +103,7 @@ impl Shape {
             Self::FabianHamann => "Fabian Hamanns Graph",
             Self::Dodecahedron => "Dodekaeder",
             Self::TriangTorus => "Torus (Dreiecke)",
+            Self::TriangTorusSkewed(_) => "Schiefer Torus (Dreiecke)",
             Self::SquareTorus => "Torus (Vierecke)",
             Self::TriangGrid => "Gitter (Dreiecke)",
             Self::SquareGrid => "Gitter (Vierecke)",
@@ -121,6 +123,7 @@ impl Shape {
             Self::Octahedron => "Oktaeder".to_string(),
             Self::Random2D(seed) => format!("Zufaellig-{seed}"),
             Self::TriangTorus => "Torus-Dreiecke".to_string(),
+            Self::TriangTorusSkewed(dy) => format!("Torus-Dreiecke-Schief-{dy}"),
             Self::SquareTorus => "Torus-Vierecke".to_string(),
             Self::TriangGrid => "Gitter-Dreiecke".to_string(),
             Self::SquareGrid => "Gitter-Vierecke".to_string(),
@@ -144,6 +147,7 @@ impl Shape {
             Self::FabianHamann => "⚽F.H.",
             Self::Dodecahedron => "🌐Dod",
             Self::TriangTorus => "🍩6",
+            Self::TriangTorusSkewed(_) => "🍩6S",
             Self::SquareTorus => "🍩4",
             Self::TriangGrid => "✂🍩6",
             Self::SquareGrid => "✂🍩4",
@@ -167,6 +171,7 @@ impl Shape {
             | Self::Random2D(_) => 0,
 
             Self::TriangTorus | Self::SquareTorus | Self::TriangGrid | Self::SquareGrid => 2,
+            Self::TriangTorusSkewed(_) => 3,
 
             Self::Custom(c) => c.basis.min_res(),
         }
@@ -185,7 +190,11 @@ impl Shape {
             | Self::RegularPolygon2D(_)
             | Self::Random2D(_) => 200,
 
-            Self::TriangTorus | Self::SquareTorus | Self::TriangGrid | Self::SquareGrid => 800,
+            Self::TriangTorus
+            | Self::TriangTorusSkewed(_)
+            | Self::SquareTorus
+            | Self::TriangGrid
+            | Self::SquareGrid => 800,
 
             Self::Custom(c) => c.basis.max_res(),
         }
@@ -203,6 +212,7 @@ impl Shape {
             | Self::Dodecahedron => true,
 
             Self::TriangTorus
+            | Self::TriangTorusSkewed(_)
             | Self::SquareTorus
             | Self::TriangGrid
             | Self::SquareGrid

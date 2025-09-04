@@ -725,6 +725,65 @@ impl Embedding3D {
         res
     }
 
+    #[allow(dead_code)]
+    fn new_skewed_torus(dx: isize, dy: isize) -> Self {
+        assert!(isize::max(dx, dy) >= 2);
+        assert!(isize::min(dx, dy) >= 0);
+        let scale = 1.0 / (f32::sqrt((dx * dx + dy * dy) as f32) + 1.0);
+        let x_step = scale * vec3(1.0, 0.0, 0.0);
+        let y_step = scale * vec3(-0.5, f32::sqrt(3.0) / 2.0, 0.0);
+
+        let mut vertices = Vec::new();
+        let mut vertex_indices = std::collections::HashMap::<grid::Coords, usize>::new();
+        let t = equivalence::skewed_torus::Torus6::new(dx, dy);
+        for x_thesis in (-dy)..dx {
+            for y_thesis in (0..(dx + 2 * dy)).rev() {
+                if t.normalize(x_thesis, y_thesis) == (x_thesis, y_thesis) {
+                    let coords = grid::Coords { x: x_thesis, y: -y_thesis };
+                    vertex_indices.insert(coords, vertices.len());
+                    let pos = (coords.x as f32) * x_step + (coords.y as f32) * y_step;
+                    vertices.push(pos.to_pos3());
+                }
+            }
+        }
+        {
+            let avg_pos = Pos3::average(vertices.iter().copied());
+            let offset = pos3(0.0, 0.0, Z_OFFSET_2D) - avg_pos;
+            for v in &mut vertices {
+                *v += offset;
+            }
+        }
+
+        let nr_vertices = vertices.len();
+        let mut edges = EdgeList::new(6, nr_vertices);
+        for (&coords, &v1) in &vertex_indices {
+            for neigh in t.neighbors_of(coords) {
+                let &v2 = vertex_indices.get(&neigh).unwrap();
+                edges.add_directed_edge(v1, v2);
+            }
+        }
+        debug_assert!({
+            for v in 0..nr_vertices {
+                debug_assert_eq!(edges.neighbors_of(v).count(), 6);
+            }
+            true
+        });
+        if dy == 0 {
+            assert_eq!(dx * dx, nr_vertices as isize);
+        }
+
+        sort_neigbors(&mut edges, &vertices);
+        Self {
+            surface: ConvexHull::empty(),
+            shape: Shape::TriangTorusSkewed(dy),
+            edge_dividing_vertices: Vec::new(),
+            inner_vertices: Vec::new(),
+            vertices,
+            edges,
+            sym_group: SymGroup::None(NoSymmetry::new(nr_vertices)),
+        }
+    }
+
     /// rendered flat as two subdivided equilateral triangles.
     /// if wrap: connect the left and right sides and the top and bottom sides.
     /// this is topologically a torus.
@@ -1024,6 +1083,22 @@ impl Embedding3D {
         });
     }
 
+    fn draw_short_edges(
+        &self,
+        to_screen: &geo::ToScreen,
+        painter: &egui::Painter,
+        stroke: egui::Stroke,
+    ) {
+        self.edges.for_each_edge(|v1, v2| {
+            let p1 = self.vertices[v1];
+            let p2 = self.vertices[v2];
+            if (p1 - p2).length_sq() < 0.25 {
+                let points = [to_screen.apply(p1), to_screen.apply(p2)];
+                painter.add(egui::Shape::LineSegment { points, stroke });
+            }
+        });
+    }
+
     fn draw_camera_facing_edges(
         &self,
         to_screen: &geo::ToScreen,
@@ -1084,6 +1159,10 @@ impl Embedding3D {
                 self.draw_all_edges(to_screen, painter, stroke);
                 true
             },
+            Shape::TriangTorusSkewed(_) => {
+                self.draw_short_edges(to_screen, painter, stroke);
+                true
+            },
             Shape::Custom(_) => {
                 self.draw_camera_facing_edges(to_screen, painter, stroke, visible);
                 false
@@ -1121,7 +1200,8 @@ impl Embedding3D {
 
     pub fn new_map_from(shape: Shape, res: usize) -> Self {
         use Shape::*;
-        match shape {
+        let wanted_shape = shape.clone();
+        let result = match shape {
             Icosahedron => Self::new_subdivided_icosahedron(res),
             Octahedron => Self::new_subdivided_octahedron(res),
             Tetrahedron => Self::new_subdivided_tetrahedron(res),
@@ -1147,6 +1227,7 @@ impl Embedding3D {
             SquareTorus => Self::new_subdivided_squares_grid(res as isize, true),
             TriangGrid => Self::new_subdivided_triangle_grid(res as isize, false),
             SquareGrid => Self::new_subdivided_squares_grid(res as isize, false),
+            TriangTorusSkewed(dy) => Self::new_skewed_torus(res as isize, dy),
             Custom(c) => {
                 let mut result = Self::new_map_from(c.basis.clone(), res);
                 for step in &c.build_steps {
@@ -1162,7 +1243,9 @@ impl Embedding3D {
                 result.shape = Custom(c);
                 result
             },
-        }
+        };
+        assert_eq!(result.shape, wanted_shape);
+        result
     }
 
     /// returns all faces of [`Self::surface`], which are touched by `v`.
