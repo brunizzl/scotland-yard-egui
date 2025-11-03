@@ -142,17 +142,12 @@ impl Rules for GeneralEagerCops {
 /// some of these types may carry more data than is stored in their counterpart here.
 /// this additional data however is no additional information,
 /// but stored intermediate results like distances between vertices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DynRules {
+    #[default]
     Lazy,
     Eager,
     GeneralEagerCops(u32),
-}
-
-impl Default for DynRules {
-    fn default() -> Self {
-        Self::Lazy
-    }
 }
 
 impl DynRules {

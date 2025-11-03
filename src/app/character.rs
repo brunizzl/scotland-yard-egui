@@ -1117,13 +1117,45 @@ impl State {
         if !self.show_allowed_next_steps {
             return;
         }
-        let Some(last_moved_character) = self.last_moved() else {
-            return;
+        let mut characters_moved_this_round = [false; 64];
+        let current_turn = 'compute_which_turn: {
+            let Some(last_moved_character) = self.last_moved() else {
+                return;
+            };
+            let placeholder_cop = Id::Cop(0);
+            if last_moved_character.id().is_robber() {
+                break 'compute_which_turn placeholder_cop;
+            }
+            let max_moving_cops = match self.rules {
+                bf::DynRules::Lazy => {
+                    break 'compute_which_turn Id::Robber;
+                },
+                bf::DynRules::Eager => self.active_cops().count(),
+                bf::DynRules::GeneralEagerCops(nr) => nr as usize,
+            };
+            let mut nr_moved_cops = 0;
+            for (ch_i, _) in self.past_moves.iter().rev() {
+                if self.characters[*ch_i].id().is_robber() {
+                    break;
+                }
+                let ch_i = *ch_i % characters_moved_this_round.len();
+                if characters_moved_this_round[ch_i] {
+                    break;
+                }
+                characters_moved_this_round[ch_i] = true;
+                nr_moved_cops += 1;
+            }
+            if nr_moved_cops >= max_moving_cops {
+                break 'compute_which_turn Id::Robber;
+            }
+            placeholder_cop
         };
         let radius = style.size() * con.scale * 6.5;
-        for ch in self.all() {
-            let name = ch.id();
-            if !ch.is_active() || name.same_job(last_moved_character.id()) {
+        for (ch_i, ch) in izip!(0.., self.all()) {
+            if !ch.is_active()
+                || !ch.id().same_job(current_turn)
+                || characters_moved_this_round[ch_i]
+            {
                 continue;
             }
             let Some(&v) = ch.past_vertices().last() else {
