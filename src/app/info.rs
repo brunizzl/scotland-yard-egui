@@ -754,7 +754,7 @@ impl Info {
         let mut new_tool = self.tool;
         egui::Window::new("Manuelle Marker")
             .open(&mut self.options.show_manual_marker_window)
-            .constrain_to(ctx.screen_rect())
+            .constrain_to(ctx.content_rect())
             .show(ctx, |ui| {
                 new_tool = new_tool.draw_mouse_tool_controls(ui);
                 self.manual_markers.draw_selection_window_contents(
@@ -1215,7 +1215,7 @@ impl Info {
             let anchor = if ui.input(|info| info.pointer.has_pointer()) {
                 egui::PopupAnchor::Pointer
             } else {
-                egui::PopupAnchor::Position(ui.ctx().screen_rect().center())
+                egui::PopupAnchor::Position(ui.ctx().content_rect().center())
             };
             egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), id, anchor).show(|ui| {
                 let opts = &self.options;
@@ -1637,7 +1637,7 @@ impl Info {
                 use egui::text::LayoutJob;
                 let mut layout_job = LayoutJob::simple_singleline(txt, font.clone(), color);
                 layout_job.halign = egui::Align::Center;
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
+                let galley = ui.fonts_mut(|f| f.layout_job(layout_job));
                 let screen_pos = con.cam().transform(pos);
                 let above_pos = screen_pos + text_shift;
                 let text =

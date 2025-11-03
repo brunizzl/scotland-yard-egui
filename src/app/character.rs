@@ -227,7 +227,7 @@ impl Character {
         let mut layout_job =
             egui::text::LayoutJob::simple(emoji_str, font, style.symbol_color(), 100.0);
         layout_job.halign = egui::Align::Center;
-        let galley = painter.ctx().fonts(|f| f.layout_job(layout_job));
+        let galley = painter.ctx().fonts_mut(|f| f.layout_job(layout_job));
         let emoji = egui::Shape::Text(egui::epaint::TextShape::new(
             emoji_pos,
             galley,
