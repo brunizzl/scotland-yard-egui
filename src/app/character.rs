@@ -1117,7 +1117,12 @@ impl State {
         if !self.show_allowed_next_steps {
             return;
         }
-        let mut characters_moved_this_round = [false; 64];
+        const MAX_CONSIDERED_COPS: usize = 32;
+        // for each entry in self.characters,
+        // store if this character has moved in the current ongoing round.
+        // note: index 0 is (kinda) wasted, because the robber ends his turn by moving.
+        // note to note: it is not actually wasted, because cop 32 is mapped to index 0 by modulo.
+        let mut cop_moved_this_round = [false; MAX_CONSIDERED_COPS];
         let current_turn = 'compute_which_turn: {
             let Some(last_moved_character) = self.last_moved() else {
                 return;
@@ -1138,11 +1143,11 @@ impl State {
                 if self.characters[*ch_i].id().is_robber() {
                     break;
                 }
-                let ch_i = *ch_i % characters_moved_this_round.len();
-                if characters_moved_this_round[ch_i] {
+                let ch_i_mod = *ch_i % MAX_CONSIDERED_COPS;
+                if cop_moved_this_round[ch_i_mod] {
                     break;
                 }
-                characters_moved_this_round[ch_i] = true;
+                cop_moved_this_round[ch_i_mod] = true;
                 nr_moved_cops += 1;
             }
             if nr_moved_cops >= max_moving_cops {
@@ -1154,7 +1159,7 @@ impl State {
         for (ch_i, ch) in izip!(0.., self.all()) {
             if !ch.is_active()
                 || !ch.id().same_job(current_turn)
-                || characters_moved_this_round[ch_i]
+                || cop_moved_this_round[ch_i % MAX_CONSIDERED_COPS]
             {
                 continue;
             }
