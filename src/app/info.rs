@@ -1458,9 +1458,9 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
-                let (mut active_cops, game_type) = self.characters.police_state(con);
+                let (active_cops, game_type) = self.characters.police_state(con);
                 if let Some(bf::Outcome::RobberWins(data)) = &self.worker.result_for(&game_type) {
-                    let safe_vertices = data.safe_vertices(&mut active_cops);
+                    let safe_vertices = data.safe_vertices(active_cops);
                     for (safe, util) in izip!(safe_vertices, utils_iter) {
                         draw_if!(safe, util);
                     }
@@ -1702,13 +1702,10 @@ impl Info {
                 draw!(0..);
             },
             VertexSymbolInfo::BruteforceCopMoves => {
-                let (active_cops, game_type) = self.characters.police_state(con);
+                let (cops, game_type) = self.characters.police_state(con);
                 if let Some(strat) = self.worker.strats_for(&game_type) {
-                    let (autos, cop_positions) = strat.pack(&active_cops);
-                    let nr_moves_left = strat.time_to_win.nr_moves_left(cop_positions);
-                    let auto = autos[0];
                     let show = |&m: &_| m != bf::UTime::MAX;
-                    draw!(auto.forward().map(|v| nr_moves_left[v]), show);
+                    draw!(strat.times_for(cops), show);
                 }
             },
             VertexSymbolInfo::Debugging => {
@@ -1809,7 +1806,7 @@ impl Info {
             return;
         };
 
-        let curr_nr_moves_left = strat.times_for(&mut cops_rs.clone()).nth(robber_v).unwrap();
+        let curr_nr_moves_left = strat.times_for(cops_rs).nth(robber_v).unwrap();
         if matches!(curr_nr_moves_left, 0 | bf::UTime::MAX) {
             return;
         }
@@ -1829,7 +1826,7 @@ impl Info {
             }
 
             neigh_times.clear();
-            neigh_times.extend(strat.times_for(&mut neigh_cops.clone()));
+            neigh_times.extend(strat.times_for(neigh_cops));
             let best_robber_response = con
                 .edges
                 .neighbors_of(robber_v)

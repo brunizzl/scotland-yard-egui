@@ -422,11 +422,8 @@ where
 impl RobberWinData {
     /// does all the automorphism stuff for one and just returns for each map vertex wether it is safe,
     /// given the passed cop state.
-    pub fn safe_vertices(
-        &self,
-        cops: &mut RawCops,
-    ) -> impl ExactSizeIterator<Item = bool> + '_ + use<'_> {
-        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, cops);
+    pub fn safe_vertices(&self, mut cops: RawCops) -> impl ExactSizeIterator<Item = bool> {
+        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, &mut cops);
         let safe_vertices = self.safe.robber_safe_when(cop_positions);
         autos[0].forward().map(|v| safe_vertices[v])
     }
@@ -721,11 +718,11 @@ fn verify_continuity_robber(
 
         // verify for every possible previous cop arrangement,
         // a vertex marked safe there still has a safe neighbor here (safe neighbors precomputed).
-        for mut cops_neighs in rules.raw_cop_moves_from(edges, cops) {
+        for cops_neighs in rules.raw_cop_moves_from(edges, cops) {
             for (v, &safe_before_curr, safe_last_move) in izip!(
                 0..,
                 &safe_should_cops_move_to_curr,
-                data.safe_vertices(&mut cops_neighs)
+                data.safe_vertices(cops_neighs)
             ) {
                 if safe_last_move && !safe_before_curr {
                     return Err(format!(
@@ -801,11 +798,6 @@ pub struct CopStrategy {
 }
 
 impl CopStrategy {
-    pub fn pack(&self, cops: &[usize]) -> (SmallVec<[&ExplicitAutomorphism; 4]>, CompactCopsIndex) {
-        let mut raw_cops = RawCops::new(cops);
-        self.cop_moves.pack(&self.symmetry, &mut raw_cops)
-    }
-
     /// values not stored because that would break the format are computed here
     pub fn compute_serde_skipped(&mut self) {
         if self.extreme_positions.is_empty() {
@@ -822,11 +814,8 @@ impl CopStrategy {
     }
 
     /// the equivalent of [`RobberWinData::safe_vertices`]
-    pub fn times_for(
-        &self,
-        cops: &mut RawCops,
-    ) -> impl ExactSizeIterator<Item = UTime> + '_ + use<'_> {
-        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, cops);
+    pub fn times_for(&self, mut cops: RawCops) -> impl ExactSizeIterator<Item = UTime> {
+        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, &mut cops);
         let time_left = self.time_to_win.nr_moves_left(cop_positions);
         autos[0].forward().map(|v| time_left[v])
     }
@@ -999,7 +988,7 @@ fn verify_continuity_cops(
     let mut max_rounds_left_cops_to_neigh = vec![UTime::MAX; nr_map_vertices];
     let mut robber_rounds_decrease = vec![false; nr_map_vertices];
     for cops_index in data.cop_moves.all_positions() {
-        let mut cops = data.cop_moves.eager_unpack(cops_index);
+        let cops = data.cop_moves.eager_unpack(cops_index);
         // logging things
         time_until_log_refresh -= 1;
         i_config += 1;
@@ -1010,10 +999,10 @@ fn verify_continuity_cops(
         }
 
         robber_rounds_decrease.fill(false);
-        for mut cops_neigh in rules.raw_cop_moves_from(edges, cops) {
+        for cops_neigh in rules.raw_cop_moves_from(edges, cops) {
             max_rounds_left_cops_to_neigh.fill(0);
             for (v, robber_neighs, cop_neigh_time) in
-                izip!(0.., edges.neighbors(), data.times_for(&mut cops_neigh))
+                izip!(0.., edges.neighbors(), data.times_for(cops_neigh))
             {
                 let set_max_eq = |a: &mut UTime, b: UTime| *a = UTime::max(*a, b);
                 set_max_eq(&mut max_rounds_left_cops_to_neigh[v], cop_neigh_time);
@@ -1022,11 +1011,9 @@ fn verify_continuity_cops(
                 }
             }
 
-            for (v, &robber_neigh_max, curr_rounds_left) in izip!(
-                0..,
-                &max_rounds_left_cops_to_neigh,
-                data.times_for(&mut cops)
-            ) {
+            for (v, &robber_neigh_max, curr_rounds_left) in
+                izip!(0.., &max_rounds_left_cops_to_neigh, data.times_for(cops))
+            {
                 // assuming police state `cops` occurs before police state `cops_neigh`,
                 // the found number of moves left in the current position is not optimal.
                 if curr_rounds_left.saturating_sub(1) > robber_neigh_max {

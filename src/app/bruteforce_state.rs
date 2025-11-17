@@ -337,8 +337,8 @@ impl BruteforceComputationState {
         );
         for cops_index in no_sym.cop_moves.all_positions() {
             let mut cops = no_sym.cop_moves.eager_unpack(cops_index);
-            let safe_with_sym = sym.safe_vertices(&mut cops);
-            let safe_without_sym = no_sym.safe_vertices(&mut cops);
+            let safe_with_sym = sym.safe_vertices(cops);
+            let safe_without_sym = no_sym.safe_vertices(cops);
             for (v, s1, s2) in izip!(0.., safe_with_sym, safe_without_sym) {
                 if s1 != s2 {
                     let (autos, repr) = sym.symmetry.power_repr(&mut cops);
