@@ -5,7 +5,7 @@ use std::slice::{Chunks, Iter};
 
 use itertools::Itertools;
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct Index {
     val: u32,

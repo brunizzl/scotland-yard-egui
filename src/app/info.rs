@@ -1792,66 +1792,71 @@ impl Info {
     }
 
     fn draw_best_cop_moves(&self, con: &DrawContext<'_>) {
-        // TODO: not assume the rules to be lazy cops
         if !self.options.show_cop_strat {
             return;
         }
-        let Some(robber) = self.characters.active_robber() else {
+        let Some(robber_v) = self.characters.active_robber().map(Character::vertex) else {
             return;
         };
-        let robber_v = robber.vertex();
-        let (mut active_cops, game_type) = self.characters.police_state(con);
+        let (cops_now, game_type) = self.characters.police_state(con);
+        // rs prefix / postfix is short for "round start",
+        // which is the point in time just after the robber made his (currently) last move.
+        // this is the starting point from which the currently progressing cop move is computed.
+        let Some(cops_rs) = self.characters.police_state_round_start() else {
+            return;
+        };
         let Some(strat) = self.worker.strats_for(&game_type) else {
             return;
         };
 
-        let (_, curr_cop_positions) = strat.pack(&active_cops);
-        let (curr_autos, curr_repr) = strat.symmetry.power_repr(&mut active_cops);
-        let to_curr = |v| curr_autos[0].apply_forward(v);
-        let from_curr = |v| curr_autos[0].apply_backward(v);
-
-        debug_assert!(active_cops[..].iter().all(|&c| curr_repr.contains(&to_curr(c))));
-
-        let robber_v_in_curr = to_curr(robber_v);
-        let curr_nr_moves_left =
-            strat.time_to_win.nr_moves_left(curr_cop_positions)[robber_v_in_curr];
+        let curr_nr_moves_left = strat.times_for(&mut cops_rs.clone()).nth(robber_v).unwrap();
         if matches!(curr_nr_moves_left, 0 | bf::UTime::MAX) {
             return;
         }
 
-        use bf::Rules;
-        for neigh_cops in bf::LazyCops.raw_cop_moves_from(con.edges, curr_repr) {
-            let (neigh_transforms, neigh_index) = strat.pack(&neigh_cops);
-            let transformed_robber_v = neigh_transforms[0].apply_forward(robber_v_in_curr);
-            let nr_moves_left = strat.time_to_win.nr_moves_left(neigh_index);
-            let neigh_chances = con
-                .edges
-                .neighbors_of(transformed_robber_v)
-                .map(|v| nr_moves_left[v])
-                .fold(nr_moves_left[transformed_robber_v], bf::UTime::max);
+        // perhaps TODO if performance is bad:
+        // use current partial move as starting state to dismiss moves starting from cops_rs
+        // that do not result in all cops which already moved in cops_now to occupy their current positions.
+        let neigh_cop_states = game_type.rules.raw_cop_moves_from(con.edges, cops_rs);
 
-            if neigh_chances == curr_nr_moves_left - 1 {
-                let i = izip!(&curr_repr[..], &neigh_cops[..]).position(|(a, b)| a != b).unwrap();
-                let curr_v = from_curr(curr_repr[i]);
-                let next_v = from_curr(neigh_cops[i]);
-                debug_assert!(con.edges.has_edge(curr_v, next_v));
-                debug_assert!(self.characters.active_cops().any(|c| c.vertex() == curr_v));
-                if !con.visible[curr_v] || !con.visible[next_v] {
+        let mut neigh_times = Vec::new();
+        for mut neigh_cops in neigh_cop_states {
+            // filter for moves that respect the current partially advanced cop state
+            if !izip!(&*cops_rs, &*neigh_cops, &*cops_now)
+                .all(|(rs, neigh, now)| now == rs || now == neigh)
+            {
+                continue;
+            }
+
+            neigh_times.clear();
+            neigh_times.extend(strat.times_for(&mut neigh_cops));
+            let best_robber_response = con
+                .edges
+                .neighbors_of(robber_v)
+                .map(|v| neigh_times[v])
+                .fold(neigh_times[robber_v], bf::UTime::max);
+
+            // filter for moves that bring the cops closer to winning
+            if best_robber_response != curr_nr_moves_left - 1 {
+                debug_assert!(best_robber_response >= curr_nr_moves_left);
+                continue;
+            }
+
+            let arrow_stroke = {
+                // add some randomness to arrow color to distinguish different movement options.
+                let hash = neigh_cops.iter().fold(0, |a, b| a ^ b);
+                let delta = ((hash | (hash >> 6) | (hash >> 12)) as u8) & 0b111111;
+                let color = Color32::from_rgba_unmultiplied(100 + delta, 100 - delta, 255, 200);
+                let width = con.scale * 2.5;
+                egui::Stroke { width, color }
+            };
+            for (&rs_v, &next_v) in izip!(&*cops_rs, &*neigh_cops) {
+                if rs_v == next_v || !con.visible[rs_v] || !con.visible[next_v] {
                     continue;
                 }
-
-                let curr_pos = con.vertex_draw_pos(curr_v);
-                let next_pos = con.vertex_draw_pos(next_v);
-                super::add_arrow(
-                    &con.painter,
-                    curr_pos,
-                    next_pos - curr_pos,
-                    egui::Stroke {
-                        width: con.scale * 1.6,
-                        color: Color32::from_rgb(150, 150, 255),
-                    },
-                    4.0,
-                );
+                let arrow_start = con.vertex_draw_pos(rs_v);
+                let arrow_dir = con.vertex_draw_pos(next_v) - arrow_start;
+                super::add_arrow(&con.painter, arrow_start, arrow_dir, arrow_stroke, 3.0);
             }
         }
     }

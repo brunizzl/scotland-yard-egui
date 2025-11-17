@@ -89,8 +89,9 @@ impl Rules for GeneralEagerCops {
             let is_selected = |i| select_moving & (1 << i) != 0;
 
             let non_moving_cops = RawCops::from_iter(
-                (0..cops.len()).filter_map(|i| (!is_selected(i)).then_some(cops[i])),
+                (0..cops.len()).map(|i| if is_selected(i) { usize::MAX } else { cops[i] }),
             );
+            debug_assert_eq!(non_moving_cops.nr_cops, cops.nr_cops);
 
             // idea: curr_moving is kinda like a c++ iterator array,
             // as in we can take the current value of the iterator (slice index 0)
@@ -110,16 +111,24 @@ impl Rules for GeneralEagerCops {
             }
 
             let yield_next = move || -> Option<_> {
-                let mut res = non_moving_cops;
-                for (i, step_options) in izip!(res.nr_cops.., &curr_moving) {
-                    // this can only be any other than the step_options of the last cop,
-                    // if some cop stands on an isolated vertex.
-                    if step_options.is_empty() {
-                        return None;
+                let res = {
+                    let mut res = non_moving_cops;
+                    let mut next_unused_i = 0;
+                    for step_options in &curr_moving {
+                        // this can only be any other than the step_options of the last cop,
+                        // if some cop stands on an isolated vertex.
+                        if step_options.is_empty() {
+                            return None;
+                        }
+                        while res.cops[next_unused_i] != usize::MAX {
+                            next_unused_i += 1;
+                        }
+                        res.cops[next_unused_i] = step_options[0].get().unwrap();
                     }
-                    res.cops[i] = step_options[0].get().unwrap();
-                }
-                res.nr_cops = cops.nr_cops;
+                    debug_assert!(res.iter().all(|&c| c != usize::MAX));
+                    Some(res)
+                };
+
                 // advance to the next value (this is like a counter, except every digit potentially has a different base)
                 for (all_steps, left_steps) in izip!(&moving_cops_neighs, &mut curr_moving) {
                     *left_steps = &left_steps[1..];
@@ -129,8 +138,7 @@ impl Rules for GeneralEagerCops {
                         break;
                     }
                 }
-
-                Some(res)
+                res
             };
 
             std::iter::from_fn(yield_next)
@@ -139,9 +147,9 @@ impl Rules for GeneralEagerCops {
 }
 
 /// this is an enumeration of the types implementing [`Rules`].
-/// some of these types may carry more data than is stored in their counterpart here.
-/// this additional data however is no additional information,
-/// but stored intermediate results like distances between vertices.
+/// in principle, these types may carry more data than is stored in their counterpart here.
+/// this additional data however should only be cashed information like distances between vertices.
+/// Note: as of today (November 2025) no rules make use of this possibility.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DynRules {
     #[default]
@@ -151,6 +159,23 @@ pub enum DynRules {
 }
 
 impl DynRules {
+    pub fn raw_cop_moves_from<'a>(&'a self, edges: &'a EdgeList, cops: RawCops) -> Vec<RawCops> {
+        match self {
+            Self::Lazy => {
+                let rs = LazyCops;
+                rs.raw_cop_moves_from(edges, cops).collect_vec()
+            },
+            Self::Eager => {
+                let rs = GeneralEagerCops(cops.len() as u32);
+                rs.raw_cop_moves_from(edges, cops).collect_vec()
+            },
+            Self::GeneralEagerCops(n) => {
+                let rs = GeneralEagerCops(*n);
+                rs.raw_cop_moves_from(edges, cops).collect_vec()
+            },
+        }
+    }
+
     pub fn compute_cop_strategy<S: SymmetryGroup + Serialize>(
         self,
         nr_cops: usize,
@@ -206,15 +231,15 @@ impl DynRules {
         match self {
             Self::Lazy => {
                 let rs = LazyCops;
-                verify_continuity(rs, data, edges, manager)
+                verify_continuity_robber(rs, data, edges, manager)
             },
             Self::Eager => {
                 let rs = GeneralEagerCops(data.cop_moves.nr_cops as u32);
-                verify_continuity(rs, data, edges, manager)
+                verify_continuity_robber(rs, data, edges, manager)
             },
             Self::GeneralEagerCops(n) => {
                 let rs = GeneralEagerCops(n);
-                verify_continuity(rs, data, edges, manager)
+                verify_continuity_robber(rs, data, edges, manager)
             },
         }
     }

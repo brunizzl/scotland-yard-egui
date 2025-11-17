@@ -821,7 +821,8 @@ impl State {
     }
 
     pub fn active_cop_vertices(&self) -> smallvec::SmallVec<[usize; 8]> {
-        smallvec::SmallVec::from_iter(self.active_cops().map(|c| c.nearest_vertex))
+        let curr_vertex = |c: &Character| *c.past_vertices().last().unwrap_or(&c.nearest_vertex);
+        smallvec::SmallVec::from_iter(self.active_cops().map(curr_vertex))
     }
 
     fn next_id(&self) -> Id {
@@ -1113,54 +1114,51 @@ impl State {
         }
     }
 
+    /// if no piece moved so far, `None` is returned.
+    /// otherwise, let `Some((id, moves))` be the result.
+    /// if it is the robbers' turn, `id == Id::Robber`.
+    /// if it is the cops turn, `id == Id::Cop(0)` and `moves` has one entry for each character,
+    /// where the characters (e.g. cops) that already moved in the current round are set to `true`.
+    fn mark_cops_moved_this_turn(&self) -> Option<(Id, Box<[bool]>)> {
+        const COP: Id = Id::Cop(0);
+        let last_moved_character = self.last_moved()?;
+        let mut moved_this_turn = Box::from(vec![false; self.characters.len()]);
+        if last_moved_character.id().is_robber() {
+            return Some((COP, moved_this_turn));
+        }
+        let max_moving_cops = match self.rules {
+            bf::DynRules::Lazy => {
+                return Some((Id::Robber, moved_this_turn));
+            },
+            bf::DynRules::Eager => self.active_cops().count(),
+            bf::DynRules::GeneralEagerCops(nr) => nr as usize,
+        };
+        let mut nr_moved_cops = 0;
+        for &(ch_i, _) in self.past_moves.iter().rev() {
+            // go back through moves until we find a move of either a robber, or a cop that already moved this round.
+            if self.characters[ch_i].id().is_robber()
+                || std::mem::replace(&mut moved_this_turn[ch_i], true)
+            {
+                break;
+            }
+            nr_moved_cops += 1;
+        }
+        if nr_moved_cops >= max_moving_cops {
+            return Some((Id::Robber, moved_this_turn));
+        }
+        Some((COP, moved_this_turn))
+    }
+
     pub fn draw_allowed_next_steps(&self, style: &CharactersStyle, con: &DrawContext<'_>) {
         if !self.show_allowed_next_steps {
             return;
         }
-        const MAX_CONSIDERED_COPS: usize = 32;
-        // for each entry in self.characters,
-        // store if this character has moved in the current ongoing round.
-        // note: index 0 is (kinda) wasted, because the robber ends his turn by moving.
-        // note to note: it is not actually wasted, because cop 32 is mapped to index 0 by modulo.
-        let mut cop_moved_this_round = [false; MAX_CONSIDERED_COPS];
-        let current_turn = 'compute_which_turn: {
-            let Some(last_moved_character) = self.last_moved() else {
-                return;
-            };
-            let placeholder_cop = Id::Cop(0);
-            if last_moved_character.id().is_robber() {
-                break 'compute_which_turn placeholder_cop;
-            }
-            let max_moving_cops = match self.rules {
-                bf::DynRules::Lazy => {
-                    break 'compute_which_turn Id::Robber;
-                },
-                bf::DynRules::Eager => self.active_cops().count(),
-                bf::DynRules::GeneralEagerCops(nr) => nr as usize,
-            };
-            let mut nr_moved_cops = 0;
-            for (ch_i, _) in self.past_moves.iter().rev() {
-                if self.characters[*ch_i].id().is_robber() {
-                    break;
-                }
-                let ch_i_mod = *ch_i % MAX_CONSIDERED_COPS;
-                if cop_moved_this_round[ch_i_mod] {
-                    break;
-                }
-                cop_moved_this_round[ch_i_mod] = true;
-                nr_moved_cops += 1;
-            }
-            if nr_moved_cops >= max_moving_cops {
-                break 'compute_which_turn Id::Robber;
-            }
-            placeholder_cop
+        let Some((current_turn, moved_this_turn)) = self.mark_cops_moved_this_turn() else {
+            return;
         };
         let radius = style.size() * con.scale * 6.5;
         for (ch_i, ch) in izip!(0.., self.all()) {
-            if !ch.is_active()
-                || !ch.id().same_job(current_turn)
-                || cop_moved_this_round[ch_i % MAX_CONSIDERED_COPS]
-            {
+            if !ch.is_active() || !ch.id().same_job(current_turn) || moved_this_turn[ch_i] {
                 continue;
             }
             let Some(&v) = ch.past_vertices().last() else {
@@ -1205,5 +1203,39 @@ impl State {
             rules: self.rules,
         };
         (raw_cops, game_type)
+    }
+
+    /// if either no active piece was moved so far or if the next move should be made by a cop piece,
+    /// then the cop arrangement before the cops started their current turn is returned.
+    /// if it is the robbers turn, `None` is returned.
+    /// e.g. for lazy cops, this function returns `.0` of [`Self::police_state`] (or `None`).
+    pub fn police_state_round_start(&self) -> Option<bf::RawCops> {
+        let cops_moved_this_turn = match self.mark_cops_moved_this_turn() {
+            None => Box::from(vec![false; self.characters.len()]),
+            Some((Id::Robber, _)) => return None,
+            Some((Id::Cop(_), moved)) => moved,
+        };
+        debug_assert!(match self.rules {
+            // note: the logic below computing the cop positions at the round start assumes
+            // that no cop can move more than once per round. if there exists some ruleset that
+            // does not fulfill this requirement, please update the computation of `cops_round_start`.
+            bf::DynRules::Lazy | bf::DynRules::Eager | bf::DynRules::GeneralEagerCops(_) => {
+                true
+            },
+        });
+        let cops_round_start = izip!(&self.characters, &cops_moved_this_turn)
+            .filter(|(c, _)| !c.id.is_robber() && c.is_active())
+            .map(|(c, &moved)| {
+                if moved {
+                    let past = c.past_vertices();
+                    debug_assert!(past.len() >= 2);
+                    debug_assert_eq!(past.last(), Some(&c.nearest_vertex));
+                    past[past.len() - 2]
+                } else {
+                    c.nearest_vertex
+                }
+            })
+            .take(bf::MAX_COPS);
+        Some(bf::RawCops::from_iter(cops_round_start))
     }
 }

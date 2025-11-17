@@ -420,6 +420,8 @@ where
 }
 
 impl RobberWinData {
+    /// does all the automorphism stuff for one and just returns for each map vertex wether it is safe,
+    /// given the passed cop state.
     pub fn safe_vertices(
         &self,
         cops: &mut RawCops,
@@ -658,7 +660,7 @@ where
         safe: f,
         cop_moves,
     };
-    debug_assert!(verify_continuity(rules, &result, &edges, manager).is_ok());
+    debug_assert!(verify_continuity_robber(rules, &result, &edges, manager).is_ok());
 
     Ok(Outcome::RobberWins(result))
 }
@@ -669,7 +671,7 @@ where
 /// Said differently: for every move the police can take, if the robber's vertex is currently marked safe,
 /// the robber must be neighboring a safe vertex next move.
 /// Further: there must exist a safe vertex for every police arrangement.
-fn verify_continuity(
+fn verify_continuity_robber(
     rules: impl Rules,
     data: &RobberWinData,
     edges: &EdgeList,
@@ -818,6 +820,16 @@ impl CopStrategy {
             }
         }
     }
+
+    /// the equivalent of [`RobberWinData::safe_vertices`]
+    pub fn times_for(
+        &self,
+        cops: &mut RawCops,
+    ) -> impl ExactSizeIterator<Item = UTime> + '_ + use<'_> {
+        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, cops);
+        let time_left = self.time_to_win.nr_moves_left(cop_positions);
+        autos[0].forward().map(|v| time_left[v])
+    }
 }
 
 fn compute_cop_strategy<S, R>(
@@ -956,13 +968,114 @@ where
     };
     res.compute_serde_skipped();
 
+    debug_assert!(verify_continuity_cops(rules, &res, &edges, manager).is_ok());
+
     Ok(res)
+}
+
+/// similar to [`verify_continuity_robber`], but this continuity has (to my knowledge)
+/// not as simple a name as "Lippschitz-continuous with respect to the Haussdorff norm".
+///
+/// Note: in [`verify_continuity_robber`], one has to check for every game state that is
+/// a winning position for the robber, wether the robber can reach a new winning game state.
+/// This is equivalent to _for each cop move, check if the robber can react_.
+///
+/// Here, the situation is slightly different. We don't want to keep the game running forever
+/// (that is a robber win), thus we need to quantify what _winning_ actually means:
+/// _for each robber move, there must be a cop move that decreases the number of rounds left_.
+fn verify_continuity_cops(
+    rules: impl Rules,
+    data: &CopStrategy,
+    edges: &EdgeList,
+    manager: &thread_manager::LocalManager,
+) -> Result<(), String> {
+    // logging things
+    let nr_configs = data.cop_moves.nr_configurations();
+    let mut i_config = 0;
+    let mut time_until_log_refresh = 1;
+    let log_refresh_interval = (nr_configs / 10_000).clamp(1000, 100_000);
+
+    let nr_map_vertices = data.cop_moves.nr_map_vertices();
+    let mut max_rounds_left_cops_to_neigh = vec![UTime::MAX; nr_map_vertices];
+    let mut robber_rounds_decrease = vec![false; nr_map_vertices];
+    for cops_index in data.cop_moves.all_positions() {
+        let mut cops = data.cop_moves.eager_unpack(cops_index);
+        // logging things
+        time_until_log_refresh -= 1;
+        i_config += 1;
+        if time_until_log_refresh == 0 {
+            let done_percent = (i_config as f64) / (nr_configs as f64) * 100.0;
+            manager.update(format!("verifiziere Kontinuität: {done_percent:.2}%"))?;
+            time_until_log_refresh = log_refresh_interval;
+        }
+
+        robber_rounds_decrease.fill(false);
+        for mut cops_neigh in rules.raw_cop_moves_from(edges, cops) {
+            max_rounds_left_cops_to_neigh.fill(0);
+            for (v, robber_neighs, cop_neigh_time) in
+                izip!(0.., edges.neighbors(), data.times_for(&mut cops_neigh))
+            {
+                let set_max_eq = |a: &mut UTime, b: UTime| *a = UTime::max(*a, b);
+                set_max_eq(&mut max_rounds_left_cops_to_neigh[v], cop_neigh_time);
+                for n in robber_neighs {
+                    set_max_eq(&mut max_rounds_left_cops_to_neigh[n], cop_neigh_time);
+                }
+            }
+
+            for (v, &robber_neigh_max, curr_rounds_left) in izip!(
+                0..,
+                &max_rounds_left_cops_to_neigh,
+                data.times_for(&mut cops)
+            ) {
+                // assuming police state `cops` occurs before police state `cops_neigh`,
+                // the found number of moves left in the current position is not optimal.
+                if curr_rounds_left.saturating_sub(1) > robber_neigh_max {
+                    return Err(format!(
+                        "Copstrategie nicht optimal an Knoten {v},\
+                        wenn Cops von {cops_neigh:?} zu {cops:?} ziehen."
+                    ));
+                }
+                // assuming police state `cops` occurs before police state `cops_neigh`,
+                // the moves to `cops_neigh` is actually optimal for the police.
+                if curr_rounds_left.saturating_sub(1) == robber_neigh_max {
+                    robber_rounds_decrease[v] = true;
+                }
+            }
+        }
+
+        if data.cops_win
+            && let Some(v) = robber_rounds_decrease.iter().position(|&x| !x)
+        {
+            return Err(format!(
+                "Copstrategie hat keinen Zug für Räuber auf {v}, Cops auf {cops:?}."
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::graph::{Embedding3D, Shape};
+
+    /// produces same result as [`cop_number`], but uses [`compute_cop_strategy`]
+    /// instead of [`compute_safe_robber_positions`] to get there.
+    fn cop_number_cop_strat(rules: impl Rules + Clone, g: Embedding3D) -> Option<usize> {
+        let mut nr = 1;
+        let sym = g.sym_group().to_explicit();
+        let (_, manager) = thread_manager::build_managers();
+        loop {
+            let cops_strat =
+                compute_cop_strategy(rules.clone(), nr, g.edges().clone(), sym.clone(), &manager)
+                    .ok()?;
+            if cops_strat.cops_win {
+                return Some(nr);
+            }
+            nr += 1;
+        }
+    }
 
     fn cop_number(rules: impl Rules + Clone, g: Embedding3D) -> Option<usize> {
         let mut nr = 1;
@@ -978,6 +1091,7 @@ mod test {
             )
             .ok()?;
             if let Outcome::CopsWin = robber_strat {
+                assert_eq!(cop_number_cop_strat(rules, g), Some(nr));
                 return Some(nr);
             }
             nr += 1;
