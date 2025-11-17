@@ -185,6 +185,10 @@ impl Character {
         &self.past_vertices
     }
 
+    pub fn last_resting_vertex(&self) -> usize {
+        *self.past_vertices.last().unwrap_or(&self.nearest_vertex)
+    }
+
     pub fn is_active(&self) -> bool {
         self.enabled && self.on_node
     }
@@ -820,11 +824,6 @@ impl State {
         self.cops().iter().filter(|c| c.is_active())
     }
 
-    pub fn active_cop_vertices(&self) -> smallvec::SmallVec<[usize; 8]> {
-        let curr_vertex = |c: &Character| *c.past_vertices().last().unwrap_or(&c.nearest_vertex);
-        smallvec::SmallVec::from_iter(self.active_cops().map(curr_vertex))
-    }
-
     fn next_id(&self) -> Id {
         if self.characters.is_empty() {
             return Id::Robber;
@@ -1193,11 +1192,10 @@ impl State {
     /// is computed as bruteforce thingy.
     /// It is thus ok to return [`RawCops`], because bruteforce also needs to respect `MAX_COPS`.
     pub fn police_state(&self, con: &DrawContext<'_>) -> (bf::RawCops, GameType) {
-        let active_cops = self.active_cop_vertices();
-        let raw_nr_cops = usize::min(active_cops.len(), bf::MAX_COPS);
-        let raw_cops = bf::RawCops::new(&active_cops[..raw_nr_cops]);
+        let cops = self.active_cops().map(Character::last_resting_vertex).take(bf::MAX_COPS);
+        let raw_cops = bf::RawCops::from_iter(cops);
         let game_type = GameType {
-            nr_cops: active_cops.len(),
+            nr_cops: raw_cops.nr_cops,
             resolution: con.map.resolution(),
             shape: con.map.shape().clone(),
             rules: self.rules,
@@ -1215,24 +1213,14 @@ impl State {
             Some((Id::Robber, _)) => return None,
             Some((Id::Cop(_), moved)) => moved,
         };
-        debug_assert!(match self.rules {
-            // note: the logic below computing the cop positions at the round start assumes
-            // that no cop can move more than once per round. if there exists some ruleset that
-            // does not fulfill this requirement, please update the computation of `cops_round_start`.
-            bf::DynRules::Lazy | bf::DynRules::Eager | bf::DynRules::GeneralEagerCops(_) => {
-                true
-            },
-        });
         let cops_round_start = izip!(&self.characters, &cops_moved_this_turn)
             .filter(|(c, _)| !c.id.is_robber() && c.is_active())
             .map(|(c, &moved)| {
                 if moved {
                     let past = c.past_vertices();
-                    debug_assert!(past.len() >= 2);
-                    debug_assert_eq!(past.last(), Some(&c.nearest_vertex));
                     past[past.len() - 2]
                 } else {
-                    c.nearest_vertex
+                    c.last_resting_vertex()
                 }
             })
             .take(bf::MAX_COPS);

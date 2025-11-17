@@ -1053,28 +1053,25 @@ impl Info {
             let cam_y = con.cam().position.y;
             let angle = con.cam().z_angle();
             let zoom = con.cam().zoom;
+
+            let vertex_str = |c: &Character| c.vertex().to_string();
             let active_police_vertices = {
-                let vertices = self.characters.active_cop_vertices();
-                let nr_seps = vertices.len().saturating_sub(1);
-                let seps = std::iter::repeat_n(", ".to_string(), nr_seps);
-                String::from_iter(vertices.iter().map(|&v| v.to_string()).interleave(seps))
-            };
-            let inactive_police_vertices = {
-                let vertices = self
-                    .characters
-                    .all()
-                    .iter()
-                    .filter_map(|c| (!c.is_active()).then_some(c.vertex().to_string()))
-                    .collect_vec();
+                let active = self.characters.active_cops();
+                let vertices = active.map(vertex_str).collect_vec();
                 let nr_seps = vertices.len().saturating_sub(1);
                 let seps = std::iter::repeat_n(", ".to_string(), nr_seps);
                 String::from_iter(vertices.into_iter().interleave(seps))
             };
-            let robber_vertex = self
-                .characters
-                .all()
-                .first()
-                .map_or("<Keiner>".to_string(), |r| r.vertex().to_string());
+            let inactive_police_vertices = {
+                let inactive = self.characters.cops().iter().filter(|c| !c.is_active());
+                let vertices = inactive.map(vertex_str).collect_vec();
+                let nr_seps = vertices.len().saturating_sub(1);
+                let seps = std::iter::repeat_n(", ".to_string(), nr_seps);
+                String::from_iter(vertices.into_iter().interleave(seps))
+            };
+            let robber_vertex =
+                self.characters.all().first().map_or("<Keiner>".to_string(), vertex_str);
+
             let comment = if is_tikz { "% " } else { "//" };
             format!(
                 "\n\

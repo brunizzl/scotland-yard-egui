@@ -33,6 +33,7 @@ pub struct RawCops {
 }
 
 impl RawCops {
+    #[allow(dead_code)]
     pub fn new(cs: &[usize]) -> Self {
         let mut cops = [usize::MAX; MAX_COPS];
         let nr_cops = cs.len();
