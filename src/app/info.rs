@@ -1820,7 +1820,7 @@ impl Info {
         let neigh_cop_states = game_type.rules.raw_cop_moves_from(con.edges, cops_rs);
 
         let mut neigh_times = Vec::new();
-        for mut neigh_cops in neigh_cop_states {
+        for neigh_cops in neigh_cop_states {
             // filter for moves that respect the current partially advanced cop state
             if !izip!(&*cops_rs, &*neigh_cops, &*cops_now)
                 .all(|(rs, neigh, now)| now == rs || now == neigh)
@@ -1829,7 +1829,7 @@ impl Info {
             }
 
             neigh_times.clear();
-            neigh_times.extend(strat.times_for(&mut neigh_cops));
+            neigh_times.extend(strat.times_for(&mut neigh_cops.clone()));
             let best_robber_response = con
                 .edges
                 .neighbors_of(robber_v)
