@@ -448,7 +448,7 @@ pub struct State {
     pub cop_changed: bool,
 
     #[serde(skip)]
-    rules: bf::DynRules,
+    pub rules: bf::DynRules,
 }
 
 impl State {

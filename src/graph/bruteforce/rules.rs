@@ -150,7 +150,7 @@ impl Rules for GeneralEagerCops {
 /// in principle, these types may carry more data than is stored in their counterpart here.
 /// this additional data however should only be cashed information like distances between vertices.
 /// Note: as of today (November 2025) no rules make use of this possibility.
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum DynRules {
     #[default]
     Lazy,

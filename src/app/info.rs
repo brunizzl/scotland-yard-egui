@@ -623,6 +623,7 @@ mod storage_keys {
     pub const OPTIONS: &str = "app::info::options";
     pub const CHARACTERS: &str = "app::info::characters";
     pub const MARKED_MANUALLY: &str = "app::info::manually_marked";
+    pub const RULES: &str = "app::info::rules";
 }
 
 impl Default for Info {
@@ -664,14 +665,17 @@ impl Info {
         eframe::set_value(storage, CHARACTERS, &self.characters);
         let rle_manually = crate::rle::encode(self.manual_markers.curr());
         eframe::set_value(storage, MARKED_MANUALLY, &rle_manually);
+        eframe::set_value(storage, RULES, &self.characters.rules());
     }
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
-        let characters = load_or(cc.storage, CHARACTERS, character::State::new);
+        let mut characters = load_or(cc.storage, CHARACTERS, character::State::new);
         let rle_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
         let marked_manually = crate::rle::decode(&rle_manually);
         let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
+        let rules = load_or(cc.storage, RULES, || bf::DynRules::Lazy);
+        characters.rules = rules;
 
         Self {
             tool: MouseTool::Drag,
