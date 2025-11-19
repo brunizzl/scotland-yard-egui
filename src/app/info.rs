@@ -1803,8 +1803,8 @@ impl Info {
             return;
         };
 
-        let curr_nr_moves_left = strat.times_for(cops_rs).nth(robber_v).unwrap();
-        if matches!(curr_nr_moves_left, 0 | bf::UTime::MAX) {
+        let curr_nr_rounds_left = strat.times_for(cops_rs).nth(robber_v).unwrap();
+        if matches!(curr_nr_rounds_left, 0 | bf::UTime::MAX) {
             return;
         }
 
@@ -1831,8 +1831,8 @@ impl Info {
                 .fold(neigh_times[robber_v], bf::UTime::max);
 
             // filter for moves that bring the cops closer to winning
-            if best_robber_response != curr_nr_moves_left - 1 {
-                debug_assert!(best_robber_response >= curr_nr_moves_left);
+            if best_robber_response != curr_nr_rounds_left - 1 {
+                debug_assert!(best_robber_response >= curr_nr_rounds_left);
                 continue;
             }
 

@@ -287,27 +287,33 @@ impl Character {
                 let point_rect = con.screen().intersect(full_rect);
 
                 let character_id = con.response.id.with(self as *const Self);
-                ui.interact(point_rect, character_id, Sense::drag())
+                ui.interact(point_rect, character_id, Sense::click_and_drag())
             };
 
-            // change a cop's apperance or status in right click menu.
-            if let Id::Cop(i) = &mut self.id {
+            {
                 let mut change = None;
                 resp.context_menu(|ui| {
-                    if ui
-                        .checkbox(&mut self.enabled, "Aktiv")
-                        .on_hover_text("berücksichte Cop bei Berechnungen")
-                        .clicked()
-                    {
-                        change = Some(Change::ToggleActive);
-                    };
-                    if ui.button("🗑 löschen").clicked() {
-                        change = Some(Change::Delete);
+                    if ui.button("⟲ ziehe auf Stelle").clicked() {
+                        self.past_vertices.push(self.nearest_vertex);
+                        change = Some(Change::Released);
                     }
-                    ui.set_max_width(0.0);
-                    ui.separator();
-                    for (emoji_i, &emoji) in izip!(0.., Id::COP_EMOJIES) {
-                        ui.radio_value(i, emoji_i, emoji);
+                    // change a cop's apperance or status
+                    if let Id::Cop(i) = &mut self.id {
+                        if ui
+                            .checkbox(&mut self.enabled, "Aktiv")
+                            .on_hover_text("berücksichte Cop bei Berechnungen")
+                            .clicked()
+                        {
+                            change = Some(Change::ToggleActive);
+                        };
+                        if ui.button("🗑 löschen").clicked() {
+                            change = Some(Change::Delete);
+                        }
+                        ui.set_max_width(0.0);
+                        ui.separator();
+                        for (emoji_i, &emoji) in izip!(0.., Id::COP_EMOJIES) {
+                            ui.radio_value(i, emoji_i, emoji);
+                        }
                     }
                 });
                 if change.is_some() {
