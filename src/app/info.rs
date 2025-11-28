@@ -1459,9 +1459,9 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
-                let (active_cops, game_type) = self.characters.police_state(con);
+                let game_type = self.characters.game_type(con);
                 if let Some(bf::Outcome::RobberWins(data)) = &self.worker.result_for(&game_type) {
-                    let safe_vertices = data.safe_vertices(active_cops);
+                    let safe_vertices = data.safe_vertices(self.characters.raw_cops());
                     for (safe, util) in izip!(safe_vertices, utils_iter) {
                         draw_if!(safe, util);
                     }
@@ -1496,10 +1496,7 @@ impl Info {
                 }
             },
             VertexColorInfo::CopsRotatedToEquivalence => {
-                let (mut active_cops, game_type) = self.characters.police_state(con);
-                if game_type.nr_cops > bf::MAX_COPS {
-                    return;
-                }
+                let mut active_cops = self.characters.raw_cops();
                 let rotated = con.sym_group().to_representative(&mut active_cops);
                 for &v in &rotated[..] {
                     self.currently_marked[v] = true;
@@ -1703,10 +1700,10 @@ impl Info {
                 draw!(0..);
             },
             VertexSymbolInfo::BruteforceCopMoves => {
-                let (cops, game_type) = self.characters.police_state(con);
+                let game_type = self.characters.game_type(con);
                 if let Some(strat) = self.worker.strats_for(&game_type) {
                     let show = |&m: &_| m != bf::UTime::MAX;
-                    draw!(strat.times_for(cops), show);
+                    draw!(strat.times_for(self.characters.raw_cops()), show);
                 }
             },
             VertexSymbolInfo::Debugging => {
@@ -1796,14 +1793,19 @@ impl Info {
         let Some(robber_v) = self.characters.active_robber().map(Character::vertex) else {
             return;
         };
-        let (cops_now, game_type) = self.characters.police_state(con);
+        let game_type = self.characters.game_type(con);
+        let Some(strat) = self.worker.strats_for(&game_type) else {
+            return;
+        };
+        let cops_now = {
+            // unlike `Character::police_state`, we do not want the active vertex, but the last resting vertex.
+            let resting = self.characters.active_cops().map(Character::last_resting_vertex);
+            bf::RawCops::from_iter(resting.take(bf::MAX_COPS))
+        };
         // rs prefix / postfix is short for "round start",
         // which is the point in time just after the robber made his (currently) last move.
         // this is the starting point from which the currently progressing cop move is computed.
         let Some(cops_rs) = self.characters.police_state_round_start() else {
-            return;
-        };
-        let Some(strat) = self.worker.strats_for(&game_type) else {
             return;
         };
 

@@ -1194,25 +1194,28 @@ impl State {
         }
     }
 
-    /// this function is only really of use, when the [`GameType`] returned as `.1`
-    /// is computed as bruteforce thingy.
-    /// It is thus ok to return [`RawCops`], because bruteforce also needs to respect `MAX_COPS`.
-    pub fn police_state(&self, con: &DrawContext<'_>) -> (bf::RawCops, GameType) {
-        let cops = self.active_cops().map(Character::last_resting_vertex).take(bf::MAX_COPS);
-        let raw_cops = bf::RawCops::from_iter(cops);
-        let game_type = GameType {
-            nr_cops: raw_cops.nr_cops,
+    /// will only return the true number of active cops, if this is not more than [`bf::MAX_COPS`].
+    /// this should not be detremental, because the [`GameType`] is (currently) only relevant in a bruteforce setting.
+    pub fn game_type(&self, con: &DrawContext<'_>) -> GameType {
+        GameType {
+            nr_cops: self.active_cops().count().min(bf::MAX_COPS),
             resolution: con.map.resolution(),
             shape: con.map.shape().clone(),
             rules: self.rules,
-        };
-        (raw_cops, game_type)
+        }
+    }
+
+    /// returns the currently closest vertex of every avtive cop.
+    /// note: this means the vertex changes while a cop is dragged, not only when a cop is released.
+    pub fn raw_cops(&self) -> bf::RawCops {
+        let cops = self.active_cops().map(Character::vertex).take(bf::MAX_COPS);
+        bf::RawCops::from_iter(cops)
     }
 
     /// if either no active piece was moved so far or if the next move should be made by a cop piece,
     /// then the cop arrangement before the cops started their current turn is returned.
     /// if it is the robbers turn, `None` is returned.
-    /// e.g. for lazy cops, this function returns `.0` of [`Self::police_state`] (or `None`).
+    /// e.g. for lazy cops, this function returns the current resting police positions or `None`.
     pub fn police_state_round_start(&self) -> Option<bf::RawCops> {
         let cops_moved_this_turn = match self.mark_cops_moved_this_turn() {
             None => Box::from(vec![false; self.characters.len()]),
