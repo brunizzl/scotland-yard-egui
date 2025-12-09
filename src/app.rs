@@ -134,6 +134,22 @@ fn add_arrow(painter: &Painter, origin: Pos2, vec: Vec2, stroke: Stroke, tip_sca
     painter.line_segment([origin, tip], stroke);
 }
 
+fn menu_button_closing_outside<'a, R>(
+    ui: &mut Ui,
+    atoms: impl egui::IntoAtoms<'a>,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    use egui::containers::menu;
+    let close =
+        menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let (response, inner) = if menu::is_in_menu(ui) {
+        menu::SubMenuButton::new(atoms).config(close).ui(ui, add_contents)
+    } else {
+        menu::MenuButton::new(atoms).config(close).ui(ui, add_contents)
+    };
+    egui::InnerResponse::new(inner.map(|i| i.inner), response)
+}
+
 pub struct State {
     map: map::Map,
     info: info::Info,
@@ -173,7 +189,7 @@ impl State {
 }
 
 fn draw_usage_info(ui: &mut Ui) {
-    ui.menu_button(" ？ Hilfe", |ui| {
+    menu_button_closing_outside(ui, " ？ Hilfe", |ui| {
         ui.add(
             Label::new(
                 "\

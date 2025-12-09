@@ -945,7 +945,7 @@ impl State {
                 }
             };
             ui.add_space(5.0);
-            ui.menu_button(format!("alle Cops ({nr_cops})"), |ui| {
+            crate::app::menu_button_closing_outside(ui, format!("alle Cops ({nr_cops})"), |ui| {
                 egui::ScrollArea::vertical().show(ui, draw_cops);
             });
             ui.add_space(8.0);

@@ -231,7 +231,7 @@ impl SavedStates {
             }
         }
 
-        ui.menu_button(" 🖴  laden / speichern", |ui| {
+        crate::app::menu_button_closing_outside(ui, " 🖴  laden / speichern", |ui| {
             let text_galleys = {
                 let max_width = ui.ctx().available_rect().width() * 0.9;
                 self.saves

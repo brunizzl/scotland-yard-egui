@@ -7,7 +7,7 @@ use super::*;
 use crate::graph::{Automorphism, ExplicitClasses, SymmetryGroup, bruteforce as bf};
 use crate::graph::{Embedding3D, NoSymmetry};
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GameType {
     pub nr_cops: usize,
     pub resolution: usize,
@@ -43,7 +43,7 @@ impl GameType {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkTask {
     Compute,
     ComputeStrat,
@@ -564,7 +564,7 @@ impl BruteforceComputationState {
                 } else if ui.button("löschen").clicked() {
                     action = Some((Action::Delete, game_type.clone()));
                 }
-                ui.menu_button("meiste Züge", |ui| {
+                menu_button_closing_outside(ui, "meiste Züge", |ui| {
                     for extreme_pos in &strat.extreme_positions {
                         ui.label(format!("{extreme_pos:?}"));
                     }
@@ -701,7 +701,7 @@ impl BruteforceComputationState {
             ui.horizontal(|ui| {
                 let nr_active = self.workers.len();
                 if NATIVE && nr_active > 0 {
-                    ui.menu_button(format!("{nr_active} aktiv"), |ui| {
+                    menu_button_closing_outside(ui, format!("{nr_active} aktiv"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_workers(ui));
                     });
                 } else if NATIVE {
@@ -710,7 +710,7 @@ impl BruteforceComputationState {
 
                 let nr_done = self.robber_strats.len() + self.cop_strats.len();
                 if nr_done > 0 {
-                    ui.menu_button(format!("{nr_done} fertig"), |ui| {
+                    menu_button_closing_outside(ui, format!("{nr_done} fertig"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_results(ui));
                     });
                 } else {
@@ -719,7 +719,7 @@ impl BruteforceComputationState {
 
                 let nr_errs = self.errors.len();
                 if nr_errs > 0 {
-                    ui.menu_button(format!("{nr_errs} 💥"), |ui| {
+                    menu_button_closing_outside(ui, format!("{nr_errs} 💥"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_errors(ui));
                     });
                 } else {
