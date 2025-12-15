@@ -587,38 +587,37 @@ impl BruteforceComputationState {
 
         for worker in &mut self.workers {
             let paused = worker.manager.as_ref().is_some_and(|m| m.is_paused());
-            let animation = match (ui.input(|i| i.time) * 5.0) as isize % 9 {
-                _ if paused => " . . ",
-                0 => ".    ",
-                1 => "..   ",
-                2 => "...  ",
-                3 => ".... ",
-                4 => " ... ",
-                5 => "  .. ",
-                6 => "   . ",
-                _ => "     ",
-            };
+            ui.add({
+                let animation = match (ui.input(|i| i.time) * 5.0) as isize % 9 {
+                    _ if paused => " . . ",
+                    0 => ".    ",
+                    1 => "..   ",
+                    2 => "...  ",
+                    3 => ".... ",
+                    4 => " ... ",
+                    5 => "  .. ",
+                    6 => "   . ",
+                    _ => "     ",
+                };
+                let task_str = match worker.task {
+                    WorkTask::Compute => "rechne (R) ",
+                    WorkTask::ComputeStrat => "rechne (C) ",
+                    WorkTask::Verify => "verifiziere ",
+                    WorkTask::Load | WorkTask::LoadStrat => "lade ",
+                    WorkTask::Store | WorkTask::StoreStrat => "speichere ",
+                };
 
-            let task_str = match worker.task {
-                WorkTask::Compute => "rechne (R) ",
-                WorkTask::ComputeStrat => "rechne (C) ",
-                WorkTask::Verify => "verifiziere ",
-                WorkTask::Load | WorkTask::LoadStrat => "lade ",
-                WorkTask::Store | WorkTask::StoreStrat => "speichere ",
-            };
-
-            ui.add(
                 Label::new(format!(
                     "{} {} {}",
                     animation,
                     task_str,
                     worker.game_type.as_tuple_string()
                 ))
-                .wrap_mode(egui::TextWrapMode::Extend),
-            );
+                .wrap_mode(egui::TextWrapMode::Extend)
+            });
 
-            if let Some(r) = &mut worker.manager {
-                ui.add(Label::new(r.last_log()).wrap_mode(egui::TextWrapMode::Extend));
+            if let Some(m) = &mut worker.manager {
+                ui.add(Label::new(m.last_log()).wrap_mode(egui::TextWrapMode::Extend));
                 ui.horizontal(|ui| {
                     {
                         let (label, cmd) = if paused {
@@ -627,7 +626,7 @@ impl BruteforceComputationState {
                             (" ⏸ ", Command::Pause)
                         };
                         if ui.button(label).clicked() {
-                            r.send_command(cmd).ok();
+                            m.send_command(cmd).ok();
                         }
                     }
                     let abort_button = ui.add_enabled(paused, Button::new("abbrechen"));
@@ -636,11 +635,12 @@ impl BruteforceComputationState {
                             if gt == &worker.game_type && t == &worker.task {
                                 let time_since_click = Instant::now() - *start;
                                 let ratio = time_since_click.as_secs_f32() / 5.0;
-                                if ratio < 1.0 {
-                                    let text = format!("{}%", (ratio * 100.0) as isize);
-                                    abort_button.on_hover_text(text);
-                                } else {
-                                    r.send_command(Command::Abort).ok();
+                                ui.label(format!("{}%", (ratio * 100.0) as isize));
+                                if ratio >= 1.0 {
+                                    // note: do not set `self.abort_worker` to `None` here,
+                                    // only do it once the mouse is released. this way,
+                                    // we guarantee that one needs to start a new click to abort the next worker.
+                                    m.send_command(Command::Abort).ok();
                                 }
                             }
                         } else {
