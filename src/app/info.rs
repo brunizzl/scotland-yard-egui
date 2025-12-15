@@ -1890,6 +1890,7 @@ impl Info {
         self.characters.cop_changed = false;
 
         // draw toroidal graphs multiple times
+        // maybe todo: consider skewed torus?
         let (dx, dy, indices) = if matches!(
             con.map.shape(),
             graph::Shape::TriangTorus | graph::Shape::SquareTorus
@@ -1915,6 +1916,7 @@ impl Info {
         for (&ix, &iy) in itertools::iproduct!(indices, indices) {
             let (ch_style, drag) = if ix == 0 && iy == 0 {
                 // only the "real" repetition is interactable
+                // note: this is required unless we want to tell the characters which repetition they are drawn in.
                 (self.options.character_style, self.tool == MouseTool::Drag)
             } else {
                 // make clear, that these characters are just "ghosts" and non-interactable
@@ -1924,7 +1926,7 @@ impl Info {
                 (CharactersStyle(Style { colors, size }), false)
             };
             let offset = (ix as f32) * dx + (iy as f32) * dy;
-            con.cam.shift_world_by(offset, *con.screen());
+            con.cam.shift_world_by(offset);
 
             self.draw_vertices(con);
             self.draw_convex_cop_hull(con);
@@ -1934,10 +1936,9 @@ impl Info {
             self.characters.draw_allowed_next_steps(&ch_style, con);
             self.draw_best_cop_moves(con);
             text_shift = self.draw_numbers(ui, con);
-
             self.characters.update_and_draw(ui, &ch_style, con, drag, &mut self.queue);
 
-            con.cam.shift_world_by(-offset, *con.screen());
+            con.cam.shift_world_by(-offset);
         }
 
         self.take_screenshot(con, text_shift);

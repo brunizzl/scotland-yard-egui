@@ -84,11 +84,11 @@ impl Camera3D {
 
     /// same effect as dragging the graph on the screen,
     /// only this is done in graph coordinates, not screen coordinates.
-    #[allow(dead_code)]
-    pub fn shift_world_by(&mut self, shift: Vec3, screen: Rect) {
+    pub fn shift_world_by(&mut self, shift: Vec3) {
         let shift_2d = self.to_screen.to_plane.project_pos(shift.to_pos3()).to_vec2();
         let scaled = shift_2d * self.to_screen.move_rect.scale();
         self.position += scaled;
+        let screen = *self.to_screen.move_rect.to();
         self.update_to_screen(screen);
     }
 
