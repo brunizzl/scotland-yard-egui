@@ -4,7 +4,7 @@ use crate::geo::{self, Pos3, Project3To2, ToScreen, Vec3};
 
 const DEFAULT_AXES: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
 pub struct Camera3D {
     /// == 1.0 -> no change
     /// < 1.0  -> zoomed out
@@ -80,6 +80,16 @@ impl Camera3D {
         //so we need to invert the axe's rotation or something
         let project = Project3To2::from_transposed(&self.direction);
         self.to_screen = ToScreen::new(project, move_rect);
+    }
+
+    /// same effect as dragging the graph on the screen,
+    /// only this is done in graph coordinates, not screen coordinates.
+    #[allow(dead_code)]
+    pub fn shift_world_by(&mut self, shift: Vec3, screen: Rect) {
+        let shift_2d = self.to_screen.to_plane.project_pos(shift.to_pos3()).to_vec2();
+        let scaled = shift_2d * self.to_screen.move_rect.scale();
+        self.position += scaled;
+        self.update_to_screen(screen);
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) {
@@ -213,6 +223,14 @@ impl Camera3D {
 
     pub fn reset_direction(&mut self) {
         self.direction = DEFAULT_AXES;
+    }
+
+    pub fn adjust_to_new_map(&mut self, new_shape: &crate::graph::Shape) {
+        if new_shape.is_3d() {
+            self.reset_position();
+        } else {
+            self.reset_direction();
+        }
     }
 
     pub fn reset(&mut self) {

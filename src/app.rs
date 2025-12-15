@@ -22,6 +22,7 @@ const NATIVE: bool = cfg!(not(target_arch = "wasm32"));
 
 pub struct DrawContext<'a> {
     pub map: &'a map::Map,
+    pub cam: Camera3D,
     pub extreme_vertices: &'a [usize],
     pub edges: &'a EdgeList,
     pub visible: &'a [bool],
@@ -34,7 +35,7 @@ pub struct DrawContext<'a> {
 
 impl DrawContext<'_> {
     pub fn cam(&self) -> &Camera3D {
-        self.map.camera()
+        &self.cam
     }
 
     pub fn screen(&self) -> &Rect {
@@ -153,6 +154,7 @@ fn menu_button_closing_outside<'a, R>(
 pub struct State {
     map: map::Map,
     info: info::Info,
+    camera: cam::Camera3D,
 
     menu_visible: bool,
     fullscreen: bool,
@@ -171,13 +173,19 @@ impl State {
             cc.egui_ctx.set_visuals(egui::Visuals::light());
         }
 
-        let mut info = info::Info::new(cc);
         let map = map::Map::new(cc);
+
+        let mut info = info::Info::new(cc);
         info.adjust_to_new_map(map.data());
+
+        let mut camera = load_or(cc.storage, Self::CAMERA, Camera3D::default);
+        camera.adjust_to_new_map(map.shape());
+
         let saves = saves::SavedStates::new(cc);
         Self {
             map,
             info,
+            camera,
             menu_visible: true,
             fullscreen: false,
             dark_mode,
@@ -186,6 +194,7 @@ impl State {
     }
 
     const DARK_MODE_KEY: &'static str = "app::in_dark_mode";
+    pub const CAMERA: &str = "app::map::camera";
 }
 
 fn draw_usage_info(ui: &mut Ui) {
@@ -226,6 +235,7 @@ impl eframe::App for State {
 
         self.map.save(storage);
         self.info.save(storage);
+        eframe::set_value(storage, Self::CAMERA, &self.camera);
         self.saves.save(storage);
     }
 
@@ -255,7 +265,7 @@ impl eframe::App for State {
 
                     draw_usage_info(ui);
 
-                    self.saves.update(ui, &mut self.map, &mut self.info);
+                    self.saves.update(ui, &mut self.map, &mut self.info, &mut self.camera);
                 });
 
                 ui.separator();
@@ -267,19 +277,21 @@ impl eframe::App for State {
                     let hover = egui::Sense::hover();
                     ui.allocate_at_least(Vec2::new(ui.available_width(), 0.0), hover);
 
+                    self.camera.draw_menu(ui);
                     let map_change = self.map.draw_menu(ui);
                     if map_change {
                         self.info.adjust_to_new_map(self.map.data());
+                        self.camera.adjust_to_new_map(self.map.shape());
                     }
-                    self.info.draw_menu(ui, &self.map);
+                    self.info.draw_menu(ui, &self.map, &self.camera);
                     ui.add_space(50.0);
                 });
             });
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let con = self.map.update_and_draw(ui);
-            self.info.update_and_draw(ui, &con);
+            let mut con = self.map.update_and_draw(ui, &mut self.camera);
+            self.info.update_and_draw(ui, &mut con);
 
             if !self.menu_visible {
                 let pos = Rect::from_center_size(pos2(12.0, 2.0), Vec2::ZERO);

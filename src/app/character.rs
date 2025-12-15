@@ -10,7 +10,7 @@ use itertools::{Itertools, izip};
 use egui::{Color32, Painter, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::{
-    app::bruteforce_state::GameType,
+    app::{self, bruteforce_state::GameType},
     geo::{Pos3, Vec3},
     graph::{EdgeList, Embedding3D, bruteforce as bf},
 };
@@ -843,8 +843,8 @@ impl State {
         Id::Cop(cops_used.iter().position_min().unwrap())
     }
 
-    pub fn new_character_at(&mut self, screen_pos: Pos2, map: &map::Map) {
-        let pos = map.camera().screen_to_intermediary(screen_pos);
+    pub fn new_character_at(&mut self, screen_pos: Pos2, cam: &app::Camera3D) {
+        let pos = cam.screen_to_intermediary(screen_pos);
         self.characters.push(Character::new(self.next_id(), pos));
     }
 
@@ -871,6 +871,7 @@ impl State {
         ui: &mut Ui,
         style: &mut CharactersStyle,
         map: &map::Map,
+        cam: &app::Camera3D,
         queue: &mut VecDeque<usize>,
     ) -> bool {
         debug_assert_eq!(
@@ -915,8 +916,8 @@ impl State {
                     change = true;
                 }
                 if ui.button(plus_text).on_hover_text("F2").clicked() {
-                    let pos = map.camera().in_front_of_cam();
-                    self.new_character_at(pos, map);
+                    let pos = cam.in_front_of_cam();
+                    self.new_character_at(pos, cam);
                     change = true;
                 }
                 style.0.draw_options(ui, &CharactersStyle::DEFAULT_COLORS);

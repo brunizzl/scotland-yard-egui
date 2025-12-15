@@ -140,7 +140,7 @@ impl Embedding3D {
         &self.sym_group
     }
 
-    /// returns whih edge lengh should be considered when displaying other features,
+    /// returns whitch edge lengh should be considered when displaying other features,
     /// e.g. how large characters and markers are drawn.
     /// also used to determine on tori which edges are not drawn, because the embedding looks ugly otherwise.
     pub fn max_scaling_edge_length(&self) -> f32 {
@@ -1147,13 +1147,15 @@ impl Embedding3D {
                 self.draw_visible_hull_edges(to_screen, painter, stroke, visible, false);
                 false
             },
-            Shape::TriangTorus | Shape::TriangGrid => {
-                self.draw_torus_edges(to_screen, painter, stroke, true);
-                true
-            },
-            Shape::SquareTorus | Shape::SquareGrid => {
-                self.draw_torus_edges(to_screen, painter, stroke, false);
-                true
+            Shape::TriangTorus | Shape::TriangGrid | Shape::SquareTorus | Shape::SquareGrid => {
+                let draw_diags = matches!(&self.shape, Shape::TriangTorus | Shape::TriangGrid);
+                let make_all_visible =
+                    matches!(&self.shape, Shape::TriangTorus | Shape::SquareTorus);
+                self.draw_torus_edges(to_screen, painter, stroke, draw_diags);
+                if make_all_visible {
+                    visible.fill(true);
+                }
+                !make_all_visible
             },
             Shape::Random2D(_) => {
                 self.draw_all_edges(to_screen, painter, stroke);

@@ -14,6 +14,7 @@ use crate::graph::{
 use super::{
     DrawContext, NATIVE, add_disabled_drag_value, add_drag_value,
     bruteforce_state::BruteforceComputationState,
+    cam::Camera3D,
     character::{self, Character, CharactersStyle},
     color, load_or,
     manual_markers::{ManualMarkerOptions, ManualMarkers},
@@ -710,7 +711,7 @@ impl Info {
         self.last_change_frame = self.frame_number;
     }
 
-    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) {
+    pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, cam: &Camera3D) {
         let mut change = self.options.draw_menu(ui, map);
 
         //everything going on here happens on a nother thread -> no need to recompute our data
@@ -732,9 +733,13 @@ impl Info {
             });
         }
 
-        change |=
-            self.characters
-                .draw_menu(ui, &mut self.options.character_style, map, &mut self.queue);
+        change |= self.characters.draw_menu(
+            ui,
+            &mut self.options.character_style,
+            map,
+            cam,
+            &mut self.queue,
+        );
         if change {
             self.register_change_now();
         }
@@ -1148,7 +1153,7 @@ impl Info {
                 let (v, dist) = con.find_closest_vertex(pointer_pos);
                 if dist <= 25.0 * con.scale {
                     if !self.characters.remove_cop_at_vertex(v) {
-                        self.characters.new_character_at(pointer_pos, con.map);
+                        self.characters.new_character_at(pointer_pos, &con.cam);
                     }
                     change = true;
                 }
@@ -1873,7 +1878,7 @@ impl Info {
         }
     }
 
-    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
+    pub fn update_and_draw(&mut self, ui: &mut Ui, con: &mut DrawContext<'_>) {
         self.choose_pointer_symbol(ui.ctx(), con);
         self.process_general_input(ui, con);
         if self.last_change_frame == self.frame_number {
@@ -1884,18 +1889,56 @@ impl Info {
         self.characters.robber_changed = false;
         self.characters.cop_changed = false;
 
-        self.draw_vertices(con);
-        self.draw_convex_cop_hull(con);
-        self.draw_green_circles(ui, con);
-        self.manual_markers.draw(con, &self.options.manual);
-        let ch_style = &self.options.character_style;
-        self.characters.draw_tails(ch_style, con);
-        self.characters.draw_allowed_next_steps(ch_style, con);
-        self.draw_best_cop_moves(con);
-        let text_shift = self.draw_numbers(ui, con);
+        // draw toroidal graphs multiple times
+        let (dx, dy, indices) = if matches!(
+            con.map.shape(),
+            graph::Shape::TriangTorus | graph::Shape::SquareTorus
+        ) {
+            let res = con.map.resolution();
+            let length_to_wrap = res as f32;
+            let dx = length_to_wrap * (con.positions[0] - con.positions[1]);
+            let dy = length_to_wrap * (con.positions[0] - con.positions[res]);
+            let indices: &[_] = match res {
+                0..=20 => &[-3, -2, -1, 0, 1, 2, 3],
+                21..=50 => &[-2, -1, 0, 1, 2],
+                51..=100 => &[-1, 0, 1],
+                _ => &[0],
+            };
+            (dx, dy, indices)
+        } else {
+            use crate::geo::Vec3;
+            let indices: &[_] = &[0];
+            (Vec3::ZERO, Vec3::ZERO, indices)
+        };
 
-        let drag = self.tool == MouseTool::Drag;
-        self.characters.update_and_draw(ui, ch_style, con, drag, &mut self.queue);
+        let mut text_shift = egui::Vec2::ZERO;
+        for (&ix, &iy) in itertools::iproduct!(indices, indices) {
+            let (ch_style, drag) = if ix == 0 && iy == 0 {
+                // only the "real" repetition is interactable
+                (self.options.character_style, self.tool == MouseTool::Drag)
+            } else {
+                // make clear, that these characters are just "ghosts" and non-interactable
+                let mut colors = self.options.character_style.0.colors;
+                colors.iter_mut().for_each(|c| *c = c.gamma_multiply(0.75));
+                let size = self.options.character_style.0.size;
+                (CharactersStyle(Style { colors, size }), false)
+            };
+            let offset = (ix as f32) * dx + (iy as f32) * dy;
+            con.cam.shift_world_by(offset, *con.screen());
+
+            self.draw_vertices(con);
+            self.draw_convex_cop_hull(con);
+            self.draw_green_circles(ui, con);
+            self.manual_markers.draw(con, &self.options.manual);
+            self.characters.draw_tails(&ch_style, con);
+            self.characters.draw_allowed_next_steps(&ch_style, con);
+            self.draw_best_cop_moves(con);
+            text_shift = self.draw_numbers(ui, con);
+
+            self.characters.update_and_draw(ui, &ch_style, con, drag, &mut self.queue);
+
+            con.cam.shift_world_by(-offset, *con.screen());
+        }
 
         self.take_screenshot(con, text_shift);
 

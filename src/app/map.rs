@@ -13,13 +13,11 @@ pub struct Map {
     extreme_vertices: Vec<usize>,
 
     resolution: isize,
-    camera: Camera3D,
 }
 
 mod storage_keys {
     pub const SHAPE: &str = "app::map::shape";
     pub const RESOLUTION: &str = "app::map::resolution";
-    pub const CAMERA: &str = "app::map::camera";
 }
 
 impl Map {
@@ -48,7 +46,6 @@ impl Map {
                 last_res
             }
         };
-        let camera = load_or(cc.storage, CAMERA, Camera3D::default);
 
         let mut result = Self {
             data: Embedding3D::default(),
@@ -56,7 +53,6 @@ impl Map {
             extreme_vertices: Vec::new(),
 
             resolution,
-            camera,
         };
         result.recompute(shape);
 
@@ -67,7 +63,6 @@ impl Map {
         use storage_keys::*;
         eframe::set_value(storage, SHAPE, &self.shape());
         eframe::set_value(storage, RESOLUTION, &self.resolution);
-        eframe::set_value(storage, CAMERA, &self.camera);
     }
 
     /// really shitty approximation of convex hull for 2D graphs
@@ -113,31 +108,17 @@ impl Map {
         self.data.shape().is_3d()
     }
 
-    pub fn camera(&self) -> &Camera3D {
-        &self.camera
-    }
-
-    fn update_vertex_visibility(&mut self) {
-        debug_assert_eq!(self.visible.len(), self.data.nr_vertices());
-        let to_screen = *self.camera.to_screen();
-        for (vis, &pos) in izip!(&mut self.visible, self.data.positions()) {
-            *vis = to_screen.pos_visible(pos);
-        }
-    }
-
     /// this function takes `&mut self` instead of returning a new `Self`,
     /// because sometimes info is kept, e.g. `self.camera` if current and new shape are both 3D / 2D
     fn recompute(&mut self, new_shape: Shape) {
         self.data = Embedding3D::new_map_from(new_shape, self.resolution as usize);
         if self.is_3d() {
             self.extreme_vertices.clear();
-            self.camera.reset_position();
         } else {
             self.update_extreme_vertices_2d();
-            self.camera.reset_direction();
         }
-        self.visible.resize(self.data.nr_vertices(), false);
-        self.update_vertex_visibility();
+        self.visible.clear();
+        self.visible.resize(self.data.nr_vertices(), true);
     }
 
     pub fn change_to(&mut self, shape: Shape, resolution: isize) {
@@ -146,7 +127,6 @@ impl Map {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
-        self.camera.draw_menu(ui);
         let mut change = false;
         ui.collapsing("Spielfeld", |ui| {
             let mut new_shape = self.shape().clone();
@@ -256,8 +236,8 @@ impl Map {
         change
     }
 
-    pub fn scale(&self) -> f32 {
-        let zoom = self.camera.zoom();
+    pub fn scale(&self, cam: &Camera3D) -> f32 {
+        let zoom = cam.zoom();
 
         let detail = {
             let max_shown_len = self.data.max_scaling_edge_length();
@@ -282,7 +262,7 @@ impl Map {
         };
         let detail_factor = f32::min(detail, 4.0);
 
-        let screen_size = self.camera.to_screen().move_rect.to().size();
+        let screen_size = cam.to_screen().move_rect.to().size();
         let screen_res_factor = screen_size.x.min(screen_size.y) * 0.001;
 
         screen_res_factor * zoom * detail_factor
@@ -296,17 +276,17 @@ impl Map {
         self
     }
 
-    pub fn update_and_draw<'a>(&'a mut self, ui: &mut Ui) -> DrawContext<'a> {
+    pub fn update_and_draw<'a>(&'a mut self, ui: &mut Ui, cam: &mut Camera3D) -> DrawContext<'a> {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, egui::Sense::hover());
         let screen = response.rect;
         if self.is_3d() {
-            self.camera.update_3d(ui, screen);
+            cam.update_3d(ui, screen);
         } else {
-            self.camera.update_2d(ui, screen);
+            cam.update_2d(ui, screen);
         }
 
-        let scale = self.scale();
+        let scale = self.scale(cam);
         let color = if ui.ctx().style().visuals.dark_mode {
             color::DARK_GREY
         } else {
@@ -315,7 +295,7 @@ impl Map {
         let grey_stroke = egui::Stroke::new(scale, color);
 
         self.data.draw_edges_and_update_visibility(
-            self.camera.to_screen(),
+            cam.to_screen(),
             &painter,
             grey_stroke,
             &mut self.visible,
@@ -323,6 +303,7 @@ impl Map {
 
         DrawContext {
             map: self.identity(),
+            cam: cam.clone(),
             extreme_vertices: &self.extreme_vertices,
             edges: self.edges(),
             visible: self.visible(),

@@ -9,7 +9,7 @@ use itertools::{Itertools, izip};
 use egui::{Ui, vec2};
 use serde::{Deserialize, Serialize};
 
-use super::{NATIVE, character, info, load_or, manual_markers::ManualMarkers, map};
+use super::{Camera3D, NATIVE, character, info, load_or, manual_markers::ManualMarkers, map};
 
 #[derive(Deserialize, Serialize)]
 struct SavedState {
@@ -22,11 +22,12 @@ struct SavedState {
 }
 
 impl SavedState {
-    fn set(&mut self, map: &mut map::Map, info: &mut info::Info) {
+    fn set(&mut self, map: &mut map::Map, info: &mut info::Info, cam: &mut Camera3D) {
         map.change_to(self.shape.clone(), self.resolution);
         info.characters = self.characters.clone_without_distances();
         info.manual_markers = ManualMarkers::new_init(crate::rle::decode(&self.manual_markers));
         info.adjust_to_new_map(map.data());
+        cam.adjust_to_new_map(map.shape());
     }
 
     fn path(&self) -> std::path::PathBuf {
@@ -214,7 +215,13 @@ impl SavedStates {
         self.ord.sort(&mut self.saves, &mut self.active);
     }
 
-    pub fn update(&mut self, ui: &mut Ui, map: &mut map::Map, info: &mut info::Info) {
+    pub fn update(
+        &mut self,
+        ui: &mut Ui,
+        map: &mut map::Map,
+        info: &mut info::Info,
+        cam: &mut Camera3D,
+    ) {
         if let Some(save) = self.active.and_then(|i| self.saves.get(i)) {
             let same_shape = &save.shape == map.shape();
             let same_res = save.resolution == map.resolution() as isize;
@@ -308,7 +315,7 @@ impl SavedStates {
                     ui.horizontal(|ui| {
                         let button = highlight(ui.button(text), Some(i) == self.active);
                         if button.on_hover_text("laden").clicked() {
-                            self.saves[i].set(map, info);
+                            self.saves[i].set(map, info, cam);
                             self.active = Some(i);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
