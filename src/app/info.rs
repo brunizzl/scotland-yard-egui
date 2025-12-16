@@ -1143,6 +1143,13 @@ impl Info {
                     .continue_move_pattern(con.edges, con.positions, &mut self.queue);
                 change = true;
             }
+            if info.modifiers.ctrl && info.key_pressed(Key::O) && drag_active {
+                let game_type = self.characters.game_type(con);
+                if let Some(strat) = self.worker.strats_for(&game_type) {
+                    self.characters.make_optimal_move(strat, con, &mut self.queue);
+                    change = true;
+                }
+            }
 
             let pointer_pos = info.pointer.latest_pos()?;
             if !con.response.contains_pointer() {
@@ -1795,58 +1802,14 @@ impl Info {
         if !self.options.show_cop_strat {
             return;
         }
-        let Some(robber_v) = self.characters.active_robber().map(Character::vertex) else {
-            return;
-        };
         let game_type = self.characters.game_type(con);
         let Some(strat) = self.worker.strats_for(&game_type) else {
             return;
         };
-        let cops_now = {
-            // unlike `Character::police_state`, we do not want the active vertex, but the last resting vertex.
-            let resting = self.characters.active_cops().map(Character::last_resting_vertex);
-            bf::RawCops::from_iter(resting.take(bf::MAX_COPS))
-        };
-        // rs prefix / postfix is short for "round start",
-        // which is the point in time just after the robber made his (currently) last move.
-        // this is the starting point from which the currently progressing cop move is computed.
-        let Some(cops_rs) = self.characters.police_state_round_start() else {
+        let Some((best_cop_moves, cops_rs)) = self.characters.best_cop_moves(strat, con) else {
             return;
         };
-
-        let curr_nr_rounds_left = strat.times_for(cops_rs).nth(robber_v).unwrap();
-        if matches!(curr_nr_rounds_left, 0 | bf::UTime::MAX) {
-            return;
-        }
-
-        // perhaps TODO if performance is bad:
-        // use current partial move as starting state to dismiss moves starting from cops_rs
-        // that do not result in all cops which already moved in cops_now to occupy their current positions.
-        let neigh_cop_states = game_type.rules.raw_cop_moves_from(con.edges, cops_rs);
-
-        let mut neigh_times = Vec::new();
-        for neigh_cops in neigh_cop_states {
-            // filter for moves that respect the current partially advanced cop state
-            if !izip!(&*cops_rs, &*neigh_cops, &*cops_now)
-                .all(|(rs, neigh, now)| now == rs || now == neigh)
-            {
-                continue;
-            }
-
-            neigh_times.clear();
-            neigh_times.extend(strat.times_for(neigh_cops));
-            let best_robber_response = con
-                .edges
-                .neighbors_of(robber_v)
-                .map(|v| neigh_times[v])
-                .fold(neigh_times[robber_v], bf::UTime::max);
-
-            // filter for moves that bring the cops closer to winning
-            if best_robber_response != curr_nr_rounds_left - 1 {
-                debug_assert!(best_robber_response >= curr_nr_rounds_left);
-                continue;
-            }
-
+        for neigh_cops in best_cop_moves {
             let arrow_stroke = {
                 // add some randomness to arrow color to distinguish different movement options.
                 let hash = neigh_cops.iter().fold(0, |a, b| a ^ b);

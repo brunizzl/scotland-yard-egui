@@ -24,6 +24,8 @@ pub enum Id {
 }
 
 impl Id {
+    pub const DEFAULT_COP: Id = Id::Cop(0);
+
     pub fn job_str(&self) -> &'static str {
         match self {
             Id::Cop(_) => "Cop",
@@ -701,6 +703,110 @@ impl State {
         self.future_moves.clear();
     }
 
+    /// regardless whether it is the cops' turn or not, this function tries to return the best moves executable from the current state.
+    /// this includes the possibility, where a cop move is currently ongoing.
+    /// other than all best cop moves, this further returns the cop state at the start of this round.
+    pub fn best_cop_moves<'a>(
+        &'a self,
+        strat: &'a bf::CopStrategy,
+        con: &'a DrawContext<'a>,
+    ) -> Option<(impl Iterator<Item = bf::RawCops> + 'a, bf::RawCops)> {
+        let robber_v = self.active_robber().map(Character::vertex)?;
+        let cops_now = {
+            // unlike `Character::raw_cops`, we do not want the active vertex, but the last resting vertex.
+            let resting = self.active_cops().map(Character::last_resting_vertex);
+            bf::RawCops::from_iter(resting.take(bf::MAX_COPS))
+        };
+        // rs prefix / postfix is short for "round start",
+        // which is the point in time just after the robber made his (currently) last move.
+        // this is the starting point from which the currently progressing cop move is computed.
+        let cops_rs = self.police_state_round_start()?;
+
+        let curr_nr_rounds_left = strat.times_for(cops_rs).nth(robber_v)?;
+        if matches!(curr_nr_rounds_left, 0 | bf::UTime::MAX) {
+            return None;
+        }
+
+        // perhaps TODO if performance is bad:
+        // use current partial move as starting state to dismiss moves starting from cops_rs
+        // that do not result in all cops which already moved in cops_now to occupy their current positions.
+        // this could be done by passing a mask to `raw_cop_moves_from`, encoding which cops may still be moved.
+        let all_cop_moves = self.rules.raw_cop_moves_from(con.edges, cops_rs);
+
+        let mut neigh_times = Vec::new();
+        let best_cop_moves = all_cop_moves.into_iter().filter(move |&neigh_cops| {
+            // filter out moves that where valid at round start, but require some already moved cop to move differently
+            if !izip!(&*cops_rs, &*neigh_cops, &*cops_now)
+                .all(|(rs, neigh, now)| now == rs || now == neigh)
+            {
+                return false;
+            }
+
+            // filter out moves that don't decrease the number of rounds the robber has left
+            neigh_times.clear();
+            neigh_times.extend(strat.times_for(neigh_cops));
+            let best_robber_response = con
+                .edges
+                .neighbors_of(robber_v)
+                .map(|v| neigh_times[v])
+                .fold(neigh_times[robber_v], bf::UTime::max);
+            debug_assert!(best_robber_response >= curr_nr_rounds_left - 1);
+            best_robber_response == curr_nr_rounds_left - 1
+        });
+
+        Some((best_cop_moves, cops_rs))
+    }
+
+    /// at least an optimal robber move could also be chosen if the robber has a winning startegy, but this is boring.
+    /// if the police have a winning strategy, _both sides_ have interesting optimal moves, not just the robber.
+    pub fn make_optimal_move(
+        &mut self,
+        strat: &bf::CopStrategy,
+        con: &DrawContext<'_>,
+        queue: &mut VecDeque<usize>,
+    ) -> Option<()> {
+        let (current_turn, moved_this_turn) = self.mark_cops_moved_this_turn();
+        let (character_index, next_v) = match current_turn {
+            Id::Robber => {
+                let robber_v = self.active_robber().map(Character::vertex)?;
+                let ttl = strat.times_for(self.raw_cops()).collect_vec();
+                let max_time_to_live = |v, n| if ttl[n] > ttl[v] { n } else { v };
+                let robber_neighs = con.edges.neighbors_of(robber_v);
+                // it may be optimal for the robber to do nothing -> start with robber_v.
+                let best_move = robber_neighs.fold(robber_v, max_time_to_live);
+
+                debug_assert!(self.characters[0].id.is_robber());
+                (0, best_move)
+            },
+            Id::Cop(_) => 'find_cop_move: {
+                let (mut best_cop_moves, _) = self.best_cop_moves(strat, con)?;
+                let best_move = best_cop_moves.next()?;
+
+                let indices_active_cops = self.cops().iter().positions(Character::is_active);
+                for (cop_nr, &step) in izip!(indices_active_cops, &*best_move) {
+                    let i = cop_nr + 1; // don't forget robber at position 0.
+                    let cop_v = self.characters[i].vertex();
+                    // note: it is never optimal for the police to do nothing,
+                    // but it may be optimal to not move all pieces in a turn.
+                    // -> ok for cop_v to equal step
+                    debug_assert!(cop_v == step || con.edges.has_edge(cop_v, step));
+                    if !moved_this_turn[i] {
+                        break 'find_cop_move (i, step);
+                    }
+                }
+                return None;
+            },
+        };
+        let character = &mut self.characters[character_index];
+        character.set_vertex_no_dist_update(next_v, con.positions);
+        self.update_character(character_index, con.edges, queue);
+
+        self.past_moves.push((character_index, next_v));
+        self.future_moves.clear();
+
+        Some(())
+    }
+
     pub fn make_random_next_step(
         &mut self,
         edges: &EdgeList,
@@ -1093,7 +1199,7 @@ impl State {
         let max_shown_edge_len = con.map.data().max_scaling_edge_length();
         for ch in self.all() {
             let glow = style.glow_color(ch.id());
-            let trans = glow.gamma_multiply(0.3);
+            let trans = glow.gamma_multiply(0.1);
 
             let mut size = con.scale * 5.0;
             for (&v1, &v2) in ch.past_vertices().iter().rev().tuple_windows() {
@@ -1120,21 +1226,21 @@ impl State {
         }
     }
 
-    /// if no piece moved so far, `None` is returned.
-    /// otherwise, let `Some((id, moves))` be the result.
-    /// if it is the robbers' turn, `id == Id::Robber`.
-    /// if it is the cops turn, `id == Id::Cop(0)` and `moves` has one entry for each character,
-    /// where the characters (e.g. cops) that already moved in the current round are set to `true`.
-    fn mark_cops_moved_this_turn(&self) -> Option<(Id, Box<[bool]>)> {
-        const COP: Id = Id::Cop(0);
-        let last_moved_character = self.last_moved()?;
+    /// Let `(id, moves)` be the result.
+    /// `moves` has one entry for each character.
+    /// if it is the robbers' turn, `id == Id::Robber` and `moves` has arbitrary entries.
+    /// if it is the cops turn, `id == Id::Cop(0)` and `moved` is true, if the corresponding character
+    /// is a cop and if he already moved in the current round.
+    fn mark_cops_moved_this_turn(&self) -> (Id, Box<[bool]>) {
         let mut moved_this_turn = Box::from(vec![false; self.characters.len()]);
-        if last_moved_character.id().is_robber() {
-            return Some((COP, moved_this_turn));
+        // if no moves where made so far, we assume the robber was just set on the board, thereby moving last.
+        let robber_moved_last = self.last_moved().is_none_or(|c| c.id.is_robber());
+        if robber_moved_last {
+            return (Id::DEFAULT_COP, moved_this_turn);
         }
         let max_moving_cops = match self.rules {
             bf::DynRules::Lazy => {
-                return Some((Id::Robber, moved_this_turn));
+                return (Id::Robber, moved_this_turn);
             },
             bf::DynRules::Eager => self.active_cops().count(),
             bf::DynRules::GeneralEagerCops(nr) => nr as usize,
@@ -1150,18 +1256,19 @@ impl State {
             nr_moved_cops += 1;
         }
         if nr_moved_cops >= max_moving_cops {
-            return Some((Id::Robber, moved_this_turn));
+            return (Id::Robber, moved_this_turn);
         }
-        Some((COP, moved_this_turn))
+        (Id::DEFAULT_COP, moved_this_turn)
     }
 
     pub fn draw_allowed_next_steps(&self, style: &CharactersStyle, con: &DrawContext<'_>) {
         if !self.show_allowed_next_steps {
             return;
         }
-        let Some((current_turn, moved_this_turn)) = self.mark_cops_moved_this_turn() else {
+        if self.past_moves.is_empty() {
             return;
-        };
+        }
+        let (current_turn, moved_this_turn) = self.mark_cops_moved_this_turn();
         let radius = style.size() * con.scale * 6.5;
         for (ch_i, ch) in izip!(0.., self.all()) {
             if !ch.is_active() || !ch.id().same_job(current_turn) || moved_this_turn[ch_i] {
@@ -1219,9 +1326,8 @@ impl State {
     /// e.g. for lazy cops, this function returns the current resting police positions or `None`.
     pub fn police_state_round_start(&self) -> Option<bf::RawCops> {
         let cops_moved_this_turn = match self.mark_cops_moved_this_turn() {
-            None => Box::from(vec![false; self.characters.len()]),
-            Some((Id::Robber, _)) => return None,
-            Some((Id::Cop(_), moved)) => moved,
+            (Id::Robber, _) => return None,
+            (Id::Cop(_), moved) => moved,
         };
         let cops_round_start = izip!(&self.characters, &cops_moved_this_turn)
             .filter(|(c, _)| !c.id.is_robber() && c.is_active())
