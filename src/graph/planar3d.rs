@@ -1166,8 +1166,13 @@ impl Embedding3D {
                 true
             },
             Shape::Custom(_) => {
-                self.draw_camera_facing_edges(to_screen, painter, stroke, visible);
-                false
+                if self.shape.is_3d() {
+                    self.draw_camera_facing_edges(to_screen, painter, stroke, visible);
+                    false
+                } else {
+                    self.draw_all_edges(to_screen, painter, stroke);
+                    true
+                }
             },
         };
 
@@ -1239,6 +1244,18 @@ impl Embedding3D {
                         },
                         shape::BuildStep::SubdivEdges(n) => {
                             result.subdivide_all_edges(*n, false);
+                        },
+                        shape::BuildStep::Vertex(x_int, y_int, z_int) => {
+                            let x = *x_int as f32 * 0.001;
+                            let y = *y_int as f32 * 0.001;
+                            let z = *z_int as f32 * 0.001;
+                            let pos = Pos3::new(x, y, z);
+                            result.add_vertex(pos);
+                        },
+                        shape::BuildStep::Edge(v1, v2) => {
+                            if *v1 < result.nr_vertices() && *v2 < result.nr_vertices() {
+                                result.edges.add_edge(*v1, *v2);
+                            }
                         },
                     }
                 }

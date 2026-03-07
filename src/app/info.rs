@@ -530,6 +530,10 @@ pub enum MouseTool {
     Draw,
     Erase,
     Paintbucket,
+    /// only useful for custom graphs
+    AddVertex,
+    /// only useful for custom graphs. the held data is the first vertex of a partially constructed edge.
+    AddEdge(Option<usize>),
 }
 
 impl MouseTool {
@@ -539,6 +543,8 @@ impl MouseTool {
             MouseTool::Draw => " ✏ ",
             MouseTool::Erase => " 📗 ",
             MouseTool::Paintbucket => " 💦 ",
+            MouseTool::AddVertex => " +v ",
+            MouseTool::AddEdge(_) => " +e ",
         }
     }
 
@@ -552,14 +558,43 @@ impl MouseTool {
                 Verschiedene Farben interagieren nicht miteinander.\n\
                 Klicken auf eine bereits markierte Region löscht diese."
             },
+            MouseTool::AddVertex => "füge Knoten zu Custom Graph hinzu ([E] + [5])",
+            MouseTool::AddEdge(_) => "füge Kante zu Custom Graph hinzu ([E] + [6])",
         }
     }
 
-    pub const ALL: [Self; 4] = [Self::Drag, Self::Draw, Self::Erase, Self::Paintbucket];
+    pub fn used_for_drawing(&self) -> bool {
+        [Self::Draw, Self::Erase, Self::Paintbucket].contains(self)
+    }
+
+    pub fn tools_for(shape: &graph::Shape) -> &[Self] {
+        if matches!(shape, graph::Shape::Custom(_)) {
+            &const {
+                [
+                    MouseTool::Drag,
+                    MouseTool::Draw,
+                    MouseTool::Erase,
+                    MouseTool::Paintbucket,
+                    MouseTool::AddVertex,
+                    MouseTool::AddEdge(None),
+                ]
+            }
+        } else {
+            &const {
+                [
+                    MouseTool::Drag,
+                    MouseTool::Draw,
+                    MouseTool::Erase,
+                    MouseTool::Paintbucket,
+                ]
+            }
+        }
+    }
 
     /// input is old self, result new one. updating stored information must be done elsewhere
-    pub fn draw_mouse_tool_controls(self, ui: &mut Ui) -> Self {
+    pub fn draw_buttons(self, map_shape: &graph::Shape, ui: &mut Ui) -> Self {
         let mut new = self;
+        let buttons = Self::tools_for(map_shape);
         ui.horizontal(|ui| {
             ui.label("Werkzeug: ").on_hover_text(
                 "Manuelle Marker der aktiven Farbe können an dem der Mausposition nächsten Knoten \
@@ -567,7 +602,7 @@ impl MouseTool {
                 Alternativ: Setzten mit [m] und Entfernen mit [n]. \
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird."
             );
-            for t in MouseTool::ALL {
+            for &t in buttons {
                 let button = egui::Button::new(t.symbol()).selected(self == t);
                 if ui.add(button).on_hover_text(t.what()).clicked() {
                     new = t;
@@ -579,7 +614,7 @@ impl MouseTool {
 }
 
 pub struct Info {
-    tool: MouseTool,
+    pub tool: MouseTool,
 
     ///remembers all vertices currently colored by `VertexColorInfo` of `self.options`
     currently_marked: Vec<bool>,
@@ -746,14 +781,18 @@ impl Info {
     }
 
     fn change_tool_to(&mut self, new: MouseTool) {
-        if new != self.tool && new != MouseTool::Drag {
+        if new != self.tool && new.used_for_drawing() {
             self.options.show_manual_marker_window = true;
         }
         self.tool = new;
     }
 
-    pub fn draw_mouse_tool_controls(&mut self, ui: &mut Ui) {
-        let new = self.tool.draw_mouse_tool_controls(ui);
+    pub fn draw_mouse_tool_controls(&mut self, ui: &mut Ui, map_shape: &graph::Shape) {
+        let custom_shape = matches!(map_shape, graph::Shape::Custom(_));
+        if !custom_shape && !self.tool.used_for_drawing() {
+            self.tool = MouseTool::Drag;
+        }
+        let new = self.tool.draw_buttons(map_shape, ui);
         self.change_tool_to(new);
     }
 
@@ -765,7 +804,7 @@ impl Info {
             .open(&mut self.options.show_manual_marker_window)
             .constrain_to(ctx.content_rect())
             .show(ctx, |ui| {
-                new_tool = new_tool.draw_mouse_tool_controls(ui);
+                new_tool = new_tool.draw_buttons(&graph::Shape::TriangTorus, ui);
                 self.manual_markers.draw_selection_window_contents(
                     ui,
                     &mut self.options.manual,
@@ -1210,7 +1249,9 @@ impl Info {
                 return Some(Key::F);
             }
             if info.key_down(Key::E) {
-                for (new_tool, &key) in izip!(MouseTool::ALL, &NUMS[..4]) {
+                let tools = MouseTool::tools_for(con.map.shape());
+                let keys = &NUMS[..tools.len()];
+                for (&new_tool, &key) in izip!(tools, keys) {
                     if info.key_pressed(key) {
                         if new_tool == tool && drag_active {
                             self.options.show_manual_marker_window ^= true;
@@ -1836,6 +1877,9 @@ impl Info {
                 MouseTool::Draw | MouseTool::Erase | MouseTool::Paintbucket => {
                     egui::CursorIcon::Crosshair
                 },
+                MouseTool::AddVertex => egui::CursorIcon::Default,
+                MouseTool::AddEdge(None) => egui::CursorIcon::Grab,
+                MouseTool::AddEdge(Some(_)) => egui::CursorIcon::Grabbing,
             };
             ctx.set_cursor_icon(icon);
         }

@@ -51,16 +51,7 @@ impl DrawContext<'_> {
     }
 
     pub fn find_closest_vertex(&self, screen_pos: Pos2) -> (usize, f32) {
-        debug_assert!(!self.positions.is_empty());
-        let find_screen_facing =
-            |v: usize| -self.positions[v].to_vec3().normalized().dot(self.cam().screen_normal());
-        let (screen_facing, _) = self.edges.find_local_minimum(find_screen_facing, 0);
-        let screen_pos_diff = |v| {
-            let dist_2d = (self.vertex_draw_pos(v) - screen_pos).length();
-            let backface_penalty = 10.0 * (!self.visible[v]) as isize as f32;
-            dist_2d + backface_penalty
-        };
-        self.edges.find_local_minimum(screen_pos_diff, screen_facing)
+        self.map.find_closest_vertex_slow(self.cam(), screen_pos)
     }
 }
 
@@ -269,7 +260,7 @@ impl eframe::App for State {
                 });
 
                 ui.separator();
-                self.info.draw_mouse_tool_controls(ui);
+                self.info.draw_mouse_tool_controls(ui, self.map.shape());
 
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -290,7 +281,7 @@ impl eframe::App for State {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let mut con = self.map.update_and_draw(ui, &mut self.camera);
+            let mut con = self.map.update_and_draw(ui, &mut self.camera, &mut self.info.tool);
             self.info.update_and_draw(ui, &mut con);
 
             if !self.menu_visible {

@@ -126,6 +126,85 @@ impl Map {
         self.recompute(shape);
     }
 
+    /// this is really needed if one wants to find many vertices per frame,
+    /// as otherwise the _slow_ version is only one of many operations taking `O(vertex count)`
+    /// every frame anyway.
+    #[allow(dead_code)]
+    pub fn find_closest_vertex_fast(&self, cam: &Camera3D, screen_pos: Pos2) -> (usize, f32) {
+        debug_assert!(!self.positions().is_empty());
+        let find_screen_facing =
+            |v: usize| -self.positions()[v].to_vec3().normalized().dot(cam.screen_normal());
+        let (screen_facing, _) = self.edges().find_local_minimum(find_screen_facing, 0);
+        let screen_pos_diff = |v: usize| {
+            let dist_2d = (cam.transform(self.positions()[v]) - screen_pos).length();
+            let backface_penalty = 10.0 * (!self.visible[v]) as isize as f32;
+            dist_2d + backface_penalty
+        };
+        self.edges().find_local_minimum(screen_pos_diff, screen_facing)
+    }
+
+    pub fn find_closest_vertex_slow(&self, cam: &Camera3D, screen_pos: Pos2) -> (usize, f32) {
+        debug_assert!(!self.positions().is_empty());
+        let mut best_v = 0;
+        let mut best_dist = f32::MAX;
+        for (v, &pos, &vis) in izip!(0.., self.positions(), self.visible()) {
+            let dist_2d = (cam.transform(pos) - screen_pos).length();
+            let backface_penalty = 10.0 * (!vis) as isize as f32;
+            let new_dist = dist_2d + backface_penalty;
+            if new_dist < best_dist {
+                best_v = v;
+                best_dist = new_dist;
+            }
+        }
+        (best_v, best_dist)
+    }
+
+    /// if self currently has shape [`Shape::Custom`], this function handles input to add vertices or edges
+    /// via mouse clicking.
+    fn extend_custom_graph(&mut self, ui: &mut Ui, cam: &Camera3D, tool: &mut info::MouseTool) {
+        let Shape::Custom(old_data) = self.shape() else {
+            return;
+        };
+        let (Some(pointer_pos), shift, true) = ui.input(|info| {
+            let pos = info.pointer.latest_pos();
+            let shift = info.modifiers.shift;
+            let clicked = info.pointer.button_released(egui::PointerButton::Primary);
+            (pos, shift, clicked)
+        }) else {
+            return;
+        };
+        if !cam.to_screen().draw_rect().contains(pointer_pos) {
+            return;
+        }
+        let new_step = match *tool {
+            info::MouseTool::AddEdge(fst) => {
+                let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
+                let Some(u) = fst else {
+                    *tool = info::MouseTool::AddEdge(Some(v));
+                    return;
+                };
+                *tool = info::MouseTool::AddEdge(shift.then_some(v));
+                if u == v {
+                    return;
+                }
+                shape::BuildStep::Edge(u, v)
+            },
+            info::MouseTool::AddVertex => {
+                let pos = cam.to_screen().apply_inverse(pointer_pos);
+                let x = (pos.x * 1000.0) as i32;
+                let y = (pos.y * 1000.0) as i32;
+                let z = (pos.z * 1000.0) as i32;
+                shape::BuildStep::Vertex(x, y, z)
+            },
+            _ => return,
+        };
+        let mut new_data = old_data.clone();
+        new_data.build_steps.push(new_step);
+        new_data.build_steps_string = new_data.print_build_steps(false);
+        let new_shape = Shape::Custom(new_data);
+        self.recompute(new_shape);
+    }
+
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut change = false;
         ui.collapsing("Spielfeld", |ui| {
@@ -161,20 +240,25 @@ impl Map {
 
                     if NATIVE {
                         let selected = matches!(new_shape, Custom(_));
-                        let name = if selected {
-                            new_shape.name_str()
-                        } else {
-                            "erweitere aktuellen Graph"
-                        };
-                        let button = egui::RadioButton::new(selected, name);
-                        if ui.add(button).clicked() {
-                            let custom_data = shape::CustomBuild {
-                                basis: new_shape.clone(),
-                                build_steps: Vec::new(),
-                                build_steps_string: String::new(),
-                            };
+                        let custom_msg = "Custom";
+                        let custom_radio = egui::RadioButton::new(selected, custom_msg);
+                        if ui.add(custom_radio).clicked() {
+                            // use this as basis, as it only is a single vertex.
+                            let basis = Shape::Random2D(1312);
+                            self.resolution = basis.min_res();
+                            let custom_data = shape::CustomBuild::new(basis);
                             let custom_box = Box::new(custom_data);
                             new_shape = Custom(custom_box);
+                            change = true;
+                        }
+                        if !selected {
+                            let extend_msg = "erweitere aktuellen Graph";
+                            let extend_radio = egui::RadioButton::new(false, extend_msg);
+                            if ui.add(extend_radio).clicked() {
+                                let custom_data = shape::CustomBuild::new(new_shape.clone());
+                                let custom_box = Box::new(custom_data);
+                                new_shape = Custom(custom_box);
+                            }
                         }
                     }
                 });
@@ -212,9 +296,14 @@ impl Map {
                     }
                 },
                 Shape::Custom(c) => {
-                    ui.horizontal(|ui| {
-                        ui.label("Bauschritte:").on_hover_text(shape::BuildStep::EXPLAINER);
-                        if ui.text_edit_singleline(&mut c.build_steps_string).lost_focus() {
+                    crate::app::menu_button_closing_outside(ui, "Bauschritte", |ui| {
+                        ui.label(shape::BuildStep::EXPLAINER);
+                        ui.add_space(5.0);
+                        let recompute_button = ui.button("Übernehmen");
+                        ui.add_space(5.0);
+                        let text_edit = egui::ScrollArea::vertical()
+                            .show(ui, |ui| ui.text_edit_multiline(&mut c.build_steps_string));
+                        if text_edit.inner.lost_focus() || recompute_button.clicked() {
                             c.parse_build_steps();
                         }
                     });
@@ -276,7 +365,12 @@ impl Map {
         self
     }
 
-    pub fn update_and_draw<'a>(&'a mut self, ui: &mut Ui, cam: &mut Camera3D) -> DrawContext<'a> {
+    pub fn update_and_draw<'a>(
+        &'a mut self,
+        ui: &mut Ui,
+        cam: &mut Camera3D,
+        tool: &mut info::MouseTool,
+    ) -> DrawContext<'a> {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, egui::Sense::hover());
         let screen = response.rect;
@@ -285,6 +379,7 @@ impl Map {
         } else {
             cam.update_2d(ui, screen);
         }
+        self.extend_custom_graph(ui, cam, tool);
 
         let scale = self.scale(cam);
         let color = if ui.ctx().style().visuals.dark_mode {

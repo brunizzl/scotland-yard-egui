@@ -101,6 +101,17 @@ impl Project3To2 {
         let y = self.new_y.dot(as_vec);
         pos2(x, y)
     }
+
+    /// computes inverse of given `pos`, extended with `z = 0`.
+    pub fn inverse(&self, pos: Pos2) -> Pos3 {
+        let input = Vec3::new(pos.x, pos.y, 0.0);
+        let this = [self.new_x, self.new_y, self.new_z];
+        let inverse = Self::from_transposed(&this);
+        let x = inverse.new_x.dot(input);
+        let y = inverse.new_y.dot(input);
+        let z = inverse.new_z.dot(input);
+        Pos3 { x, y, z }
+    }
 }
 
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
@@ -177,6 +188,17 @@ impl ToScreen {
     pub fn apply(&self, pos: Pos3) -> Pos2 {
         let projected = self.to_plane.project_pos(pos);
         self.move_rect.transform_pos(projected)
+    }
+
+    /// result always lies on screen plane.
+    pub fn apply_inverse(&self, screen_pos: Pos2) -> Pos3 {
+        let intermediate = self.move_rect.inverse().transform_pos(screen_pos);
+        self.to_plane.inverse(intermediate)
+    }
+
+    /// the rectangle in screen space defining the area we are allowed to draw in.
+    pub fn draw_rect(&self) -> &Rect {
+        self.move_rect.to()
     }
 
     pub fn faces_camera(&self, face_normal: Vec3) -> bool {

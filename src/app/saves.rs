@@ -302,8 +302,8 @@ impl SavedStates {
             });
 
             ui.separator();
-            if self.deleted.is_some() {
-                let name = self.deleted.as_ref().unwrap().name.clone();
+            if let Some(del) = &self.deleted {
+                let name = del.name.clone();
                 if ui.button(format!("\"{name}\" wiederherstellen")).clicked() {
                     self.saves.push(self.deleted.take().unwrap());
                     self.ord.sort(&mut self.saves, &mut self.active);
