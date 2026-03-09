@@ -103,8 +103,8 @@ impl Project3To2 {
     }
 
     /// computes inverse of given `pos`, extended with `z = 0`.
-    pub fn inverse(&self, pos: Pos2) -> Pos3 {
-        let input = Vec3::new(pos.x, pos.y, 0.0);
+    pub fn inverse(&self, pos: Pos2, z_offset: f32) -> Pos3 {
+        let input = Vec3::new(pos.x, pos.y, z_offset);
         let this = [self.new_x, self.new_y, self.new_z];
         let inverse = Self::from_transposed(&this);
         let x = inverse.new_x.dot(input);
@@ -191,9 +191,9 @@ impl ToScreen {
     }
 
     /// result always lies on screen plane.
-    pub fn apply_inverse(&self, screen_pos: Pos2) -> Pos3 {
+    pub fn apply_inverse(&self, screen_pos: Pos2, z_offset: f32) -> Pos3 {
         let intermediate = self.move_rect.inverse().transform_pos(screen_pos);
-        self.to_plane.inverse(intermediate)
+        self.to_plane.inverse(intermediate, z_offset)
     }
 
     /// the rectangle in screen space defining the area we are allowed to draw in.

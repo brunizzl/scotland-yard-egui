@@ -21,6 +21,8 @@ impl BuildStep {
         V<x>,<y>,<z>: Knoten mit Koordinaten (<x>, <y>, <z>) / 1000\n\
         E<u>,<v>: Kante zwischen Knoten mit Indices <u> und <v>.\
         ";
+
+    pub const DEFAULT_Z: i32 = (crate::graph::Z_OFFSET_2D * 1000.0) as i32;
 }
 
 impl std::fmt::Display for BuildStep {
@@ -30,8 +32,9 @@ impl std::fmt::Display for BuildStep {
             Self::SubdivEdges(1) => write!(f, "D"),
             Self::NeighNeihs(n) => write!(f, "N{n}"),
             Self::SubdivEdges(n) => write!(f, "D{n}"),
+            Self::Vertex(x, y, Self::DEFAULT_Z) => write!(f, "V{x},{y}"),
             Self::Vertex(x, y, z) => write!(f, "V{x},{y},{z}"),
-            Self::Edge(v1, v2) => write!(f, "E{v1},{v2},"),
+            Self::Edge(v1, v2) => write!(f, "E{v1},{v2}"),
         }
     }
 }
@@ -108,7 +111,7 @@ impl CustomBuild {
                 space_or_comma(&mut data);
                 let y = parse_i32(&mut data).unwrap_or(0);
                 space_or_comma(&mut data);
-                let z = parse_i32(&mut data).unwrap_or(0);
+                let z = parse_i32(&mut data).unwrap_or(BuildStep::DEFAULT_Z);
                 self.build_steps.push(BuildStep::Vertex(x, y, z));
             } else if data.starts_with("E") {
                 data = &data[1..];

@@ -281,7 +281,11 @@ impl eframe::App for State {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let mut con = self.map.update_and_draw(ui, &mut self.camera, &mut self.info.tool);
+            let (map_change, mut con) =
+                self.map.update_and_draw(ui, &mut self.camera, &mut self.info.tool);
+            if map_change {
+                self.info.adjust_to_new_map(con.map.data());
+            }
             self.info.update_and_draw(ui, &mut con);
 
             if !self.menu_visible {

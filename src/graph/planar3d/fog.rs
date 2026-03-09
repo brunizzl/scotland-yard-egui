@@ -3,10 +3,7 @@
 
 use itertools::{Itertools, izip};
 
-use crate::{
-    app::character::{self},
-    graph::EdgeList,
-};
+use crate::{app::character, graph::EdgeList};
 
 pub struct GameSates {
     /// last entry is the present.
@@ -29,6 +26,7 @@ fn dark_vertices(edges: &EdgeList, cleaners: &character::State, range: isize) ->
         if !cleaner.is_active() {
             continue;
         }
+        debug_assert_eq!(cleaner.dists().len(), edges.nr_vertices());
         queue.push_back(cleaner.last_resting_vertex());
         visited.insert(cleaner.last_resting_vertex());
         while let Some(v) = queue.pop_front() {
@@ -60,9 +58,15 @@ impl GameSates {
     }
 
     pub fn update(&mut self, edges: &EdgeList, cleaners: &character::State, cleaning_range: isize) {
+        let mut add_new = false;
         if self.cleaning_range != cleaning_range {
-            self.history.clear();
             self.cleaning_range = cleaning_range;
+            self.history.clear();
+            add_new = true;
+        }
+        if self.history.last().is_some_and(|fog| fog.len() != edges.nr_vertices()) {
+            self.history.clear();
+            add_new = true;
         }
         if self.history.is_empty() {
             self.history.push(dark_vertices(edges, cleaners, cleaning_range));
@@ -74,16 +78,19 @@ impl GameSates {
             let rounds_diff = new_nr_rounds as isize - self.nr_rounds as isize;
             self.nr_rounds = new_nr_rounds;
             match rounds_diff {
-                -1 => {
-                    // the last move was undone -> no updates required after also undoing last move here
-                    self.history.pop();
-                    return;
+                -1 => _ = self.history.pop(), // lasst move was undone -> also undo here
+                0 => {},                      // no change -> nothing to do here
+                1 => add_new = true,          // new move is completed -> update below
+                _ => {
+                    self.history.clear();
+                    add_new = true;
                 },
-                0 => return,               // no change -> nothing to do here
-                1 => {},                   // new move is completed -> update below
-                _ => self.history.clear(), // unknow state -> compute fresh state below.
             }
         } else {
+            self.nr_rounds = 0;
+            return;
+        }
+        if !add_new {
             return;
         }
 

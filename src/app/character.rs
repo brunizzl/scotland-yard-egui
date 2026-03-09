@@ -915,8 +915,8 @@ impl State {
         self.future_moves.retain_mut(retain_c);
     }
 
-    pub fn all(&self) -> &[Character] {
-        &self.characters
+    pub fn all(&self) -> std::slice::Iter<'_, Character> {
+        self.characters.iter()
     }
 
     pub fn all_mut(&mut self) -> &mut [Character] {

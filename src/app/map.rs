@@ -1,9 +1,8 @@
-use crate::graph::{Shape, shape};
 use itertools::izip;
 
 use crate::app::cam::Camera3D;
 use crate::geo::Pos3;
-use crate::graph::{EdgeList, Embedding3D};
+use crate::graph::{EdgeList, Embedding3D, Shape, Z_OFFSET_2D, shape};
 
 use super::*;
 
@@ -161,9 +160,15 @@ impl Map {
 
     /// if self currently has shape [`Shape::Custom`], this function handles input to add vertices or edges
     /// via mouse clicking.
-    fn extend_custom_graph(&mut self, ui: &mut Ui, cam: &Camera3D, tool: &mut info::MouseTool) {
+    /// returns whether a change to self was made.
+    fn extend_custom_graph(
+        &mut self,
+        ui: &mut Ui,
+        cam: &Camera3D,
+        tool: &mut info::MouseTool,
+    ) -> bool {
         let Shape::Custom(old_data) = self.shape() else {
-            return;
+            return false;
         };
         let (Some(pointer_pos), shift, true) = ui.input(|info| {
             let pos = info.pointer.latest_pos();
@@ -171,38 +176,39 @@ impl Map {
             let clicked = info.pointer.button_released(egui::PointerButton::Primary);
             (pos, shift, clicked)
         }) else {
-            return;
+            return false;
         };
         if !cam.to_screen().draw_rect().contains(pointer_pos) {
-            return;
+            return false;
         }
         let new_step = match *tool {
             info::MouseTool::AddEdge(fst) => {
                 let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
                 let Some(u) = fst else {
                     *tool = info::MouseTool::AddEdge(Some(v));
-                    return;
+                    return false;
                 };
                 *tool = info::MouseTool::AddEdge(shift.then_some(v));
                 if u == v {
-                    return;
+                    return false;
                 }
                 shape::BuildStep::Edge(u, v)
             },
             info::MouseTool::AddVertex => {
-                let pos = cam.to_screen().apply_inverse(pointer_pos);
+                let pos = cam.to_screen().apply_inverse(pointer_pos, Z_OFFSET_2D);
                 let x = (pos.x * 1000.0) as i32;
                 let y = (pos.y * 1000.0) as i32;
                 let z = (pos.z * 1000.0) as i32;
                 shape::BuildStep::Vertex(x, y, z)
             },
-            _ => return,
+            _ => return false,
         };
         let mut new_data = old_data.clone();
         new_data.build_steps.push(new_step);
         new_data.build_steps_string = new_data.print_build_steps(false);
         let new_shape = Shape::Custom(new_data);
         self.recompute(new_shape);
+        true
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
@@ -365,12 +371,13 @@ impl Map {
         self
     }
 
+    /// fst return value is wether the map has changed.
     pub fn update_and_draw<'a>(
         &'a mut self,
         ui: &mut Ui,
         cam: &mut Camera3D,
         tool: &mut info::MouseTool,
-    ) -> DrawContext<'a> {
+    ) -> (bool, DrawContext<'a>) {
         let draw_space = Vec2::new(ui.available_width(), ui.available_height());
         let (response, painter) = ui.allocate_painter(draw_space, egui::Sense::hover());
         let screen = response.rect;
@@ -379,7 +386,7 @@ impl Map {
         } else {
             cam.update_2d(ui, screen);
         }
-        self.extend_custom_graph(ui, cam, tool);
+        let change = self.extend_custom_graph(ui, cam, tool);
 
         let scale = self.scale(cam);
         let color = if ui.ctx().style().visuals.dark_mode {
@@ -396,7 +403,7 @@ impl Map {
             &mut self.visible,
         );
 
-        DrawContext {
+        let con = DrawContext {
             map: self.identity(),
             cam: cam.clone(),
             extreme_vertices: &self.extreme_vertices,
@@ -407,6 +414,7 @@ impl Map {
             scale,
             painter,
             response,
-        }
+        };
+        (change, con)
     }
 }

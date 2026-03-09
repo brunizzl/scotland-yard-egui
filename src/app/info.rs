@@ -558,6 +558,13 @@ impl MouseTool {
         }
     }
 
+    fn same_tool(self, other: Self) -> bool {
+        match (self, other) {
+            (MouseTool::AddEdge(_), MouseTool::AddEdge(_)) => true,
+            _ => self == other,
+        }
+    }
+
     fn what(self) -> &'static str {
         match self {
             MouseTool::Drag => "bewege Figuren ([E] + [1])",
@@ -613,7 +620,7 @@ impl MouseTool {
                 Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird."
             );
             for &t in buttons {
-                let button = egui::Button::new(t.symbol()).selected(self == t);
+                let button = egui::Button::new(t.symbol()).selected(self.same_tool(t));
                 if ui.add(button).on_hover_text(t.what()).clicked() {
                     new = t;
                 }
@@ -1137,7 +1144,7 @@ impl Info {
                 String::from_iter(vertices.into_iter().interleave(seps))
             };
             let robber_vertex =
-                self.characters.all().first().map_or("<Keiner>".to_string(), vertex_str);
+                self.characters.all().next().map_or("<Keiner>".to_string(), vertex_str);
 
             let comment = if is_tikz { "% " } else { "//" };
             format!(
