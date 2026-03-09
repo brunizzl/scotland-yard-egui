@@ -1261,17 +1261,24 @@ impl State {
         (Id::DEFAULT_COP, moved_this_turn)
     }
 
-    pub fn draw_allowed_next_steps(&self, style: &CharactersStyle, con: &DrawContext<'_>) {
+    // if `draw_all`, both sides have their steps drawn. (useful for fog setting)
+    pub fn draw_allowed_next_steps(
+        &self,
+        style: &CharactersStyle,
+        con: &DrawContext<'_>,
+        draw_all: bool,
+    ) {
         if !self.show_allowed_next_steps {
             return;
         }
-        if self.past_moves.is_empty() {
+        if self.past_moves.is_empty() && !draw_all {
             return;
         }
         let (current_turn, moved_this_turn) = self.mark_cops_moved_this_turn();
         let radius = style.size() * con.scale * 6.5;
         for (ch_i, ch) in izip!(0.., self.all()) {
-            if !ch.is_active() || !ch.id().same_job(current_turn) || moved_this_turn[ch_i] {
+            let wrong_job = !draw_all && !ch.id().same_job(current_turn);
+            if !ch.is_active() || wrong_job || moved_this_turn[ch_i] {
                 continue;
             }
             let Some(&v) = ch.past_vertices().last() else {

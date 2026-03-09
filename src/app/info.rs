@@ -46,6 +46,7 @@ pub enum VertexColorInfo {
     RobberVertexClass, //equivalence class of the robbers vertices
     CopsRotatedToEquivalence,
     CopsVoronoi,
+    Fog,
     CopStratPlaneDanger, //makes only sense in infinite plane
     Debugging,
     SpecificVertex,
@@ -91,6 +92,8 @@ impl VertexColorInfo {
             - drei Cops ca. (zwei exakt und einer +1 oder einer exakt und zwei +1)\n\
             - zwei Cops exakt, kein dritter +1\n\
             - zwei Cops ca. (einer exakt und einer +1)",
+            Fog => "anderes Spiel: alle Figuren probieren gemeinsam das Spielfeld von Nebel zu befreien.\n\
+            Der Zug der Cleaner endet, wenn der Räuber gezogen hat.",
             CopStratPlaneDanger => "Knoten die Räuber nicht betreten sollte, wenn Cops bestimmte \
             Strategie auf unendlicher Ebene fahren.",
             Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
@@ -121,6 +124,7 @@ impl VertexColorInfo {
             RobberVertexClass => "Äquivalenzklasse Räuberknoten",
             CopsRotatedToEquivalence => "Rotierte Coppositionen",
             CopsVoronoi => "Cops Voronoi",
+            Fog => "Nebel",
             CopStratPlaneDanger => "Cops Ebene Strat Gefahr",
             Debugging => "Debugging",
             SpecificVertex => "einzelner Knoten",
@@ -258,6 +262,7 @@ struct Options {
     /// determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
     marked_cop_dist: isize,
     /// determines max dist marked in [`VertexColorInfo::RobberDist`]
+    /// and also the fog-clearing distance in [`VertexColorInfo::Fog`]
     marked_robber_dist: isize,
     #[serde(skip)]
     specific_shown_vertex: usize,
@@ -266,7 +271,7 @@ struct Options {
     /// escpected in `0..=32`. if 0, all bits are shown, else just the chosen one
     #[serde(skip)]
     shown_u32_bit: isize,
-
+    /// distance for [`VertexColorInfo::Fog`].
     show_convex_hull: bool,
     show_hull_boundary: bool,
     draw_vertices: bool,
@@ -324,6 +329,7 @@ impl Options {
             None,
             MarkedCopDist,
             MarkedRobberDist,
+            FogVisibility,
             VertexIndex,
             DirectionBits,
             U32Bits,
@@ -334,6 +340,7 @@ impl Options {
                 | VertexColorInfo::MaxCopDist
                 | VertexColorInfo::AnyCopDist => ShownValue::MarkedCopDist,
                 VertexColorInfo::RobberDist => ShownValue::MarkedRobberDist,
+                VertexColorInfo::Fog => ShownValue::FogVisibility,
                 VertexColorInfo::SpecificVertex => ShownValue::VertexIndex,
                 VertexColorInfo::Escape2Grid
                 | VertexColorInfo::EscapeConeGrid
@@ -356,6 +363,9 @@ impl Options {
             },
             ShownValue::MarkedRobberDist => {
                 add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", 0..=1000, 1);
+            },
+            ShownValue::FogVisibility => {
+                add_drag_value(ui, &mut self.marked_robber_dist, "Sichtweite", 0..=1000, 1);
             },
             ShownValue::VertexIndex => {
                 ui.horizontal(|ui| {
@@ -625,6 +635,7 @@ pub struct Info {
     escapable_grid: graph::EscapableDirections,
     dilemma: graph::DilemmaNodes,
     plane_cop_strat: graph::PlaneCopStat,
+    fog_state: graph::fog::GameSates,
 
     /// elementwise minimum of `.distance` of active cops in `self.characters`
     min_cop_dist: Vec<isize>,
@@ -673,6 +684,7 @@ impl Default for Info {
             escapable_grid: graph::EscapableDirections::new(),
             dilemma: graph::DilemmaNodes::new(),
             plane_cop_strat: graph::PlaneCopStat::new(),
+            fog_state: graph::fog::GameSates::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -722,6 +734,7 @@ impl Info {
             escapable_grid: graph::EscapableDirections::new(),
             dilemma: graph::DilemmaNodes::new(),
             plane_cop_strat: graph::PlaneCopStat::new(),
+            fog_state: graph::fog::GameSates::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
             cop_advantage: Vec::new(),
@@ -975,6 +988,8 @@ impl Info {
         self.update_dilemma(con);
         self.update_cop_advantage(con.edges);
         self.update_plane_cop_strat(con);
+        self.fog_state
+            .update(con.edges, &self.characters, self.options.marked_robber_dist);
     }
 
     /// recomputes only things currently shown or required by things currently shown
@@ -1069,6 +1084,10 @@ impl Info {
         }
         if cop_moved && update_plane_cop_strat {
             self.update_plane_cop_strat(con);
+        }
+        if self.options.vertex_color_info() == Color::Fog {
+            self.fog_state
+                .update(con.edges, &self.characters, self.options.marked_robber_dist);
         }
     }
 
@@ -1655,6 +1674,13 @@ impl Info {
                     draw_if!(weight > 100, util, || choose_color(weight));
                 }
             },
+            VertexColorInfo::Fog => {
+                if let Some(fog) = self.fog_state.curr_fog() {
+                    for (&foggy, util) in izip!(fog, utils_iter) {
+                        draw_if!(foggy, util);
+                    }
+                }
+            },
             VertexColorInfo::CopStratPlaneDanger => {
                 for (&dang, util) in izip!(self.plane_cop_strat.danger_zones(), utils_iter) {
                     let color = || color::u32_marker_color(dang, colors);
@@ -1940,7 +1966,8 @@ impl Info {
             self.draw_green_circles(ui, con);
             self.manual_markers.draw(con, &self.options.manual);
             self.characters.draw_tails(&ch_style, con);
-            self.characters.draw_allowed_next_steps(&ch_style, con);
+            let draw_all_steps = self.options.vertex_color_info() == VertexColorInfo::Fog;
+            self.characters.draw_allowed_next_steps(&ch_style, con, draw_all_steps);
             self.draw_best_cop_moves(con);
             text_shift = self.draw_numbers(ui, con);
             self.characters.update_and_draw(ui, &ch_style, con, drag, &mut self.queue);

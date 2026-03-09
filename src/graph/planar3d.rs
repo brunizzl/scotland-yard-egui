@@ -19,6 +19,8 @@ use bidirectional_range::*;
 mod convex_hull;
 use convex_hull::*;
 
+pub mod fog;
+
 fn is_small(x: f32) -> bool {
     x.abs() < 1e-4
 }
