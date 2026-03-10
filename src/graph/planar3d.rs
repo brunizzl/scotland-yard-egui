@@ -150,14 +150,17 @@ impl Embedding3D {
             // just above 0.5 vs just below sqrt(2)
             if self.nr_vertices() > 4 { 0.55 } else { 1.4 }
         } else if !self.vertices.is_empty() {
+            let is_custom = matches!(self.shape, Shape::Custom(_));
+            let safety_factor = if is_custom { 1.99 } else { 1.5 };
             let p0 = self.vertices[0];
-            1.5 * self
+            let min_dist_p0 = self
                 .edges()
                 .neighbors_of(0)
                 .map(|v1| (self.vertices[v1] - p0).length_sq())
                 .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .unwrap_or(1e10)
-                .sqrt()
+                .sqrt();
+            safety_factor * min_dist_p0
         } else {
             1e10
         }

@@ -244,7 +244,7 @@ impl Map {
                     //radio!(RegularPolygon2D(6), RegularPolygon2D(_));
                     radio!(Random2D(1337), Random2D(_));
 
-                    if NATIVE {
+                    {
                         let selected = matches!(new_shape, Custom(_));
                         let custom_msg = "Custom";
                         let custom_radio = egui::RadioButton::new(selected, custom_msg);

@@ -58,15 +58,12 @@ impl GameSates {
     }
 
     pub fn update(&mut self, edges: &EdgeList, cleaners: &character::State, cleaning_range: isize) {
-        let mut add_new = false;
         if self.cleaning_range != cleaning_range {
             self.cleaning_range = cleaning_range;
             self.history.clear();
-            add_new = true;
         }
         if self.history.last().is_some_and(|fog| fog.len() != edges.nr_vertices()) {
             self.history.clear();
-            add_new = true;
         }
         if self.history.is_empty() {
             self.history.push(dark_vertices(edges, cleaners, cleaning_range));
@@ -75,22 +72,22 @@ impl GameSates {
         // for simplicity, moving the robber determines when a cleaning move is over.
         if let Some(robber) = cleaners.active_robber() {
             let new_nr_rounds = robber.past_vertices().len();
+            if new_nr_rounds == 0 {
+                return;
+            }
             let rounds_diff = new_nr_rounds as isize - self.nr_rounds as isize;
             self.nr_rounds = new_nr_rounds;
             match rounds_diff {
-                -1 => _ = self.history.pop(), // lasst move was undone -> also undo here
-                0 => {},                      // no change -> nothing to do here
-                1 => add_new = true,          // new move is completed -> update below
-                _ => {
-                    self.history.clear();
-                    add_new = true;
+                -1 => {
+                    // last move was undone -> also undo here
+                    self.history.pop();
+                    return;
                 },
+                0 => return,               // no change -> nothing to do here
+                1 => {},                   // new move is completed -> update below
+                _ => self.history.clear(), // we don't know what happened -> start anew.
             }
         } else {
-            self.nr_rounds = 0;
-            return;
-        }
-        if !add_new {
             return;
         }
 
