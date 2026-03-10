@@ -375,16 +375,6 @@ impl Character {
             let dist_weight = (to_plane.project_pos(con.positions[v]) - pos2).length_sq();
             visible_weight + dist_weight
         };
-        {
-            // try on the cheap if we can improve the current position.
-            // if not, we return immediately without running the expensive part below
-            let (local_best, dist_sq) =
-                con.edges.find_local_minimum(potential, self.nearest_vertex);
-            let now_on_node = dist_sq <= con.tolerance * con.tolerance;
-            if local_best == self.nearest_vertex && now_on_node == self.on_node {
-                return false;
-            }
-        }
         let (best_vertex, dist_sq) = con.edges.find_global_minimum(potential);
         let now_on_node = dist_sq <= con.tolerance * con.tolerance;
 
@@ -1196,7 +1186,6 @@ impl State {
         if !self.show_past_steps {
             return;
         }
-        let max_shown_edge_len = con.map.data().max_scaling_edge_length();
         for ch in self.all() {
             let glow = style.glow_color(ch.id());
             let trans = glow.gamma_multiply(0.1);
@@ -1211,9 +1200,8 @@ impl State {
 
                 let points = [con.vertex_draw_pos(v1), con.vertex_draw_pos(v2)];
                 let stroke = {
-                    let space_dist = (con.positions[v2] - con.positions[v1]).length();
-                    let max = max_shown_edge_len;
-                    let color = if space_dist < max { glow } else { trans };
+                    let valid = con.edges.has_edge(v1, v2);
+                    let color = if valid { glow } else { trans };
                     egui::Stroke::new(size * 0.75, color)
                 };
                 let line = egui::Shape::LineSegment { points, stroke };
