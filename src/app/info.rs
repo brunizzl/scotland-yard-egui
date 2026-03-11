@@ -1389,7 +1389,7 @@ impl Info {
     }
 
     fn draw_vertices(&self, con: &DrawContext<'_>) {
-        if !self.options.draw_vertices {
+        if !self.options.draw_vertices && !con.map.shape().pure_custom() {
             return;
         }
         let size = 4.0 * con.scale * self.options.vertex_style.size;

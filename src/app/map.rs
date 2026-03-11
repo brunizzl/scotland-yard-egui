@@ -256,8 +256,7 @@ impl Map {
                     radio!(Random2D(1337), Random2D(_));
 
                     {
-                        let selected =
-                            matches!(&new_shape, Custom(c) if c.basis == Shape::SingleVertex);
+                        let selected = new_shape.pure_custom();
                         let custom_msg = "Custom";
                         let custom_radio = egui::RadioButton::new(selected, custom_msg);
                         if ui.add(custom_radio).clicked() {

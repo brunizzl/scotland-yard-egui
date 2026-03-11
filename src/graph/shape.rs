@@ -24,7 +24,8 @@ impl BuildStep {
         N<zahl>: <zahl>-distanz und nähere Knoten werden Nachbarn\n\
         D<zahl>: Jede Kante wird Weg mit <zahl> vielen inneren Knoten\n\
         V<x>,<y>,<z>: Knoten mit Koordinaten (<x>, <y>, <z>) / 1000\n\
-        E<u>,<v>: Kante zwischen Knoten mit Indices <u> und <v>.\
+        E<u>,<v>: Kante zwischen Knoten mit Indices <u> und <v>.\n\n\
+        BITTE BEACHTE WERKZEUGE [±v] UND [±e]\
         ";
 
     pub const DEFAULT_Z: i32 = (crate::graph::Z_OFFSET_2D * 1000.0) as i32;
@@ -225,10 +226,20 @@ pub enum Shape {
     SquareGrid,
     RegularPolygon2D(isize),
     Random2D(u32),
+    /// really plays two roles:
+    /// either with basis shape [`Shape::SingleVertex`] as completely custom graph
+    /// or with a different shape as extension of this (then non-trivial) base graph.
+    /// (the second role is -currently- only available if compiled natively)
     Custom(Box<CustomBuild>),
 }
 
 impl Shape {
+    /// returns `true` iff variant [`Self::Custom`] is held and
+    /// the basis shape is [`Self::SingleVertex`].
+    pub fn pure_custom(&self) -> bool {
+        matches!(self, Self::Custom(c) if c.basis == Self::SingleVertex)
+    }
+
     pub fn name_str(&self) -> &'static str {
         match self {
             Self::SingleVertex => "SingleVertex",
@@ -247,8 +258,8 @@ impl Shape {
             Self::SquareGrid => "Gitter (Vierecke)",
             Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
             Self::Random2D(_) => "2D Kreisscheibe trianguliert",
-            Self::Custom(c) if c.basis == Self::SingleVertex => "Custom",
-            Self::Custom(_) => "Extended",
+            Self::Custom(_) if self.pure_custom() => "Custom",
+            Self::Custom(_) => "erweitere aktuellen Graph",
         }
     }
 
@@ -270,7 +281,7 @@ impl Shape {
             Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
             Self::Tetrahedron => "Tetraeder".to_string(),
             Self::Icosahedron => "Ikosaeder".to_string(),
-            Self::Custom(c) if c.basis == Self::SingleVertex => {
+            Self::Custom(c) if self.pure_custom() => {
                 format!("Custom-{}", c.print_build_steps(true))
             },
             Self::Custom(c) => {
@@ -299,7 +310,7 @@ impl Shape {
             Self::SquareGrid => "✂🍩4",
             Self::RegularPolygon2D(_) => "⬣",
             Self::Random2D(_) => "⏺",
-            Self::Custom(c) if c.basis == Self::SingleVertex => "🔨",
+            Self::Custom(_) if self.pure_custom() => "🔨",
             Self::Custom(_) => "+🔨",
         }
     }
