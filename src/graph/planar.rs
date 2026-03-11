@@ -35,7 +35,7 @@ impl Embedding2D {
     }
 
     #[inline(always)]
-    fn add_vertex(&mut self, pos: Pos2) -> usize {
+    pub fn add_vertex(&mut self, pos: Pos2) -> usize {
         let new_index = self.nr_vertices();
         self.positions.push(pos);
         self.edges.push();

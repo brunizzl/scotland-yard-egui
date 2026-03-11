@@ -924,6 +924,12 @@ impl Embedding3D {
         res
     }
 
+    fn new_single_vertex() -> Self {
+        let mut as_2d = super::Embedding2D::default();
+        as_2d.add_vertex(egui::Pos2::new(0.0, 0.0));
+        Self::from_2d(as_2d, Shape::SingleVertex)
+    }
+
     /// draws all visible edges, updates `visible` while doing so.
     fn draw_visible_hull_edges(
         &self,
@@ -1162,7 +1168,7 @@ impl Embedding3D {
                 }
                 !make_all_visible
             },
-            Shape::Random2D(_) => {
+            Shape::SingleVertex | Shape::Random2D(_) => {
                 self.draw_all_edges(to_screen, painter, stroke);
                 true
             },
@@ -1214,6 +1220,7 @@ impl Embedding3D {
         use Shape::*;
         let wanted_shape = shape.clone();
         let result = match shape {
+            SingleVertex => Self::new_single_vertex(),
             Icosahedron => Self::new_subdivided_icosahedron(res),
             Octahedron => Self::new_subdivided_octahedron(res),
             Tetrahedron => Self::new_subdivided_tetrahedron(res),
@@ -1244,13 +1251,13 @@ impl Embedding3D {
                 let mut result = Self::new_map_from(c.basis.clone(), res);
                 for step in &c.build_steps {
                     match step {
-                        shape::BuildStep::NeighNeihs(n) => {
+                        shape::BuildStep::NeighNeighs(n) => {
                             result.edge_pow(*n);
                         },
                         shape::BuildStep::SubdivEdges(n) => {
                             result.subdivide_all_edges(*n, false);
                         },
-                        shape::BuildStep::Vertex(x_int, y_int, z_int) => {
+                        shape::BuildStep::Vertex(_, [x_int, y_int, z_int]) => {
                             let x = *x_int as f32 * 0.001;
                             let y = *y_int as f32 * 0.001;
                             let z = *z_int as f32 * 0.001;
@@ -1262,6 +1269,8 @@ impl Embedding3D {
                                 result.edges.add_edge(*v1, *v2);
                             }
                         },
+                        shape::BuildStep::DeleteEdge(_, _) => unreachable!(),
+                        shape::BuildStep::DeleteVertex(_) => unreachable!(),
                     }
                 }
                 result.shape = Custom(c);

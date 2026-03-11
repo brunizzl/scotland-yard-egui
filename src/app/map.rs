@@ -170,17 +170,18 @@ impl Map {
         let Shape::Custom(old_data) = self.shape() else {
             return false;
         };
-        let (Some(pointer_pos), shift, true) = ui.input(|info| {
+        let (Some(pointer_pos), modifiers, true) = ui.input(|info| {
             let pos = info.pointer.latest_pos();
-            let shift = info.modifiers.shift;
+            let modifiers = info.modifiers;
             let clicked = info.pointer.button_released(egui::PointerButton::Primary);
-            (pos, shift, clicked)
+            (pos, modifiers, clicked)
         }) else {
             return false;
         };
         if !cam.to_screen().draw_rect().contains(pointer_pos) {
             return false;
         }
+        let in_delete_mode = modifiers.shift;
         let new_step = match *tool {
             info::MouseTool::AddEdge(fst) => {
                 let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
@@ -188,23 +189,33 @@ impl Map {
                     *tool = info::MouseTool::AddEdge(Some(v));
                     return false;
                 };
-                *tool = info::MouseTool::AddEdge(shift.then_some(v));
+                *tool = info::MouseTool::AddEdge(modifiers.ctrl.then_some(v));
                 if u == v {
                     return false;
                 }
-                shape::BuildStep::Edge(u, v)
+                if in_delete_mode {
+                    shape::BuildStep::DeleteEdge(u, v)
+                } else {
+                    shape::BuildStep::Edge(u, v)
+                }
             },
-            info::MouseTool::AddVertex => {
+            info::MouseTool::AddVertex if !in_delete_mode => {
+                let v = self.data.nr_vertices();
                 let pos = cam.to_screen().apply_inverse(pointer_pos, Z_OFFSET_2D);
                 let x = (pos.x * 1000.0) as i32;
                 let y = (pos.y * 1000.0) as i32;
                 let z = (pos.z * 1000.0) as i32;
-                shape::BuildStep::Vertex(x, y, z)
+                shape::BuildStep::Vertex(v, [x, y, z])
+            },
+            info::MouseTool::AddVertex if in_delete_mode => {
+                let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
+                shape::BuildStep::DeleteVertex(v)
             },
             _ => return false,
         };
         let mut new_data = old_data.clone();
         new_data.build_steps.push(new_step);
+        new_data.normalize_build_steps();
         new_data.build_steps_string = new_data.print_build_steps(false);
         let new_shape = Shape::Custom(new_data);
         self.recompute(new_shape);
@@ -245,26 +256,26 @@ impl Map {
                     radio!(Random2D(1337), Random2D(_));
 
                     {
-                        let selected = matches!(new_shape, Custom(_));
+                        let selected =
+                            matches!(&new_shape, Custom(c) if c.basis == Shape::SingleVertex);
                         let custom_msg = "Custom";
                         let custom_radio = egui::RadioButton::new(selected, custom_msg);
                         if ui.add(custom_radio).clicked() {
-                            // use this as basis, as it only is a single vertex.
-                            let basis = Shape::Random2D(1312);
+                            let basis = Shape::SingleVertex;
                             self.resolution = basis.min_res();
                             let custom_data = shape::CustomBuild::new(basis);
                             let custom_box = Box::new(custom_data);
                             new_shape = Custom(custom_box);
                             change = true;
                         }
-                        if !selected {
-                            let extend_msg = "erweitere aktuellen Graph";
-                            let extend_radio = egui::RadioButton::new(false, extend_msg);
-                            if ui.add(extend_radio).clicked() {
-                                let custom_data = shape::CustomBuild::new(new_shape.clone());
-                                let custom_box = Box::new(custom_data);
-                                new_shape = Custom(custom_box);
-                            }
+                    }
+                    if NATIVE && !matches!(new_shape, Custom(_)) {
+                        let extend_msg = "erweitere aktuellen Graph";
+                        let extend_radio = egui::RadioButton::new(false, extend_msg);
+                        if ui.add(extend_radio).clicked() {
+                            let custom_data = shape::CustomBuild::new(new_shape.clone());
+                            let custom_box = Box::new(custom_data);
+                            new_shape = Custom(custom_box);
                         }
                     }
                 });

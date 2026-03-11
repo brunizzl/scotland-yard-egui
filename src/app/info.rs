@@ -553,8 +553,8 @@ impl MouseTool {
             MouseTool::Draw => " ✏ ",
             MouseTool::Erase => " 📗 ",
             MouseTool::Paintbucket => " 💦 ",
-            MouseTool::AddVertex => " +v ",
-            MouseTool::AddEdge(_) => " +e ",
+            MouseTool::AddVertex => " ±v ",
+            MouseTool::AddEdge(_) => " ±e ",
         }
     }
 
@@ -575,8 +575,15 @@ impl MouseTool {
                 Verschiedene Farben interagieren nicht miteinander.\n\
                 Klicken auf eine bereits markierte Region löscht diese."
             },
-            MouseTool::AddVertex => "füge Knoten zu Custom Graph hinzu ([E] + [5])",
-            MouseTool::AddEdge(_) => "füge Kante zu Custom Graph hinzu ([E] + [6])",
+            MouseTool::AddVertex => {
+                "füge Knoten zu Custom Graph hinzu ([E] + [5])\n\
+                [shift] + [klick] entfernt Knoten."
+            },
+            MouseTool::AddEdge(_) => {
+                "füge Kante zu Custom Graph hinzu ([E] + [6])\n\
+                [shift] + [klick] entfernt Kante.\n\
+                [strg] + [klick] für Kantenzug."
+            },
         }
     }
 
