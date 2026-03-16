@@ -1101,13 +1101,14 @@ impl State {
                 ui.label(format!("{move_name}: {ch_name}"));
             };
             print_move("vorletzter Zug", self.snd_last_moved());
-            print_move("letzter Zug", self.last_moved());
-            print_move("nächster Zug", self.next_moved());
+            print_move("letzter Zug      ", self.last_moved());
+            print_move("nächster Zug  ", self.next_moved());
             ui.label(format!(
                 "Rundenindex: {}",
                 self.active_robber()
                     .map_or(0, |r| r.past_vertices().len().saturating_sub(1))
-            ));
+            ))
+            .on_hover_text("Anzahl von Räuberzügen (inklusive auf der Stelle)");
 
             ui.add_space(8.0);
             if ui.button(" 🗑 ").on_hover_text("Spiel vergessen").clicked() {

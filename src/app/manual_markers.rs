@@ -290,9 +290,10 @@ impl ManualMarkers {
                     }
                 }
 
-                let what_set = match () {
-                    () if automatic_markers_shown => "automatische Marker",
-                    () => "aktive manuelle Marker",
+                let what_set = if automatic_markers_shown {
+                    "automatische Marker"
+                } else {
+                    "aktive manuelle Marker"
                 };
                 enum Op {
                     Add,

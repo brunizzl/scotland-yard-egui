@@ -428,7 +428,8 @@ impl Options {
         ui.collapsing("Knoteninfo", |ui| {
             //obv. whether to draw vertices or not has no influence over any actual information -> no need to update menu change
             ui.horizontal(|ui| {
-                ui.add(Checkbox::new(&mut self.draw_vertices, "Knoten"));
+                ui.add(Checkbox::new(&mut self.draw_vertices, "Knoten"))
+                    .on_hover_text("Spielfeldform \"Custom\" zeigt Knoten immer an.");
                 self.vertex_style.draw_options(ui, &[Color32::GRAY]);
             });
 

@@ -315,7 +315,20 @@ impl Map {
                     crate::app::menu_button_closing_outside(ui, "Bauschritte", |ui| {
                         ui.label(shape::BuildStep::EXPLAINER);
                         ui.add_space(5.0);
-                        let recompute_button = ui.button("Übernehmen");
+                        let (recompute_button, delete_button) = ui
+                            .horizontal(|ui| {
+                                let recompute = ui
+                                    .button("Übernehmen")
+                                    .on_hover_text("Parse Text, lösche Fehler, update Graph.");
+                                ui.add_space(100.0);
+                                let delete = ui.button(" 🗑 ").on_hover_text("Lösche Graph");
+                                (recompute, delete)
+                            })
+                            .inner;
+                        if delete_button.clicked() {
+                            c.build_steps.clear();
+                            c.build_steps_string.clear();
+                        }
                         ui.add_space(5.0);
                         let text_edit = egui::ScrollArea::vertical()
                             .show(ui, |ui| ui.text_edit_multiline(&mut c.build_steps_string));

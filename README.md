@@ -24,6 +24,11 @@ On Fedora Rawhide you need to run:
 
 `dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
 
+*NOTE: TO SAVE SCREENSHOTS / BRUTEFORCE DATA, YOU NEED TO HAVE THE FOLLOWING FOLDERS IN THIS DIRECTORY:*
+- bruteforce
+- bruteforce-police
+- screenshots
+
 ### Website Version
 
  Try it out at <https://brunizzl.github.io/scotland-yard-egui/>.

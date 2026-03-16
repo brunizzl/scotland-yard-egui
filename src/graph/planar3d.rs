@@ -731,7 +731,6 @@ impl Embedding3D {
         res
     }
 
-    #[allow(dead_code)]
     fn new_skewed_torus(dx: isize, dy: isize) -> Self {
         assert!(isize::max(dx, dy) >= 2);
         assert!(isize::min(dx, dy) >= 0);
@@ -929,6 +928,45 @@ impl Embedding3D {
         let mut as_2d = super::Embedding2D::default();
         as_2d.add_vertex(egui::Pos2::new(0.0, 0.0));
         Self::from_2d(as_2d, Shape::SingleVertex)
+    }
+
+    fn new_custom(c: Box<shape::CustomBuild>, res: usize) -> Self {
+        let mut result = Self::new_map_from(c.basis.clone(), res);
+        let mut keep_symmetry = true;
+        for step in &c.build_steps {
+            match step {
+                shape::BuildStep::NeighNeighs(n) => {
+                    result.edge_pow(*n);
+                },
+                shape::BuildStep::SubdivEdges(n) => {
+                    result.subdivide_all_edges(*n, false);
+                    keep_symmetry = false;
+                },
+                shape::BuildStep::Vertex(_, [x_int, y_int, z_int]) => {
+                    let x = *x_int as f32 * 0.001;
+                    let y = *y_int as f32 * 0.001;
+                    let z = *z_int as f32 * 0.001;
+                    let pos = Pos3::new(x, y, z);
+                    result.add_vertex(pos);
+                    keep_symmetry = false;
+                },
+                shape::BuildStep::Edge(v1, v2) => {
+                    if usize::max(*v1, *v2) < result.nr_vertices()
+                        && !result.edges.has_edge(*v1, *v2)
+                    {
+                        result.edges.add_edge(*v1, *v2);
+                        keep_symmetry = false;
+                    }
+                },
+                shape::BuildStep::DeleteEdge(_, _) => unreachable!(),
+                shape::BuildStep::DeleteVertex(_) => unreachable!(),
+            }
+        }
+        result.shape = shape::Shape::Custom(c);
+        if !keep_symmetry {
+            result.sym_group = SymGroup::None(NoSymmetry::new(result.vertices.len()));
+        }
+        result
     }
 
     /// draws all visible edges, updates `visible` while doing so.
@@ -1248,35 +1286,7 @@ impl Embedding3D {
             TriangGrid => Self::new_subdivided_triangle_grid(res as isize, false),
             SquareGrid => Self::new_subdivided_squares_grid(res as isize, false),
             TriangTorusSkewed(dy) => Self::new_skewed_torus(res as isize, dy),
-            Custom(c) => {
-                let mut result = Self::new_map_from(c.basis.clone(), res);
-                for step in &c.build_steps {
-                    match step {
-                        shape::BuildStep::NeighNeighs(n) => {
-                            result.edge_pow(*n);
-                        },
-                        shape::BuildStep::SubdivEdges(n) => {
-                            result.subdivide_all_edges(*n, false);
-                        },
-                        shape::BuildStep::Vertex(_, [x_int, y_int, z_int]) => {
-                            let x = *x_int as f32 * 0.001;
-                            let y = *y_int as f32 * 0.001;
-                            let z = *z_int as f32 * 0.001;
-                            let pos = Pos3::new(x, y, z);
-                            result.add_vertex(pos);
-                        },
-                        shape::BuildStep::Edge(v1, v2) => {
-                            if *v1 < result.nr_vertices() && *v2 < result.nr_vertices() {
-                                result.edges.add_edge(*v1, *v2);
-                            }
-                        },
-                        shape::BuildStep::DeleteEdge(_, _) => unreachable!(),
-                        shape::BuildStep::DeleteVertex(_) => unreachable!(),
-                    }
-                }
-                result.shape = Custom(c);
-                result
-            },
+            Custom(c) => Self::new_custom(c, res),
         };
         assert_eq!(result.shape, wanted_shape);
         result
