@@ -103,7 +103,7 @@ impl VertexColorInfo {
             - zwei Cops ca. (einer exakt und einer +1)",
             Fog => "anderes Spiel: alle Figuren probieren gemeinsam das Spielfeld von Nebel zu befreien.\n\
             Der Zug der Cleaner endet, wenn der Räuber gezogen hat.\n\
-            Starte mit Manuellen Markern als Nebel: habe Nebel ausgewählt + [Strg] + [T]",
+            Starte mit Manuellen Markern als Nebel: habe Nebel ausgewählt + [Shift] + [T]",
             CopStratPlaneDanger => "Knoten die Räuber nicht betreten sollte, wenn Cops bestimmte \
             Strategie auf unendlicher Ebene fahren.",
             Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
@@ -1245,7 +1245,7 @@ impl Info {
             }
 
             if self.options.vertex_color_info() == VertexColorInfo::Fog
-                && info.modifiers.ctrl
+                && info.modifiers.shift
                 && info.key_pressed(Key::T)
             {
                 let active_mask = 1u8 << self.manual_markers.active_bit;
