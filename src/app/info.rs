@@ -28,6 +28,8 @@ use super::{
 pub enum VertexColorInfo {
     None,
     NearNodes,
+    ConvexHull,
+    ConvexHullBorder,
     SafeOutside,
     SafeBoundary,
     Escape1,
@@ -58,6 +60,13 @@ impl VertexColorInfo {
         match self {
             None => "Es werden keine automatisch berechneten Punkte angezeigt",
             NearNodes => "alle Knoten näher am Räuber als am nächsten Cop",
+            ConvexHull => "Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
+            wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
+            hier immer als außerhalb der Hülle angenommen wird.",
+            ConvexHullBorder => "Punkte in Hülle, die mindestens einen Nachbarn ausserhalb Hülle haben. \
+            Weil diese Punkte nicht in Isolation interessant sind, sondern als Kreis um die Hülle, \
+            wird ein Punkt nur als Randpunkt makiert, wenn er erfolgreich in den Kreis um die Hülle \
+            aufgenommen werden konnte.",
             SafeOutside => "Alle Knoten nicht in konvexer Hülle und mit Mindestabstand >= 2 zu nächstem Cop",
             SafeBoundary => "Alle Knoten auf Rand von konvexer Hülle mit Mindestabstand >= 2 zu nächstem Cop",
             Escape1 => "alle Punkte in der Konvexen Hülle, \
@@ -93,7 +102,8 @@ impl VertexColorInfo {
             - zwei Cops exakt, kein dritter +1\n\
             - zwei Cops ca. (einer exakt und einer +1)",
             Fog => "anderes Spiel: alle Figuren probieren gemeinsam das Spielfeld von Nebel zu befreien.\n\
-            Der Zug der Cleaner endet, wenn der Räuber gezogen hat.",
+            Der Zug der Cleaner endet, wenn der Räuber gezogen hat.\n\
+            Starte mit Manuellen Markern als Nebel: habe Nebel ausgewählt + [Strg] + [T]",
             CopStratPlaneDanger => "Knoten die Räuber nicht betreten sollte, wenn Cops bestimmte \
             Strategie auf unendlicher Ebene fahren.",
             Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
@@ -106,6 +116,8 @@ impl VertexColorInfo {
         match self {
             None => "Keine",
             NearNodes => "für Räuber nähere Knoten",
+            ConvexHull => "Konvexe Hülle um Cops",
+            ConvexHullBorder => "Grenze Konvexe Hülle",
             SafeOutside => "Winning Outside",
             SafeBoundary => "Winning Stage I",
             Escape1 => "Winning Stage II",
@@ -178,7 +190,7 @@ impl VertexSymbolInfo {
         use VertexSymbolInfo::*;
         match self {
             None => "Es werden keine Zahlen angezeigt",
-            Indices => "nur relevant für Debugging",
+            Indices => "primär relevant für Debugging",
             RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
             Escape2 => {
                 "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
@@ -247,8 +259,6 @@ impl VertexSymbolInfo {
 struct Options {
     vertex_style: Style<1>,
     automatic_marker_style: Style<1>,
-    hull_style: Style<1>,
-    hull_boundary_style: Style<1>,
     number_style: Style<0>,
     character_style: CharactersStyle,
     manual: ManualMarkerOptions,
@@ -261,19 +271,17 @@ struct Options {
     //these are only used, when the respective VertexColorInfo(s) is/are active
     /// determines cop dist marked in VertexColorInfo::{Max/Min/Any}CopDist
     marked_cop_dist: isize,
-    /// determines max dist marked in [`VertexColorInfo::RobberDist`]
-    /// and also the fog-clearing distance in [`VertexColorInfo::Fog`]
+    /// determines dist marked in [`VertexColorInfo::RobberDist`]
     marked_robber_dist: isize,
-    #[serde(skip)]
+    /// how far can cleaners see when clearing fog? (see [`VertexColorInfo::Fog`])
+    fog_clearing_dist: isize,
+    /// see [`VertexColorInfo::SpecificVertex`]
     specific_shown_vertex: usize,
     /// the last two bits are always zero, therefore valid value for [`crate::graph::grid::Dirs`]
     shown_escape_directions: u8,
     /// escpected in `0..=32`. if 0, all bits are shown, else just the chosen one
-    #[serde(skip)]
     shown_u32_bit: isize,
-    /// distance for [`VertexColorInfo::Fog`].
-    show_convex_hull: bool,
-    show_hull_boundary: bool,
+
     draw_vertices: bool,
     show_cop_strat: bool,
     show_manual_marker_window: bool,
@@ -282,8 +290,6 @@ struct Options {
 const DEFAULT_OPTIONS: Options = Options {
     vertex_style: Style::new(&[Color32::GRAY]),
     automatic_marker_style: Style::new(&[color::GREEN]),
-    hull_style: Style::new(&[color::LIGHT_BLUE]),
-    hull_boundary_style: Style::new(&[color::WHITE]),
     number_style: Style::new(&[]),
     character_style: CharactersStyle::DEFAULT,
     manual: ManualMarkerOptions {
@@ -295,6 +301,7 @@ const DEFAULT_OPTIONS: Options = Options {
 
     marked_cop_dist: 10,
     marked_robber_dist: 10,
+    fog_clearing_dist: 1,
     specific_shown_vertex: 0,
     shown_escape_directions: 63,
     shown_u32_bit: 0,
@@ -302,8 +309,6 @@ const DEFAULT_OPTIONS: Options = Options {
     last_selected_vertex_color_infos: [VertexColorInfo::None; 7],
     last_selected_vertex_number_infos: [VertexSymbolInfo::None; 7],
 
-    show_convex_hull: false,
-    show_hull_boundary: false,
     draw_vertices: false,
     show_cop_strat: false,
     show_manual_marker_window: false,
@@ -365,7 +370,7 @@ impl Options {
                 add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", 0..=1000, 1);
             },
             ShownValue::FogVisibility => {
-                add_drag_value(ui, &mut self.marked_robber_dist, "Sichtweite", 0..=1000, 1);
+                add_drag_value(ui, &mut self.fog_clearing_dist, "Sichtweite", 0..=1000, 1);
             },
             ShownValue::VertexIndex => {
                 ui.horizontal(|ui| {
@@ -426,51 +431,24 @@ impl Options {
                 ui.add(Checkbox::new(&mut self.draw_vertices, "Knoten"));
                 self.vertex_style.draw_options(ui, &[Color32::GRAY]);
             });
-            ui.add_space(8.0);
-
-
-            ui.horizontal(|ui| {
-                menu_change |= ui
-                    .add(Checkbox::new(&mut self.show_convex_hull, "konvexe Hülle um Cops"))
-                    .on_hover_text(
-                        "Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
-                    wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
-                    hier immer als außerhalb der Hülle angenommen wird.",
-                    )
-                    .changed();
-                self.hull_style.draw_options(ui, &[color::LIGHT_BLUE]);
-            });
-
-            ui.horizontal(|ui| {
-                menu_change |= ui
-                .add(Checkbox::new(
-                    &mut self.show_hull_boundary,
-                    "Grenze konvexer Hülle",
-                ))
-                .on_hover_text(
-                    "Punkte in Hülle, die mindestens einen Nachbarn ausserhalb Hülle haben. \
-                Weil diese Punkte nicht in Isolation interessant sind, sondern als Kreis um die Hülle, \
-                wird ein Punkt nur als Randpunkt makiert, wenn er erfolgreich in den Kreis um die Hülle \
-                aufgenommen werden konnte.",
-                )
-                .changed();
-                self.hull_boundary_style.draw_options(ui, &[color::WHITE]);
-            });
 
             ui.add_space(8.0);
             ui.add(Checkbox::new(&mut self.show_cop_strat, "Polizeistrategie"))
                 .on_hover_text(
                     "Wenn für aktuelle Anzahl Cops & für aktuellen Graphen Bruteforce \
-                Polizeistrategie berechnet wurde und aktueller Spielstate von Cops \
-                gewonnen wird, werden alle idealen Züge angezeigt."
+                    Polizeistrategie berechnet wurde und aktueller Spielstate von Cops \
+                    gewonnen wird, werden alle idealen Züge angezeigt.",
                 );
-
 
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.label("Marker:");
                 self.automatic_marker_style.draw_options(ui, &[color::GREEN]);
             });
+            let color_info_text = format!(
+                "{}\n\nrotiere durch letzte Marker mit [Q] + [1]/[2]/[3]/[4]",
+                self.vertex_color_info().description(),
+            );
             ComboBox::from_id_salt(&self.last_selected_vertex_color_infos as *const _)
                 .selected_text(self.vertex_color_info().name_str())
                 .show_ui(ui, |ui| {
@@ -482,27 +460,32 @@ impl Options {
                         if !val.selectable_with(map) {
                             text = text.weak();
                         }
-                        ui.radio_value(&mut curr, val, text)
-                            .on_hover_text(val.description());
+                        ui.radio_value(&mut curr, val, text).on_hover_text(val.description());
                     }
                     if curr != self.vertex_color_info() {
                         let infos = &mut self.last_selected_vertex_color_infos;
-                        let new_pos = infos.iter().position(|&i| i == curr).unwrap_or(infos.len() - 1);
+                        let new_pos =
+                            infos.iter().position(|&i| i == curr).unwrap_or(infos.len() - 1);
                         infos[..=new_pos].rotate_right(1);
                         debug_assert!(!infos.contains(&curr) || infos[0] == curr);
                         infos[0] = curr;
 
                         menu_change = true;
                     }
-                }).response.on_hover_text("rotiere durch letzte mit [Q] + [1]/[2]/[3]/[4]");
+                })
+                .response
+                .on_hover_text(color_info_text);
             self.draw_drag_value(ui, true);
-
 
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.label("Symbole:");
                 self.number_style.draw_options(ui, &[]);
             });
+            let symbol_info_text = format!(
+                "{}\n\nrotiere durch letzte Symbole mit [W] + [1]/[2]/[3]/[4]",
+                self.vertex_number_info().description(),
+            );
             ComboBox::from_id_salt(&self.last_selected_vertex_number_infos as *const _)
                 .selected_text(self.vertex_number_info().name_str())
                 .show_ui(ui, |ui| {
@@ -514,19 +497,21 @@ impl Options {
                         if !val.selectable_with(map) {
                             text = text.weak();
                         }
-                        ui.radio_value(&mut curr, val, text)
-                            .on_hover_text(val.description());
+                        ui.radio_value(&mut curr, val, text).on_hover_text(val.description());
                     }
                     if curr != self.vertex_number_info() {
                         let infos = &mut self.last_selected_vertex_number_infos;
-                        let new_pos = infos.iter().position(|&i| i == curr).unwrap_or(infos.len() - 1);
+                        let new_pos =
+                            infos.iter().position(|&i| i == curr).unwrap_or(infos.len() - 1);
                         infos[..=new_pos].rotate_right(1);
                         debug_assert!(!infos.contains(&curr) || infos[0] == curr);
                         infos[0] = curr;
 
                         menu_change = true;
                     }
-                }).response.on_hover_text("rotiere durch letzte mit [W] + [1]/[2]/[3]/[4]");
+                })
+                .response
+                .on_hover_text(symbol_info_text);
             self.draw_drag_value(ui, false);
         });
 
@@ -577,12 +562,12 @@ impl MouseTool {
             },
             MouseTool::AddVertex => {
                 "füge Knoten zu Custom Graph hinzu ([E] + [5])\n\
-                [shift] + [klick] entfernt Knoten."
+                [Shift] + [Klick] entfernt Knoten."
             },
             MouseTool::AddEdge(_) => {
                 "füge Kante zu Custom Graph hinzu ([E] + [6])\n\
-                [shift] + [klick] entfernt Kante.\n\
-                [strg] + [klick] für Kantenzug."
+                [Shift] + [Klick] entfernt Kante.\n\
+                [Strg] + [Klick] für Kantenzug."
             },
         }
     }
@@ -774,7 +759,7 @@ impl Info {
     }
 
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map, cam: &Camera3D) {
-        let mut change = self.options.draw_menu(ui, map);
+        let options_changed = self.options.draw_menu(ui, map);
 
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
@@ -795,14 +780,17 @@ impl Info {
             });
         }
 
-        change |= self.characters.draw_menu(
+        let characters_changed = self.characters.draw_menu(
             ui,
             &mut self.options.character_style,
             map,
             cam,
             &mut self.queue,
         );
-        if change {
+        if characters_changed {
+            self.tool = MouseTool::Drag;
+        }
+        if options_changed || characters_changed {
             self.register_change_now();
         }
     }
@@ -825,7 +813,6 @@ impl Info {
 
     pub fn draw_windows(&mut self, ctx: &egui::Context) {
         let automatic_shown = self.options.vertex_color_info() != VertexColorInfo::None;
-        let hull_shown = self.options.show_convex_hull;
         let mut new_tool = self.tool;
         egui::Window::new("Manuelle Marker")
             .open(&mut self.options.show_manual_marker_window)
@@ -836,9 +823,7 @@ impl Info {
                     ui,
                     &mut self.options.manual,
                     automatic_shown,
-                    hull_shown,
                     &self.currently_marked,
-                    self.cop_hull_data.hull(),
                 );
             });
         self.change_tool_to(new_tool);
@@ -1003,7 +988,7 @@ impl Info {
         self.update_cop_advantage(con.edges);
         self.update_plane_cop_strat(con);
         self.fog_state
-            .update(con.edges, &self.characters, self.options.marked_robber_dist);
+            .update(con.edges, &self.characters, self.options.fog_clearing_dist);
     }
 
     /// recomputes only things currently shown or required by things currently shown
@@ -1056,9 +1041,13 @@ impl Info {
             || update_cop_advantage
             || update_escapable
             || update_esc_grid
-            || matches!(color, Color::SafeOutside | Color::SafeBoundary)
-            || self.options.show_convex_hull
-            || self.options.show_hull_boundary;
+            || matches!(
+                color,
+                Color::SafeOutside
+                    | Color::SafeBoundary
+                    | Color::ConvexHull
+                    | Color::ConvexHullBorder
+            );
 
         debug_assert_eq!(self.min_cop_dist.len(), nr_vertices);
         let update_min_cop_dist = show_debug
@@ -1101,7 +1090,7 @@ impl Info {
         }
         if self.options.vertex_color_info() == Color::Fog {
             self.fog_state
-                .update(con.edges, &self.characters, self.options.marked_robber_dist);
+                .update(con.edges, &self.characters, self.options.fog_clearing_dist);
         }
     }
 
@@ -1251,6 +1240,16 @@ impl Info {
                 self.manual_markers.paint_bucket_at(pointer_pos, con, &mut self.queue);
             }
 
+            if self.options.vertex_color_info() == VertexColorInfo::Fog
+                && info.modifiers.ctrl
+                && info.key_pressed(Key::T)
+            {
+                let active_mask = 1u8 << self.manual_markers.active_bit;
+                let is_colored = |&marker: &u8| (marker & active_mask) != 0;
+                let new_fog = self.manual_markers.curr().iter().map(is_colored);
+                self.fog_state.set_to(new_fog);
+            }
+
             const NUMS: [Key; 8] = {
                 use egui::Key::*;
                 [Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8]
@@ -1359,35 +1358,6 @@ impl Info {
         }
     }
 
-    fn draw_convex_cop_hull(&self, con: &DrawContext<'_>) {
-        if self.options.show_convex_hull {
-            let color = self.options.hull_style.colors[0];
-            let size = con.scale * 8.0 * self.options.hull_style.size;
-            for (&in_hull, &pos, &vis) in
-                izip!(self.cop_hull_data.hull(), con.positions, con.visible)
-            {
-                if vis && in_hull.contained() {
-                    let draw_pos = con.cam().transform(pos);
-                    let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
-                    con.painter.add(marker_circle);
-                }
-            }
-        }
-        if self.options.show_hull_boundary {
-            let color = self.options.hull_boundary_style.colors[0];
-            let size = con.scale * 4.0 * self.options.hull_boundary_style.size;
-            for segment in self.cop_hull_data.safe_boundary_parts() {
-                for &v in segment {
-                    if con.visible[v] {
-                        let draw_pos = con.vertex_draw_pos(v);
-                        let marker_circle = egui::Shape::circle_filled(draw_pos, size, color);
-                        con.painter.add(marker_circle);
-                    }
-                }
-            }
-        }
-    }
-
     fn draw_vertices(&self, con: &DrawContext<'_>) {
         if !self.options.draw_vertices && !con.map.shape().pure_custom() {
             return;
@@ -1447,6 +1417,22 @@ impl Info {
                 if let Some(r) = self.characters.active_robber() {
                     for (r_dist, c_dist, util) in izip!(r.dists(), &self.min_cop_dist, utils_iter) {
                         draw_if!(r_dist < c_dist, util);
+                    }
+                }
+            },
+            VertexColorInfo::ConvexHull => {
+                for (&in_hull, util) in izip!(self.cop_hull_data.hull(), utils_iter) {
+                    draw_if!(in_hull.contained(), util);
+                }
+            },
+            VertexColorInfo::ConvexHullBorder => {
+                let color = self.options.automatic_marker_style.colors[0];
+                for segment in self.cop_hull_data.safe_boundary_parts() {
+                    for &v in segment {
+                        self.currently_marked[v] = true;
+                        if con.visible[v] {
+                            draw_circle_at(con.positions[v], color);
+                        }
                     }
                 }
             },
@@ -1976,7 +1962,6 @@ impl Info {
             con.cam.shift_world_by(offset);
 
             self.draw_vertices(con);
-            self.draw_convex_cop_hull(con);
             self.draw_green_circles(ui, con);
             self.manual_markers.draw(con, &self.options.manual);
             self.characters.draw_tails(&ch_style, con);

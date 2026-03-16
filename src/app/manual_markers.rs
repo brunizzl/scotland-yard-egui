@@ -3,8 +3,6 @@ use std::collections::VecDeque;
 use egui::{Color32, Pos2, Ui};
 use itertools::izip;
 
-use crate::graph::InSet;
-
 use super::{DrawContext, color, style};
 
 /// stripped down copy of [`egui::RadioButton`], but with added ability to directly decide the background color
@@ -202,9 +200,7 @@ impl ManualMarkers {
         ui: &mut Ui,
         opts: &mut ManualMarkerOptions,
         automatic_markers_shown: bool,
-        hull_shown: bool,
         automatic_markers: &[bool],
-        hull: &[InSet],
     ) {
         ui.horizontal(|ui| {
             if ui.button(" ⟲ ").on_hover_text("zurück (strg + z)").clicked() {
@@ -296,7 +292,6 @@ impl ManualMarkers {
 
                 let what_set = match () {
                     () if automatic_markers_shown => "automatische Marker",
-                    () if hull_shown => "Konvexe Hülle",
                     () => "aktive manuelle Marker",
                 };
                 enum Op {
@@ -341,11 +336,6 @@ impl ManualMarkers {
                             let iter = izip!(automatic_markers, self.curr_mut());
                             for (&set, marker) in iter {
                                 apply(marker, set);
-                            }
-                        } else if hull_shown {
-                            let iter = izip!(hull, self.curr_mut());
-                            for (&hull, marker) in iter {
-                                apply(marker, hull.contained());
                             }
                         } else {
                             for marker in self.curr_mut() {
