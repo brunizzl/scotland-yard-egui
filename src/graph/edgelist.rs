@@ -170,7 +170,8 @@ impl EdgeList {
             self.maybe_shrink_capacity(2);
             self.next_shrink_check_len = (new_len * 3) / 2;
         }
-        self.entries.resize(self.entries.len() + self.max_neighbors, Index::NONE);
+        self.entries
+            .resize(self.entries.len() + self.max_neighbors, Index::NONE);
         self.length = new_len;
         new_index
     }

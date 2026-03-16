@@ -1,5 +1,5 @@
 
-chain_width = 75
+chain_width = 70
 match_block_trailing_comma = true
-single_line_let_else_max_width = 75
+single_line_let_else_max_width = 70
 struct_lit_width = 30

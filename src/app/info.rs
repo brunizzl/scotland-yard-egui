@@ -1139,8 +1139,11 @@ impl Info {
                 let seps = std::iter::repeat_n(", ".to_string(), nr_seps);
                 String::from_iter(vertices.into_iter().interleave(seps))
             };
-            let robber_vertex =
-                self.characters.all().next().map_or("<Keiner>".to_string(), vertex_str);
+            let robber_vertex = self
+                .characters
+                .all()
+                .next()
+                .map_or("<Keiner>".to_string(), vertex_str);
 
             let comment = if is_tikz { "% " } else { "//" };
             format!(
@@ -1966,10 +1969,12 @@ impl Info {
             self.manual_markers.draw(con, &self.options.manual);
             self.characters.draw_tails(&ch_style, con);
             let draw_all_steps = self.options.vertex_color_info() == VertexColorInfo::Fog;
-            self.characters.draw_allowed_next_steps(&ch_style, con, draw_all_steps);
+            self.characters
+                .draw_allowed_next_steps(&ch_style, con, draw_all_steps);
             self.draw_best_cop_moves(con);
             text_shift = self.draw_numbers(ui, con);
-            self.characters.update_and_draw(ui, &ch_style, con, drag, &mut self.queue);
+            self.characters
+                .update_and_draw(ui, &ch_style, con, drag, &mut self.queue);
 
             con.cam.shift_world_by(-offset);
         }

@@ -147,7 +147,10 @@ impl CopsHull {
         assert_eq!(min_cop_dist.len(), edges.nr_vertices());
 
         let hull = &mut self.hull[..];
-        debug_assert!(hull.iter().all(|&h| h.finished_construction() && h != InSet::OnBoundary));
+        debug_assert!(
+            hull.iter()
+                .all(|&h| h.finished_construction() && h != InSet::OnBoundary)
+        );
 
         self.flat_boundary_segments.clear();
         self.safe_segments.clear();

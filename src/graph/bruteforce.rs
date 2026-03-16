@@ -805,7 +805,8 @@ impl CopStrategy {
             let max_moves = self.max_moves as UTime;
             for index in self.cop_moves.all_positions() {
                 if self.time_to_win.nr_moves_left(index).contains(&max_moves) {
-                    self.extreme_positions.push(self.cop_moves.unpack(index).collect_vec());
+                    self.extreme_positions
+                        .push(self.cop_moves.unpack(index).collect_vec());
                     if self.extreme_positions.len() == 20 {
                         break;
                     }
@@ -1158,8 +1159,9 @@ mod test {
 
         // between the extremes: if more cops are allowed to move,
         // all moves with fewer moving cops should still be contained.
-        let mut allowed_moves: std::collections::HashSet<_> =
-            GeneralEagerCops(0).raw_cop_moves_from(q10.edges(), old_cops).collect();
+        let mut allowed_moves: std::collections::HashSet<_> = GeneralEagerCops(0)
+            .raw_cop_moves_from(q10.edges(), old_cops)
+            .collect();
         assert!(allowed_moves.is_empty());
         for max_moving_cops in 1..=4 {
             let moves: std::collections::HashSet<_> = GeneralEagerCops(max_moving_cops)

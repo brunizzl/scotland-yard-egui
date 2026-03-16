@@ -1048,7 +1048,8 @@ impl State {
             ui.add_space(8.0);
             ui.checkbox(&mut self.show_allowed_next_steps, "zeige Zugoptionen")
                 .on_hover_text("F3");
-            ui.checkbox(&mut self.show_past_steps, "zeige Züge").on_hover_text("F4");
+            ui.checkbox(&mut self.show_past_steps, "zeige Züge")
+                .on_hover_text("F4");
             ui.horizontal(|ui| {
                 //⏭⏮⏩⏪
                 if ui.button(" ⏮ ").on_hover_text("zurück zum Anfang der Zeit").clicked() {
@@ -1068,7 +1069,11 @@ impl State {
                     self.undo_move(map.edges(), map.positions(), queue);
                     change = true;
                 }
-                if ui.button(" ⟳ ").on_hover_text("einen Zug in Zukunft (strg + y)").clicked() {
+                if ui
+                    .button(" ⟳ ")
+                    .on_hover_text("einen Zug in Zukunft (strg + y)")
+                    .clicked()
+                {
                     self.redo_move(map.edges(), map.positions(), queue);
                     change = true;
                 }
@@ -1077,7 +1082,11 @@ impl State {
                     self.redo_multiple_moves(map.edges(), map.positions(), queue, nr);
                     change = true;
                 }
-                if ui.button(" ⏭ ").on_hover_text("vorspulen ans Ende der Zeit").clicked() {
+                if ui
+                    .button(" ⏭ ")
+                    .on_hover_text("vorspulen ans Ende der Zeit")
+                    .clicked()
+                {
                     self.redo_multiple_moves(map.edges(), map.positions(), queue, usize::MAX);
                     change = true;
                 }

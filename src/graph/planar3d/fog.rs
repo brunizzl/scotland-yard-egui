@@ -67,7 +67,11 @@ impl GameSates {
             self.cleaning_range = cleaning_range;
             self.history.clear();
         }
-        if self.history.last().is_some_and(|fog| fog.len() != edges.nr_vertices()) {
+        if self
+            .history
+            .last()
+            .is_some_and(|fog| fog.len() != edges.nr_vertices())
+        {
             self.history.clear();
         }
         if self.history.is_empty() {

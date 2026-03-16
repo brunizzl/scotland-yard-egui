@@ -388,7 +388,8 @@ impl Embedding3D {
                         hull.edges.add_edge(v1, center_v);
                         edges.add_edge(v1, center_v);
                         let tri = direct_triangle(&hull.vertices, [center_v, v1, v2]);
-                        hull.face_normals.push(compute_normal(&hull.vertices, center_v, v1, v2));
+                        hull.face_normals
+                            .push(compute_normal(&hull.vertices, center_v, v1, v2));
                         hull.faces.add_row(tri.into_iter());
                     }
                 } else {

@@ -291,7 +291,11 @@ impl eframe::App for State {
             if !self.menu_visible {
                 let pos = Rect::from_center_size(pos2(12.0, 2.0), Vec2::ZERO);
                 let open = Button::new("⏵");
-                if ui.put(pos, open).on_hover_text("Menü ausklappen (strg + b)").clicked() {
+                if ui
+                    .put(pos, open)
+                    .on_hover_text("Menü ausklappen (strg + b)")
+                    .clicked()
+                {
                     self.menu_visible = true;
                 }
             }

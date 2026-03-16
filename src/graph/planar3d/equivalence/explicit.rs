@@ -257,7 +257,9 @@ impl ExplicitClasses {
                 distance_to_og_edges[v] = 0;
                 queue.push_back(v);
             }
-            graph.edges.calc_distances_to(&mut queue, &mut distance_to_og_vertices);
+            graph
+                .edges
+                .calc_distances_to(&mut queue, &mut distance_to_og_vertices);
 
             debug_assert!(queue.is_empty());
             for &edge in &graph.edge_dividing_vertices {

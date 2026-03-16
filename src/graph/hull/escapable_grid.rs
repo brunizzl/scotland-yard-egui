@@ -435,7 +435,9 @@ impl DistGridGraph {
             }
             debug_assert_eq!(curr, cop2);
             debug_assert!(
-                bd.iter().tuple_windows().all(|(&v1, v2)| g.neighbors_of(v1).contains(v2))
+                bd.iter()
+                    .tuple_windows()
+                    .all(|(&v1, v2)| g.neighbors_of(v1).contains(v2))
             );
         }
 
