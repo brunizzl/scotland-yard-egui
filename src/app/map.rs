@@ -110,7 +110,7 @@ impl Map {
     /// this function takes `&mut self` instead of returning a new `Self`,
     /// because sometimes info is kept, e.g. `self.camera` if current and new shape are both 3D / 2D
     fn recompute(&mut self, new_shape: Shape) {
-        self.data = Embedding3D::new_map_from(new_shape, self.resolution as usize);
+        self.data = Embedding3D::new_map_from(&new_shape, self.resolution as usize);
         if self.is_3d() {
             self.extreme_vertices.clear();
         } else {

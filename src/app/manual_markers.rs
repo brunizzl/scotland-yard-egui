@@ -141,7 +141,7 @@ impl ManualMarkers {
     /// E.g. if some vertex is erased, drawn, paintbucket is called ...
     fn log_action(&mut self, tool: DrawTool) {
         let nr_vertices = {
-            let curr_entry = &mut self.history[self.index];
+            let curr_entry = &self.history[self.index];
             // if action is performed with same tool as before: no need to make new history entry
             if curr_entry.tool == tool && curr_entry.bit == self.active_bit {
                 return;

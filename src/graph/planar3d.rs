@@ -931,7 +931,7 @@ impl Embedding3D {
     }
 
     fn new_custom(c: Box<shape::CustomBuild>, res: usize) -> Self {
-        let mut result = Self::new_map_from(c.basis.clone(), res);
+        let mut result = Self::new_map_from(&c.basis, res);
         let mut keep_symmetry = true;
         for step in &c.build_steps {
             match step {
@@ -1255,10 +1255,10 @@ impl Embedding3D {
         }
     }
 
-    pub fn new_map_from(shape: Shape, res: usize) -> Self {
+    pub fn new_map_from(shape: &Shape, res: usize) -> Self {
         use Shape::*;
-        let wanted_shape = shape.clone();
-        let result = match shape {
+        let new_shape = shape.clone();
+        let result = match new_shape {
             SingleVertex => Self::new_single_vertex(),
             Icosahedron => Self::new_subdivided_icosahedron(res),
             Octahedron => Self::new_subdivided_octahedron(res),
@@ -1270,7 +1270,7 @@ impl Embedding3D {
                 } else {
                     (usize::max(res, 1) - 1) / (res1 + 1)
                 };
-                Self::new_subdivided_subdivided_icosahedron(res1, res2, shape)
+                Self::new_subdivided_subdivided_icosahedron(res1, res2, new_shape)
             },
             RegularPolygon2D(nr_sides) => {
                 let sides = nr_sides as usize;
@@ -1280,7 +1280,7 @@ impl Embedding3D {
             Dodecahedron => Self::new_subdivided_dodecahedron(res, false, false),
             Football => Self::new_subdivided_football(res, false),
             FabianHamann => Self::new_subdivided_football(res, true),
-            Random2D(seed) => Self::from_2d(super::random_triangulated(res, 8, seed), shape),
+            Random2D(seed) => Self::from_2d(super::random_triangulated(res, 8, seed), new_shape),
             TriangTorus => Self::new_subdivided_triangle_grid(res as isize, true),
             SquareTorus => Self::new_subdivided_squares_grid(res as isize, true),
             TriangGrid => Self::new_subdivided_triangle_grid(res as isize, false),
@@ -1288,7 +1288,7 @@ impl Embedding3D {
             TriangTorusSkewed(dy) => Self::new_skewed_torus(res as isize, dy),
             Custom(c) => Self::new_custom(c, res),
         };
-        assert_eq!(result.shape, wanted_shape);
+        assert_eq!(&result.shape, shape);
         result
     }
 

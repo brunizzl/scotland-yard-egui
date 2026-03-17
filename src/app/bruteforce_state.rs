@@ -38,67 +38,67 @@ impl GameType {
     }
 
     fn create_edges(&self) -> EdgeList {
-        let embedding = Embedding3D::new_map_from(self.shape.clone(), self.resolution);
+        let embedding = Embedding3D::new_map_from(&self.shape, self.resolution);
         embedding.into_edges()
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkTask {
-    Compute,
-    ComputeStrat,
-    Verify,
-    Load,
-    LoadStrat,
-    Store,
-    StoreStrat,
+    ComputeRobber,
+    ComputeCops,
+    VerifyRobber,
+    LoadRobber,
+    LoadCops,
+    StoreRobber,
+    StoreCops,
+}
+
+enum WorkResultData {
+    Robber(GameOutcome),
+    Cops(bf::CopStrategy),
+    None,
 }
 
 /// sometimes, e.g. when storing or when verifying, we both have a result and could encounter an error.
 /// thus: this is not eighter / or, but can be both.
 struct WorkResult {
-    robber_strat: Option<GameOutcome>,
-    police_strat: Option<bf::CopStrategy>,
+    data: WorkResultData,
     error: Option<String>,
 }
 
 impl WorkResult {
     fn new_err<E: ToString>(err: E) -> Self {
         Self {
-            robber_strat: None,
-            police_strat: None,
+            data: WorkResultData::None,
             error: Some(err.to_string()),
         }
     }
 
-    fn new_res_err<E: ToString>(outcome: GameOutcome, err: E) -> Self {
+    fn new_robber_and_err<E: ToString>(outcome: GameOutcome, err: E) -> Self {
         Self {
-            robber_strat: Some(outcome),
-            police_strat: None,
+            data: WorkResultData::Robber(outcome),
             error: Some(err.to_string()),
         }
     }
 
-    fn new_strat_err<E: ToString>(strat: bf::CopStrategy, err: E) -> Self {
+    fn new_cops_and_err<E: ToString>(strat: bf::CopStrategy, err: E) -> Self {
         Self {
-            robber_strat: None,
-            police_strat: Some(strat),
+            data: WorkResultData::Cops(strat),
             error: Some(err.to_string()),
         }
     }
 
-    fn new_strat(strat: bf::CopStrategy) -> Self {
+    fn new_cops(strat: bf::CopStrategy) -> Self {
         Self {
-            robber_strat: None,
-            police_strat: Some(strat),
+            data: WorkResultData::Cops(strat),
             error: None,
         }
     }
 
-    fn new_res(outcome: GameOutcome) -> Self {
+    fn new_robber(outcome: GameOutcome) -> Self {
         Self {
-            robber_strat: Some(outcome),
-            police_strat: None,
+            data: WorkResultData::Robber(outcome),
             error: None,
         }
     }
@@ -111,8 +111,7 @@ impl From<(Result<bf::Outcome, String>, Confidence)> for WorkResult {
             Err(err) => (None, Some(err)),
         };
         Self {
-            robber_strat: result,
-            police_strat: None,
+            data: result.map_or(WorkResultData::None, WorkResultData::Robber),
             error,
         }
     }
@@ -125,8 +124,7 @@ impl From<Result<bf::CopStrategy, String>> for WorkResult {
             Err(err) => (None, Some(err)),
         };
         Self {
-            robber_strat: None,
-            police_strat: cop_strat,
+            data: cop_strat.map_or(WorkResultData::None, WorkResultData::Cops),
             error,
         }
     }
@@ -142,9 +140,10 @@ struct Worker {
     manager: Option<Manager>,
 }
 
-/// the bruteforce algorithm is quite large to ensure correctness from just looking at the results
-/// and/or looking at the code.
+/// due to the size of the bruteforce algorithm, it is rather difficult to ensure correctness
+/// by just looking at the results and/or looking at the code.
 /// to improve confidence in the correctness, one can compute the same result with and without using symmetry.
+/// note: this is somewhat redundant now, because `crate::graph::bruteforce::verify_continuity_robber` exists.
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub enum Confidence {
     SymmetryOnly,
@@ -167,11 +166,18 @@ struct GameOutcome {
 
 use std::collections::BTreeMap;
 pub struct BruteforceComputationState {
+    /// currently running computations
     workers: Vec<Worker>,
+    /// currently running worker that is about to be aborted
+    /// (ui abort button must be pressed for some time, because paranoia)
     abort_worker: Option<(GameType, WorkTask, Instant)>,
+    /// what is currently drawn on screen
     curr_game_type: GameType,
+    /// do we have a robber strat for [`Self::curr_game_type`] stored in the filesystem?
     robber_strat_stored: bool,
+    /// do we have a police strat for [`Self::curr_game_type`] stored in the filesystem?
     cops_strat_stored: bool,
+
     robber_strats: BTreeMap<GameType, GameOutcome>,
     cop_strats: BTreeMap<GameType, bf::CopStrategy>,
     errors: Vec<(GameType, String)>,
@@ -209,11 +215,14 @@ impl BruteforceComputationState {
             self.errors.push((game_type.clone(), err));
         }
 
-        if let Some(strat) = res.robber_strat {
-            self.robber_strats.insert(game_type.clone(), strat);
-        }
-        if let Some(strat) = res.police_strat {
-            self.cop_strats.insert(game_type.clone(), strat);
+        match res.data {
+            WorkResultData::Robber(data) => {
+                self.robber_strats.insert(game_type.clone(), data);
+            },
+            WorkResultData::Cops(data) => {
+                self.cop_strats.insert(game_type.clone(), data);
+            },
+            WorkResultData::None => {},
         }
     }
 
@@ -264,7 +273,7 @@ impl BruteforceComputationState {
         }
     }
 
-    fn start_computation(&mut self, map: &map::Map) {
+    fn start_robber_computation(&mut self, map: &map::Map) {
         let game_type = self.curr_game_type.clone();
         let rules = game_type.rules;
         let nr_cops = game_type.nr_cops;
@@ -279,7 +288,7 @@ impl BruteforceComputationState {
                     let res = rules.compute_safe_robber_positions(nr_cops, edges, sym, &mut there);
                     (res, Confidence::SymmetryOnly).into()
                 };
-                self.employ_worker(game_type, work, here, WorkTask::Compute);
+                self.employ_worker(game_type, work, here, WorkTask::ComputeRobber);
             };
         }
         match map.data().sym_group() {
@@ -298,7 +307,7 @@ impl BruteforceComputationState {
         }
     }
 
-    fn start_strat_computation(&mut self, map: &map::Map) {
+    fn start_cops_computation(&mut self, map: &map::Map) {
         let game_type = self.curr_game_type.clone();
         let nr_cops = game_type.nr_cops;
         let rules = game_type.rules;
@@ -309,22 +318,22 @@ impl BruteforceComputationState {
             SymGroup::Explicit(equiv) => {
                 let sym = equiv.clone();
                 let work = move || rules.compute_cop_strategy(nr_cops, edges, sym, &there).into();
-                self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
+                self.employ_worker(game_type, work, here, WorkTask::ComputeCops);
             },
             SymGroup::Torus6(torus) => {
                 let sym = ExplicitClasses::from(torus);
                 let work = move || rules.compute_cop_strategy(nr_cops, edges, sym, &there).into();
-                self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
+                self.employ_worker(game_type, work, here, WorkTask::ComputeCops);
             },
             SymGroup::Torus4(torus) => {
                 let sym = ExplicitClasses::from(torus);
                 let work = move || rules.compute_cop_strategy(nr_cops, edges, sym, &there).into();
-                self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
+                self.employ_worker(game_type, work, here, WorkTask::ComputeCops);
             },
             SymGroup::None(none) => {
                 let sym = *none;
                 let work = move || rules.compute_cop_strategy(nr_cops, edges, sym, &there).into();
-                self.employ_worker(game_type, work, here, WorkTask::ComputeStrat);
+                self.employ_worker(game_type, work, here, WorkTask::ComputeCops);
             },
         }
     }
@@ -366,7 +375,7 @@ impl BruteforceComputationState {
                 rules.compute_safe_robber_positions(game_type.nr_cops, edges, sym, &there);
             let outcome_without = match res_without {
                 Ok(ok) => ok,
-                Err(err) => return WorkResult::new_res_err(outcome, err),
+                Err(err) => return WorkResult::new_robber_and_err(outcome, err),
             };
             there.update("vergleiche Ergebnisse").ok();
             use bf::Outcome::*;
@@ -376,52 +385,52 @@ impl BruteforceComputationState {
                 (RobberWins(_), CopsWin) => Confidence::new_err("Ohne sym. gewinnen Cops"),
                 (RobberWins(sym), RobberWins(no_sym)) => Self::verify_robber_win_eq(sym, no_sym),
             };
-            WorkResult::new_res(outcome)
+            WorkResult::new_robber(outcome)
         };
-        self.employ_worker(game_type_clone, work, here, WorkTask::Verify);
+        self.employ_worker(game_type_clone, work, here, WorkTask::VerifyRobber);
     }
 
-    fn save_result(&mut self, game_type: GameType, outcome: GameOutcome) {
+    fn save_robber_strat(&mut self, game_type: GameType, outcome: GameOutcome) {
         let game_type_clone = game_type.clone();
         let work = move || {
             let path = game_type.file_name("bruteforce");
             let file = match fs::File::create(path) {
                 Ok(file) => file,
-                Err(err) => return WorkResult::new_res_err(outcome, err),
+                Err(err) => return WorkResult::new_robber_and_err(outcome, err),
             };
             let mut file_buffer = std::io::BufWriter::new(file);
             if let Err(err) = rmp_serde::encode::write(&mut file_buffer, &outcome) {
-                return WorkResult::new_res_err(outcome, err);
+                return WorkResult::new_robber_and_err(outcome, err);
             }
             if let Err(err) = file_buffer.flush() {
-                return WorkResult::new_res_err(outcome, err);
+                return WorkResult::new_robber_and_err(outcome, err);
             }
-            WorkResult::new_res(outcome)
+            WorkResult::new_robber(outcome)
         };
-        self.employ_worker(game_type_clone, work, None, WorkTask::Store);
+        self.employ_worker(game_type_clone, work, None, WorkTask::StoreRobber);
     }
 
-    fn save_strat(&mut self, game_type: GameType, strat: bf::CopStrategy) {
+    fn save_cops_strat(&mut self, game_type: GameType, strat: bf::CopStrategy) {
         let game_type_clone = game_type.clone();
         let work = move || {
             let path = game_type.file_name("bruteforce-police");
             let file = match fs::File::create(path) {
                 Ok(file) => file,
-                Err(err) => return WorkResult::new_strat_err(strat, err),
+                Err(err) => return WorkResult::new_cops_and_err(strat, err),
             };
             let mut file_buffer = std::io::BufWriter::new(file);
             if let Err(err) = rmp_serde::encode::write(&mut file_buffer, &strat) {
-                return WorkResult::new_strat_err(strat, err);
+                return WorkResult::new_cops_and_err(strat, err);
             }
             if let Err(err) = file_buffer.flush() {
-                return WorkResult::new_strat_err(strat, err);
+                return WorkResult::new_cops_and_err(strat, err);
             }
-            WorkResult::new_strat(strat)
+            WorkResult::new_cops(strat)
         };
-        self.employ_worker(game_type_clone, work, None, WorkTask::StoreStrat);
+        self.employ_worker(game_type_clone, work, None, WorkTask::StoreCops);
     }
 
-    fn load_result_from(&mut self, game_type: GameType) {
+    fn load_robber_strat_for(&mut self, game_type: GameType) {
         let game_type_clone = game_type.clone();
         let (here, there) = bf::thread_manager::build_managers();
         let work = move || {
@@ -441,18 +450,17 @@ impl BruteforceComputationState {
                         None
                     };
                     WorkResult {
-                        robber_strat: Some(res),
-                        police_strat: None,
+                        data: WorkResultData::Robber(res),
                         error,
                     }
                 },
                 Err(err) => WorkResult::new_err(err),
             }
         };
-        self.employ_worker(game_type_clone, work, Some(here), WorkTask::Load);
+        self.employ_worker(game_type_clone, work, Some(here), WorkTask::LoadRobber);
     }
 
-    fn load_strat_from(&mut self, game_type: GameType) {
+    fn load_cops_strat_for(&mut self, game_type: GameType) {
         let game_type_clone = game_type.clone();
         let work = move || {
             let path = game_type.file_name("bruteforce-police");
@@ -464,15 +472,15 @@ impl BruteforceComputationState {
             match rmp_serde::decode::from_read::<_, bf::CopStrategy>(buff_reader) {
                 Ok(mut res) => {
                     res.compute_serde_skipped();
-                    WorkResult::new_strat(res)
+                    WorkResult::new_cops(res)
                 },
                 Err(err) => WorkResult::new_err(err),
             }
         };
-        self.employ_worker(game_type_clone, work, None, WorkTask::LoadStrat);
+        self.employ_worker(game_type_clone, work, None, WorkTask::LoadCops);
     }
 
-    fn draw_result(ui: &mut Ui, game_type: &GameType, outcome: &GameOutcome) {
+    fn draw_robber_result(ui: &mut Ui, game_type: &GameType, outcome: &GameOutcome) {
         let outcome_str = match &outcome.outcome {
             bf::Outcome::CopsWin => "verliert",
             bf::Outcome::RobberWins(_) => "gewinnt",
@@ -501,7 +509,7 @@ impl BruteforceComputationState {
         );
     }
 
-    fn draw_strat(ui: &mut Ui, game_type: &GameType, strat: &bf::CopStrategy) {
+    fn draw_cops_result(ui: &mut Ui, game_type: &GameType, strat: &bf::CopStrategy) {
         let one_cop = game_type.nr_cops == 1;
         let cops_str = if one_cop {
             "ein Cop".to_owned()
@@ -532,7 +540,7 @@ impl BruteforceComputationState {
         ui.add_space(5.0);
         let mut action = None;
         for (game_type, outcome) in &self.robber_strats {
-            Self::draw_result(ui, game_type, outcome);
+            Self::draw_robber_result(ui, game_type, outcome);
             ui.horizontal(|ui| {
                 if NATIVE && ui.button("speichern").clicked() {
                     action = Some((Action::Store, game_type.clone()));
@@ -550,14 +558,14 @@ impl BruteforceComputationState {
             let outcome = self.robber_strats.remove(&game_type).unwrap();
             match a {
                 Action::Delete => {},
-                Action::Store => self.save_result(game_type, outcome),
+                Action::Store => self.save_robber_strat(game_type, outcome),
                 Action::Verify => self.verify_result(game_type, outcome),
             }
         }
 
         let mut action = None;
         for (game_type, strat) in &self.cop_strats {
-            Self::draw_strat(ui, game_type, strat);
+            Self::draw_cops_result(ui, game_type, strat);
             ui.horizontal(|ui| {
                 if NATIVE && ui.button("speichern").clicked() {
                     action = Some((Action::Store, game_type.clone()));
@@ -576,7 +584,7 @@ impl BruteforceComputationState {
             let strat = self.cop_strats.remove(&game_type).unwrap();
             match a {
                 Action::Delete | Action::Verify => {},
-                Action::Store => self.save_strat(game_type, strat),
+                Action::Store => self.save_cops_strat(game_type, strat),
             }
         }
     }
@@ -600,11 +608,11 @@ impl BruteforceComputationState {
                     _ => "     ",
                 };
                 let task_str = match worker.task {
-                    WorkTask::Compute => "rechne (R) ",
-                    WorkTask::ComputeStrat => "rechne (C) ",
-                    WorkTask::Verify => "verifiziere ",
-                    WorkTask::Load | WorkTask::LoadStrat => "lade ",
-                    WorkTask::Store | WorkTask::StoreStrat => "speichere ",
+                    WorkTask::ComputeRobber => "rechne (R) ",
+                    WorkTask::ComputeCops => "rechne (C) ",
+                    WorkTask::VerifyRobber => "verifiziere ",
+                    WorkTask::LoadRobber | WorkTask::LoadCops => "lade ",
+                    WorkTask::StoreRobber | WorkTask::StoreCops => "speichere ",
                 };
 
                 Label::new(format!(
@@ -735,7 +743,8 @@ impl BruteforceComputationState {
 
             ui.label("Räuberstrategie:");
             let computing_robber_strat = self.workers.iter().any(|w| {
-                w.game_type == game_type && matches!(w.task, WorkTask::Compute | WorkTask::Load)
+                w.game_type == game_type
+                    && matches!(w.task, WorkTask::ComputeRobber | WorkTask::LoadRobber)
             });
             ui.horizontal(|ui| {
                 let curr_known = self.robber_strats.contains_key(&game_type);
@@ -746,18 +755,18 @@ impl BruteforceComputationState {
                     .on_hover_text(disclaimer)
                     .clicked()
                 {
-                    self.start_computation(map);
+                    self.start_robber_computation(map);
                 }
                 let enable_load = self.robber_strat_stored && !curr_known;
                 let load_button = Button::new("laden 🖴");
                 if ui.add_enabled(enable_load, load_button).clicked() {
-                    self.load_result_from(game_type.clone());
+                    self.load_robber_strat_for(game_type.clone());
                 }
             });
             ui.add_space(5.0);
             ui.label("Copstrategie:");
             let computing_cop_strat = self.workers.iter().any(|worker| {
-                worker.game_type == game_type && worker.task == WorkTask::ComputeStrat
+                worker.game_type == game_type && worker.task == WorkTask::ComputeCops
             });
             ui.horizontal(|ui| {
                 let curr_known = self.cop_strats.contains_key(&game_type);
@@ -768,12 +777,12 @@ impl BruteforceComputationState {
                     .on_hover_text(disclaimer)
                     .clicked()
                 {
-                    self.start_strat_computation(map);
+                    self.start_cops_computation(map);
                 }
                 let enable_load = self.cops_strat_stored && !curr_known;
                 let load_button = Button::new("laden 🖴");
                 if ui.add_enabled(enable_load, load_button).clicked() {
-                    self.load_strat_from(game_type);
+                    self.load_cops_strat_for(game_type);
                 }
             });
         });

@@ -1090,8 +1090,8 @@ mod test {
     #[test]
     fn test_cop_numbers() {
         let eager = GeneralEagerCops(MAX_COPS as u32);
-        let c_e = |s, res| cop_number(eager, Embedding3D::new_map_from(s, res));
-        let c_l = |s, res| cop_number(LazyCops, Embedding3D::new_map_from(s, res));
+        let c_e = |s, res| cop_number(eager, Embedding3D::new_map_from(&s, res));
+        let c_l = |s, res| cop_number(LazyCops, Embedding3D::new_map_from(&s, res));
 
         assert_eq!(c_l(Shape::Cube, 0), Some(2));
         assert_eq!(c_l(Shape::Dodecahedron, 0), Some(3));
@@ -1106,7 +1106,7 @@ mod test {
 
     #[test]
     fn test_raw_general_cop_moves_from() {
-        let q10 = Embedding3D::new_map_from(Shape::SquareGrid, 10);
+        let q10 = Embedding3D::new_map_from(&Shape::SquareGrid, 10);
         assert_eq!(q10.nr_vertices(), 100);
         let old_cops = RawCops::new(&[0, 13, 70, 85]);
         let neighborss = old_cops
