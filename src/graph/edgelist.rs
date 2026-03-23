@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::iter::{ExactSizeIterator, Map};
 use std::slice::{Chunks, Iter};
 
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
 #[repr(transparent)]
@@ -456,5 +456,33 @@ impl EdgeList {
             }
         }
         (best, smallest_pot)
+    }
+
+    /// all vertices with distance <= `n` become neighbors (except no vertex is neighbor to itself).
+    pub fn pow(&self, n: usize) -> Self {
+        if n == 0 {
+            return Self::new(1, self.length);
+        }
+        let mut new_edges = self.clone();
+        for _ in 1..n {
+            let new_neighbors = izip!(0.., new_edges.neighbors())
+                .map(|(v, ns)| {
+                    let mut new_neighs = Vec::from_iter(ns.clone());
+                    for n in ns {
+                        new_neighs.extend(self.neighbors_of(n));
+                    }
+                    new_neighs.sort();
+                    new_neighs.dedup();
+                    new_neighs.retain(|&u| u != v);
+                    new_neighs
+                })
+                .collect_vec();
+            let max_neighbors = new_neighbors.iter().map(Vec::len).max().unwrap_or(0);
+            new_edges = EdgeList::from_iter(
+                new_neighbors.into_iter().map(|ns| ns.into_iter()),
+                max_neighbors,
+            );
+        }
+        new_edges
     }
 } //impl EdgeList

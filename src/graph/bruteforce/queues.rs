@@ -93,7 +93,7 @@ impl BitQueue {
 /// if all bits are visited, we start anew at bit 0, until no bits are set.
 pub struct RobberStratQueue {
     /// stores which values are enqueued
-    bit_queues: Vec<queues::BitQueue>,
+    bit_queues: Vec<BitQueue>,
     /// maps each of [`Self::bit_queues`] to their representative vertex
     firsts: Vec<usize>,
 
@@ -111,7 +111,7 @@ impl RobberStratQueue {
         let mut bit_queues = Vec::new();
         let mut firsts = Vec::new();
         for (&fst_index, indices) in &cop_moves.configurations {
-            let queue = queues::BitQueue::new(indices.len())?;
+            let queue = BitQueue::new(indices.len())?;
             bit_queues.push(queue);
             firsts.push(fst_index);
         }

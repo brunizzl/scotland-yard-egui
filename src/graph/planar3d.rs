@@ -549,33 +549,11 @@ impl Embedding3D {
         self.sym_group = SymGroup::None(NoSymmetry::new(self.vertices.len()));
     }
 
-    /// all vertices with distance <= `n` become meighbors (except no vertex is neighbor of itself).
+    /// all vertices with distance <= `n` become neighbors (except no vertex is neighbor of itself).
     ///
     /// note: the symmetry is kept (or increased, but we ignore this possibility) by this operation.
-    #[allow(dead_code)]
     fn edge_pow(&mut self, n: usize) {
-        let old_edges = &self.edges;
-        let mut new_edges = old_edges.clone();
-        for _ in 0..n {
-            let new_neighbors = izip!(0.., new_edges.neighbors())
-                .map(|(v, ns)| {
-                    let mut new_neighs = Vec::from_iter(ns.clone());
-                    for n in ns {
-                        new_neighs.extend(old_edges.neighbors_of(n));
-                    }
-                    new_neighs.sort();
-                    new_neighs.dedup();
-                    new_neighs.retain(|&u| u != v);
-                    new_neighs
-                })
-                .collect_vec();
-            let max_neighbors = new_neighbors.iter().map(Vec::len).max().unwrap_or(0);
-            new_edges = EdgeList::from_iter(
-                new_neighbors.into_iter().map(|ns| ns.into_iter()),
-                max_neighbors,
-            );
-        }
-        self.edges = new_edges;
+        self.edges = self.edges.pow(n);
     }
 
     /// custom subdivision of graph described in Fabian Hamann's masters thesis.
@@ -785,6 +763,9 @@ impl Embedding3D {
             inner_vertices: Vec::new(),
             vertices,
             edges,
+            // note: we could convert `t` to an explicit representation here.
+            // the only reason not to do it is that this takes O(nr_vertices^2) time,
+            // while the rest of the function takes only O(nr_vertices^2).
             sym_group: SymGroup::None(NoSymmetry::new(nr_vertices)),
         }
     }

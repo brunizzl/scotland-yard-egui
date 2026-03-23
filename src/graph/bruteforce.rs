@@ -15,6 +15,9 @@ use queues::{CopStratQueue, RobberStratQueue};
 mod rules;
 pub use rules::*;
 
+#[allow(dead_code)]
+mod fog_bf;
+
 /// maximum number of cops for which a bruteforce computation can be started.
 /// is not too detrimental, that this number is small,
 /// because the computation is ungodly expensive anyway.
@@ -90,7 +93,7 @@ impl std::hash::Hash for RawCops {
 fn multiset_count(universe_size: usize, cardinality: usize) -> Option<usize> {
     fn binomial_coefficient(n: usize, k: usize) -> Option<usize> {
         if k == 0 {
-            return Some(0);
+            return Some(1);
         }
         let mut res: usize = 1;
         for i in 1..=k {
@@ -105,6 +108,28 @@ fn multiset_count(universe_size: usize, cardinality: usize) -> Option<usize> {
     debug_assert_eq!(binomial_coefficient(8, 6), Some(28));
 
     binomial_coefficient(universe_size + cardinality - 1, cardinality)
+}
+
+/// assume we have multisets of `multiset.len()` many elements in `0..universe_size`.
+/// there are `multiset_count(universe_size, multiset.len())` many such multisets.
+/// this function computes how many lexicographically smaller multisets exist.
+#[allow(dead_code)]
+fn multiset_index(universe_size: usize, multiset: &[usize]) -> Option<usize> {
+    debug_assert!(multiset.is_sorted());
+    debug_assert!(multiset.iter().all(|&x| x < universe_size));
+
+    let mut res = 0usize;
+    let mut prev_elem = 0usize;
+    for (&elem, nr_later_elems) in izip!(multiset, (0..multiset.len()).rev()) {
+        for smaller_val in prev_elem..elem {
+            let smaller_universe = universe_size - smaller_val;
+            // if elem where smaller_val instead, how many options would there be for the later elems?
+            let nr_with_smaller_elem = multiset_count(smaller_universe, nr_later_elems)?;
+            res = res.checked_add(nr_with_smaller_elem)?;
+        }
+        prev_elem = elem;
+    }
+    Some(res)
 }
 
 /// this corresponds to one entry in CopConfigurations:
@@ -1048,6 +1073,24 @@ fn verify_continuity_cops(
 mod test {
     use super::*;
     use crate::graph::{Embedding3D, Shape};
+
+    #[test]
+    fn multiset_index_works() {
+        let graph = Embedding3D::new_map_from(&Shape::SquareGrid, 5);
+        let SymGroup::None(sym) = graph.sym_group() else {
+            panic!();
+        };
+        let (_, manager) = thread_manager::build_managers();
+        let cop_states = CopConfigurations::new(graph.edges(), sym, 5, &manager).unwrap();
+        let fst_index = 0;
+        for rest_index in 0..(cop_states.configurations[&fst_index].len()) {
+            let cops_index = CompactCopsIndex { fst_index, rest_index };
+            let mut cops_state = cop_states.eager_unpack(cops_index);
+            cops_state.sort();
+            let computed_index = multiset_index(graph.nr_vertices(), &cops_state[1..]).unwrap();
+            assert_eq!(computed_index, cops_index.rest_index);
+        }
+    }
 
     /// produces same result as [`cop_number`], but uses [`compute_cop_strategy`]
     /// instead of [`compute_safe_robber_positions`] to get there.
