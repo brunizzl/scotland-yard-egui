@@ -884,6 +884,51 @@ impl State {
         change
     }
 
+    pub fn load_fog_cleaning_sequence(&mut self, map: &map::Map, sol: &bf::FogSolution) {
+        if !sol.cleanable() {
+            return;
+        }
+        self.forget_move_history();
+        let rules = self.rules();
+        let mut cleaners = std::mem::take(&mut self.characters)
+            .into_iter()
+            .filter(|c| c.is_active() || c.id().is_robber())
+            .collect_vec();
+        debug_assert!(cleaners[0].id().is_robber());
+        debug_assert_eq!(cleaners.len(), sol.nr_cleaners);
+        let mut sequence = sol.iter_unpacked();
+        let mut last_positions = sequence.next().unwrap();
+        {
+            let iter = izip!(&last_positions[..], &mut cleaners).rev();
+            for (&init, cleaner) in iter {
+                cleaner.nearest_vertex = init;
+            }
+        }
+        for curr_positions_sorted in sequence {
+            // important to always keep the ordering with respect to the characters the same.
+            let curr_positions = {
+                let steps_from_last = rules.raw_cop_moves_from(map.edges(), last_positions);
+                steps_from_last
+                    .into_iter()
+                    .find(|steps| {
+                        let mut sorted = *steps;
+                        sorted.sort();
+                        sorted == curr_positions_sorted
+                    })
+                    .unwrap()
+            };
+            let iter = izip!(0..sol.nr_cleaners, &curr_positions[..], &mut cleaners).rev();
+            for (i, &v, cleaner) in iter {
+                cleaner.set_vertex_no_dist_update(v, map.positions());
+                self.past_moves.push((i, v));
+            }
+            last_positions = curr_positions;
+        }
+        self.characters = cleaners;
+        let mut queue = std::collections::VecDeque::new();
+        self.undo_multiple_moves(map.edges(), map.positions(), &mut queue, usize::MAX);
+    }
+
     pub fn forget_move_history(&mut self) {
         self.past_moves.clear();
         self.future_moves.clear();

@@ -4,6 +4,7 @@ use itertools::izip;
 use serde::{Deserialize, Serialize};
 
 use super::*;
+use crate::graph::bruteforce::FogSolution;
 use crate::graph::{Automorphism, ExplicitClasses, SymmetryGroup, bruteforce as bf};
 use crate::graph::{Embedding3D, NoSymmetry};
 
@@ -658,7 +659,7 @@ impl BruteforceComputationState {
                 if let Some(seq) = &sol.sequence {
                     menu_button_closing_outside(ui, "Zugfolge", |ui| {
                         for &compact in seq {
-                            let raw = compact.into_raw(sol.nr_cleaners, sol.nr_vertices);
+                            let raw = sol.unpack(compact);
                             ui.add(Label::new(format!("{:?}", &raw[..])).extend());
                         }
                     });
@@ -775,6 +776,7 @@ impl BruteforceComputationState {
         }
     }
 
+    /// a returned fog solution is meant to be turned into a move sequence of characters.
     pub fn draw_menu(
         &mut self,
         nr_cops: usize,
@@ -782,7 +784,8 @@ impl BruteforceComputationState {
         ui: &mut Ui,
         map: &map::Map,
         visibility: &mut isize,
-    ) {
+    ) -> Option<&FogSolution> {
+        let mut fog_solution = None;
         ui.collapsing("Bruteforce", |ui| {
             self.check_on_workers();
             let game_type = GameType {
@@ -899,7 +902,18 @@ impl BruteforceComputationState {
                 {
                     self.start_fog_computation(map, vis);
                 }
+                let load_sol_to_characters_button = Button::new("als Züge ♟");
+                let solution = self.fog_strats.get(&game_type_with_vis);
+                let enable_load = solution.is_some_and(|sol| sol.cleanable());
+                if ui
+                    .add_enabled(enable_load, load_sol_to_characters_button)
+                    .on_hover_text("Ersetze Figurenbewegungen durch die entnebelnde Zugfolge.")
+                    .clicked()
+                {
+                    fog_solution = solution;
+                }
             });
         });
+        fog_solution
     }
 }

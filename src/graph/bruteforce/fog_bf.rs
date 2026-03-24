@@ -223,6 +223,15 @@ impl FogSolution {
     pub fn cleanable(&self) -> bool {
         self.sequence.is_some()
     }
+
+    pub fn unpack(&self, packed: PackedCleaners) -> RawCleaners {
+        packed.into_raw(self.nr_cleaners, self.nr_vertices)
+    }
+
+    pub fn iter_unpacked(&self) -> impl ExactSizeIterator<Item = RawCleaners> {
+        let slice = self.sequence.as_ref().map_or(&[] as &[_], Vec::as_slice);
+        slice.iter().map(|&cs| self.unpack(cs))
+    }
 }
 
 /// unlike for the other bruteforce algorithms, no care is taken to ensure that out-of-memory errors are caught.
@@ -311,7 +320,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
                 current_fogs.push(state.fog.clone());
             }
         }
-        let curr_cleaners = curr.cleaners.into_raw(nr_cleaners, nr_vertices);
+        let curr_cleaners = sol.unpack(curr.cleaners);
         for curr_fog in current_fogs.drain(..) {
             for mut next_cleaners in rules.raw_cop_moves_from(&edges, curr_cleaners) {
                 next_cleaners.sort();
@@ -344,7 +353,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
     let is_cleaned = |state: &&FogState| state.fog.count_cleaned(nr_vertices) == nr_vertices;
     let mut curr_state = states[&final_compact_cleaners].iter().find(is_cleaned).unwrap();
     loop {
-        let curr_cleaners = curr_compact_cleaners.into_raw(nr_cleaners, nr_vertices);
+        let curr_cleaners = sol.unpack(curr_compact_cleaners);
         if curr_state.fog == Fog::new_initial(&curr_cleaners, &visible) {
             break;
         }
@@ -367,16 +376,16 @@ pub fn compute_cleaning_strategy<R: Rules>(
 
 /// tries to walk the solution and fails if something fishy happens while doing so.
 fn verify_sequence<R: Rules>(rules: R, sol: &FogSolution, edges: &EdgeList) -> Result<(), String> {
-    let Some(seq) = &sol.sequence else {
-        return Err("solution doesn't exist".to_string());
+    if !sol.cleanable() {
+        return Err("cleaning sequence doesn't exist".to_string());
     };
     assert_eq!(sol.nr_vertices, edges.nr_vertices());
     let visible = compute_visible(edges, sol.visibility);
 
-    let mut prev_cleaners = seq[0].into_raw(sol.nr_cleaners, sol.nr_vertices);
+    let mut sequence = sol.iter_unpacked();
+    let mut prev_cleaners = sequence.next().unwrap();
     let mut prev_fog = Fog::new_initial(&prev_cleaners, &visible);
-    for &curr_compact in &seq[1..] {
-        let curr_cleaners = curr_compact.into_raw(sol.nr_cleaners, sol.nr_vertices);
+    for curr_cleaners in sequence {
         if !rules.raw_cop_moves_from(edges, prev_cleaners).any(|mut step| {
             step.sort();
             step == curr_cleaners

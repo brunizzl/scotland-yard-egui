@@ -765,13 +765,16 @@ impl Info {
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
         let nr_cops = self.characters.active_cops().count();
-        self.worker.draw_menu(
+        let fog_sol = self.worker.draw_menu(
             nr_cops,
             self.characters.rules(),
             ui,
             map,
             &mut self.options.fog_clearing_dist,
         );
+        if let Some(sol) = fog_sol {
+            self.characters.load_fog_cleaning_sequence(map, sol);
+        }
         if NATIVE {
             ui.collapsing("📷 Screenshots", |ui| {
                 ui.horizontal(|ui| {
@@ -793,7 +796,7 @@ impl Info {
             map,
             cam,
             &mut self.queue,
-        );
+        ) || fog_sol.is_some();
         if characters_changed {
             self.tool = MouseTool::Drag;
         }
