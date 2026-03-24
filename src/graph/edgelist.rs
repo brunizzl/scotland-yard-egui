@@ -485,4 +485,23 @@ impl EdgeList {
         }
         new_edges
     }
+
+    pub fn is_connected(&self) -> bool {
+        if self.nr_vertices() == 0 {
+            return true;
+        }
+        let mut discovered = vec![false; self.nr_vertices()];
+        discovered[0] = true;
+        let mut stack = vec![0];
+        while let Some(v) = stack.pop() {
+            debug_assert!(discovered[v]);
+            for neigh in self.neighbors_of(v) {
+                if !discovered[neigh] {
+                    discovered[neigh] = true;
+                    stack.push(neigh);
+                }
+            }
+        }
+        discovered.into_iter().all(|x| x)
+    }
 } //impl EdgeList

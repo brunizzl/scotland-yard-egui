@@ -39,6 +39,8 @@ impl CompactCleaners {
 /// this has the same size as just the [`bitvec::boxed::BitBox`] variant on it's own,
 /// because the pointer pointing to the `BitBox` storage is guaranteed to never be null.
 /// (and because this pointer is a fat pointer, e.g. also carries the length of the held storage.)
+/// note: i just hope that the branch predictor is able to overcom any run-time overhead
+/// caused by the match of `self` in each non-static method.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Fog {
     Smol(usize),
@@ -47,7 +49,7 @@ enum Fog {
 
 impl Fog {
     fn new_filled(nr_vertices: usize) -> Self {
-        const MAX_BITS_PER_INT: usize = std::mem::size_of::<usize>() * 8;
+        const MAX_BITS_PER_INT: usize = usize::MAX.count_ones() as usize;
         match nr_vertices {
             MAX_BITS_PER_INT => Self::Smol(usize::MAX),
             0..MAX_BITS_PER_INT => Self::Smol((1 << nr_vertices) - 1),
@@ -61,6 +63,18 @@ impl Fog {
                 Self::Big(BitBox::from_boxed_slice(raw_box))
             },
         }
+    }
+
+    /// returns fog state where all vertices not in visibility range of `cleaners` are foggy.
+    /// `visible` maps each vertex to the set of all vertices visible from that vertex.
+    fn new_initial(cleaners: &[usize], visible: &EdgeList) -> Self {
+        let mut result = Self::new_filled(visible.nr_vertices());
+        for &cleaner in cleaners {
+            for vis in visible.neighbors_of(cleaner) {
+                result.mark_cleaned(vis);
+            }
+        }
+        result
     }
 
     fn count_foggy(&self) -> usize {
@@ -173,20 +187,26 @@ struct FogState {
     prev: CompactCleaners,
 }
 
+/// this is meant to be inserted into a max-heap.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct QueueEntry {
+    /// this is the first held data,
+    /// so that an entry with more cleaned vertices is larger, e.g. is removed from the max-heap earlier.
+    /// (this is also the reason why we cout the number of cleaned, instead of the number of foggy vertices)
     nr_cleaned: usize,
     cleaners: CompactCleaners,
 }
 
-pub struct CleaningSequence(pub Vec<CompactCleaners>);
 pub enum Solution {
-    Cleanable(CleaningSequence),
+    CleaningSequence(Vec<CompactCleaners>),
     NotCleanable,
 }
 
+/// unlike for the other bruteforce algorithms, no care is taken to ensure that out-of-memory errors are caught.
+/// this is because this algorithm is continuously allocating small chunks. first, this is very anoying to track
+/// and second not even guaranteed to be recoverable if something goes wrong anyway.
 pub fn compute_cleaning_strategy<R: Rules>(
-    movement_rules: R,
+    rules: R,
     visibility: usize,
     nr_cleaners: usize,
     edges: EdgeList,
@@ -200,71 +220,56 @@ pub fn compute_cleaning_strategy<R: Rules>(
     if nr_vertices.checked_pow(nr_cleaners as u32).is_none() {
         return Err("Cleanerpositionen passen nicht in usize.".to_string());
     }
+    if nr_vertices == 0 {
+        return Err("Graph darf nicht leer sein.".to_string());
+    }
+    if !edges.is_connected() {
+        return Err("Graph muss zusammenhängend sein".to_string());
+    }
 
-    // stores for each position which vertices are cleaned if a cleaner occupies this position.
+    manager.update("initialisiere Variablen")?;
+
+    // stores for each vertex which vertices are visible from there.
     let visible = {
         let visible_others = edges.pow(visibility);
         EdgeList::from_iter(
             izip!(0..nr_vertices, visible_others.neighbors())
                 .map(|(v, vis)| std::iter::once(v).chain(vis)),
-            visible_others.max_neighbors() + 1,
+            visible_others.max_degree() + 1,
         )
     };
 
-    let mut states = {
-        let sym = crate::graph::NoSymmetry::new(nr_vertices);
-        let positions = super::CopConfigurations::new(&edges, &sym, nr_cleaners, manager)?;
-        let mut states = std::collections::HashMap::new();
-        let nr_initial_states = positions.nr_configurations();
-        if states.try_reserve(nr_initial_states).is_err() {
-            return Err("nicht genug Speicher für States.".to_string());
-        }
-        for (i, position_index) in izip!(0.., positions.all_positions()) {
-            if i % 4096 == 0 {
-                manager.update(format!(
-                    "initialisiere Cleanerstates: {:.2}%",
-                    100.0 * (i as f32) / (nr_initial_states as f32)
-                ))?;
-            }
-            let mut raw_positions = positions.eager_unpack(position_index);
-            raw_positions.sort();
-            let compact = CompactCleaners::from_raw(nr_vertices, &raw_positions);
-            let mut fog = Fog::new_filled(nr_vertices);
-            for &cleaner in raw_positions.iter() {
-                for vis in visible.neighbors_of(cleaner) {
-                    fog.mark_cleaned(vis);
-                }
-            }
-            states.insert(compact, vec![FogState { fog, prev: compact }]);
-        }
-        states
-    };
-
-    manager.update("initialisiere Queue")?;
+    // stores for each cleaner state, which interesting fog states are possible to reach
+    let mut states = std::collections::HashMap::new();
     let mut queue = std::collections::BinaryHeap::new();
-    if queue.try_reserve(states.len()).is_err() {
-        return Err("nicht genug Speicher für Queue.".to_string());
-    }
-    for (&cleaners, init) in &states {
-        let nr_cleared = init[0].fog.count_cleaned(nr_vertices);
-        queue.push(QueueEntry {
-            nr_cleaned: nr_cleared,
-            cleaners,
-        });
+    {
+        let initial_cleaners = RawCops::from_iter(std::iter::repeat_n(0, nr_cleaners));
+        let compact = CompactCleaners::from_raw(nr_vertices, &initial_cleaners);
+        let fog = Fog::new_initial(&initial_cleaners, &visible);
+        let nr_cleaned = fog.count_cleaned(nr_vertices);
+        states.insert(compact, vec![FogState { fog, prev: compact }]);
+        queue.push(QueueEntry { nr_cleaned, cleaners: compact });
     }
 
+    // because a queue entry only stores how many vertices are foggy,
+    // and because it may be that the same cleaner state holds multiple
+    // fog states with the same number of cleaned vertices,
+    // we don't always know which fog state is the exact one entered into the queue.
+    // solution: do the update for every such fog state.
+    // for borrow rules reasons, we need to clone these fog states into this variable.
     let mut current_fogs = Vec::new();
 
     let mut most_cleaned_so_far = 0;
     let mut time_until_log_refresh: usize = 1;
-    let final_cleaners = loop {
+
+    let final_compact_cleaners = loop {
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
             manager.update(format!(
-                "berechne Reinigungsstrategie:\n{:.2}% in Queue ({}), {} Knoten sauber",
-                100.0 * (queue.len() as f32) / (states.len() as f32),
+                "berechne Reinigungsstrategie: {} in Queue, max {}/{} Knoten sauber",
                 queue.len(),
                 most_cleaned_so_far,
+                nr_vertices,
             ))?;
             time_until_log_refresh = 10_000;
         }
@@ -278,41 +283,29 @@ pub fn compute_cleaning_strategy<R: Rules>(
             break curr.cleaners;
         }
 
-        {
-            let curr_states = &states[&curr.cleaners];
-            if current_fogs.try_reserve(curr_states.len()).is_err() {
-                return Err("zu wenig Speicherplatz für States".to_string());
-            }
-            for state in curr_states.iter() {
-                if state.fog.count_cleaned(nr_vertices) == curr.nr_cleaned {
-                    current_fogs.push(state.fog.clone());
-                }
+        debug_assert!(current_fogs.is_empty());
+        for state in states[&curr.cleaners].iter() {
+            if state.fog.count_cleaned(nr_vertices) == curr.nr_cleaned {
+                current_fogs.push(state.fog.clone());
             }
         }
         let curr_cleaners = curr.cleaners.into_raw(nr_cleaners, nr_vertices);
         for curr_fog in current_fogs.drain(..) {
-            for mut next_cleaners in movement_rules.raw_cop_moves_from(&edges, curr_cleaners) {
+            for mut next_cleaners in rules.raw_cop_moves_from(&edges, curr_cleaners) {
                 next_cleaners.sort();
-                // todo: this function allocates. make it fallible.
                 let next_fog = curr_fog.compute_step(&edges, &visible, &next_cleaners);
                 let next_compact_cleaners = CompactCleaners::from_raw(nr_vertices, &next_cleaners);
-                let next_states = states.get_mut(&next_compact_cleaners).unwrap();
+                let next_states = states.entry(next_compact_cleaners).or_insert_with(Vec::new);
+                // next_fog is only interesting if we don't already know that we can reach
+                // a fog state with (at least) all the vertices cleaned in next_fog also cleaned.
                 if next_states.iter().any(|state| state.fog.is_subset_of(&next_fog)) {
                     continue;
                 }
                 let next_nr_cleared = next_fog.count_cleaned(nr_vertices);
-
-                if next_states.try_reserve(1).is_err() {
-                    return Err("zu wenig Speicherplatz für States".to_string());
-                }
                 next_states.push(FogState {
                     fog: next_fog,
                     prev: curr.cleaners,
                 });
-
-                if queue.try_reserve(1).is_err() {
-                    return Err("zu wenig Speicherplatz für Queue".to_string());
-                }
                 queue.push(QueueEntry {
                     nr_cleaned: next_nr_cleared,
                     cleaners: next_compact_cleaners,
@@ -322,30 +315,31 @@ pub fn compute_cleaning_strategy<R: Rules>(
     };
     drop(queue);
 
-    let mut cleaning_sequence = vec![final_cleaners];
-    let mut curr_cleaners = final_cleaners;
-    let mut curr_state = states[&final_cleaners]
-        .iter()
-        .find(|state| state.fog.count_cleaned(nr_vertices) == nr_vertices)
-        .unwrap();
+    manager.update("schreibe Lösung")?;
+    let mut cleaning_sequence = vec![final_compact_cleaners];
+    let mut curr_compact_cleaners = final_compact_cleaners;
+    let is_cleaned = |state: &&FogState| state.fog.count_cleaned(nr_vertices) == nr_vertices;
+    let mut curr_state = states[&final_compact_cleaners].iter().find(is_cleaned).unwrap();
     loop {
-        if curr_state.prev == curr_cleaners {
+        if curr_state.prev == curr_compact_cleaners {
+            break;
+        }
+        let curr_cleaners = curr_compact_cleaners.into_raw(nr_cleaners, nr_vertices);
+        if curr_state.fog == Fog::new_initial(&curr_cleaners, &visible) {
             break;
         }
         let prev_states = &states[&curr_state.prev];
-        let raw_curr_cleaners = curr_cleaners.into_raw(nr_cleaners, nr_vertices);
-        let Some(prev_state) = prev_states.iter().find(|state| {
-            state.fog.compute_step(&edges, &visible, &raw_curr_cleaners) == curr_state.fog
-        }) else {
-            return Err("Programmfehler".to_string());
+        let is_prev = |state: &&FogState| {
+            state.fog.compute_step(&edges, &visible, &curr_cleaners) == curr_state.fog
         };
+        let prev_state = prev_states.iter().find(is_prev).unwrap();
         cleaning_sequence.push(curr_state.prev);
-        curr_cleaners = curr_state.prev;
+        curr_compact_cleaners = curr_state.prev;
         curr_state = prev_state;
     }
 
     cleaning_sequence.reverse();
-    Ok(Solution::Cleanable(CleaningSequence(cleaning_sequence)))
+    Ok(Solution::CleaningSequence(cleaning_sequence))
 }
 
 #[cfg(test)]
@@ -389,7 +383,7 @@ mod test {
         for nr_cleaners in 1.. {
             let result =
                 compute_cleaning_strategy(rules, visibility, nr_cleaners, edges.clone(), &manager)?;
-            if matches!(result, Solution::Cleanable(_)) {
+            if matches!(result, Solution::CleaningSequence(_)) {
                 return Ok(nr_cleaners);
             }
         }
@@ -406,6 +400,7 @@ mod test {
         assert_eq!(cleaning_number(circle(5), 1), Ok(2));
         assert_eq!(cleaning_number(circle(5), 2), Ok(1));
         assert_eq!(cleaning_number(circle(25), 2), Ok(2));
+        assert_eq!(cleaning_number(circle(25), 11), Ok(2));
         assert_eq!(cleaning_number(circle(25), 12), Ok(1));
 
         use crate::graph::{planar3d::Embedding3D, shape::Shape};
@@ -413,5 +408,7 @@ mod test {
         assert_eq!(cleaning_number(from_shape(Shape::TriangGrid, 4), 1), Ok(1));
         // one cleaner guards a fixed edge, the other cleaners walk the six remaining vertices in parallel.
         assert_eq!(cleaning_number(from_shape(Shape::Cube, 0), 0), Ok(3));
+        // two cleaners at opposing sides already see every vertex without moving
+        assert_eq!(cleaning_number(from_shape(Shape::Icosahedron, 1), 2), Ok(2));
     }
 }
