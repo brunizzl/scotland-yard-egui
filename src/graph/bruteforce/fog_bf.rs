@@ -220,7 +220,7 @@ pub struct FogSolution {
 }
 
 impl FogSolution {
-    pub fn cleanable(&self) -> bool {
+    pub fn is_cleanable(&self) -> bool {
         self.sequence.is_some()
     }
 
@@ -301,11 +301,11 @@ pub fn compute_cleaning_strategy<R: Rules>(
                 most_cleaned_so_far,
                 nr_vertices,
             ))?;
-            time_until_log_refresh = 10_000;
+            time_until_log_refresh = 1_000;
         }
 
         let Some(curr) = queue.pop() else {
-            debug_assert!(!sol.cleanable());
+            debug_assert!(!sol.is_cleanable());
             return Ok(sol);
         };
         debug_assert!(curr.nr_cleaned <= nr_vertices);
@@ -376,7 +376,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
 
 /// tries to walk the solution and fails if something fishy happens while doing so.
 fn verify_sequence<R: Rules>(rules: R, sol: &FogSolution, edges: &EdgeList) -> Result<(), String> {
-    if !sol.cleanable() {
+    if !sol.is_cleanable() {
         return Err("cleaning sequence doesn't exist".to_string());
     };
     assert_eq!(sol.nr_vertices, edges.nr_vertices());
@@ -458,7 +458,7 @@ mod test {
         for nr_cleaners in 1.. {
             let result =
                 compute_cleaning_strategy(rules, visibility, nr_cleaners, edges.clone(), &manager)?;
-            if result.cleanable() {
+            if result.is_cleanable() {
                 verify_sequence(rules, &result, &edges)?;
                 return Ok(nr_cleaners);
             }

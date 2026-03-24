@@ -152,7 +152,6 @@ impl CustomBuild {
                 }
             }
         }
-        degrees.sort();
 
         use std::fmt::Write;
         let mut sep = "";

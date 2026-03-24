@@ -578,15 +578,15 @@ impl BruteforceComputationState {
         let nr_cleaners = game_type.nr_cleaners();
         let rules = game_type.rules.name();
         let single_cleaner = nr_cleaners == 1;
-        let can = if single_cleaner { "kann " } else { "können" };
-        let not = if sol.cleanable() { "" } else { "nicht " };
+        let can = if single_cleaner { "kann" } else { "können" };
+        let not = if sol.is_cleanable() { "" } else { "NICHT " };
+        let shape = game_type.shape.to_sting();
+        let res = game_type.resolution;
 
         ui.add(
             Label::new(format!(
                 "{nr_cleaners} Cleaner ({rules}, Sichtweite {visibility}) \
-                {can} {not} Graph {} mit Auflösung {} von Nebel befreien",
-                game_type.shape.to_sting(),
-                game_type.resolution,
+                {can} {shape} mit Auflösung {res} {not}von Nebel befreien",
             ))
             .extend(),
         );
@@ -656,12 +656,16 @@ impl BruteforceComputationState {
                 if ui.button("löschen").clicked() {
                     action = Some((Action::Delete, (game_type.clone(), *visibility)));
                 }
-                if let Some(seq) = &sol.sequence {
+                if sol.is_cleanable() {
                     menu_button_closing_outside(ui, "Zugfolge", |ui| {
-                        for &compact in seq {
-                            let raw = sol.unpack(compact);
-                            ui.add(Label::new(format!("{:?}", &raw[..])).extend());
+                        use std::fmt::Write;
+                        let mut sequence_str = String::new();
+                        let mut sep = "";
+                        for positions in sol.iter_unpacked() {
+                            write!(sequence_str, "{}{:?}", sep, &positions[..]).ok();
+                            sep = ", ";
                         }
+                        ui.label(sequence_str);
                     });
                 }
             });
@@ -832,10 +836,14 @@ impl BruteforceComputationState {
             });
             ui.add_space(5.0);
 
-            let disclaimer = "WARNUNG: weil WASM keine Threads mag, blockt \
+            let disclaimer = if NATIVE {
+                "die Rechnung startet in einem eingenen Thread."
+            } else {
+                "WARNUNG: weil WASM keine Threads mag, blockt \
                 die Websiteversion bei dieser Rechnung die GUI.\n\
                 Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
-                Bruteforceberechnungen nicht möglich macht.";
+                Bruteforceberechnungen nicht möglich macht."
+            };
 
             ui.label("Räuberstrategie:");
             let computing_robber_strat = self.workers.iter().any(|w| {
@@ -904,7 +912,7 @@ impl BruteforceComputationState {
                 }
                 let load_sol_to_characters_button = Button::new("als Züge ♟");
                 let solution = self.fog_strats.get(&game_type_with_vis);
-                let enable_load = solution.is_some_and(|sol| sol.cleanable());
+                let enable_load = solution.is_some_and(|sol| sol.is_cleanable());
                 if ui
                     .add_enabled(enable_load, load_sol_to_characters_button)
                     .on_hover_text("Ersetze Figurenbewegungen durch die entnebelnde Zugfolge.")

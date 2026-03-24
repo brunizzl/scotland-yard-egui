@@ -886,7 +886,7 @@ impl State {
 
     /// forgets the current move history and instead inserts the passed fog clearing sequence as future moves.
     pub fn load_fog_cleaning_sequence(&mut self, map: &map::Map, sol: &bf::FogSolution) {
-        if !sol.cleanable() {
+        if !sol.is_cleanable() {
             return;
         }
         self.forget_move_history();
@@ -900,13 +900,13 @@ impl State {
 
         let mut sequence = sol.iter_unpacked();
         let mut last_positions = sequence.next().unwrap();
-        {
-            // reversed to update the robber last, as the robber move causes the fog update.
-            let iter = izip!(&last_positions[..], &mut cleaners).rev();
-            for (&init, cleaner) in iter {
-                cleaner.nearest_vertex = init;
-            }
+        // reversed to update the robber last, as the robber move causes the fog update.
+        // note: we don't actually move something here, but better to be consistent with
+        // the loop below.
+        for (&init, cleaner) in izip!(&last_positions[..], &mut cleaners).rev() {
+            cleaner.nearest_vertex = init;
         }
+
         for curr_positions_sorted in sequence {
             // important to always keep the ordering with respect to the characters the same.
             let curr_positions = 'find_curr_positions: {
