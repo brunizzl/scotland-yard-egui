@@ -764,16 +764,17 @@ impl Info {
 
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
-        let nr_cops = self.characters.active_cops().count();
-        let fog_sol = self.worker.draw_menu(
-            nr_cops,
-            self.characters.rules(),
-            ui,
-            map,
-            &mut self.options.fog_clearing_dist,
-        );
+        let fog_sol = {
+            let nr_cops = self.characters.active_cops().count();
+            let vis = &mut self.options.fog_clearing_dist;
+            let rules = self.characters.rules();
+            self.worker.draw_menu(nr_cops, rules, ui, map, vis)
+        };
         if let Some(sol) = fog_sol {
             self.characters.load_fog_cleaning_sequence(map, sol);
+            self.fog_state.reset();
+            let vis = sol.visibility as isize;
+            self.fog_state.update(map.edges(), &self.characters, vis);
         }
         if NATIVE {
             ui.collapsing("📷 Screenshots", |ui| {

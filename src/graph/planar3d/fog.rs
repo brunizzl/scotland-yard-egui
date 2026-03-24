@@ -62,6 +62,10 @@ impl GameSates {
         self.history.push(Vec::from_iter(new));
     }
 
+    pub fn reset(&mut self) {
+        self.history.clear();
+    }
+
     pub fn update(&mut self, edges: &EdgeList, cleaners: &character::State, cleaning_range: isize) {
         if self.cleaning_range != cleaning_range {
             self.cleaning_range = cleaning_range;

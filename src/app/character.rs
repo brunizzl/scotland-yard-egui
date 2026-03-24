@@ -884,6 +884,7 @@ impl State {
         change
     }
 
+    /// forgets the current move history and instead inserts the passed fog clearing sequence as future moves.
     pub fn load_fog_cleaning_sequence(&mut self, map: &map::Map, sol: &bf::FogSolution) {
         if !sol.cleanable() {
             return;
@@ -896,9 +897,11 @@ impl State {
             .collect_vec();
         debug_assert!(cleaners[0].id().is_robber());
         debug_assert_eq!(cleaners.len(), sol.nr_cleaners);
+
         let mut sequence = sol.iter_unpacked();
         let mut last_positions = sequence.next().unwrap();
         {
+            // reversed to update the robber last, as the robber move causes the fog update.
             let iter = izip!(&last_positions[..], &mut cleaners).rev();
             for (&init, cleaner) in iter {
                 cleaner.nearest_vertex = init;
@@ -906,17 +909,17 @@ impl State {
         }
         for curr_positions_sorted in sequence {
             // important to always keep the ordering with respect to the characters the same.
-            let curr_positions = {
-                let steps_from_last = rules.raw_cop_moves_from(map.edges(), last_positions);
-                steps_from_last
-                    .into_iter()
-                    .find(|steps| {
-                        let mut sorted = *steps;
-                        sorted.sort();
-                        sorted == curr_positions_sorted
-                    })
-                    .unwrap()
+            let curr_positions = 'find_curr_positions: {
+                for steps in rules.raw_cop_moves_from(map.edges(), last_positions) {
+                    let mut sorted = steps;
+                    sorted.sort();
+                    if sorted == curr_positions_sorted {
+                        break 'find_curr_positions steps;
+                    }
+                }
+                panic!("a valid solution must be a valid sequence of moves");
             };
+            // reversed to update the robber last, as the robber move causes the fog update.
             let iter = izip!(0..sol.nr_cleaners, &curr_positions[..], &mut cleaners).rev();
             for (i, &v, cleaner) in iter {
                 cleaner.set_vertex_no_dist_update(v, map.positions());
@@ -924,6 +927,7 @@ impl State {
             }
             last_positions = curr_positions;
         }
+
         self.characters = cleaners;
         let mut queue = std::collections::VecDeque::new();
         self.undo_multiple_moves(map.edges(), map.positions(), &mut queue, usize::MAX);
