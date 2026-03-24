@@ -41,12 +41,19 @@ impl GameType {
         let embedding = Embedding3D::new_map_from(&self.shape, self.resolution);
         embedding.into_edges()
     }
+
+    fn nr_cleaners(&self) -> usize {
+        // the robber also helps.
+        self.nr_cops + 1
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkTask {
     ComputeRobber,
     ComputeCops,
+    /// integer is visibility.
+    ComputeFog(usize),
     VerifyRobber,
     LoadRobber,
     LoadCops,
@@ -57,6 +64,7 @@ enum WorkTask {
 enum WorkResultData {
     Robber(GameOutcome),
     Cops(bf::CopStrategy),
+    Fog(bf::FogSolution),
     None,
 }
 
@@ -106,27 +114,34 @@ impl WorkResult {
 
 impl From<(Result<bf::Outcome, String>, Confidence)> for WorkResult {
     fn from((res, confidence): (Result<bf::Outcome, String>, Confidence)) -> Self {
-        let (result, error) = match res {
-            Ok(outcome) => (Some(GameOutcome { confidence, outcome }), None),
-            Err(err) => (None, Some(err)),
+        let (data, error) = match res {
+            Ok(outcome) => {
+                let tagged = GameOutcome { confidence, outcome };
+                (WorkResultData::Robber(tagged), None)
+            },
+            Err(err) => (WorkResultData::None, Some(err)),
         };
-        Self {
-            data: result.map_or(WorkResultData::None, WorkResultData::Robber),
-            error,
-        }
+        Self { data, error }
     }
 }
 
 impl From<Result<bf::CopStrategy, String>> for WorkResult {
     fn from(res: Result<bf::CopStrategy, String>) -> Self {
-        let (cop_strat, error) = match res {
-            Ok(strat) => (Some(strat), None),
-            Err(err) => (None, Some(err)),
+        let (data, error) = match res {
+            Ok(strat) => (WorkResultData::Cops(strat), None),
+            Err(err) => (WorkResultData::None, Some(err)),
         };
-        Self {
-            data: cop_strat.map_or(WorkResultData::None, WorkResultData::Cops),
-            error,
-        }
+        Self { data, error }
+    }
+}
+
+impl From<Result<bf::FogSolution, String>> for WorkResult {
+    fn from(value: Result<bf::FogSolution, String>) -> Self {
+        let (data, error) = match value {
+            Ok(sol) => (WorkResultData::Fog(sol), None),
+            Err(err) => (WorkResultData::None, Some(err)),
+        };
+        Self { data, error }
     }
 }
 
@@ -180,6 +195,8 @@ pub struct BruteforceComputationState {
 
     robber_strats: BTreeMap<GameType, GameOutcome>,
     cop_strats: BTreeMap<GameType, bf::CopStrategy>,
+    /// .1 in key is the visibility.
+    fog_strats: BTreeMap<(GameType, usize), bf::FogSolution>,
     errors: Vec<(GameType, String)>,
 }
 
@@ -198,6 +215,7 @@ impl BruteforceComputationState {
             cops_strat_stored: false,
             robber_strats: BTreeMap::new(),
             cop_strats: BTreeMap::new(),
+            fog_strats: BTreeMap::new(),
             errors: Vec::new(),
         }
     }
@@ -221,6 +239,10 @@ impl BruteforceComputationState {
             },
             WorkResultData::Cops(data) => {
                 self.cop_strats.insert(game_type.clone(), data);
+            },
+            WorkResultData::Fog(sol) => {
+                let key = (game_type.clone(), sol.visibility);
+                self.fog_strats.insert(key, sol);
             },
             WorkResultData::None => {},
         }
@@ -336,6 +358,21 @@ impl BruteforceComputationState {
                 self.employ_worker(game_type, work, here, WorkTask::ComputeCops);
             },
         }
+    }
+
+    fn start_fog_computation(&mut self, map: &map::Map, visibility: usize) {
+        let game_type = self.curr_game_type.clone();
+        let nr_cleaners = game_type.nr_cleaners();
+        let rules = game_type.rules;
+        let edges = map.edges().clone();
+        let (here, there) = bf::thread_manager::build_managers();
+        let here = Some(here);
+        let work = move || {
+            rules
+                .compute_fog_strategy(nr_cleaners, visibility, edges, &there)
+                .into()
+        };
+        self.employ_worker(game_type, work, here, WorkTask::ComputeFog(visibility));
     }
 
     fn verify_robber_win_eq(sym: &bf::RobberWinData, no_sym: &bf::RobberWinData) -> Confidence {
@@ -505,7 +542,7 @@ impl BruteforceComputationState {
                 game_type.shape.to_sting(),
                 game_type.resolution
             ))
-            .wrap_mode(egui::TextWrapMode::Extend),
+            .extend(),
         );
     }
 
@@ -527,7 +564,30 @@ impl BruteforceComputationState {
                 game_type.resolution,
                 strat.max_moves,
             ))
-            .wrap_mode(egui::TextWrapMode::Extend),
+            .extend(),
+        );
+    }
+
+    fn draw_fog_result(
+        ui: &mut Ui,
+        game_type: &GameType,
+        visibility: usize,
+        sol: &bf::FogSolution,
+    ) {
+        let nr_cleaners = game_type.nr_cleaners();
+        let rules = game_type.rules.name();
+        let single_cleaner = nr_cleaners == 1;
+        let can = if single_cleaner { "kann " } else { "können" };
+        let not = if sol.cleanable() { "" } else { "nicht " };
+
+        ui.add(
+            Label::new(format!(
+                "{nr_cleaners} Cleaner ({rules}, Sichtweite {visibility}) \
+                {can} {not} Graph {} mit Auflösung {} von Nebel befreien",
+                game_type.shape.to_sting(),
+                game_type.resolution,
+            ))
+            .extend(),
         );
     }
 
@@ -587,6 +647,30 @@ impl BruteforceComputationState {
                 Action::Store => self.save_cops_strat(game_type, strat),
             }
         }
+
+        let mut action = None;
+        for ((game_type, visibility), sol) in &self.fog_strats {
+            Self::draw_fog_result(ui, game_type, *visibility, sol);
+            ui.horizontal(|ui| {
+                if ui.button("löschen").clicked() {
+                    action = Some((Action::Delete, (game_type.clone(), *visibility)));
+                }
+                if let Some(seq) = &sol.sequence {
+                    menu_button_closing_outside(ui, "Zugfolge", |ui| {
+                        for &compact in seq {
+                            let raw = compact.into_raw(sol.nr_cleaners, sol.nr_vertices);
+                            ui.add(Label::new(format!("{:?}", &raw[..])).extend());
+                        }
+                    });
+                }
+            });
+        }
+        if let Some((a, game_type_with_vis)) = action {
+            let _sol = self.fog_strats.remove(&game_type_with_vis).unwrap();
+            match a {
+                Action::Delete | Action::Verify | Action::Store => {},
+            }
+        }
     }
 
     fn draw_workers(&mut self, ui: &mut Ui) {
@@ -613,6 +697,7 @@ impl BruteforceComputationState {
                     WorkTask::VerifyRobber => "verifiziere ",
                     WorkTask::LoadRobber | WorkTask::LoadCops => "lade ",
                     WorkTask::StoreRobber | WorkTask::StoreCops => "speichere ",
+                    WorkTask::ComputeFog(_) => "rechne (Nebel)",
                 };
 
                 Label::new(format!(
@@ -690,7 +775,14 @@ impl BruteforceComputationState {
         }
     }
 
-    pub fn draw_menu(&mut self, nr_cops: usize, rules: bf::DynRules, ui: &mut Ui, map: &map::Map) {
+    pub fn draw_menu(
+        &mut self,
+        nr_cops: usize,
+        rules: bf::DynRules,
+        ui: &mut Ui,
+        map: &map::Map,
+        visibility: &mut isize,
+    ) {
         ui.collapsing("Bruteforce", |ui| {
             self.check_on_workers();
             let game_type = GameType {
@@ -716,7 +808,8 @@ impl BruteforceComputationState {
                     ui.add_enabled(false, Button::new("0 aktiv"));
                 }
 
-                let nr_done = self.robber_strats.len() + self.cop_strats.len();
+                let nr_done =
+                    self.robber_strats.len() + self.cop_strats.len() + self.fog_strats.len();
                 if nr_done > 0 {
                     menu_button_closing_outside(ui, format!("{nr_done} fertig"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_results(ui));
@@ -763,6 +856,7 @@ impl BruteforceComputationState {
                     self.load_robber_strat_for(game_type.clone());
                 }
             });
+
             ui.add_space(5.0);
             ui.label("Copstrategie:");
             let computing_cop_strat = self.workers.iter().any(|worker| {
@@ -782,7 +876,28 @@ impl BruteforceComputationState {
                 let enable_load = self.cops_strat_stored && !curr_known;
                 let load_button = Button::new("laden 🖴");
                 if ui.add_enabled(enable_load, load_button).clicked() {
-                    self.load_cops_strat_for(game_type);
+                    self.load_cops_strat_for(game_type.clone());
+                }
+            });
+
+            ui.add_space(10.0);
+            ui.label("Nebel entfernen:");
+            crate::app::add_drag_value(ui, visibility, "Sichtweite", 0..=1000, 1);
+            let vis = *visibility as usize;
+            let computing_fog_strat = self.workers.iter().any(|worker| {
+                worker.game_type == game_type && worker.task == WorkTask::ComputeFog(vis)
+            });
+            ui.horizontal(|ui| {
+                let game_type_with_vis = (game_type.clone(), vis);
+                let curr_known = self.fog_strats.contains_key(&game_type_with_vis);
+                let enable_compute = !computing_fog_strat && !curr_known;
+                let compute_button = Button::new("berechnen");
+                if ui
+                    .add_enabled(enable_compute, compute_button)
+                    .on_hover_text(disclaimer)
+                    .clicked()
+                {
+                    self.start_fog_computation(map, vis);
                 }
             });
         });

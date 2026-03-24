@@ -211,16 +211,18 @@ fn compute_visible(edges: &EdgeList, visibility: usize) -> EdgeList {
     EdgeList::from_iter(all_visible, max_dregree)
 }
 
-pub struct CleaningSequence {
-    pub sequence: Vec<PackedCleaners>,
+pub struct FogSolution {
+    /// is Some iff cleanable.
+    pub sequence: Option<Vec<PackedCleaners>>,
     pub nr_vertices: usize,
     pub nr_cleaners: usize,
     pub visibility: usize,
 }
 
-pub enum FogSolution {
-    Cleanable(CleaningSequence),
-    NotCleanable,
+impl FogSolution {
+    pub fn cleanable(&self) -> bool {
+        self.sequence.is_some()
+    }
 }
 
 /// unlike for the other bruteforce algorithms, no care is taken to ensure that out-of-memory errors are caught.
@@ -247,6 +249,13 @@ pub fn compute_cleaning_strategy<R: Rules>(
     if !edges.is_connected() {
         return Err("Graph muss zusammenhängend sein".to_string());
     }
+
+    let mut sol = FogSolution {
+        sequence: None,
+        nr_vertices,
+        nr_cleaners,
+        visibility,
+    };
 
     manager.update("initialisiere Variablen")?;
     let visible = compute_visible(&edges, visibility);
@@ -287,7 +296,8 @@ pub fn compute_cleaning_strategy<R: Rules>(
         }
 
         let Some(curr) = queue.pop() else {
-            return Ok(FogSolution::NotCleanable);
+            debug_assert!(!sol.cleanable());
+            return Ok(sol);
         };
         debug_assert!(curr.nr_cleaned <= nr_vertices);
         most_cleaned_so_far = most_cleaned_so_far.max(curr.nr_cleaned);
@@ -350,29 +360,23 @@ pub fn compute_cleaning_strategy<R: Rules>(
     }
 
     cleaning_sequence.reverse();
-    let seq = CleaningSequence {
-        sequence: cleaning_sequence,
-        nr_vertices,
-        nr_cleaners,
-        visibility,
-    };
-    debug_assert!(verify_solution(rules, &seq, &edges).is_ok());
-    Ok(FogSolution::Cleanable(seq))
+    sol.sequence = Some(cleaning_sequence);
+    debug_assert!(verify_sequence(rules, &sol, &edges).is_ok());
+    Ok(sol)
 }
 
 /// tries to walk the solution and fails if something fishy happens while doing so.
-fn verify_solution<R: Rules>(
-    rules: R,
-    seq: &CleaningSequence,
-    edges: &EdgeList,
-) -> Result<(), String> {
-    assert_eq!(seq.nr_vertices, edges.nr_vertices());
-    let visible = compute_visible(edges, seq.visibility);
+fn verify_sequence<R: Rules>(rules: R, sol: &FogSolution, edges: &EdgeList) -> Result<(), String> {
+    let Some(seq) = &sol.sequence else {
+        return Err("solution doesn't exist".to_string());
+    };
+    assert_eq!(sol.nr_vertices, edges.nr_vertices());
+    let visible = compute_visible(edges, sol.visibility);
 
-    let mut prev_cleaners = seq.sequence[0].into_raw(seq.nr_cleaners, seq.nr_vertices);
+    let mut prev_cleaners = seq[0].into_raw(sol.nr_cleaners, sol.nr_vertices);
     let mut prev_fog = Fog::new_initial(&prev_cleaners, &visible);
-    for &curr_compact in &seq.sequence[1..] {
-        let curr_cleaners = curr_compact.into_raw(seq.nr_cleaners, seq.nr_vertices);
+    for &curr_compact in &seq[1..] {
+        let curr_cleaners = curr_compact.into_raw(sol.nr_cleaners, sol.nr_vertices);
         if !rules.raw_cop_moves_from(edges, prev_cleaners).any(|mut step| {
             step.sort();
             step == curr_cleaners
@@ -384,7 +388,7 @@ fn verify_solution<R: Rules>(
             ));
         }
         let curr_fog = prev_fog.compute_step(edges, &visible, &curr_cleaners);
-        for v in 0..seq.nr_vertices {
+        for v in 0..sol.nr_vertices {
             if curr_fog.is_foggy(v) && edges.neighbors_of(v).all(|n| !prev_fog.is_foggy(n)) {
                 return Err("fog spread faster than one unit per step".to_string());
             }
@@ -397,7 +401,7 @@ fn verify_solution<R: Rules>(
         prev_cleaners = curr_cleaners;
     }
 
-    let still_foggy = (0..seq.nr_vertices).filter(|&v| prev_fog.is_foggy(v)).collect_vec();
+    let still_foggy = (0..sol.nr_vertices).filter(|&v| prev_fog.is_foggy(v)).collect_vec();
     if !still_foggy.is_empty() {
         return Err(format!("these vertices {still_foggy:?} are not cleaned."));
     }
@@ -445,7 +449,8 @@ mod test {
         for nr_cleaners in 1.. {
             let result =
                 compute_cleaning_strategy(rules, visibility, nr_cleaners, edges.clone(), &manager)?;
-            if matches!(result, FogSolution::Cleanable(_)) {
+            if result.cleanable() {
+                verify_sequence(rules, &result, &edges)?;
                 return Ok(nr_cleaners);
             }
         }

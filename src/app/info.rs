@@ -765,7 +765,13 @@ impl Info {
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
         let nr_cops = self.characters.active_cops().count();
-        self.worker.draw_menu(nr_cops, self.characters.rules(), ui, map);
+        self.worker.draw_menu(
+            nr_cops,
+            self.characters.rules(),
+            ui,
+            map,
+            &mut self.options.fog_clearing_dist,
+        );
         if NATIVE {
             ui.collapsing("📷 Screenshots", |ui| {
                 ui.horizontal(|ui| {

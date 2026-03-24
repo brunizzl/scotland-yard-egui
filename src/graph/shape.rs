@@ -134,6 +134,37 @@ impl CustomBuild {
         res
     }
 
+    /// returns the stringified degree sequence.
+    pub fn print_fingerprint(&self) -> String {
+        let nr_vertices = self
+            .build_steps
+            .iter()
+            .filter(|s| matches!(s, BuildStep::Vertex(_, _)))
+            .count();
+        let mut degrees = vec![0; nr_vertices];
+        for step in &self.build_steps {
+            if let BuildStep::Edge(u, v) = *step {
+                if u < nr_vertices {
+                    degrees[u] += 1;
+                }
+                if v < nr_vertices {
+                    degrees[v] += 1;
+                }
+            }
+        }
+        degrees.sort();
+
+        use std::fmt::Write;
+        let mut sep = "";
+        let mut result = String::new();
+        write!(result, "(").ok();
+        for deg in degrees {
+            write!(result, "{}{deg}", std::mem::replace(&mut sep, "-")).ok();
+        }
+        write!(result, ")").ok();
+        result
+    }
+
     /// the removal build steps cannot be parsed and should only
     /// be creatable by clicking with the right tool + shift.
     pub fn parse_build_steps(&mut self) {
@@ -282,7 +313,7 @@ impl Shape {
             Self::Tetrahedron => "Tetraeder".to_string(),
             Self::Icosahedron => "Ikosaeder".to_string(),
             Self::Custom(c) if self.pure_custom() => {
-                format!("Custom-{}", c.print_build_steps(true))
+                format!("Custom-{}", c.print_fingerprint())
             },
             Self::Custom(c) => {
                 let basis = c.basis.to_sting();

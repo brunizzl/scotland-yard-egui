@@ -15,8 +15,8 @@ use queues::{CopStratQueue, RobberStratQueue};
 mod rules;
 pub use rules::*;
 
-#[allow(dead_code)]
 mod fog_bf;
+pub use fog_bf::*;
 
 /// maximum number of cops for which a bruteforce computation can be started.
 /// is not too detrimental, that this number is small,

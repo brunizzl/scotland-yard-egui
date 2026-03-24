@@ -222,6 +222,29 @@ impl DynRules {
         }
     }
 
+    pub fn compute_fog_strategy(
+        self,
+        nr_cleaners: usize,
+        visibility: usize,
+        edges: EdgeList,
+        manager: &thread_manager::LocalManager,
+    ) -> Result<FogSolution, String> {
+        match self {
+            Self::Lazy => {
+                let rs = LazyCops;
+                compute_cleaning_strategy(rs, visibility, nr_cleaners, edges, manager)
+            },
+            Self::Eager => {
+                let rs = GeneralEagerCops(nr_cleaners as u32);
+                compute_cleaning_strategy(rs, visibility, nr_cleaners, edges, manager)
+            },
+            Self::GeneralEagerCops(n) => {
+                let rs = GeneralEagerCops(n);
+                compute_cleaning_strategy(rs, visibility, nr_cleaners, edges, manager)
+            },
+        }
+    }
+
     pub fn verify_continuity(
         self,
         data: &RobberWinData,
