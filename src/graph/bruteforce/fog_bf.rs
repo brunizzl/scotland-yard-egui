@@ -4,16 +4,17 @@
 //! a strategy to remove all fog. should such a strategy exist, it will be found here.
 
 use bitvec::boxed::BitBox;
-use itertools::izip;
+use itertools::{Itertools, izip};
 
 use crate::graph::EdgeList;
 
-use super::{MAX_COPS, RawCops, Rules, thread_manager};
+use super::RawCops as RawCleaners;
+use super::{MAX_COPS, Rules, thread_manager};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CompactCleaners(usize);
+pub struct PackedCleaners(usize);
 
-impl CompactCleaners {
+impl PackedCleaners {
     pub fn from_raw(nr_vertices: usize, positions: &[usize]) -> Self {
         debug_assert!(positions.is_sorted());
         let mut result = 0;
@@ -25,8 +26,8 @@ impl CompactCleaners {
         Self(result)
     }
 
-    pub fn into_raw(mut self, nr_cleaners: usize, nr_vertices: usize) -> RawCops {
-        let mut raw = RawCops::uninit(nr_cleaners);
+    pub fn into_raw(mut self, nr_cleaners: usize, nr_vertices: usize) -> RawCleaners {
+        let mut raw = RawCleaners::uninit(nr_cleaners);
         for i in 0..nr_cleaners {
             raw[i] = self.0 % nr_vertices;
             self.0 /= nr_vertices;
@@ -39,7 +40,7 @@ impl CompactCleaners {
 /// this has the same size as just the [`bitvec::boxed::BitBox`] variant on it's own,
 /// because the pointer pointing to the `BitBox` storage is guaranteed to never be null.
 /// (and because this pointer is a fat pointer, e.g. also carries the length of the held storage.)
-/// note: i just hope that the branch predictor is able to overcom any run-time overhead
+/// note: i just hope that the branch predictor is able to overcome any run-time overhead
 /// caused by the match of `self` in each non-static method.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Fog {
@@ -88,6 +89,7 @@ impl Fog {
         nr_vertices - self.count_foggy()
     }
 
+    #[allow(dead_code)]
     fn first_cleaned(&self) -> usize {
         match self {
             Self::Smol(data) => data.trailing_ones() as usize,
@@ -184,7 +186,7 @@ impl Fog {
 #[derive(Debug, Clone)]
 struct FogState {
     fog: Fog,
-    prev: CompactCleaners,
+    prev: PackedCleaners,
 }
 
 /// this is meant to be inserted into a max-heap.
@@ -192,13 +194,32 @@ struct FogState {
 struct QueueEntry {
     /// this is the first held data,
     /// so that an entry with more cleaned vertices is larger, e.g. is removed from the max-heap earlier.
-    /// (this is also the reason why we cout the number of cleaned, instead of the number of foggy vertices)
+    /// (this is also the reason why we count the number of cleaned, not the number of foggy vertices)
     nr_cleaned: usize,
-    cleaners: CompactCleaners,
+    cleaners: PackedCleaners,
 }
 
-pub enum Solution {
-    CleaningSequence(Vec<CompactCleaners>),
+/// for a given vertex `v`, the returned "neighbors" of `v` are
+/// the vertices with distance `<= visibility` in `edges`.
+/// note: this means `v` always "neighbors" itself.
+fn compute_visible(edges: &EdgeList, visibility: usize) -> EdgeList {
+    let visible_others = edges.pow(visibility);
+    let all_visible = izip!(0..edges.nr_vertices(), visible_others.neighbors())
+        .map(|(v, vis)| std::iter::once(v).chain(vis));
+
+    let max_dregree = visible_others.max_degree() + 1;
+    EdgeList::from_iter(all_visible, max_dregree)
+}
+
+pub struct CleaningSequence {
+    pub sequence: Vec<PackedCleaners>,
+    pub nr_vertices: usize,
+    pub nr_cleaners: usize,
+    pub visibility: usize,
+}
+
+pub enum FogSolution {
+    Cleanable(CleaningSequence),
     NotCleanable,
 }
 
@@ -211,7 +232,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
     nr_cleaners: usize,
     edges: EdgeList,
     manager: &thread_manager::LocalManager,
-) -> Result<Solution, String> {
+) -> Result<FogSolution, String> {
     if nr_cleaners > MAX_COPS {
         let msg = format!("Rechnung kann für höchstens {MAX_COPS} Cleaner durchgeführt werden.");
         return Err(msg);
@@ -228,23 +249,14 @@ pub fn compute_cleaning_strategy<R: Rules>(
     }
 
     manager.update("initialisiere Variablen")?;
-
-    // stores for each vertex which vertices are visible from there.
-    let visible = {
-        let visible_others = edges.pow(visibility);
-        EdgeList::from_iter(
-            izip!(0..nr_vertices, visible_others.neighbors())
-                .map(|(v, vis)| std::iter::once(v).chain(vis)),
-            visible_others.max_degree() + 1,
-        )
-    };
+    let visible = compute_visible(&edges, visibility);
 
     // stores for each cleaner state, which interesting fog states are possible to reach
     let mut states = std::collections::HashMap::new();
     let mut queue = std::collections::BinaryHeap::new();
     {
-        let initial_cleaners = RawCops::from_iter(std::iter::repeat_n(0, nr_cleaners));
-        let compact = CompactCleaners::from_raw(nr_vertices, &initial_cleaners);
+        let initial_cleaners = RawCleaners::from_iter(std::iter::repeat_n(0, nr_cleaners));
+        let compact = PackedCleaners::from_raw(nr_vertices, &initial_cleaners);
         let fog = Fog::new_initial(&initial_cleaners, &visible);
         let nr_cleaned = fog.count_cleaned(nr_vertices);
         states.insert(compact, vec![FogState { fog, prev: compact }]);
@@ -275,7 +287,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
         }
 
         let Some(curr) = queue.pop() else {
-            return Ok(Solution::NotCleanable);
+            return Ok(FogSolution::NotCleanable);
         };
         debug_assert!(curr.nr_cleaned <= nr_vertices);
         most_cleaned_so_far = most_cleaned_so_far.max(curr.nr_cleaned);
@@ -294,7 +306,8 @@ pub fn compute_cleaning_strategy<R: Rules>(
             for mut next_cleaners in rules.raw_cop_moves_from(&edges, curr_cleaners) {
                 next_cleaners.sort();
                 let next_fog = curr_fog.compute_step(&edges, &visible, &next_cleaners);
-                let next_compact_cleaners = CompactCleaners::from_raw(nr_vertices, &next_cleaners);
+                let next_compact_cleaners = PackedCleaners::from_raw(nr_vertices, &next_cleaners);
+                // don't actually initialize the fog states, because this is done below anyway.
                 let next_states = states.entry(next_compact_cleaners).or_insert_with(Vec::new);
                 // next_fog is only interesting if we don't already know that we can reach
                 // a fog state with (at least) all the vertices cleaned in next_fog also cleaned.
@@ -321,13 +334,11 @@ pub fn compute_cleaning_strategy<R: Rules>(
     let is_cleaned = |state: &&FogState| state.fog.count_cleaned(nr_vertices) == nr_vertices;
     let mut curr_state = states[&final_compact_cleaners].iter().find(is_cleaned).unwrap();
     loop {
-        if curr_state.prev == curr_compact_cleaners {
-            break;
-        }
         let curr_cleaners = curr_compact_cleaners.into_raw(nr_cleaners, nr_vertices);
         if curr_state.fog == Fog::new_initial(&curr_cleaners, &visible) {
             break;
         }
+        assert_ne!(curr_compact_cleaners, curr_state.prev);
         let prev_states = &states[&curr_state.prev];
         let is_prev = |state: &&FogState| {
             state.fog.compute_step(&edges, &visible, &curr_cleaners) == curr_state.fog
@@ -339,7 +350,58 @@ pub fn compute_cleaning_strategy<R: Rules>(
     }
 
     cleaning_sequence.reverse();
-    Ok(Solution::CleaningSequence(cleaning_sequence))
+    let seq = CleaningSequence {
+        sequence: cleaning_sequence,
+        nr_vertices,
+        nr_cleaners,
+        visibility,
+    };
+    debug_assert!(verify_solution(rules, &seq, &edges).is_ok());
+    Ok(FogSolution::Cleanable(seq))
+}
+
+/// tries to walk the solution and fails if something fishy happens while doing so.
+fn verify_solution<R: Rules>(
+    rules: R,
+    seq: &CleaningSequence,
+    edges: &EdgeList,
+) -> Result<(), String> {
+    assert_eq!(seq.nr_vertices, edges.nr_vertices());
+    let visible = compute_visible(edges, seq.visibility);
+
+    let mut prev_cleaners = seq.sequence[0].into_raw(seq.nr_cleaners, seq.nr_vertices);
+    let mut prev_fog = Fog::new_initial(&prev_cleaners, &visible);
+    for &curr_compact in &seq.sequence[1..] {
+        let curr_cleaners = curr_compact.into_raw(seq.nr_cleaners, seq.nr_vertices);
+        if !rules.raw_cop_moves_from(edges, prev_cleaners).any(|mut step| {
+            step.sort();
+            step == curr_cleaners
+        }) {
+            return Err(format!(
+                "Cannot walk from {:?} to {:?} in a single round.",
+                &prev_cleaners[..],
+                &curr_cleaners[..]
+            ));
+        }
+        let curr_fog = prev_fog.compute_step(edges, &visible, &curr_cleaners);
+        for v in 0..seq.nr_vertices {
+            if curr_fog.is_foggy(v) && edges.neighbors_of(v).all(|n| !prev_fog.is_foggy(n)) {
+                return Err("fog spread faster than one unit per step".to_string());
+            }
+            let v_visible = curr_cleaners.iter().any(|&c| visible.neighbors_of(c).contains(&v));
+            if prev_fog.is_foggy(v) && !curr_fog.is_foggy(v) && !v_visible {
+                return Err(format!("vertex {v} became fog-free while not visible"));
+            }
+        }
+        prev_fog = curr_fog;
+        prev_cleaners = curr_cleaners;
+    }
+
+    let still_foggy = (0..seq.nr_vertices).filter(|&v| prev_fog.is_foggy(v)).collect_vec();
+    if !still_foggy.is_empty() {
+        return Err(format!("these vertices {still_foggy:?} are not cleaned."));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -383,7 +445,7 @@ mod test {
         for nr_cleaners in 1.. {
             let result =
                 compute_cleaning_strategy(rules, visibility, nr_cleaners, edges.clone(), &manager)?;
-            if matches!(result, Solution::CleaningSequence(_)) {
+            if matches!(result, FogSolution::Cleanable(_)) {
                 return Ok(nr_cleaners);
             }
         }
@@ -408,7 +470,7 @@ mod test {
         assert_eq!(cleaning_number(from_shape(Shape::TriangGrid, 4), 1), Ok(1));
         // one cleaner guards a fixed edge, the other cleaners walk the six remaining vertices in parallel.
         assert_eq!(cleaning_number(from_shape(Shape::Cube, 0), 0), Ok(3));
-        // two cleaners at opposing sides already see every vertex without moving
+        // two cleaners at opposing sides already see most vertices without moving
         assert_eq!(cleaning_number(from_shape(Shape::Icosahedron, 1), 2), Ok(2));
     }
 }
