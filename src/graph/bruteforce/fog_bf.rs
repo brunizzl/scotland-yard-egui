@@ -49,14 +49,16 @@ enum Fog {
 }
 
 impl Fog {
+    /// number of bits of a usize
+    const MAX_SMOL: usize = usize::BITS as usize;
+
     fn new_filled(nr_vertices: usize) -> Self {
-        const MAX_BITS_PER_INT: usize = usize::MAX.count_ones() as usize;
         match nr_vertices {
-            MAX_BITS_PER_INT => Self::Smol(usize::MAX),
-            0..MAX_BITS_PER_INT => Self::Smol((1 << nr_vertices) - 1),
+            Self::MAX_SMOL => Self::Smol(usize::MAX),
+            0..Self::MAX_SMOL => Self::Smol((1 << nr_vertices) - 1),
             _ => {
-                let mut data = vec![usize::MAX; nr_vertices.div_ceil(MAX_BITS_PER_INT)];
-                let nr_in_last_int = nr_vertices % MAX_BITS_PER_INT;
+                let mut data = vec![usize::MAX; nr_vertices.div_ceil(Self::MAX_SMOL)];
+                let nr_in_last_int = nr_vertices % Self::MAX_SMOL;
                 if nr_in_last_int > 0 {
                     *data.last_mut().unwrap() = (1 << nr_in_last_int) - 1;
                 }
@@ -78,15 +80,11 @@ impl Fog {
         result
     }
 
-    fn count_foggy(&self) -> usize {
+    fn count_foggy(&self) -> u32 {
         match self {
-            Self::Smol(data) => data.count_ones() as usize,
-            Self::Big(data) => data.count_ones(),
+            Self::Smol(data) => data.count_ones(),
+            Self::Big(data) => data.count_ones() as u32,
         }
-    }
-
-    fn count_cleaned(&self, nr_vertices: usize) -> usize {
-        nr_vertices - self.count_foggy()
     }
 
     #[allow(dead_code)]
@@ -190,13 +188,38 @@ struct FogState {
 }
 
 /// this is meant to be inserted into a max-heap.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq)]
 struct QueueEntry {
-    /// this is the first held data,
-    /// so that an entry with more cleaned vertices is larger, e.g. is removed from the max-heap earlier.
-    /// (this is also the reason why we count the number of cleaned, not the number of foggy vertices)
-    nr_cleaned: usize,
+    time: u32,
+    nr_foggy: u32,
     cleaners: PackedCleaners,
+}
+
+impl std::cmp::Ord for QueueEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // note: this is a max-heap entry, so values that are larger should be better to investigate further.
+        // -> smaller time is good to prioritize and smaller number of foggy vertices is good to prioritize.
+        let time = other.time.cmp(&self.time);
+        let nr_foggy = other.nr_foggy.cmp(&self.nr_foggy);
+        let cleaners = other.cleaners.cmp(&self.cleaners);
+        // we find the optimal strategy for at most two cleaners on graphs with
+        // vertex counts that don't require heap allocations for a fog states.
+        // otherwise we prioritize finding any strategy at all.
+        // note. this is somewhat janky as we don't actually know how many vertices and cleaners are in play.
+        const MAX_OPTIMAL: usize = Fog::MAX_SMOL * Fog::MAX_SMOL;
+        if usize::max(self.cleaners.0, other.cleaners.0) < MAX_OPTIMAL {
+            // primarily order by time -> resulting strategy is shortest possible
+            time.then(nr_foggy).then(cleaners)
+        } else {
+            // primarily oder by nr_foggy -> this speeds up the algorithm.
+            nr_foggy.then(time).then(cleaners)
+        }
+    }
+}
+impl std::cmp::PartialOrd for QueueEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// for a given vertex `v`, the returned "neighbors" of `v` are
@@ -274,11 +297,11 @@ pub fn compute_cleaning_strategy<R: Rules>(
     let mut queue = std::collections::BinaryHeap::new();
     {
         let initial_cleaners = RawCleaners::from_iter(std::iter::repeat_n(0, nr_cleaners));
-        let compact = PackedCleaners::from_raw(nr_vertices, &initial_cleaners);
+        let cleaners = PackedCleaners::from_raw(nr_vertices, &initial_cleaners);
         let fog = Fog::new_initial(&initial_cleaners, &visible);
-        let nr_cleaned = fog.count_cleaned(nr_vertices);
-        states.insert(compact, vec![FogState { fog, prev: compact }]);
-        queue.push(QueueEntry { nr_cleaned, cleaners: compact });
+        let nr_foggy = fog.count_foggy();
+        states.insert(cleaners, vec![FogState { fog, prev: cleaners }]);
+        queue.push(QueueEntry { time: 0, nr_foggy, cleaners });
     }
 
     // because a queue entry only stores how many vertices are foggy,
@@ -308,15 +331,14 @@ pub fn compute_cleaning_strategy<R: Rules>(
             debug_assert!(!sol.is_cleanable());
             return Ok(sol);
         };
-        debug_assert!(curr.nr_cleaned <= nr_vertices);
-        most_cleaned_so_far = most_cleaned_so_far.max(curr.nr_cleaned);
-        if curr.nr_cleaned == nr_vertices {
+        most_cleaned_so_far = most_cleaned_so_far.max(nr_vertices - curr.nr_foggy as usize);
+        if curr.nr_foggy == 0 {
             break curr.cleaners;
         }
 
         debug_assert!(current_fogs.is_empty());
         for state in states[&curr.cleaners].iter() {
-            if state.fog.count_cleaned(nr_vertices) == curr.nr_cleaned {
+            if state.fog.count_foggy() == curr.nr_foggy {
                 current_fogs.push(state.fog.clone());
             }
         }
@@ -333,13 +355,14 @@ pub fn compute_cleaning_strategy<R: Rules>(
                 if next_states.iter().any(|state| state.fog.is_subset_of(&next_fog)) {
                     continue;
                 }
-                let next_nr_cleared = next_fog.count_cleaned(nr_vertices);
+                let next_nr_foggy = next_fog.count_foggy();
                 next_states.push(FogState {
                     fog: next_fog,
                     prev: curr.cleaners,
                 });
                 queue.push(QueueEntry {
-                    nr_cleaned: next_nr_cleared,
+                    time: curr.time + 1,
+                    nr_foggy: next_nr_foggy,
                     cleaners: next_compact_cleaners,
                 });
             }
@@ -350,7 +373,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
     manager.update("schreibe Lösung")?;
     let mut cleaning_sequence = vec![final_compact_cleaners];
     let mut curr_compact_cleaners = final_compact_cleaners;
-    let is_cleaned = |state: &&FogState| state.fog.count_cleaned(nr_vertices) == nr_vertices;
+    let is_cleaned = |state: &&FogState| state.fog.count_foggy() == 0;
     let mut curr_state = states[&final_compact_cleaners].iter().find(is_cleaned).unwrap();
     loop {
         let curr_cleaners = sol.unpack(curr_compact_cleaners);
@@ -428,7 +451,7 @@ mod test {
         let _ = Fog::new_filled(0);
         for nr_vertices in [10, 32, 41, 64, 500, 1024, 2000] {
             let full_fog = Fog::new_filled(nr_vertices);
-            assert_eq!(nr_vertices, full_fog.count_foggy());
+            assert_eq!(nr_vertices, full_fog.count_foggy() as usize);
             assert_eq!(nr_vertices, full_fog.first_cleaned());
 
             let mut fog = full_fog.clone();
@@ -437,7 +460,7 @@ mod test {
             assert_eq!(fog.first_cleaned(), 5);
             fog.mark_cleaned(3);
             assert_eq!(fog.first_cleaned(), 3);
-            assert_eq!(fog.count_foggy(), nr_vertices - 2);
+            assert_eq!(fog.count_foggy() as usize, nr_vertices - 2);
 
             assert_eq!(fog.subset_ord(&full_fog), Some(std::cmp::Ordering::Less));
             assert_eq!(full_fog.subset_ord(&fog), Some(std::cmp::Ordering::Greater));

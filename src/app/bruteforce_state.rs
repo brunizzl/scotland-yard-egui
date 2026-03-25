@@ -684,7 +684,7 @@ impl BruteforceComputationState {
 
         for worker in &mut self.workers {
             let paused = worker.manager.as_ref().is_some_and(|m| m.is_paused());
-            ui.add({
+            ui.horizontal(|ui| {
                 let animation = match (ui.input(|i| i.time) * 5.0) as isize % 9 {
                     _ if paused => " . . ",
                     0 => ".    ",
@@ -696,26 +696,22 @@ impl BruteforceComputationState {
                     6 => "   . ",
                     _ => "     ",
                 };
-                let task_str = match worker.task {
-                    WorkTask::ComputeRobber => "rechne (R) ",
-                    WorkTask::ComputeCops => "rechne (C) ",
-                    WorkTask::VerifyRobber => "verifiziere ",
-                    WorkTask::LoadRobber | WorkTask::LoadCops => "lade ",
-                    WorkTask::StoreRobber | WorkTask::StoreCops => "speichere ",
-                    WorkTask::ComputeFog(_) => "rechne (Nebel)",
-                };
+                ui.add(Label::new(egui::RichText::new(animation).monospace()).extend());
 
-                Label::new(format!(
-                    "{} {} {}",
-                    animation,
-                    task_str,
-                    worker.game_type.as_tuple_string()
-                ))
-                .wrap_mode(egui::TextWrapMode::Extend)
+                let task_str = match worker.task {
+                    WorkTask::ComputeRobber => "rechne (R)".to_string(),
+                    WorkTask::ComputeCops => "rechne (C)".to_string(),
+                    WorkTask::VerifyRobber => "verifiziere".to_string(),
+                    WorkTask::LoadRobber | WorkTask::LoadCops => "lade".to_string(),
+                    WorkTask::StoreRobber | WorkTask::StoreCops => "speichere".to_string(),
+                    WorkTask::ComputeFog(vis) => format!("rechne (N-{vis})"),
+                };
+                let game_str = worker.game_type.as_tuple_string();
+                ui.add(Label::new(format!("{task_str} {game_str}")).extend());
             });
 
             if let Some(m) = &mut worker.manager {
-                ui.add(Label::new(m.last_log()).wrap_mode(egui::TextWrapMode::Extend));
+                ui.add(Label::new(m.last_log()).extend());
                 ui.horizontal(|ui| {
                     {
                         let (label, cmd) = if paused {
@@ -769,7 +765,7 @@ impl BruteforceComputationState {
                     game_type.as_tuple_string(),
                     err
                 ))
-                .wrap_mode(egui::TextWrapMode::Extend),
+                .extend(),
             );
             if ui.button("löschen").clicked() {
                 delete = Some(i);

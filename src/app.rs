@@ -206,7 +206,7 @@ ziehen mit linker Maustaste
 Viele Menüpunkte zeigen Extrainformation, 
 wenn die Maus über ihnen schwebt.",
             )
-            .wrap_mode(egui::TextWrapMode::Extend),
+            .extend(),
         );
     });
 }
@@ -245,7 +245,7 @@ impl eframe::App for State {
                     const COMPILE_DATETIME: &str = compile_time::datetime_str!();
                     //add spaces to force minimum width of sidebar
                     let compile_info = format!("kompiliert: {COMPILE_DATETIME} ");
-                    ui.add(Label::new(compile_info).wrap_mode(egui::TextWrapMode::Extend));
+                    ui.add(Label::new(compile_info).extend());
                     if ui.button("⏴").on_hover_text("Menü einklappen (strg + b)").clicked() {
                         self.menu_visible = false;
                     }

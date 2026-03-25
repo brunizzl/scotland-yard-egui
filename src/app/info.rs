@@ -1320,7 +1320,7 @@ impl Info {
             egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), id, anchor).show(|ui| {
                 let opts = &self.options;
                 let add_unwrapped = |ui: &mut Ui, txt| {
-                    ui.add(Label::new(txt).wrap_mode(egui::TextWrapMode::Extend));
+                    ui.add(Label::new(txt).extend());
                 };
                 match key {
                     Key::Q => {
@@ -1358,10 +1358,7 @@ impl Info {
                         }
                     },
                     Key::E => {
-                        ui.add(
-                            Label::new(egui::RichText::new(tool.symbol()).size(30.0))
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                        );
+                        ui.add(Label::new(egui::RichText::new(tool.symbol()).size(30.0)).extend());
                     },
                     _ => unreachable!(),
                 }
