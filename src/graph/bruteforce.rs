@@ -58,6 +58,11 @@ impl RawCops {
         }
         Self { cops, nr_cops }
     }
+
+    pub fn sorted(mut self) -> Self {
+        self.sort();
+        self
+    }
 }
 
 impl std::ops::Deref for RawCops {
@@ -520,10 +525,9 @@ where
 
     for (i, index) in izip!(0.., cop_moves.all_positions()) {
         if i % 4096 == 0 {
-            manager.update(format!(
-                "initialisiere Räuberstrategiefunktion: {:.2}%",
-                100.0 * (i as f32) / (cop_moves.nr_configurations() as f32)
-            ))?;
+            let percent = 100.0 * (i as f32) / (cop_moves.nr_configurations() as f32);
+            let msg = format!("initialisiere Räuberstrategiefunktion: {percent:.2}%");
+            manager.update(msg)?;
         }
 
         // test round trip
@@ -1085,8 +1089,7 @@ mod test {
         let fst_index = 0;
         for rest_index in 0..(cop_states.configurations[&fst_index].len()) {
             let cops_index = CompactCopsIndex { fst_index, rest_index };
-            let mut cops_state = cop_states.eager_unpack(cops_index);
-            cops_state.sort();
+            let cops_state = cop_states.eager_unpack(cops_index).sorted();
             let computed_index = multiset_index(graph.nr_vertices(), &cops_state[1..]).unwrap();
             assert_eq!(computed_index, cops_index.rest_index);
         }
@@ -1161,19 +1164,14 @@ mod test {
         debug_assert_eq!(&neighborss[2], &[60, 71, 80]);
         debug_assert_eq!(&neighborss[3], &[75, 84, 86, 95]);
 
-        let sort_cops = |mut cops: RawCops| {
-            cops.sort();
-            cops
-        };
-
         // test case 1: lazy cops means a single cop can move
         let mut lazy_1 = LazyCops
             .raw_cop_moves_from(q10.edges(), old_cops)
-            .map(sort_cops)
+            .map(RawCops::sorted)
             .collect_vec();
         let mut lazy_2 = GeneralEagerCops(1)
             .raw_cop_moves_from(q10.edges(), old_cops)
-            .map(sort_cops)
+            .map(RawCops::sorted)
             .collect_vec();
         lazy_1.sort_by(|a, b| (&a[..]).cmp(&b[..]));
         lazy_2.sort_by(|a, b| (&a[..]).cmp(&b[..]));
@@ -1182,7 +1180,7 @@ mod test {
         // test case 2: eager cops means all cops can move.
         let mut eager_1 = GeneralEagerCops(4)
             .raw_cop_moves_from(q10.edges(), old_cops)
-            .map(sort_cops)
+            .map(RawCops::sorted)
             .collect_vec();
         eager_1.push(old_cops);
         let mut eager_2 = Vec::new();
@@ -1193,7 +1191,7 @@ mod test {
         });
         for combo in all_eager_options.multi_cartesian_product() {
             let cops_step = RawCops::new(&combo);
-            eager_2.push(sort_cops(cops_step));
+            eager_2.push(cops_step.sorted());
         }
         eager_1.sort_by(|a, b| (&a[..]).cmp(&b[..]));
         eager_2.sort_by(|a, b| (&a[..]).cmp(&b[..]));

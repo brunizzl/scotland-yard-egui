@@ -908,22 +908,20 @@ impl State {
         }
 
         for curr_positions_sorted in sequence {
-            // important to always keep the ordering with respect to the characters the same.
-            let curr_positions = 'find_curr_positions: {
-                for steps in rules.raw_cop_moves_from(map.edges(), last_positions) {
-                    let mut sorted = steps;
-                    sorted.sort();
-                    if sorted == curr_positions_sorted {
-                        break 'find_curr_positions steps;
-                    }
-                }
-                panic!("a valid solution must be a valid sequence of moves");
+            let curr_positions = {
+                // important to always keep the ordering with respect to the characters the same.
+                let potential_positions = rules.raw_cop_moves_from(map.edges(), last_positions);
+                let same_multiset = |steps: &bf::RawCops| steps.sorted() == curr_positions_sorted;
+                potential_positions.into_iter().find(same_multiset).unwrap()
             };
             // reversed to update the robber last, as the robber move causes the fog update.
             let iter = izip!(0..sol.nr_cleaners, &curr_positions[..], &mut cleaners).rev();
             for (i, &v, cleaner) in iter {
-                cleaner.set_vertex_no_dist_update(v, map.positions());
-                self.past_moves.push((i, v));
+                // always "move" robber, because fog must be updated.
+                if cleaner.id().is_robber() || cleaner.vertex() != v {
+                    cleaner.set_vertex_no_dist_update(v, map.positions());
+                    self.past_moves.push((i, v));
+                }
             }
             last_positions = curr_positions;
         }

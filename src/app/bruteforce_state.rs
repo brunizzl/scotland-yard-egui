@@ -194,6 +194,9 @@ pub struct BruteforceComputationState {
     /// do we have a police strat for [`Self::curr_game_type`] stored in the filesystem?
     cops_strat_stored: bool,
 
+    /// which bruteforce algorithm for fog clearing is called
+    compute_best_fog_strat: bool,
+
     robber_strats: BTreeMap<GameType, GameOutcome>,
     cop_strats: BTreeMap<GameType, bf::CopStrategy>,
     /// .1 in key is the visibility.
@@ -214,6 +217,7 @@ impl BruteforceComputationState {
             },
             robber_strat_stored: false,
             cops_strat_stored: false,
+            compute_best_fog_strat: true,
             robber_strats: BTreeMap::new(),
             cop_strats: BTreeMap::new(),
             fog_strats: BTreeMap::new(),
@@ -368,10 +372,14 @@ impl BruteforceComputationState {
         let edges = map.edges().clone();
         let (here, there) = bf::thread_manager::build_managers();
         let here = Some(here);
+        let compute_best = self.compute_best_fog_strat;
         let work = move || {
-            rules
-                .compute_fog_strategy(nr_cleaners, visibility, edges, &there)
-                .into()
+            if compute_best {
+                rules.compute_best_fog_strategy(nr_cleaners, visibility, edges, &there)
+            } else {
+                rules.compute_any_fog_strategy(nr_cleaners, visibility, edges, &there)
+            }
+            .into()
         };
         self.employ_worker(game_type, work, here, WorkTask::ComputeFog(visibility));
     }
@@ -657,6 +665,19 @@ impl BruteforceComputationState {
                     action = Some((Action::Delete, (game_type.clone(), *visibility)));
                 }
                 if sol.is_cleanable() {
+                    menu_button_closing_outside(ui, "Fun Facts", |ui| {
+                        ui.horizontal(|ui| {
+                            let not = if sol.works_in_reverse { "" } else { "NICHT " };
+                            ui.label(format!("Folge ist {not}umkehrbar."));
+                            if ui.button("umkehren").clicked() {
+                                sol.sequence.as_mut().unwrap().reverse();
+                            }
+                        });
+                        if sol.is_best_solution {
+                            ui.label("Folge ist kürzestmöglich.");
+                        }
+                    });
+
                     menu_button_closing_outside(ui, "Zugfolge", |ui| {
                         use std::fmt::Write;
                         let mut sequence_str = String::new();
@@ -667,12 +688,6 @@ impl BruteforceComputationState {
                         }
                         ui.label(sequence_str);
                     });
-
-                    let not = if sol.works_in_reverse { "" } else { "NICHT " };
-                    ui.label(format!("Folge ist {not}umkehrbar."));
-                    if sol.works_in_reverse && ui.button("umkehren").clicked() {
-                        sol.sequence.as_mut().unwrap().reverse();
-                    }
                 }
             });
         }
@@ -893,8 +908,8 @@ impl BruteforceComputationState {
                 }
             });
 
-            ui.add_space(10.0);
-            ui.label("Nebel entfernen:");
+            ui.add_space(5.0);
+            ui.label("Reinigungsstrategie:");
             crate::app::add_drag_value(ui, visibility, "Sichtweite", 0..=1000, 1);
             let vis = *visibility as usize;
             let computing_fog_strat = self.workers.iter().any(|worker| {
@@ -912,6 +927,20 @@ impl BruteforceComputationState {
                 {
                     self.start_fog_computation(map, vis);
                 }
+                {
+                    let curr_strat = match self.compute_best_fog_strat {
+                        true => " beste ",
+                        false => "  egal  ",
+                    };
+                    let info = match self.compute_best_fog_strat {
+                        true => "aktuell: finde die kürzeste Zugfolge (lange Rechenzeit)",
+                        false => "aktuell: finde irgendeine Zugfolge (kurze Rechenzeit)",
+                    };
+                    if ui.button(curr_strat).on_hover_text(info).clicked() {
+                        self.compute_best_fog_strat ^= true;
+                    }
+                }
+                ui.add_space(5.0);
                 let load_sol_to_characters_button = Button::new("als Züge ♟");
                 let solution = self.fog_strats.get(&game_type_with_vis);
                 let enable_load = solution.is_some_and(|sol| sol.is_cleanable());
@@ -923,6 +952,7 @@ impl BruteforceComputationState {
                     fog_solution = solution;
                 }
             });
+            ui.add_space(5.0);
         });
         fog_solution
     }

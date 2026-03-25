@@ -188,26 +188,23 @@ struct FogState {
 }
 
 /// this is meant to be inserted into a max-heap.
+/// if `BEST` is true, the queue is optimized to find the shortest solution,
+/// which may take (significantly) longer.
 #[derive(Debug, PartialEq, Eq)]
-struct QueueEntry {
+struct QueueEntry<const BEST: bool> {
     time: u32,
     nr_foggy: u32,
     cleaners: PackedCleaners,
 }
 
-impl std::cmp::Ord for QueueEntry {
+impl<const BEST: bool> std::cmp::Ord for QueueEntry<BEST> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // note: this is a max-heap entry, so values that are larger should be better to investigate further.
         // -> smaller time is good to prioritize and smaller number of foggy vertices is good to prioritize.
         let time = other.time.cmp(&self.time);
         let nr_foggy = other.nr_foggy.cmp(&self.nr_foggy);
         let cleaners = other.cleaners.cmp(&self.cleaners);
-        // we find the optimal strategy for at most two cleaners on graphs with
-        // vertex counts that don't require heap allocations for a fog states.
-        // otherwise we prioritize finding any strategy at all.
-        // note. this is somewhat janky as we don't actually know how many vertices and cleaners are in play.
-        const MAX_OPTIMAL: usize = Fog::MAX_SMOL * Fog::MAX_SMOL;
-        if usize::max(self.cleaners.0, other.cleaners.0) < MAX_OPTIMAL {
+        if BEST {
             // primarily order by time -> resulting strategy is shortest possible
             time.then(nr_foggy).then(cleaners)
         } else {
@@ -216,7 +213,7 @@ impl std::cmp::Ord for QueueEntry {
         }
     }
 }
-impl std::cmp::PartialOrd for QueueEntry {
+impl<const BEST: bool> std::cmp::PartialOrd for QueueEntry<BEST> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
@@ -243,6 +240,8 @@ pub struct FogSolution {
     /// if graph is cleanable with [`Self::sequence`],
     /// is it also cleanable with the reverse of [`Self::sequence`]?
     pub works_in_reverse: bool,
+    /// assuming graph is cleanable, is [`Self::sequence`] a shortest possible sequence?
+    pub is_best_solution: bool,
 }
 
 impl FogSolution {
@@ -263,7 +262,7 @@ impl FogSolution {
 /// unlike for the other bruteforce algorithms, no care is taken to ensure that out-of-memory errors are caught.
 /// this is because this algorithm is continuously allocating small chunks. first, this is very anoying to track
 /// and second not even guaranteed to be recoverable if something goes wrong anyway.
-pub fn compute_cleaning_strategy<R: Rules>(
+fn compute_fog_strategy<R: Rules, const BEST: bool>(
     rules: R,
     visibility: usize,
     nr_cleaners: usize,
@@ -291,21 +290,52 @@ pub fn compute_cleaning_strategy<R: Rules>(
         nr_cleaners,
         visibility,
         works_in_reverse: false,
+        is_best_solution: BEST,
     };
 
     manager.update("initialisiere Variablen")?;
     let visible = compute_visible(&edges, visibility);
 
-    // stores for each cleaner state, which interesting fog states are possible to reach
+    // stores for each cleaner state which interesting fog states are possible to reach
     let mut states = std::collections::HashMap::new();
-    let mut queue = std::collections::BinaryHeap::new();
-    {
-        let initial_cleaners = RawCleaners::from_iter(std::iter::repeat_n(0, nr_cleaners));
-        let cleaners = PackedCleaners::from_raw(nr_vertices, &initial_cleaners);
-        let fog = Fog::new_initial(&initial_cleaners, &visible);
-        let nr_foggy = fog.count_foggy();
-        states.insert(cleaners, vec![FogState { fog, prev: cleaners }]);
-        queue.push(QueueEntry { time: 0, nr_foggy, cleaners });
+    let mut queue = std::collections::BinaryHeap::<QueueEntry<BEST>>::new();
+    // enters an initial state (assumed to be RawCleaners) into both states and queue.
+    // note: this is a macro, because we cannot borrow states and queue.
+    macro_rules! add_initial {
+        ($unpacked: ident) => {
+            let cleaners = PackedCleaners::from_raw(nr_vertices, &$unpacked);
+            let fog = Fog::new_initial(&$unpacked, &visible);
+            let nr_foggy = fog.count_foggy();
+            states.insert(cleaners, vec![FogState { fog, prev: cleaners }]);
+            queue.push(QueueEntry { time: 0, nr_foggy, cleaners });
+        };
+    }
+    if BEST {
+        // we want to find the best solution (e.g. shortest move sequence),
+        // so we actually need to consider every possible initial state.
+        let sym = crate::graph::NoSymmetry::new(nr_vertices);
+        let positions = super::CopConfigurations::new(&edges, &sym, nr_cleaners, manager)?;
+        let nr_initial_states = positions.nr_configurations();
+        if states.try_reserve(nr_initial_states).is_err() {
+            return Err("nicht genug Speicher für States.".to_string());
+        }
+        if queue.try_reserve(nr_initial_states).is_err() {
+            return Err("nicht genug Speicher für Queue.".to_string());
+        }
+        for (i, position_index) in izip!(0.., positions.all_positions()) {
+            if i % 4096 == 0 {
+                let percent = 100.0 * (i as f32) / (nr_initial_states as f32);
+                manager.update(format!("initialisiere Cleanerstates: {percent:.2}%"))?;
+            }
+            let initial_unpacked = positions.eager_unpack(position_index).sorted();
+            add_initial!(initial_unpacked);
+        }
+    } else {
+        // we want to find a solution quickly and the graph is connected
+        // -> it suffices to start with any arbitrary cleaner states and the other (needed ones)
+        // are discovered in the main loop.
+        let initial_unpacked = RawCleaners::from_iter(std::iter::repeat_n(0, nr_cleaners));
+        add_initial!(initial_unpacked);
     }
 
     // because a queue entry only stores how many vertices are foggy,
@@ -322,11 +352,10 @@ pub fn compute_cleaning_strategy<R: Rules>(
     let final_compact_cleaners = loop {
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
+            let len = queue.len();
             manager.update(format!(
-                "berechne Reinigungsstrategie: {} in Queue, max {}/{} Knoten sauber",
-                queue.len(),
-                most_cleaned_so_far,
-                nr_vertices,
+                "berechne Reinigungsstrategie: {len} in Queue, \
+                max {most_cleaned_so_far}/{nr_vertices} Knoten sauber"
             ))?;
             time_until_log_refresh = 1_000;
         }
@@ -348,8 +377,10 @@ pub fn compute_cleaning_strategy<R: Rules>(
         }
         let curr_cleaners = sol.unpack(curr.cleaners);
         for curr_fog in current_fogs.drain(..) {
-            for mut next_cleaners in rules.raw_cop_moves_from(&edges, curr_cleaners) {
-                next_cleaners.sort();
+            let iter = rules
+                .raw_cop_moves_from(&edges, curr_cleaners)
+                .map(RawCleaners::sorted);
+            for next_cleaners in iter {
                 let next_fog = curr_fog.compute_step(&edges, &visible, &next_cleaners);
                 let next_compact_cleaners = PackedCleaners::from_raw(nr_vertices, &next_cleaners);
                 // don't actually initialize the fog states, because this is done below anyway.
@@ -383,6 +414,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
     loop {
         let curr_cleaners = sol.unpack(curr_compact_cleaners);
         if curr_state.fog == Fog::new_initial(&curr_cleaners, &visible) {
+            debug_assert!(!BEST || curr_compact_cleaners == curr_state.prev);
             break;
         }
         assert_ne!(curr_compact_cleaners, curr_state.prev);
@@ -403,6 +435,26 @@ pub fn compute_cleaning_strategy<R: Rules>(
     verify_sequence(&rules, &sol, &edges)?;
 
     Ok(sol)
+}
+
+pub fn compute_best_fog_strategy<R: Rules>(
+    rules: R,
+    visibility: usize,
+    nr_cleaners: usize,
+    edges: EdgeList,
+    manager: &thread_manager::LocalManager,
+) -> Result<FogSolution, String> {
+    compute_fog_strategy::<_, true>(rules, visibility, nr_cleaners, edges, manager)
+}
+
+pub fn compute_any_fog_strategy<R: Rules>(
+    rules: R,
+    visibility: usize,
+    nr_cleaners: usize,
+    edges: EdgeList,
+    manager: &thread_manager::LocalManager,
+) -> Result<FogSolution, String> {
+    compute_fog_strategy::<_, false>(rules, visibility, nr_cleaners, edges, manager)
 }
 
 /// tries to walk the solution and fails if something fishy happens while doing so.
@@ -483,13 +535,17 @@ mod test {
         }
     }
 
-    fn cleaning_number(edges: EdgeList, visibility: usize) -> Result<usize, String> {
+    fn cleaning_number(edges: EdgeList, vis: usize) -> Result<usize, String> {
         let rules = crate::graph::bruteforce::rules::GeneralEagerCops(u32::MAX);
         let (_, manager) = thread_manager::build_managers();
         for nr_cleaners in 1.. {
-            let result =
-                compute_cleaning_strategy(rules, visibility, nr_cleaners, edges.clone(), &manager)?;
-            if result.is_cleanable() {
+            let any_result =
+                compute_any_fog_strategy(rules, vis, nr_cleaners, edges.clone(), &manager)?;
+            let best_result =
+                compute_best_fog_strategy(rules, vis, nr_cleaners, edges.clone(), &manager)?;
+
+            assert_eq!(any_result.is_cleanable(), best_result.is_cleanable());
+            if any_result.is_cleanable() {
                 return Ok(nr_cleaners);
             }
         }
