@@ -650,7 +650,7 @@ impl BruteforceComputationState {
         }
 
         let mut action = None;
-        for ((game_type, visibility), sol) in &self.fog_strats {
+        for ((game_type, visibility), sol) in &mut self.fog_strats {
             Self::draw_fog_result(ui, game_type, *visibility, sol);
             ui.horizontal(|ui| {
                 if ui.button("löschen").clicked() {
@@ -667,6 +667,12 @@ impl BruteforceComputationState {
                         }
                         ui.label(sequence_str);
                     });
+
+                    let not = if sol.works_in_reverse { "" } else { "NICHT " };
+                    ui.label(format!("Folge ist {not}umkehrbar."));
+                    if sol.works_in_reverse && ui.button("umkehren").clicked() {
+                        sol.sequence.as_mut().unwrap().reverse();
+                    }
                 }
             });
         }

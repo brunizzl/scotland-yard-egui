@@ -240,6 +240,9 @@ pub struct FogSolution {
     pub nr_vertices: usize,
     pub nr_cleaners: usize,
     pub visibility: usize,
+    /// if graph is cleanable with [`Self::sequence`],
+    /// is it also cleanable with the reverse of [`Self::sequence`]?
+    pub works_in_reverse: bool,
 }
 
 impl FogSolution {
@@ -287,6 +290,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
         nr_vertices,
         nr_cleaners,
         visibility,
+        works_in_reverse: false,
     };
 
     manager.update("initialisiere Variablen")?;
@@ -371,6 +375,7 @@ pub fn compute_cleaning_strategy<R: Rules>(
     drop(queue);
 
     manager.update("schreibe Lösung")?;
+    // the sequence is found in reversed order (e.g. starting from the final position)
     let mut cleaning_sequence = vec![final_compact_cleaners];
     let mut curr_compact_cleaners = final_compact_cleaners;
     let is_cleaned = |state: &&FogState| state.fog.count_foggy() == 0;
@@ -391,14 +396,17 @@ pub fn compute_cleaning_strategy<R: Rules>(
         curr_state = prev_state;
     }
 
-    cleaning_sequence.reverse();
     sol.sequence = Some(cleaning_sequence);
-    debug_assert!(verify_sequence(rules, &sol, &edges).is_ok());
+    sol.works_in_reverse = verify_sequence(&rules, &sol, &edges).is_ok();
+    // actually store sequence in correct order
+    sol.sequence.as_mut().unwrap().reverse();
+    verify_sequence(&rules, &sol, &edges)?;
+
     Ok(sol)
 }
 
 /// tries to walk the solution and fails if something fishy happens while doing so.
-fn verify_sequence<R: Rules>(rules: R, sol: &FogSolution, edges: &EdgeList) -> Result<(), String> {
+fn verify_sequence<R: Rules>(rules: &R, sol: &FogSolution, edges: &EdgeList) -> Result<(), String> {
     if !sol.is_cleanable() {
         return Err("cleaning sequence doesn't exist".to_string());
     };
@@ -482,7 +490,6 @@ mod test {
             let result =
                 compute_cleaning_strategy(rules, visibility, nr_cleaners, edges.clone(), &manager)?;
             if result.is_cleanable() {
-                verify_sequence(rules, &result, &edges)?;
                 return Ok(nr_cleaners);
             }
         }
