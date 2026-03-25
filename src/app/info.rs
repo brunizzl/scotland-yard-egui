@@ -554,8 +554,18 @@ impl MouseTool {
     fn what(self) -> &'static str {
         match self {
             MouseTool::Drag => "bewege Figuren ([E] + [1])",
-            MouseTool::Draw => "zeichne ([E] + [2])",
-            MouseTool::Erase => "radiere ([E] + [3])",
+            MouseTool::Draw => {
+                "zeichne ([E] + [2])\n\
+                unabhängig vom aktiven Werkzeug kann die\n\
+                aktive Farbe des der Maus nähesten Knoten\n\
+                mit [m] gesetzt und mit [n] entfernt werden."
+            },
+            MouseTool::Erase => {
+                "radiere ([E] + [3])\n\
+                unabhängig vom aktiven Werkzeug kann die\n\
+                aktive Farbe des der Maus nähesten Knoten\n\
+                mit [m] gesetzt und mit [n] entfernt werden."
+            },
             MouseTool::Paintbucket => {
                 "Farbeimer ([E] + [4])\n\
                 Verschiedene Farben interagieren nicht miteinander.\n\
@@ -606,12 +616,6 @@ impl MouseTool {
         let mut new = self;
         let buttons = Self::tools_for(map_shape);
         ui.horizontal(|ui| {
-            ui.label("Werkzeug: ").on_hover_text(
-                "Manuelle Marker der aktiven Farbe können an dem der Mausposition nächsten Knoten \
-                mit Klicken bei Auswahl des [✏]-Werkzeuges hinzugefügt und bei Auswahl von [📗] entfernt werden. \
-                Alternativ: Setzten mit [m] und Entfernen mit [n]. \
-                Es werden automatish alle manuellen Marker entfernt, wenn der Graph geändert wird."
-            );
             for &t in buttons {
                 let button = egui::Button::new(t.symbol()).selected(self.same_tool(t));
                 if ui.add(button).on_hover_text(t.what()).clicked() {

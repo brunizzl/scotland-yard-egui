@@ -676,6 +676,8 @@ impl BruteforceComputationState {
                         if sol.is_best_solution {
                             ui.label("Folge ist kürzestmöglich.");
                         }
+                        let len = sol.sequence.as_ref().map_or(0, Vec::len);
+                        ui.label(format!("Länge: {len}"));
                     });
 
                     menu_button_closing_outside(ui, "Zugfolge", |ui| {
@@ -707,15 +709,15 @@ impl BruteforceComputationState {
             let paused = worker.manager.as_ref().is_some_and(|m| m.is_paused());
             ui.horizontal(|ui| {
                 let animation = match (ui.input(|i| i.time) * 5.0) as isize % 9 {
-                    _ if paused => " . . ",
-                    0 => ".    ",
-                    1 => "..   ",
-                    2 => "...  ",
-                    3 => ".... ",
-                    4 => " ... ",
-                    5 => "  .. ",
-                    6 => "   . ",
-                    _ => "     ",
+                    _ if paused => " . .",
+                    0 => ".   ",
+                    1 => "..  ",
+                    2 => "... ",
+                    3 => "....",
+                    4 => " ...",
+                    5 => "  ..",
+                    6 => "   .",
+                    _ => "    ",
                 };
                 ui.add(Label::new(egui::RichText::new(animation).monospace()).extend());
 
@@ -725,7 +727,7 @@ impl BruteforceComputationState {
                     WorkTask::VerifyRobber => "verifiziere".to_string(),
                     WorkTask::LoadRobber | WorkTask::LoadCops => "lade".to_string(),
                     WorkTask::StoreRobber | WorkTask::StoreCops => "speichere".to_string(),
-                    WorkTask::ComputeFog(vis) => format!("rechne (N-{vis})"),
+                    WorkTask::ComputeFog(vis) => format!("rechne (N{vis})"),
                 };
                 let game_str = worker.game_type.as_tuple_string();
                 ui.add(Label::new(format!("{task_str} {game_str}")).extend());
@@ -854,7 +856,7 @@ impl BruteforceComputationState {
             ui.add_space(5.0);
 
             let disclaimer = if NATIVE {
-                "die Rechnung startet in einem eingenen Thread."
+                "die Rechnung startet in einem eigenen Thread."
             } else {
                 "WARNUNG: weil WASM keine Threads mag, blockt \
                 die Websiteversion bei dieser Rechnung die GUI.\n\
@@ -909,8 +911,8 @@ impl BruteforceComputationState {
             });
 
             ui.add_space(5.0);
-            ui.label("Reinigungsstrategie:");
-            crate::app::add_drag_value(ui, visibility, "Sichtweite", 0..=1000, 1);
+            ui.label("Reinigungsstrategie:")
+                .on_hover_text("Nutzt die Sichtweite von Nebel Marker aus Knoteninfo");
             let vis = *visibility as usize;
             let computing_fog_strat = self.workers.iter().any(|worker| {
                 worker.game_type == game_type && worker.task == WorkTask::ComputeFog(vis)
@@ -927,20 +929,10 @@ impl BruteforceComputationState {
                 {
                     self.start_fog_computation(map, vis);
                 }
-                {
-                    let curr_strat = match self.compute_best_fog_strat {
-                        true => " beste ",
-                        false => "  egal  ",
-                    };
-                    let info = match self.compute_best_fog_strat {
-                        true => "aktuell: finde die kürzeste Zugfolge (lange Rechenzeit)",
-                        false => "aktuell: finde irgendeine Zugfolge (kurze Rechenzeit)",
-                    };
-                    if ui.button(curr_strat).on_hover_text(info).clicked() {
-                        self.compute_best_fog_strat ^= true;
-                    }
-                }
-                ui.add_space(5.0);
+                ui.checkbox(&mut self.compute_best_fog_strat, "beste").on_hover_text(
+                    "wenn ausgewählt: finde die kürzeste Zugfolge (lange Rechenzeit)\n\
+                     wenn nicht: finde irgendeine Zugfolge (kurze Rechenzeit)",
+                );
                 let load_sol_to_characters_button = Button::new("als Züge ♟");
                 let solution = self.fog_strats.get(&game_type_with_vis);
                 let enable_load = solution.is_some_and(|sol| sol.is_cleanable());
