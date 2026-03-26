@@ -59,12 +59,14 @@ pub struct CustomBuild {
 
 impl CustomBuild {
     pub fn new(basis: Shape) -> Self {
-        let name = {
+        let name = if crate::app::NATIVE {
             use chrono::{DateTime, Local, Timelike};
-            let now = DateTime::<Local>::from(web_time::SystemTime::now());
+            let now = DateTime::<Local>::from(std::time::SystemTime::now());
             let date = now.date_naive();
             let secs = now.time().num_seconds_from_midnight();
             format!("{date}-{secs}")
+        } else {
+            "unbenannt".to_string()
         };
         Self {
             basis,
