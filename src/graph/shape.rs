@@ -52,14 +52,25 @@ pub struct CustomBuild {
     pub basis: Shape,
     pub build_steps_string: String,
     pub build_steps: Vec<BuildStep>,
+    /// identifier chosen by user.
+    #[serde(default)]
+    pub name: String,
 }
 
 impl CustomBuild {
     pub fn new(basis: Shape) -> Self {
+        let name = {
+            use chrono::{DateTime, Local, Timelike};
+            let now = DateTime::<Local>::from(web_time::SystemTime::now());
+            let date = now.date_naive();
+            let secs = now.time().num_seconds_from_midnight();
+            format!("{date}-{secs}")
+        };
         Self {
             basis,
             build_steps_string: String::new(),
             build_steps: Vec::new(),
+            name,
         }
     }
 
@@ -134,8 +145,12 @@ impl CustomBuild {
         res
     }
 
-    /// returns the stringified degree sequence.
+    /// returns an identifier. this is the name if that is available, else the degree sequence.
     pub fn print_fingerprint(&self) -> String {
+        if !self.name.is_empty() {
+            return self.name.clone();
+        }
+
         let nr_vertices = self
             .build_steps
             .iter()
@@ -266,7 +281,7 @@ pub enum Shape {
 impl Shape {
     /// returns `true` iff variant [`Self::Custom`] is held and
     /// the basis shape is [`Self::SingleVertex`].
-    pub fn pure_custom(&self) -> bool {
+    pub fn is_pure_custom(&self) -> bool {
         matches!(self, Self::Custom(c) if c.basis == Self::SingleVertex)
     }
 
@@ -288,7 +303,7 @@ impl Shape {
             Self::SquareGrid => "Gitter (Vierecke)",
             Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
             Self::Random2D(_) => "2D Kreisscheibe trianguliert",
-            Self::Custom(_) if self.pure_custom() => "Custom",
+            Self::Custom(_) if self.is_pure_custom() => "Custom",
             Self::Custom(_) => "erweitere aktuellen Graph",
         }
     }
@@ -311,7 +326,7 @@ impl Shape {
             Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
             Self::Tetrahedron => "Tetraeder".to_string(),
             Self::Icosahedron => "Ikosaeder".to_string(),
-            Self::Custom(c) if self.pure_custom() => {
+            Self::Custom(c) if self.is_pure_custom() => {
                 format!("Custom-{}", c.print_fingerprint())
             },
             Self::Custom(c) => {
@@ -340,7 +355,7 @@ impl Shape {
             Self::SquareGrid => "✂🍩4",
             Self::RegularPolygon2D(_) => "⬣",
             Self::Random2D(_) => "⏺",
-            Self::Custom(_) if self.pure_custom() => "🔨",
+            Self::Custom(_) if self.is_pure_custom() => "🔨",
             Self::Custom(_) => "+🔨",
         }
     }

@@ -256,7 +256,7 @@ impl Map {
                     radio!(Random2D(1337), Random2D(_));
 
                     {
-                        let selected = new_shape.pure_custom();
+                        let selected = new_shape.is_pure_custom();
                         let custom_msg = "Custom";
                         let custom_radio = egui::RadioButton::new(selected, custom_msg);
                         if ui.add(custom_radio).clicked() {
@@ -313,6 +313,11 @@ impl Map {
                 },
                 Shape::Custom(c) => {
                     crate::app::menu_button_closing_outside(ui, "Bauschritte", |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Name:");
+                            ui.text_edit_singleline(&mut c.name);
+                        });
+                        ui.add_space(5.0);
                         ui.label(shape::BuildStep::EXPLAINER);
                         ui.add_space(5.0);
                         let (recompute_button, delete_button) = ui

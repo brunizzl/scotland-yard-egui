@@ -280,7 +280,7 @@ fn compute_fog_strategy<R: Rules, const BEST: bool>(
     if nr_vertices == 0 {
         return Err("Graph darf nicht leer sein.".to_string());
     }
-    if !edges.is_connected() {
+    if !BEST && !edges.is_connected() {
         return Err("Graph muss zusammenhängend sein".to_string());
     }
 

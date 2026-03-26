@@ -917,11 +917,10 @@ impl State {
             // reversed to update the robber last, as the robber move causes the fog update.
             let iter = izip!(0..sol.nr_cleaners, &curr_positions[..], &mut cleaners).rev();
             for (i, &v, cleaner) in iter {
-                // always "move" robber, because fog must be updated.
-                if cleaner.id().is_robber() || cleaner.vertex() != v {
-                    cleaner.set_vertex_no_dist_update(v, map.positions());
-                    self.past_moves.push((i, v));
-                }
+                // always "move" every cleaner, even if they don't actually change their position,
+                // because this allows to press [ctrl] + [y] a fixed number of times to advance a round.
+                cleaner.set_vertex_no_dist_update(v, map.positions());
+                self.past_moves.push((i, v));
             }
             last_positions = curr_positions;
         }
