@@ -185,6 +185,7 @@ impl Fog {
 struct FogState {
     fog: Fog,
     prev: PackedCleaners,
+    time: u32,
 }
 
 /// this is meant to be inserted into a max-heap.
@@ -306,7 +307,7 @@ fn compute_fog_strategy<R: Rules, const BEST: bool>(
             let cleaners = PackedCleaners::from_raw(nr_vertices, &$unpacked);
             let fog = Fog::new_initial(&$unpacked, &visible);
             let nr_foggy = fog.count_foggy();
-            states.insert(cleaners, vec![FogState { fog, prev: cleaners }]);
+            states.insert(cleaners, vec![FogState { fog, prev: cleaners, time: 0 }]);
             queue.push(QueueEntry { time: 0, nr_foggy, cleaners });
         };
     }
@@ -387,16 +388,19 @@ fn compute_fog_strategy<R: Rules, const BEST: bool>(
                 let next_states = states.entry(next_compact_cleaners).or_insert_with(Vec::new);
                 // next_fog is only interesting if we don't already know that we can reach
                 // a fog state with (at least) all the vertices cleaned in next_fog also cleaned.
-                if next_states.iter().any(|state| state.fog.is_subset_of(&next_fog)) {
+                if let Some(old) = next_states.iter_mut().find(|s| s.fog.is_subset_of(&next_fog)) {
+                    debug_assert!(!BEST || old.time <= curr.time + 1);
                     continue;
                 }
                 let next_nr_foggy = next_fog.count_foggy();
+                let time = curr.time + 1;
                 next_states.push(FogState {
                     fog: next_fog,
                     prev: curr.cleaners,
+                    time,
                 });
                 queue.push(QueueEntry {
-                    time: curr.time + 1,
+                    time,
                     nr_foggy: next_nr_foggy,
                     cleaners: next_compact_cleaners,
                 });
@@ -418,9 +422,11 @@ fn compute_fog_strategy<R: Rules, const BEST: bool>(
             break;
         }
         assert_ne!(curr_compact_cleaners, curr_state.prev);
+        assert_ne!(curr_state.time, 0);
         let prev_states = &states[&curr_state.prev];
         let is_prev = |state: &&FogState| {
-            state.fog.compute_step(&edges, &visible, &curr_cleaners) == curr_state.fog
+            state.time + 1 == curr_state.time
+                && state.fog.compute_step(&edges, &visible, &curr_cleaners) == curr_state.fog
         };
         let prev_state = prev_states.iter().find(is_prev).unwrap();
         cleaning_sequence.push(curr_state.prev);
