@@ -770,7 +770,7 @@ impl Info {
         //-> no need to log wether something changed
         let fog_sol = {
             let nr_cops = self.characters.active_cops().count();
-            let vis = &mut self.options.fog_clearing_dist;
+            let vis = self.options.fog_clearing_dist as usize;
             let rules = self.characters.rules();
             self.worker.draw_menu(nr_cops, rules, ui, map, vis)
         };

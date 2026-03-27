@@ -48,13 +48,23 @@ impl GameType {
         self.nr_cops + 1
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FogType {
+    pub visibility: usize,
+    pub best_solution: bool,
+}
+
+impl FogType {
+    fn new(visibility: usize, best_solution: bool) -> Self {
+        Self { visibility, best_solution }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkTask {
     ComputeRobber,
     ComputeCops,
-    /// integer is visibility.
-    ComputeFog(usize),
+    ComputeFog(FogType),
     VerifyRobber,
     LoadRobber,
     LoadCops,
@@ -199,8 +209,7 @@ pub struct BruteforceComputationState {
 
     robber_strats: BTreeMap<GameType, GameOutcome>,
     cop_strats: BTreeMap<GameType, bf::CopStrategy>,
-    /// .1 in key is the visibility.
-    fog_strats: BTreeMap<(GameType, usize), bf::FogSolution>,
+    fog_strats: BTreeMap<(GameType, FogType), bf::FogSolution>,
     errors: Vec<(GameType, String)>,
 }
 
@@ -246,7 +255,8 @@ impl BruteforceComputationState {
                 self.cop_strats.insert(game_type.clone(), data);
             },
             WorkResultData::Fog(sol) => {
-                let key = (game_type.clone(), sol.visibility);
+                let fog = FogType::new(sol.visibility, sol.is_best_solution);
+                let key = (game_type.clone(), fog);
                 self.fog_strats.insert(key, sol);
             },
             WorkResultData::None => {},
@@ -365,23 +375,23 @@ impl BruteforceComputationState {
         }
     }
 
-    fn start_fog_computation(&mut self, map: &map::Map, visibility: usize) {
+    fn start_fog_computation(&mut self, map: &map::Map, fog_type: FogType) {
         let game_type = self.curr_game_type.clone();
         let nr_cleaners = game_type.nr_cleaners();
+        let vis = fog_type.visibility;
         let rules = game_type.rules;
         let edges = map.edges().clone();
         let (here, there) = bf::thread_manager::build_managers();
         let here = Some(here);
-        let compute_best = self.compute_best_fog_strat;
         let work = move || {
-            if compute_best {
-                rules.compute_best_fog_strategy(nr_cleaners, visibility, edges, &there)
+            if fog_type.best_solution {
+                rules.compute_best_fog_strategy(nr_cleaners, vis, edges, &there)
             } else {
-                rules.compute_any_fog_strategy(nr_cleaners, visibility, edges, &there)
+                rules.compute_any_fog_strategy(nr_cleaners, vis, edges, &there)
             }
             .into()
         };
-        self.employ_worker(game_type, work, here, WorkTask::ComputeFog(visibility));
+        self.employ_worker(game_type, work, here, WorkTask::ComputeFog(fog_type));
     }
 
     fn verify_robber_win_eq(sym: &bf::RobberWinData, no_sym: &bf::RobberWinData) -> Confidence {
@@ -577,12 +587,7 @@ impl BruteforceComputationState {
         );
     }
 
-    fn draw_fog_result(
-        ui: &mut Ui,
-        game_type: &GameType,
-        visibility: usize,
-        sol: &bf::FogSolution,
-    ) {
+    fn draw_fog_result(ui: &mut Ui, game_type: &GameType, sol: &bf::FogSolution) {
         let nr_cleaners = game_type.nr_cleaners();
         let rules = game_type.rules.name();
         let single_cleaner = nr_cleaners == 1;
@@ -590,10 +595,11 @@ impl BruteforceComputationState {
         let not = if sol.is_cleanable() { "" } else { "NICHT " };
         let shape = game_type.shape.to_sting();
         let res = game_type.resolution;
+        let vis = sol.visibility;
 
         ui.add(
             Label::new(format!(
-                "{nr_cleaners} Cleaner ({rules}, Sichtweite {visibility}) \
+                "{nr_cleaners} Cleaner ({rules}, Sichtweite {vis}) \
                 {can} {shape} mit Auflösung {res} {not}von Nebel befreien",
             ))
             .extend(),
@@ -659,7 +665,7 @@ impl BruteforceComputationState {
 
         let mut action = None;
         for ((game_type, visibility), sol) in &mut self.fog_strats {
-            Self::draw_fog_result(ui, game_type, *visibility, sol);
+            Self::draw_fog_result(ui, game_type, sol);
             ui.horizontal(|ui| {
                 if ui.button("löschen").clicked() {
                     action = Some((Action::Delete, (game_type.clone(), *visibility)));
@@ -727,7 +733,10 @@ impl BruteforceComputationState {
                     WorkTask::VerifyRobber => "verifiziere".to_string(),
                     WorkTask::LoadRobber | WorkTask::LoadCops => "lade".to_string(),
                     WorkTask::StoreRobber | WorkTask::StoreCops => "speichere".to_string(),
-                    WorkTask::ComputeFog(vis) => format!("rechne (N{vis})"),
+                    WorkTask::ComputeFog(FogType { visibility, best_solution }) => {
+                        let best = if best_solution { "-beste" } else { "" };
+                        format!("rechne (N{visibility}{best})")
+                    },
                 };
                 let game_str = worker.game_type.as_tuple_string();
                 ui.add(Label::new(format!("{task_str} {game_str}")).extend());
@@ -806,7 +815,7 @@ impl BruteforceComputationState {
         rules: bf::DynRules,
         ui: &mut Ui,
         map: &map::Map,
-        visibility: &mut isize,
+        visibility: usize,
     ) -> Option<&FogSolution> {
         let mut fog_solution = None;
         ui.collapsing("Bruteforce", |ui| {
@@ -913,12 +922,12 @@ impl BruteforceComputationState {
             ui.add_space(5.0);
             ui.label("Reinigungsstrategie:")
                 .on_hover_text("Nutzt die Sichtweite von Nebel Marker aus Knoteninfo");
-            let vis = *visibility as usize;
+            let fog_type = FogType::new(visibility, self.compute_best_fog_strat);
             let computing_fog_strat = self.workers.iter().any(|worker| {
-                worker.game_type == game_type && worker.task == WorkTask::ComputeFog(vis)
+                worker.game_type == game_type && worker.task == WorkTask::ComputeFog(fog_type)
             });
             ui.horizontal(|ui| {
-                let game_type_with_vis = (game_type.clone(), vis);
+                let game_type_with_vis = (game_type.clone(), fog_type);
                 let curr_known = self.fog_strats.contains_key(&game_type_with_vis);
                 let enable_compute = !computing_fog_strat && !curr_known;
                 let compute_button = Button::new("berechnen");
@@ -927,7 +936,7 @@ impl BruteforceComputationState {
                     .on_hover_text(disclaimer)
                     .clicked()
                 {
-                    self.start_fog_computation(map, vis);
+                    self.start_fog_computation(map, fog_type);
                 }
                 ui.checkbox(&mut self.compute_best_fog_strat, "beste").on_hover_text(
                     "wenn ausgewählt: finde die kürzeste Zugfolge (lange Rechenzeit)\n\
