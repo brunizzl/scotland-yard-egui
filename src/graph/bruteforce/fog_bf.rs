@@ -76,7 +76,7 @@ impl Fog {
         let mut result = Self::new_filled(visible.nr_vertices());
         for &cleaner in cleaners {
             for vis in visible.neighbors_of(cleaner) {
-                result.mark_cleaned(vis);
+                result.mark_cleaned_at(vis);
             }
         }
         result
@@ -90,28 +90,28 @@ impl Fog {
     }
 
     #[allow(dead_code)]
-    fn first_cleaned(&self) -> usize {
+    fn find_first_cleaned(&self) -> usize {
         match self {
             Self::Smol(data) => data.trailing_ones() as usize,
             Self::Big(data) => data.first_zero().unwrap_or(data.len()),
         }
     }
 
-    fn mark_foggy(&mut self, v: usize) {
+    fn mark_foggy_at(&mut self, v: usize) {
         match self {
             Self::Smol(data) => *data |= 1usize << v,
             Self::Big(data) => data.set(v, true),
         }
     }
 
-    fn mark_cleaned(&mut self, v: usize) {
+    fn mark_cleaned_at(&mut self, v: usize) {
         match self {
             Self::Smol(data) => *data &= !(1usize << v),
             Self::Big(data) => data.set(v, false),
         }
     }
 
-    fn is_foggy(&self, v: usize) -> bool {
+    fn is_foggy_at(&self, v: usize) -> bool {
         match self {
             Self::Smol(data) => (*data & (1usize << v)) != 0,
             Self::Big(data) => data[v],
@@ -165,16 +165,16 @@ impl Fog {
         let mut out_of_reach = Fog::new_filled(edges.nr_vertices());
         for &cleaner in new_positions {
             for vis in visible.neighbors_of(cleaner) {
-                out_of_reach.mark_cleaned(vis);
-                fog_after_step.mark_cleaned(vis);
+                out_of_reach.mark_cleaned_at(vis);
+                fog_after_step.mark_cleaned_at(vis);
             }
         }
         let mut next_fog = fog_after_step.clone();
         for (v, neighs) in izip!(0.., edges.neighbors()) {
-            if fog_after_step.is_foggy(v) {
+            if fog_after_step.is_foggy_at(v) {
                 for neigh in neighs {
-                    if out_of_reach.is_foggy(neigh) {
-                        next_fog.mark_foggy(neigh);
+                    if out_of_reach.is_foggy_at(neigh) {
+                        next_fog.mark_foggy_at(neigh);
                     }
                 }
             }
@@ -492,7 +492,7 @@ pub fn compute_any_fog_strategy<R: Rules>(
 /// tries to walk the solution and fails if something fishy happens while doing so.
 fn verify_sequence<R: Rules>(rules: &R, sol: &FogSolution, edges: &EdgeList) -> Result<(), String> {
     if !sol.is_cleanable() {
-        return Err("cleaning sequence doesn't exist".to_string());
+        return Err("Strategie existiert nicht.".to_string());
     };
     assert_eq!(sol.nr_vertices, edges.nr_vertices());
     let visible = compute_visible(edges, sol.visibility);
@@ -507,28 +507,33 @@ fn verify_sequence<R: Rules>(rules: &R, sol: &FogSolution, edges: &EdgeList) -> 
             .contains(&curr_cleaners)
         {
             return Err(format!(
-                "Cannot walk from {:?} to {:?} in a single round.",
-                &prev_cleaners[..],
-                &curr_cleaners[..]
+                "Komme nicht von {prev_cleaners:?} zu {curr_cleaners:?} in einer Runde.",
             ));
         }
         let curr_fog = prev_fog.compute_step(edges, &visible, &curr_cleaners);
         for v in 0..sol.nr_vertices {
-            if curr_fog.is_foggy(v) && edges.neighbors_of(v).all(|n| !prev_fog.is_foggy(n)) {
-                return Err("fog spread faster than one unit per step".to_string());
+            if curr_fog.is_foggy_at(v)
+                && !prev_fog.is_foggy_at(v)
+                && edges.neighbors_of(v).all(|n| !prev_fog.is_foggy_at(n))
+            {
+                return Err("Nebel breitet sich zu schnell aus.".to_string());
             }
             let v_visible = curr_cleaners.iter().any(|&c| visible.neighbors_of(c).contains(&v));
-            if prev_fog.is_foggy(v) && !curr_fog.is_foggy(v) && !v_visible {
-                return Err(format!("vertex {v} became fog-free while not visible"));
+            if prev_fog.is_foggy_at(v) && !curr_fog.is_foggy_at(v) && !v_visible {
+                return Err(format!(
+                    "Knoten {v} wurde nebelfrei während außer Sichtweite."
+                ));
             }
         }
         prev_fog = curr_fog;
         prev_cleaners = curr_cleaners;
     }
 
-    let still_foggy = (0..sol.nr_vertices).filter(|&v| prev_fog.is_foggy(v)).collect_vec();
+    let still_foggy = (0..sol.nr_vertices)
+        .filter(|&v| prev_fog.is_foggy_at(v))
+        .collect_vec();
     if !still_foggy.is_empty() {
-        return Err(format!("these vertices {still_foggy:?} are not cleaned."));
+        return Err(format!("Diese Knoten {still_foggy:?} sind noch nebelig."));
     }
     Ok(())
 }
@@ -545,14 +550,14 @@ mod test {
         for nr_vertices in [10, 32, 41, 64, 500, 1024, 2000] {
             let full_fog = Fog::new_filled(nr_vertices);
             assert_eq!(nr_vertices, full_fog.count_foggy() as usize);
-            assert_eq!(nr_vertices, full_fog.first_cleaned());
+            assert_eq!(nr_vertices, full_fog.find_first_cleaned());
 
             let mut fog = full_fog.clone();
 
-            fog.mark_cleaned(5);
-            assert_eq!(fog.first_cleaned(), 5);
-            fog.mark_cleaned(3);
-            assert_eq!(fog.first_cleaned(), 3);
+            fog.mark_cleaned_at(5);
+            assert_eq!(fog.find_first_cleaned(), 5);
+            fog.mark_cleaned_at(3);
+            assert_eq!(fog.find_first_cleaned(), 3);
             assert_eq!(fog.count_foggy() as usize, nr_vertices - 2);
 
             assert_eq!(fog.subset_ord(&full_fog), Some(std::cmp::Ordering::Less));
@@ -560,25 +565,31 @@ mod test {
             assert!(!full_fog.is_subset_of(&fog));
             assert!(fog.is_subset_of(&full_fog));
 
-            fog.mark_foggy(3);
-            assert_eq!(fog.first_cleaned(), 5);
-            fog.mark_foggy(5);
-            assert_eq!(fog.first_cleaned(), nr_vertices);
+            fog.mark_foggy_at(3);
+            assert_eq!(fog.find_first_cleaned(), 5);
+            fog.mark_foggy_at(5);
+            assert_eq!(fog.find_first_cleaned(), nr_vertices);
             assert_eq!(fog.subset_ord(&full_fog), Some(std::cmp::Ordering::Equal));
         }
     }
 
-    fn cleaning_number(edges: EdgeList, vis: usize) -> Result<usize, String> {
-        let rules = crate::graph::bruteforce::rules::GeneralEagerCops(u32::MAX);
+    fn compute_best(
+        edges: EdgeList,
+        vis: usize,
+        nr_cleaners: usize,
+    ) -> Result<FogSolution, String> {
+        let rules = super::super::GeneralEagerCops(u32::MAX);
         let (_, manager) = thread_manager::build_managers();
-        for nr_cleaners in 1.. {
-            let any_result =
-                compute_any_fog_strategy(rules, vis, nr_cleaners, edges.clone(), &manager)?;
-            let best_result =
-                compute_best_fog_strategy(rules, vis, nr_cleaners, edges.clone(), &manager)?;
+        let any = compute_any_fog_strategy(rules, vis, nr_cleaners, edges.clone(), &manager)?;
+        let best = compute_best_fog_strategy(rules, vis, nr_cleaners, edges.clone(), &manager)?;
+        assert_eq!(any.is_cleanable(), best.is_cleanable());
+        assert!(best.sequence.len() <= any.sequence.len());
+        Ok(best)
+    }
 
-            assert_eq!(any_result.is_cleanable(), best_result.is_cleanable());
-            if any_result.is_cleanable() {
+    fn cleaning_number(edges: EdgeList, vis: usize) -> Result<usize, String> {
+        for nr_cleaners in 1.. {
+            if compute_best(edges.clone(), vis, nr_cleaners)?.is_cleanable() {
                 return Ok(nr_cleaners);
             }
         }
@@ -591,12 +602,41 @@ mod test {
             let edges = (0..n).map(|v| [(v + n - 1) % n, (v + n + 1) % n].into_iter());
             EdgeList::from_iter(edges, 2)
         };
+        let complete = |n: usize| -> EdgeList {
+            let edges = (0..n).map(|v| (0..v).chain((v + 1)..n));
+            EdgeList::from_iter(edges, n - 1)
+        };
         assert_eq!(cleaning_number(circle(5), 0), Ok(2));
         assert_eq!(cleaning_number(circle(5), 1), Ok(2));
         assert_eq!(cleaning_number(circle(5), 2), Ok(1));
         assert_eq!(cleaning_number(circle(25), 2), Ok(2));
         assert_eq!(cleaning_number(circle(25), 11), Ok(2));
         assert_eq!(cleaning_number(circle(25), 12), Ok(1));
+        assert_eq!(cleaning_number(complete(4), 0), Ok(2));
+        assert_eq!(cleaning_number(complete(5), 0), Ok(3));
+        assert_eq!(cleaning_number(complete(6), 0), Ok(3));
+        assert_eq!(cleaning_number(complete(10), 1), Ok(1));
+
+        // example was found by alexander. this exposed a (now fixed) bug
+        let complete_with_rings = |n: usize| -> EdgeList {
+            let mut edges = complete(n);
+            let ring_a = (0..(n + 1)).map(|_| edges.add_vertex()).collect_vec();
+            let ring_b = (0..(n + 1)).map(|_| edges.add_vertex()).collect_vec();
+            for ring in [&ring_a, &ring_b] {
+                edges.add_path_edges(ring.iter().copied().chain(Some(ring[0])));
+            }
+            for (i, va, vb) in izip!(0.., ring_a, ring_b) {
+                edges.add_edge(va, i % n);
+                edges.add_edge(vb, (i + n / 2) % n);
+            }
+            edges
+        };
+        for n in 6..12 {
+            let strat = compute_best(complete_with_rings(n), 1, 1).unwrap();
+            assert!(strat.is_cleanable());
+            assert!(strat.sequence.len() >= 6 * (n - 2));
+            assert!(strat.sequence.len() <= 6 * n);
+        }
 
         use crate::graph::{planar3d::Embedding3D, shape::Shape};
         let from_shape = |shape, res| Embedding3D::new_map_from(&shape, res).into_edges();

@@ -2,6 +2,7 @@ use super::*;
 
 /// specifies which positions the police can reach within a single turn.
 /// (perhaps todo: also extend this to enable more flexible robber behavior)
+/// (perhaps todo: also extend this to enable more flexible winning conditions)
 ///
 /// note: the assumption is always to have the pieces placed on the graph vertices.
 /// only how far a single piece can move / how many cop pieces can move in a single turn can change.
@@ -10,10 +11,10 @@ pub trait Rules {
     /// enumerate every multiset of police positions, that can be reached by the police in a single round,
     /// except the do-nothing move.
     ///
-    /// note: because the returned [`RawCops`] are meant to represent a multiset,
-    /// no guarantee about any ordering in a single [`RawCops`] value is given.
-    /// in particular, it may not be the case, that the vertices at each index of a
-    /// returned value correspond to the pieces at the same indices of the input.
+    /// note: in general, [`RawCops`] most often represents a multiset, so ordering is often unimportant.
+    /// it is however often convinient to remember which cop moves to which next position.
+    /// each entry in a returned [`RawCops`] must therefore correspond to the entry at the same index in the input.
+    /// note to note: even with a sorted input, the output can thus never be assumed to be sorted.
     fn raw_cop_moves_from<'a>(
         &'a self,
         edges: &'a EdgeList,
@@ -67,7 +68,7 @@ impl Rules for LazyCops {
     const IS_LAZY: bool = true;
 }
 
-/// at most <argument> many cops can move each round and with speed 1
+/// at most _argument_ many cops can move each round and with speed 1
 #[derive(Debug, Clone, Copy)]
 pub struct GeneralEagerCops(pub u32);
 

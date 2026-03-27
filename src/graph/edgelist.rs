@@ -163,7 +163,7 @@ impl EdgeList {
 
     /// keeps all edges the same, but adds space for edges of a new vertex
     /// returns index of that new vertex
-    pub fn push(&mut self) -> usize {
+    pub fn add_vertex(&mut self) -> usize {
         let new_index = self.length;
         let new_len = self.length + 1;
         if self.next_shrink_check_len <= new_len {

@@ -170,7 +170,7 @@ impl Embedding3D {
     fn add_vertex(&mut self, pos: Pos3) -> usize {
         let new_index = self.nr_vertices();
         self.vertices.push(pos);
-        self.edges.push();
+        self.edges.add_vertex();
         new_index
     }
 
@@ -195,7 +195,7 @@ impl Embedding3D {
             let fst_inner_edge_vertex = vertices.len();
             for steps in 1..=divisions {
                 let p = p1 + (steps as f32) * dir;
-                let v = edges.push();
+                let v = edges.add_vertex();
                 debug_assert_eq!(v, vertices.len());
                 vertices.push(p);
             }
@@ -236,7 +236,7 @@ impl Embedding3D {
                     let nr_inner_nodes = level - 1;
                     for node in 1..=nr_inner_nodes {
                         let node_pos = level_start_pos + (node as f32) * dir_2_3;
-                        let node_index = edges.push();
+                        let node_index = edges.add_vertex();
                         debug_assert_eq!(node_index, vertices.len());
                         vertices.push(node_pos);
                         this_levels_nodes.push(node_index);
@@ -380,9 +380,9 @@ impl Embedding3D {
                 if triangulate {
                     let center = Pos3::average(face.iter().map(|&v| hull.vertices[v]));
                     vertices.push(center);
-                    edges.push();
+                    edges.add_vertex();
                     hull.vertices.push(center);
-                    let center_v = hull.edges.push();
+                    let center_v = hull.edges.add_vertex();
                     for (v1, v2) in face.iter().copied().circular_tuple_windows() {
                         debug_assert!(edges.neighbors_of(v1).contains(&v2));
                         hull.edges.add_edge(v1, center_v);
@@ -676,7 +676,7 @@ impl Embedding3D {
             let start = res.nr_vertices();
             for ia in 1..=divisions {
                 for ib in 1..=divisions {
-                    res.edges.push();
+                    res.edges.add_vertex();
                     res.vertices.push(corner + (ia as f32) * dir_a + (ib as f32) * dir_b);
                 }
             }
