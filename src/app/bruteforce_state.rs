@@ -670,13 +670,13 @@ impl BruteforceComputationState {
                             let not = if sol.works_in_reverse { "" } else { "NICHT " };
                             ui.label(format!("Folge ist {not}umkehrbar."));
                             if ui.button("umkehren").clicked() {
-                                sol.sequence.as_mut().unwrap().reverse();
+                                sol.sequence.reverse();
                             }
                         });
                         if sol.is_best_solution {
                             ui.label("Folge ist kürzestmöglich.");
                         }
-                        let len = sol.sequence.as_ref().map_or(0, Vec::len);
+                        let len = sol.sequence.len();
                         ui.label(format!("Länge: {len}"));
                     });
 
