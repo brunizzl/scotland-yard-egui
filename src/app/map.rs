@@ -417,7 +417,7 @@ impl Map {
         let change = self.extend_custom_graph(ui, cam, tool);
 
         let scale = self.scale(cam);
-        let color = if ui.ctx().style().visuals.dark_mode {
+        let color = if ui.global_style().visuals.dark_mode {
             color::DARK_GREY
         } else {
             color::LIGHT_GREY

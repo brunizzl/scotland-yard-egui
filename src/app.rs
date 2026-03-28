@@ -1,4 +1,4 @@
-use egui::{Button, Context, Label, Painter, Pos2, Rect, Stroke, Ui, Vec2, pos2};
+use egui::{Button, Label, Painter, Pos2, Rect, Stroke, Ui, Vec2, pos2};
 
 use crate::geo::Pos3;
 use crate::graph::{EdgeList, SymGroup};
@@ -230,17 +230,17 @@ impl eframe::App for State {
         self.saves.save(storage);
     }
 
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        if NATIVE && ctx.input(|info| info.key_pressed(egui::Key::F11)) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if NATIVE && ui.input(|info| info.key_pressed(egui::Key::F11)) {
             self.fullscreen ^= true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
+            ui.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
         }
-        if ctx.input(|info| info.modifiers.ctrl && info.key_pressed(egui::Key::B)) {
+        if ui.input(|info| info.modifiers.ctrl && info.key_pressed(egui::Key::B)) {
             self.menu_visible ^= true;
         }
 
         if self.menu_visible {
-            egui::SidePanel::left("left_panel").show(ctx, |ui| {
+            egui::Panel::left("left panel").show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     const COMPILE_DATETIME: &str = compile_time::datetime_str!();
                     //add spaces to force minimum width of sidebar
@@ -280,7 +280,7 @@ impl eframe::App for State {
             });
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             let (map_change, mut con) =
                 self.map.update_and_draw(ui, &mut self.camera, &mut self.info.tool);
             if map_change {
@@ -301,6 +301,6 @@ impl eframe::App for State {
             }
         });
 
-        self.info.draw_windows(ctx);
+        self.info.draw_windows(ui);
     }
 }

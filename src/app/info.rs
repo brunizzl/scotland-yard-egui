@@ -1389,7 +1389,7 @@ impl Info {
     }
 
     fn draw_green_circles(&mut self, ui: &Ui, con: &DrawContext<'_>) {
-        let dark = ui.ctx().style().visuals.dark_mode;
+        let dark = ui.global_style().visuals.dark_mode;
         let colors = if dark {
             &color::DARK_MARKER_COLORS_F32
         } else {
@@ -1719,7 +1719,7 @@ impl Info {
         // shift pos upwards (negative y direction), so text is centered on vertex
         // why the heck is the best value not 0.5 btw?
         let text_shift = font.size * Vec2::new(0.0, -0.53);
-        let color = if ui.ctx().style().visuals.dark_mode {
+        let color = if ui.global_style().visuals.dark_mode {
             color::WHITE
         } else {
             color::BLACK

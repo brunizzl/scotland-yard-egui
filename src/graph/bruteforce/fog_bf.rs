@@ -372,7 +372,7 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
         }
     } else {
         // we want to find a solution quickly and the graph is connected
-        // -> it suffices to start with any arbitrary cleaner states and the other (needed ones)
+        // -> it suffices to start with any arbitrary cleaner state and the other (needed ones)
         // are discovered in the main loop.
         let initial_unpacked = RawCleaners::from_iter(std::iter::repeat_n(0, nr_cleaners));
         add_initial!(initial_unpacked);
