@@ -198,14 +198,14 @@ struct QueueEntry {
 
 impl std::cmp::Ord for QueueEntry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // note: this is fuction is called when we are stored in a max-heap.
+        // note: this is function is called when we are stored in a max-heap.
         // -> values that are larger should be better to investigate further.
         // -> smaller number of foggy vertices is good to prioritize.
         let nr_foggy = other.fog.count_foggy().cmp(&self.fog.count_foggy());
         let fog = other.fog.cmp(&self.fog);
         let cleaners = other.cleaners.cmp(&self.cleaners);
 
-        // primarily oder by nr_foggy -> this speeds up the algorithm.
+        // primarily oder by nr_foggy -> this speeds up the algorithm (if a solution exists).
         nr_foggy.then(fog).then(cleaners)
     }
 }
@@ -260,7 +260,7 @@ trait Queue<T> {
     fn pop(&mut self) -> Option<T>;
     fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError>;
     fn len(&self) -> usize;
-    const KEEP_ORDER: bool;
+    const IS_FIFO: bool;
 }
 impl<T> Queue<T> for VecDeque<T> {
     fn push(&mut self, new: T) {
@@ -275,7 +275,7 @@ impl<T> Queue<T> for VecDeque<T> {
     fn len(&self) -> usize {
         VecDeque::len(self)
     }
-    const KEEP_ORDER: bool = true;
+    const IS_FIFO: bool = true;
 }
 impl<T: Ord> Queue<T> for BinaryHeap<T> {
     fn push(&mut self, new: T) {
@@ -290,7 +290,7 @@ impl<T: Ord> Queue<T> for BinaryHeap<T> {
     fn len(&self) -> usize {
         BinaryHeap::len(self)
     }
-    const KEEP_ORDER: bool = false;
+    const IS_FIFO: bool = false;
 }
 
 /// unlike for the other bruteforce algorithms, no care is taken to ensure that out-of-memory errors are caught.
@@ -304,10 +304,10 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
     manager: &thread_manager::LocalManager,
 ) -> Result<FogSolution, String> {
     // if the queue keeps the order we inserted entries in,
-    // we do a breath first search, so game states reached sooner are handled first.
+    // we do a breath first search, so game states reached in fewer steps are handled first.
     // otherwise the priorisation is dependent on however the queue decides to do it.
     // in that other case, we can thus not guarantee to find a solution with the fewest possible steps.
-    let find_best = Q::KEEP_ORDER;
+    let find_best = Q::IS_FIFO;
 
     if nr_cleaners > MAX_COPS {
         let msg = format!("Rechnung kann für höchstens {MAX_COPS} Cleaner durchgeführt werden.");
@@ -337,19 +337,18 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
     let visible = compute_visible(&edges, visibility);
 
     // stores for each cleaner state, which interesting fog states are possible to reach.
-    let mut states = std::collections::HashMap::new();
+    type States = std::collections::HashMap<PackedCleaners, Vec<FogState>>;
+    let mut states = States::new();
+    // stores each interesting game state with unexplored moves.
     let mut queue = Q::default();
 
-    // enters an initial state (assumed to be RawCleaners) into both states and queue.
-    // note: this is a macro, because we cannot borrow states and queue.
-    macro_rules! add_initial {
-        ($unpacked: ident) => {
-            let cleaners = PackedCleaners::from_raw(nr_vertices, &$unpacked);
-            let fog = Fog::new_initial(&$unpacked, &visible);
-            queue.push(QueueEntry { fog: fog.clone(), cleaners });
-            states.insert(cleaners, vec![FogState { fog, prev: cleaners }]);
-        };
-    }
+    // enters an initial state into both states and queue.
+    let add_initial = |unpacked: &[usize], states: &mut States, queue: &mut Q| {
+        let cleaners = PackedCleaners::from_raw(nr_vertices, unpacked);
+        let fog = Fog::new_initial(unpacked, &visible);
+        queue.push(QueueEntry { fog: fog.clone(), cleaners });
+        states.insert(cleaners, vec![FogState { fog, prev: cleaners }]);
+    };
     if find_best {
         // we want to find the best solution (e.g. shortest move sequence),
         // so we actually need to consider every possible initial state.
@@ -368,14 +367,14 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
                 manager.update(format!("initialisiere Cleanerstates: {percent:.2}%"))?;
             }
             let initial_unpacked = positions.eager_unpack(position_index).sorted();
-            add_initial!(initial_unpacked);
+            add_initial(&initial_unpacked, &mut states, &mut queue);
         }
     } else {
         // we want to find a solution quickly and the graph is connected
         // -> it suffices to start with any arbitrary cleaner state and the other (needed ones)
         // are discovered in the main loop.
         let initial_unpacked = RawCleaners::from_iter(std::iter::repeat_n(0, nr_cleaners));
-        add_initial!(initial_unpacked);
+        add_initial(&initial_unpacked, &mut states, &mut queue);
     }
 
     // information for manager
@@ -410,9 +409,10 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
         for next_cleaners in all_raw_next_cleaners.map(RawCleaners::sorted) {
             let next_fog = curr.fog.compute_step(&edges, &visible, &next_cleaners);
             let next_packed_cleaners = PackedCleaners::from_raw(nr_vertices, &next_cleaners);
+
             debug_assert!(!find_best || states.contains_key(&next_packed_cleaners));
             // don't actually initialize the fog states, because this is done below anyway.
-            let next_states = states.entry(next_packed_cleaners).or_insert_with(Vec::new);
+            let next_states = states.entry(next_packed_cleaners).or_default();
             // next_fog is only interesting if we don't already know that we can reach
             // a fog state with (at least) all the vertices cleaned in next_fog also cleaned.
             if next_states.iter().any(|old| old.fog.is_subset_of(&next_fog)) {
@@ -433,30 +433,33 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
     drop(queue);
 
     manager.update("schreibe Lösung")?;
-    // the sequence is found in reversed order (e.g. starting from the final position)
-    let mut cleaning_sequence = vec![final_packed_cleaners];
+    let mut reversed_sequence = vec![final_packed_cleaners];
     let mut curr_packed_cleaners = final_packed_cleaners;
     let is_cleaned = |state: &&FogState| state.fog.count_foggy() == 0;
     let mut curr_state = states[&final_packed_cleaners].iter().find(is_cleaned).unwrap();
     loop {
+        let prev_packed_cleaners = curr_state.prev;
         let curr_cleaners = sol.unpack(curr_packed_cleaners);
         if curr_state.fog == Fog::new_initial(&curr_cleaners, &visible) {
-            debug_assert!(!find_best || curr_packed_cleaners == curr_state.prev);
+            debug_assert!(!find_best || curr_packed_cleaners == prev_packed_cleaners);
             break;
         }
-        assert_ne!(curr_packed_cleaners, curr_state.prev);
-        let prev_states = &states[&curr_state.prev];
-        let is_prev = |state: &&FogState| {
+        assert_ne!(curr_packed_cleaners, prev_packed_cleaners);
+        reversed_sequence.push(prev_packed_cleaners);
+
+        let is_prev_fog = |state: &&FogState| {
             state.fog.compute_step(&edges, &visible, &curr_cleaners) == curr_state.fog
         };
-        let prev_state = prev_states.iter().find(is_prev).unwrap();
-        cleaning_sequence.push(curr_state.prev);
+        // note that if we find a best solution,
+        // the fog states of a fixed cleaner state are stored in chronological order.
+        // we thus take the earliest state with consistent fog.
+        let prev_state = states[&prev_packed_cleaners].iter().find(is_prev_fog).unwrap();
 
-        curr_packed_cleaners = curr_state.prev;
+        curr_packed_cleaners = prev_packed_cleaners;
         curr_state = prev_state;
     }
 
-    sol.sequence = cleaning_sequence;
+    sol.sequence = reversed_sequence;
     sol.works_in_reverse = verify_sequence(&rules, &sol, &edges).is_ok();
     // actually store sequence in correct order
     sol.sequence.reverse();
