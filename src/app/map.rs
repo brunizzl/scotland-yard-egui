@@ -170,26 +170,83 @@ impl Map {
         let Shape::Custom(old_data) = self.shape() else {
             return false;
         };
-        let (Some(pointer_pos), modifiers, true) = ui.input(|info| {
-            let pos = info.pointer.latest_pos();
+        let (modifiers, Some(pointer_pos), clicking, clicked) = ui.input(|info| {
             let modifiers = info.modifiers;
+            let pos = info.pointer.latest_pos();
+            let clicking = info.pointer.button_down(egui::PointerButton::Primary);
             let clicked = info.pointer.button_released(egui::PointerButton::Primary);
-            (pos, modifiers, clicked)
+            (modifiers, pos, clicking, clicked)
         }) else {
             return false;
         };
-        if !cam.to_screen().draw_rect().contains(pointer_pos) {
+
+        if modifiers.command && matches!(tool, info::MouseTool::AddVertex) {
+            *tool = info::MouseTool::DragVertex(None);
+        }
+        if let info::MouseTool::DragVertex(dragged_vertex) = tool {
+            if !modifiers.command && !clicking {
+                *tool = info::MouseTool::AddVertex;
+                return false;
+            }
+            let (drag_start, drag_delta) = ui.input(|info| {
+                let start = info.pointer.button_pressed(egui::PointerButton::Primary);
+                let delta = info.pointer.delta();
+                (start, delta)
+            });
+            if drag_start {
+                let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
+                *dragged_vertex = Some(v);
+            }
+            if !clicking {
+                *dragged_vertex = None;
+            }
+            if let Some(v) = *dragged_vertex {
+                let delta_3d = {
+                    let prev = cam.to_screen().apply_inverse(pointer_pos - drag_delta, 0.0);
+                    let curr = cam.to_screen().apply_inverse(pointer_pos, 0.0);
+                    curr - prev
+                };
+                self.data.positions_mut()[v] += delta_3d;
+                if let Shape::Custom(custom_data) = self.data.shape_mut() {
+                    for step in &mut custom_data.build_steps {
+                        if let shape::BuildStep::Vertex(u, pos) = step
+                            && *u == v
+                        {
+                            pos[0] += (delta_3d.x * 1000.0) as i32;
+                            pos[1] += (delta_3d.y * 1000.0) as i32;
+                            pos[2] += (delta_3d.z * 1000.0) as i32;
+                            break;
+                        }
+                    }
+                    custom_data.build_steps_string = custom_data.print_build_steps(false);
+                }
+            }
+            return false;
+        }
+
+        if let info::MouseTool::AddEdge(walk, _) = tool {
+            if !*walk && modifiers.command {
+                *walk = true;
+            }
+            if *walk && !modifiers.command {
+                *tool = info::MouseTool::AddEdge(false, None);
+            }
+        }
+
+        if !clicked || !cam.to_screen().draw_rect().contains(pointer_pos) {
             return false;
         }
         let in_delete_mode = modifiers.shift;
-        let new_step = match *tool {
-            info::MouseTool::AddEdge(fst) => {
+        let new_step = match tool {
+            info::MouseTool::AddEdge(walk, fst) => {
                 let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
-                let Some(u) = fst else {
-                    *tool = info::MouseTool::AddEdge(Some(v));
+                let Some(u) = *fst else {
+                    *fst = Some(v);
                     return false;
                 };
-                *tool = info::MouseTool::AddEdge(modifiers.ctrl.then_some(v));
+                if !*walk {
+                    *fst = None;
+                }
                 if u == v {
                     return false;
                 }

@@ -121,6 +121,10 @@ impl Embedding3D {
         &self.shape
     }
 
+    pub fn shape_mut(&mut self) -> &mut Shape {
+        &mut self.shape
+    }
+
     pub fn edges(&self) -> &EdgeList {
         &self.edges
     }
@@ -136,6 +140,10 @@ impl Embedding3D {
 
     pub fn positions(&self) -> &[Pos3] {
         &self.vertices
+    }
+
+    pub fn positions_mut(&mut self) -> &mut [Pos3] {
+        &mut self.vertices
     }
 
     pub fn sym_group(&self) -> &SymGroup {

@@ -528,8 +528,13 @@ pub enum MouseTool {
     Paintbucket,
     /// only useful for custom graphs
     AddVertex,
-    /// only useful for custom graphs. the held data is the first vertex of a partially constructed edge.
-    AddEdge(Option<usize>),
+    /// only useful for custom graphs. change the position in space of an existing vertex.
+    /// acts menu-wise just as variant of [`Self::AddVertex`].
+    DragVertex(Option<usize>),
+    /// only useful for custom graphs.
+    /// `.0` remembers whether [ctrl] is pressed.
+    /// `.1` is the first vertex of a partially constructed edge.
+    AddEdge(bool, Option<usize>),
 }
 
 impl MouseTool {
@@ -540,13 +545,15 @@ impl MouseTool {
             MouseTool::Erase => " 📗 ",
             MouseTool::Paintbucket => " 💦 ",
             MouseTool::AddVertex => " ±v ",
-            MouseTool::AddEdge(_) => " ±e ",
+            MouseTool::DragVertex(_) => panic!("this is menu-wise only a subvariant of AddVertex."),
+            MouseTool::AddEdge(_, _) => " ±e ",
         }
     }
 
     fn same_tool(self, other: Self) -> bool {
         match (self, other) {
-            (MouseTool::AddEdge(_), MouseTool::AddEdge(_)) => true,
+            (Self::AddEdge(_, _), Self::AddEdge(_, _)) => true,
+            (Self::AddVertex | Self::DragVertex(_), Self::AddVertex | Self::DragVertex(_)) => true,
             _ => self == other,
         }
     }
@@ -573,9 +580,11 @@ impl MouseTool {
             },
             MouseTool::AddVertex => {
                 "füge Knoten zu Custom Graph hinzu ([E] + [5])\n\
-                [Shift] + [Klick] entfernt Knoten."
+                [Shift] + [Klick] entfernt Knoten.\n\
+                [Strg] + ziehen mit linker Maustaste bewegt Knoten."
             },
-            MouseTool::AddEdge(_) => {
+            MouseTool::DragVertex(_) => panic!("this is menu-wise only a subvariant of AddVertex."),
+            MouseTool::AddEdge(_, _) => {
                 "füge Kante zu Custom Graph hinzu ([E] + [6])\n\
                 [Shift] + [Klick] entfernt Kante.\n\
                 [Strg] + [Klick] für Kantenzug."
@@ -596,7 +605,7 @@ impl MouseTool {
                     MouseTool::Erase,
                     MouseTool::Paintbucket,
                     MouseTool::AddVertex,
-                    MouseTool::AddEdge(None),
+                    MouseTool::AddEdge(false, None),
                 ]
             }
         } else {
@@ -1919,8 +1928,10 @@ impl Info {
                     egui::CursorIcon::Crosshair
                 },
                 MouseTool::AddVertex => egui::CursorIcon::Default,
-                MouseTool::AddEdge(None) => egui::CursorIcon::Grab,
-                MouseTool::AddEdge(Some(_)) => egui::CursorIcon::Grabbing,
+                MouseTool::DragVertex(None) => egui::CursorIcon::Grab,
+                MouseTool::DragVertex(Some(_)) => egui::CursorIcon::Grabbing,
+                MouseTool::AddEdge(_, None) => egui::CursorIcon::Grab,
+                MouseTool::AddEdge(_, Some(_)) => egui::CursorIcon::Grabbing,
             };
             ctx.set_cursor_icon(icon);
         }
