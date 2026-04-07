@@ -275,6 +275,9 @@ struct Options {
     marked_robber_dist: isize,
     /// how far can cleaners see when clearing fog? (see [`VertexColorInfo::Fog`])
     fog_clearing_dist: isize,
+    /// how far can fog move in a single step?
+    #[serde(default)]
+    fog_speed: isize,
     /// see [`VertexColorInfo::SpecificVertex`]
     specific_shown_vertex: usize,
     /// the last two bits are always zero, therefore valid value for [`crate::graph::grid::Dirs`]
@@ -302,6 +305,7 @@ const DEFAULT_OPTIONS: Options = Options {
     marked_cop_dist: 10,
     marked_robber_dist: 10,
     fog_clearing_dist: 1,
+    fog_speed: 1,
     specific_shown_vertex: 0,
     shown_escape_directions: 63,
     shown_u32_bit: 0,
@@ -334,7 +338,7 @@ impl Options {
             None,
             MarkedCopDist,
             MarkedRobberDist,
-            FogVisibility,
+            FogParams,
             VertexIndex,
             DirectionBits,
             U32Bits,
@@ -345,7 +349,7 @@ impl Options {
                 | VertexColorInfo::MaxCopDist
                 | VertexColorInfo::AnyCopDist => ShownValue::MarkedCopDist,
                 VertexColorInfo::RobberDist => ShownValue::MarkedRobberDist,
-                VertexColorInfo::Fog => ShownValue::FogVisibility,
+                VertexColorInfo::Fog => ShownValue::FogParams,
                 VertexColorInfo::SpecificVertex => ShownValue::VertexIndex,
                 VertexColorInfo::Escape2Grid
                 | VertexColorInfo::EscapeConeGrid
@@ -369,8 +373,10 @@ impl Options {
             ShownValue::MarkedRobberDist => {
                 add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", 0..=1000, 1);
             },
-            ShownValue::FogVisibility => {
+            ShownValue::FogParams => {
+                // this is a deviation from the usual philosophy of keeping everything the same height.
                 add_drag_value(ui, &mut self.fog_clearing_dist, "Sichtweite", 0..=1000, 1);
+                add_drag_value(ui, &mut self.fog_speed, "Nebeltempo", 0..=1000, 1);
             },
             ShownValue::VertexIndex => {
                 ui.horizontal(|ui| {
@@ -779,15 +785,17 @@ impl Info {
         //-> no need to log wether something changed
         let fog_sol = {
             let nr_cops = self.characters.active_cops().count();
-            let vis = self.options.fog_clearing_dist as usize;
+            let vis = &mut self.options.fog_clearing_dist;
+            let speed = &mut self.options.fog_speed;
             let rules = self.characters.rules();
-            self.worker.draw_menu(nr_cops, rules, ui, map, vis)
+            self.worker.draw_menu(nr_cops, rules, ui, map, vis, speed)
         };
         if let Some(sol) = fog_sol {
             self.characters.load_fog_cleaning_sequence(map, sol);
             self.fog_state.reset();
             let vis = sol.visibility as isize;
-            self.fog_state.update(map.edges(), &self.characters, vis);
+            let speed = sol.fog_speed;
+            self.fog_state.update(map.edges(), &self.characters, vis, speed);
         }
         if NATIVE {
             ui.collapsing("📷 Screenshots", |ui| {
@@ -988,6 +996,15 @@ impl Info {
         );
     }
 
+    fn update_fog(&mut self, con: &DrawContext<'_>) {
+        self.fog_state.update(
+            con.edges,
+            &self.characters,
+            self.options.fog_clearing_dist,
+            self.options.fog_speed,
+        );
+    }
+
     pub fn adjust_to_new_map(&mut self, map: &Embedding3D) {
         for ch in self.characters.all_mut() {
             ch.adjust_to_new_map(map, &mut self.queue);
@@ -1011,8 +1028,7 @@ impl Info {
         self.update_dilemma(con);
         self.update_cop_advantage(con.edges);
         self.update_plane_cop_strat(con);
-        self.fog_state
-            .update(con.edges, &self.characters, self.options.fog_clearing_dist);
+        self.update_fog(con);
     }
 
     /// recomputes only things currently shown or required by things currently shown
@@ -1113,8 +1129,7 @@ impl Info {
             self.update_plane_cop_strat(con);
         }
         if self.options.vertex_color_info() == Color::Fog {
-            self.fog_state
-                .update(con.edges, &self.characters, self.options.fog_clearing_dist);
+            self.update_fog(con);
         }
     }
 

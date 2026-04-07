@@ -227,21 +227,22 @@ impl DynRules {
         self,
         nr_cleaners: usize,
         visibility: usize,
+        fog_speed: isize,
         edges: EdgeList,
         manager: &thread_manager::LocalManager,
     ) -> Result<FogSolution, String> {
         match self {
             Self::Lazy => {
                 let rs = LazyCops;
-                compute_any_fog_strategy(rs, visibility, nr_cleaners, edges, manager)
+                compute_any_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
             },
             Self::Eager => {
                 let rs = GeneralEagerCops(nr_cleaners as u32);
-                compute_any_fog_strategy(rs, visibility, nr_cleaners, edges, manager)
+                compute_any_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
             },
             Self::GeneralEagerCops(n) => {
                 let rs = GeneralEagerCops(n);
-                compute_any_fog_strategy(rs, visibility, nr_cleaners, edges, manager)
+                compute_any_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
             },
         }
     }
@@ -250,21 +251,22 @@ impl DynRules {
         self,
         nr_cleaners: usize,
         visibility: usize,
+        fog_speed: isize,
         edges: EdgeList,
         manager: &thread_manager::LocalManager,
     ) -> Result<FogSolution, String> {
         match self {
             Self::Lazy => {
                 let rs = LazyCops;
-                compute_best_fog_strategy(rs, visibility, nr_cleaners, edges, manager)
+                compute_best_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
             },
             Self::Eager => {
                 let rs = GeneralEagerCops(nr_cleaners as u32);
-                compute_best_fog_strategy(rs, visibility, nr_cleaners, edges, manager)
+                compute_best_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
             },
             Self::GeneralEagerCops(n) => {
                 let rs = GeneralEagerCops(n);
-                compute_best_fog_strategy(rs, visibility, nr_cleaners, edges, manager)
+                compute_best_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
             },
         }
     }

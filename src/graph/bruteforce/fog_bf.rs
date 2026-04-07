@@ -118,6 +118,17 @@ impl Fog {
         }
     }
 
+    fn as_slice(&self) -> &bitvec::slice::BitSlice {
+        match self {
+            Self::Smol(data) => bitvec::slice::BitSlice::from_element(data),
+            Self::Big(data) => data.as_bitslice(),
+        }
+    }
+
+    fn iter_foggy(&self) -> impl Iterator<Item = usize> {
+        self.as_slice().iter_ones()
+    }
+
     /// returns [`std::cmp::Ordering::Equal`] if `self == other`,
     /// [`std::cmp::Ordering::Less`] if self is a subset of other and
     /// [`std::cmp::Ordering::Greater`] if self is a suberset of other.
@@ -183,6 +194,70 @@ impl Fog {
     }
 }
 
+/// convinience struct to have everything needed to perform a fog step computation.
+struct FogStepComputation<'a> {
+    edges: &'a EdgeList,
+    visible: &'a EdgeList,
+    fog_speed: isize,
+    distances: Vec<isize>,
+    queue: VecDeque<usize>,
+}
+
+impl<'a> FogStepComputation<'a> {
+    fn new(edges: &'a EdgeList, visible: &'a EdgeList, fog_speed: isize) -> Self {
+        debug_assert_eq!(edges.nr_vertices(), visible.nr_vertices());
+        let distances = vec![0isize; edges.nr_vertices()];
+        let queue = VecDeque::new();
+        Self {
+            edges,
+            visible,
+            fog_speed,
+            distances,
+            queue,
+        }
+    }
+
+    fn compute_step(&mut self, curr_fog: &Fog, new_positions: &[usize]) -> Fog {
+        debug_assert!(self.queue.is_empty());
+
+        let mut fog_after_step = curr_fog.clone();
+        let mut out_of_reach = Fog::new_filled(self.edges.nr_vertices());
+        for &cleaner in new_positions {
+            for vis in self.visible.neighbors_of(cleaner) {
+                out_of_reach.mark_cleaned_at(vis);
+                fog_after_step.mark_cleaned_at(vis);
+            }
+        }
+
+        self.distances.fill(isize::MAX);
+        for fog_v in fog_after_step.iter_foggy() {
+            self.distances[fog_v] = 0;
+            self.queue.push_back(fog_v);
+        }
+        let select = |v: usize, dists: &[isize], new_dist: isize| {
+            new_dist <= self.fog_speed && out_of_reach.is_foggy_at(v) && dists[v] > new_dist
+        };
+        self.edges
+            .calc_distances_to_with(&mut self.distances, select, &mut self.queue);
+
+        let mut next_fog = fog_after_step.clone();
+        for (v, &dist) in izip!(0.., &self.distances) {
+            if dist != isize::MAX {
+                next_fog.mark_foggy_at(v);
+            }
+        }
+
+        if self.fog_speed == 1 {
+            debug_assert_eq!(
+                next_fog,
+                curr_fog.compute_step(self.edges, self.visible, new_positions)
+            );
+        }
+
+        next_fog
+    }
+}
+
 struct FogState {
     fog: Fog,
     prev: PackedCleaners,
@@ -216,10 +291,11 @@ impl std::cmp::PartialOrd for QueueEntry {
 }
 
 /// for a given vertex `v`, the returned "neighbors" of `v` are
-/// the vertices with distance `<= visibility` in `edges`.
+/// the vertices with distance `<= max_dist` in `edges`.
 /// note: this means `v` always "neighbors" itself.
-fn compute_visible(edges: &EdgeList, visibility: usize) -> EdgeList {
-    let visible_others = edges.pow(visibility);
+fn compute_near_vertices(edges: &EdgeList, max_dist: usize) -> EdgeList {
+    let max_dist = max_dist.min(edges.nr_vertices());
+    let visible_others = edges.pow(max_dist);
     let all_visible = izip!(0..edges.nr_vertices(), visible_others.neighbors())
         .map(|(v, vis)| std::iter::once(v).chain(vis));
 
@@ -233,6 +309,7 @@ pub struct FogSolution {
     pub nr_vertices: usize,
     pub nr_cleaners: usize,
     pub visibility: usize,
+    pub fog_speed: isize,
     /// if graph is cleanable with [`Self::sequence`],
     /// is it also cleanable with the reverse of [`Self::sequence`]?
     pub works_in_reverse: bool,
@@ -300,6 +377,7 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
     rules: R,
     visibility: usize,
     nr_cleaners: usize,
+    fog_speed: isize,
     edges: EdgeList,
     manager: &thread_manager::LocalManager,
 ) -> Result<FogSolution, String> {
@@ -329,12 +407,16 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
         nr_vertices,
         nr_cleaners,
         visibility,
+        fog_speed,
         works_in_reverse: false,
         is_best_solution: find_best,
     };
 
     manager.update("initialisiere Variablen")?;
-    let visible = compute_visible(&edges, visibility);
+    // `visible.neighbors_of(v)` are all vertices in sight of a cleaner standing at vertex `v`.
+    let visible = compute_near_vertices(&edges, visibility);
+
+    let mut fog_step_data = FogStepComputation::new(&edges, &visible, fog_speed);
 
     // stores for each cleaner state, which interesting fog states are possible to reach.
     type States = std::collections::HashMap<PackedCleaners, Vec<FogState>>;
@@ -407,7 +489,7 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
         let all_raw_next_cleaners = rules.raw_cop_moves_from(&edges, curr_cleaners);
 
         for next_cleaners in all_raw_next_cleaners.map(RawCleaners::sorted) {
-            let next_fog = curr.fog.compute_step(&edges, &visible, &next_cleaners);
+            let next_fog = fog_step_data.compute_step(&curr.fog, &next_cleaners);
             let next_packed_cleaners = PackedCleaners::from_raw(nr_vertices, &next_cleaners);
 
             debug_assert!(!find_best || states.contains_key(&next_packed_cleaners));
@@ -448,7 +530,7 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
         reversed_sequence.push(prev_packed_cleaners);
 
         let is_prev_fog = |state: &&FogState| {
-            state.fog.compute_step(&edges, &visible, &curr_cleaners) == curr_state.fog
+            fog_step_data.compute_step(&state.fog, &curr_cleaners) == curr_state.fog
         };
         // note that if we find a best solution,
         // the fog states of a fixed cleaner state are stored in chronological order.
@@ -473,11 +555,12 @@ pub fn compute_best_fog_strategy<R: Rules>(
     rules: R,
     visibility: usize,
     nr_cleaners: usize,
+    fog_speed: isize,
     edges: EdgeList,
     manager: &thread_manager::LocalManager,
 ) -> Result<FogSolution, String> {
     type Q = VecDeque<QueueEntry>;
-    compute_fog_strategy::<R, Q>(rules, visibility, nr_cleaners, edges, manager)
+    compute_fog_strategy::<R, Q>(rules, visibility, nr_cleaners, fog_speed, edges, manager)
 }
 
 /// if a strategy exists, an unspecified working strategy is returned.
@@ -485,11 +568,12 @@ pub fn compute_any_fog_strategy<R: Rules>(
     rules: R,
     visibility: usize,
     nr_cleaners: usize,
+    fog_speed: isize,
     edges: EdgeList,
     manager: &thread_manager::LocalManager,
 ) -> Result<FogSolution, String> {
     type Q = BinaryHeap<QueueEntry>;
-    compute_fog_strategy::<R, Q>(rules, visibility, nr_cleaners, edges, manager)
+    compute_fog_strategy::<R, Q>(rules, visibility, nr_cleaners, fog_speed, edges, manager)
 }
 
 /// tries to walk the solution and fails if something fishy happens while doing so.
@@ -498,7 +582,10 @@ fn verify_sequence<R: Rules>(rules: &R, sol: &FogSolution, edges: &EdgeList) -> 
         return Err("Strategie existiert nicht.".to_string());
     };
     assert_eq!(sol.nr_vertices, edges.nr_vertices());
-    let visible = compute_visible(edges, sol.visibility);
+    let visible = compute_near_vertices(edges, sol.visibility);
+    let fog_spread = compute_near_vertices(edges, sol.fog_speed as usize);
+
+    let mut fog_step_data = FogStepComputation::new(edges, &visible, sol.fog_speed);
 
     let mut sequence = sol.iter_unpacked();
     let mut prev_cleaners = sequence.next().unwrap();
@@ -513,19 +600,15 @@ fn verify_sequence<R: Rules>(rules: &R, sol: &FogSolution, edges: &EdgeList) -> 
                 "Komme nicht von {prev_cleaners:?} zu {curr_cleaners:?} in einer Runde.",
             ));
         }
-        let curr_fog = prev_fog.compute_step(edges, &visible, &curr_cleaners);
+        let curr_fog = fog_step_data.compute_step(&prev_fog, &curr_cleaners);
         for v in 0..sol.nr_vertices {
-            if curr_fog.is_foggy_at(v)
-                && !prev_fog.is_foggy_at(v)
-                && edges.neighbors_of(v).all(|n| !prev_fog.is_foggy_at(n))
-            {
+            let v_close_to_fog = fog_spread.neighbors_of(v).any(|n| prev_fog.is_foggy_at(n));
+            if curr_fog.is_foggy_at(v) && !v_close_to_fog {
                 return Err("Nebel breitet sich zu schnell aus.".to_string());
             }
             let v_visible = curr_cleaners.iter().any(|&c| visible.neighbors_of(c).contains(&v));
             if prev_fog.is_foggy_at(v) && !curr_fog.is_foggy_at(v) && !v_visible {
-                return Err(format!(
-                    "Knoten {v} wurde nebelfrei während außer Sichtweite."
-                ));
+                return Err("Nebel verschwindet von alleine.".to_string());
             }
         }
         prev_fog = curr_fog;
@@ -579,20 +662,23 @@ mod test {
     fn compute_best(
         edges: EdgeList,
         vis: usize,
+        speed: isize,
         nr_cleaners: usize,
     ) -> Result<FogSolution, String> {
         let rules = super::super::GeneralEagerCops(u32::MAX);
         let (_, manager) = thread_manager::build_managers();
-        let any = compute_any_fog_strategy(rules, vis, nr_cleaners, edges.clone(), &manager)?;
-        let best = compute_best_fog_strategy(rules, vis, nr_cleaners, edges.clone(), &manager)?;
+        let any =
+            compute_any_fog_strategy(rules, vis, nr_cleaners, speed, edges.clone(), &manager)?;
+        let best =
+            compute_best_fog_strategy(rules, vis, nr_cleaners, speed, edges.clone(), &manager)?;
         assert_eq!(any.is_cleanable(), best.is_cleanable());
         assert!(best.sequence.len() <= any.sequence.len());
         Ok(best)
     }
 
-    fn cleaning_number(edges: EdgeList, vis: usize) -> Result<usize, String> {
+    fn general_cleaning_number(edges: EdgeList, vis: usize, speed: isize) -> Result<usize, String> {
         for nr_cleaners in 1.. {
-            if compute_best(edges.clone(), vis, nr_cleaners)?.is_cleanable() {
+            if compute_best(edges.clone(), vis, speed, nr_cleaners)?.is_cleanable() {
                 return Ok(nr_cleaners);
             }
         }
@@ -609,6 +695,8 @@ mod test {
             let edges = (0..n).map(|v| (0..v).chain((v + 1)..n));
             EdgeList::from_iter(edges, n - 1)
         };
+        let cleaning_number = |edges, vis| general_cleaning_number(edges, vis, 1);
+
         assert_eq!(cleaning_number(circle(5), 0), Ok(2));
         assert_eq!(cleaning_number(circle(5), 1), Ok(2));
         assert_eq!(cleaning_number(circle(5), 2), Ok(1));
@@ -635,7 +723,7 @@ mod test {
             edges
         };
         for n in 6..12 {
-            let strat = compute_best(complete_with_rings(n), 1, 1).unwrap();
+            let strat = compute_best(complete_with_rings(n), 1, 1, 1).unwrap();
             assert!(strat.is_cleanable());
             assert!(strat.sequence.len() >= 6 * (n - 2));
             assert!(strat.sequence.len() <= 6 * n);
@@ -648,5 +736,20 @@ mod test {
         assert_eq!(cleaning_number(from_shape(Shape::Cube, 0), 0), Ok(3));
         // two cleaners at opposing sides already see most vertices without moving
         assert_eq!(cleaning_number(from_shape(Shape::Icosahedron, 1), 2), Ok(2));
+
+        // cleaning numbers for higher fog speeds (all these are independent of speed)
+        assert_eq!(general_cleaning_number(circle(5), 0, 2), Ok(2));
+        assert_eq!(general_cleaning_number(circle(5), 0, 100), Ok(2));
+        assert_eq!(general_cleaning_number(circle(5), 1, 2), Ok(2));
+        assert_eq!(general_cleaning_number(circle(5), 1, 100), Ok(2));
+        assert_eq!(general_cleaning_number(circle(5), 2, 2), Ok(1));
+        assert_eq!(general_cleaning_number(circle(5), 2, 100), Ok(1));
+        assert_eq!(general_cleaning_number(circle(25), 2, 2), Ok(2));
+        assert_eq!(general_cleaning_number(circle(25), 2, 100), Ok(2));
+        // increasing speed increases cleaning number
+        assert_eq!(
+            general_cleaning_number(complete_with_rings(10), 1, 2),
+            Ok(2)
+        );
     }
 }

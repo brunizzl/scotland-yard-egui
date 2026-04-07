@@ -1,7 +1,7 @@
 //! in this setting, cops and robber have the same roles, which is cleaning the fog.
 //! they are not exactly equivalent though: the robber causes a cleaning + fog update when moved.
 
-use itertools::{Itertools, izip};
+use itertools::izip;
 
 use crate::{app::character, graph::EdgeList};
 
@@ -10,6 +10,8 @@ pub struct GameSates {
     history: Vec<Vec<bool>>,
     /// from how far can vertices be cleaned
     cleaning_range: isize,
+    /// how far fog can move in a single step
+    fog_speed: isize,
     /// if fog is only shown after some moves where made,
     /// we need to know how many moves happened beforehand.
     /// this variable stores the number of overall rounds (with and without fog)
@@ -49,6 +51,7 @@ impl GameSates {
         Self {
             history: Vec::new(),
             cleaning_range: 1,
+            fog_speed: 1,
             nr_rounds: usize::MAX / 2,
         }
     }
@@ -66,9 +69,19 @@ impl GameSates {
         self.history.clear();
     }
 
-    pub fn update(&mut self, edges: &EdgeList, cleaners: &character::State, cleaning_range: isize) {
+    pub fn update(
+        &mut self,
+        edges: &EdgeList,
+        cleaners: &character::State,
+        cleaning_range: isize,
+        fog_speed: isize,
+    ) {
         if self.cleaning_range != cleaning_range {
             self.cleaning_range = cleaning_range;
+            self.history.clear();
+        }
+        if self.fog_speed != fog_speed {
+            self.fog_speed = fog_speed;
             self.history.clear();
         }
         if self
@@ -114,10 +127,16 @@ impl GameSates {
         }
 
         // spread fog where possible.
-        let new_fog = izip!(0.., edges.neighbors())
-            .map(|(v, ns)| dark[v] && std::iter::once(v).chain(ns).any(|n| reduced_fog[n]))
-            .collect_vec();
-
-        self.history.push(new_fog);
+        {
+            let mut new_fog = Vec::new();
+            for _ in 0..fog_speed {
+                new_fog.clear();
+                new_fog.extend(izip!(0.., edges.neighbors()).map(|(v, ns)| {
+                    dark[v] && std::iter::once(v).chain(ns).any(|n| reduced_fog[n])
+                }));
+                std::mem::swap(&mut reduced_fog, &mut new_fog);
+            }
+        }
+        self.history.push(reduced_fog);
     }
 }
