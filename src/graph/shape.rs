@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum BuildStep {
     /// neighbors of neighbors become neighbors, procedure is iterated given number of times
     NeighNeighs(usize),
@@ -17,14 +17,24 @@ pub enum BuildStep {
     Edge(usize, usize),
     /// delete edge between vertices with these indices
     DeleteEdge(usize, usize),
+    /// adds every Edge between a vertex in `.0` and `.1`.
+    CompleteBetween(Box<[usize]>, Box<[usize]>),
+    /// adds every edge between consecutive elements
+    Path(Box<[usize]>),
 }
+
+/// operator that separates first and last element of a sequence of consecutive integers.
+const SEQUENCE_SEP: &str = "..=";
 
 impl BuildStep {
     pub const EXPLAINER: &str = "\
         N<zahl>: <zahl>-distanz und nähere Knoten werden Nachbarn\n\
         D<zahl>: Jede Kante wird Weg mit <zahl> vielen inneren Knoten\n\
         V<x>,<y>,<z>: Knoten mit Koordinaten (<x>, <y>, <z>) / 1000\n\
-        E<u>,<v>: Kante zwischen Knoten mit Indices <u> und <v>.\n\n\
+        E<u>,<v>: Kante zwischen Knoten mit Indices <u> und <v>.\n\
+        K(<X>)(<Y>): alle Kanten zwischen Folgen <X> und <Y>\n\
+        P(<X>): Kantenzug entlang Folge <X>\n\n\
+        eine Folge hat die Form <a1>, ..., <an>.\n\
         BITTE BEACHTE WERKZEUGE [±v] UND [±e]\
         ";
 
@@ -33,6 +43,31 @@ impl BuildStep {
 
 impl std::fmt::Display for BuildStep {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // writes a sequence, except long subsequences of consecutive entries are written with ..
+        let write_sequence = |f: &mut std::fmt::Formatter<'_>, vs: &[usize]| {
+            write!(f, "(")?;
+            let mut i = 0;
+            let mut sep = "";
+            while i < vs.len() {
+                let x = vs[i];
+                let mut y = x;
+                let mut streak = 1;
+                while i + streak < vs.len() && vs[i + streak] == vs[i] + streak {
+                    y += 1;
+                    streak += 1;
+                }
+                // arbitrary decision to no rewrite streaks of just two or three elements
+                if streak > 3 {
+                    write!(f, "{sep}{x}{SEQUENCE_SEP}{y}")?;
+                    i += streak;
+                } else {
+                    write!(f, "{sep}{x}")?;
+                    i += 1;
+                }
+                sep = ", ";
+            }
+            write!(f, ")")
+        };
         match self {
             Self::NeighNeighs(1) => write!(f, "N"),
             Self::SubdivEdges(1) => write!(f, "D"),
@@ -43,6 +78,15 @@ impl std::fmt::Display for BuildStep {
             Self::DeleteVertex(v) => write!(f, "DelV{v}"),
             Self::Edge(v1, v2) => write!(f, "E{v1},{v2}"),
             Self::DeleteEdge(v1, v2) => write!(f, "DelE{v1},{v2}"),
+            Self::CompleteBetween(xs, ys) => {
+                write!(f, "K")?;
+                write_sequence(f, xs)?;
+                write_sequence(f, ys)
+            },
+            Self::Path(xs) => {
+                write!(f, "P")?;
+                write_sequence(f, xs)
+            },
         }
     }
 }
@@ -95,28 +139,29 @@ impl CustomBuild {
         // note: there should be at most a single deletion command each time, because these are
         // invoked by clicking. therefore the O(nr_vertices^2) runtime here is ok.
         while i < self.build_steps.len() {
-            let curr_step = self.build_steps[i];
+            let curr_step = &self.build_steps[i];
             i += 1;
-            if let del_cmd @ BuildStep::DeleteEdge(v1, v2) = curr_step {
+            if let &BuildStep::DeleteEdge(v1, v2) = curr_step {
+                let del_cmd = curr_step.clone();
                 let to_del = BuildStep::Edge(v1, v2);
                 let remove_edge = |s: &mut _| *s == del_cmd || *s == to_del;
                 let nr_removed = self.build_steps.extract_if(.., remove_edge).count();
                 i = i.saturating_sub(nr_removed);
-            }
-            if let del_cmd @ BuildStep::DeleteVertex(v) = curr_step {
+            } else if let &BuildStep::DeleteVertex(v) = curr_step {
+                let del_cmd = curr_step.clone();
                 let remove_vertex =
                     |s: &mut _| *s == del_cmd || matches!(s, BuildStep::Vertex(u, _) if *u == v);
                 let nr_vertices_removed = self.build_steps.extract_if(.., remove_vertex).count();
                 debug_assert!(nr_vertices_removed > 0); // at least the removeal command should be removed.
+                // vertices with larger index than the removed one must be adjusted.
+                let decr_larger_vertex = |u: &mut usize| {
+                    // only decrement if removal was successfull (more than the removal command are removed)
+                    if nr_vertices_removed > 1 && *u > v {
+                        *u -= 1;
+                    }
+                };
                 // all edges containing the removed vertex are also removed.
                 let remove_edge = |s: &mut BuildStep| {
-                    // vertices with larger index than the removed one must be adjusted.
-                    let decr_larger_vertex = |u: &mut usize| {
-                        // only decrement if removal was successfull (more than the removal command are removed)
-                        if nr_vertices_removed > 1 && *u > v {
-                            *u -= 1;
-                        }
-                    };
                     if let BuildStep::Edge(u1, u2) | BuildStep::DeleteEdge(u1, u2) = s {
                         if *u1 == v || *u2 == v {
                             return true;
@@ -124,12 +169,31 @@ impl CustomBuild {
                         decr_larger_vertex(u1);
                         decr_larger_vertex(u2);
                     }
-                    if let BuildStep::Vertex(u, _) = s {
-                        decr_larger_vertex(u);
-                    }
                     false
                 };
                 let nr_edges_removed = self.build_steps.extract_if(.., remove_edge).count();
+                // adjust the kept vertices:
+                for s in &mut self.build_steps {
+                    let adjust_box = |us: &mut Box<[usize]>| {
+                        let mut as_vec = std::mem::take(us).into_vec();
+                        as_vec.extract_if(.., |u| *u == v).count();
+                        for u in &mut as_vec {
+                            decr_larger_vertex(u);
+                        }
+                        *us = Box::from(as_vec);
+                    };
+                    if let BuildStep::CompleteBetween(xs, ys) = s {
+                        adjust_box(xs);
+                        adjust_box(ys);
+                    }
+                    if let BuildStep::Vertex(u, _) = s {
+                        decr_larger_vertex(u);
+                    }
+                    if let BuildStep::Path(xs) = s {
+                        adjust_box(xs);
+                    }
+                }
+                // ensure to not skip a case
                 i = i.saturating_sub(nr_vertices_removed + nr_edges_removed);
             }
         }
@@ -213,8 +277,35 @@ impl CustomBuild {
                 *data = data.trim_start_matches(is_first);
             }
         }
-        let remove_space_or_comma = |data: &mut &str| {
-            remove_single(data, |c| c == ' ' || c == ',');
+        let remove_exact = |data: &mut &str, ch: char| {
+            remove_single(data, |c| c == ch);
+        };
+        let remove_comma = |data: &mut &str| {
+            remove_exact(data, ',');
+        };
+        let parse_sequence = |data: &mut &str, sort: bool| {
+            remove_exact(data, '(');
+            let mut sequence = Vec::new();
+            while data.starts_with(|c: char| c.is_ascii_digit()) {
+                let x = parse_usize(data).unwrap();
+                if data.starts_with(SEQUENCE_SEP) {
+                    *data = &data[(SEQUENCE_SEP.len())..];
+                    if let Some(y) = parse_usize(data)
+                        && y >= x
+                    {
+                        sequence.extend(x..=y);
+                    }
+                } else {
+                    sequence.push(x);
+                }
+                remove_comma(data);
+            }
+            remove_exact(data, ')');
+            if sort {
+                sequence.sort();
+                sequence.dedup();
+            }
+            Box::from(sequence)
         };
         self.build_steps.clear();
         while !data.is_empty() {
@@ -229,21 +320,30 @@ impl CustomBuild {
             } else if data.starts_with("V") {
                 data = &data[1..];
                 if let Some(v) = parse_usize(&mut data) {
-                    remove_single(&mut data, |c| c == '(');
+                    remove_exact(&mut data, '(');
                     let x = parse_i32(&mut data).unwrap_or(0);
-                    remove_space_or_comma(&mut data);
+                    remove_comma(&mut data);
                     let y = parse_i32(&mut data).unwrap_or(0);
-                    remove_space_or_comma(&mut data);
+                    remove_comma(&mut data);
                     let z = parse_i32(&mut data).unwrap_or(BuildStep::DEFAULT_Z);
-                    remove_single(&mut data, |c| c == ')');
+                    remove_exact(&mut data, ')');
                     self.build_steps.push(BuildStep::Vertex(v, [x, y, z]));
                 }
             } else if data.starts_with("E") {
                 data = &data[1..];
                 let v1 = parse_usize(&mut data).unwrap_or(0);
-                remove_space_or_comma(&mut data);
+                remove_comma(&mut data);
                 let v2 = parse_usize(&mut data).unwrap_or(0);
                 self.build_steps.push(BuildStep::Edge(v1, v2));
+            } else if data.starts_with("K") {
+                data = &data[1..];
+                let xs = parse_sequence(&mut data, true);
+                let ys = parse_sequence(&mut data, true);
+                self.build_steps.push(BuildStep::CompleteBetween(xs, ys));
+            } else if data.starts_with("P") {
+                data = &data[1..];
+                let xs = parse_sequence(&mut data, false);
+                self.build_steps.push(BuildStep::Path(xs));
             } else {
                 // remove the leading character and try again
                 remove_single(&mut data, |_| true);

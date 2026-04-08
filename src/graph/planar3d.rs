@@ -923,6 +923,12 @@ impl Embedding3D {
         let mut result = Self::new_map_from(&c.basis, res);
         let mut keep_symmetry = true;
         for step in &c.build_steps {
+            let mut add_edge_between = |v1: usize, v2: usize| {
+                if v1 != v2 && v1.max(v2) < result.nr_vertices() && !result.edges.has_edge(v1, v2) {
+                    result.edges.add_edge(v1, v2);
+                    keep_symmetry = false;
+                }
+            };
             match step {
                 shape::BuildStep::NeighNeighs(n) => {
                     result.edge_pow(*n);
@@ -940,11 +946,16 @@ impl Embedding3D {
                     keep_symmetry = false;
                 },
                 shape::BuildStep::Edge(v1, v2) => {
-                    if usize::max(*v1, *v2) < result.nr_vertices()
-                        && !result.edges.has_edge(*v1, *v2)
-                    {
-                        result.edges.add_edge(*v1, *v2);
-                        keep_symmetry = false;
+                    add_edge_between(*v1, *v2);
+                },
+                shape::BuildStep::CompleteBetween(xs, ys) => {
+                    for (&x, &y) in itertools::iproduct!(xs, ys) {
+                        add_edge_between(x, y);
+                    }
+                },
+                shape::BuildStep::Path(xs) => {
+                    for (&x, &y) in xs.iter().tuple_windows() {
+                        add_edge_between(x, y);
                     }
                 },
                 shape::BuildStep::DeleteEdge(_, _) => unreachable!(),
