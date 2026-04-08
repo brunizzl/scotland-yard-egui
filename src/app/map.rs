@@ -244,9 +244,7 @@ impl Map {
                     *fst = Some(v);
                     return false;
                 };
-                if !*walk {
-                    *fst = None;
-                }
+                *fst = (*walk).then_some(v);
                 if u == v {
                     return false;
                 }
@@ -471,7 +469,8 @@ impl Map {
         } else {
             cam.update_2d(ui, screen);
         }
-        let change = self.extend_custom_graph(ui, cam, tool);
+        // only try to extend custom graph if mouse is not over menus.
+        let change = response.contains_pointer() && self.extend_custom_graph(ui, cam, tool);
 
         let scale = self.scale(cam);
         let color = if ui.global_style().visuals.dark_mode {

@@ -217,7 +217,7 @@ impl<'a> FogStepComputation<'a> {
         }
     }
 
-    fn compute_step(&mut self, curr_fog: &Fog, new_positions: &[usize]) -> Fog {
+    fn compute_step_general(&mut self, curr_fog: &Fog, new_positions: &[usize]) -> Fog {
         debug_assert!(self.queue.is_empty());
 
         let mut fog_after_step = curr_fog.clone();
@@ -234,27 +234,29 @@ impl<'a> FogStepComputation<'a> {
             self.distances[fog_v] = 0;
             self.queue.push_back(fog_v);
         }
+        let mut next_fog = fog_after_step;
         let select = |v: usize, dists: &[isize], new_dist: isize| {
-            new_dist <= self.fog_speed && out_of_reach.is_foggy_at(v) && dists[v] > new_dist
+            if new_dist <= self.fog_speed && out_of_reach.is_foggy_at(v) && dists[v] > new_dist {
+                debug_assert!(!next_fog.is_foggy_at(v));
+                next_fog.mark_foggy_at(v);
+                return true;
+            }
+            false
         };
         self.edges
             .calc_distances_to_with(&mut self.distances, select, &mut self.queue);
 
-        let mut next_fog = fog_after_step.clone();
-        for (v, &dist) in izip!(0.., &self.distances) {
-            if dist != isize::MAX {
-                next_fog.mark_foggy_at(v);
-            }
-        }
-
-        if self.fog_speed == 1 {
-            debug_assert_eq!(
-                next_fog,
-                curr_fog.compute_step(self.edges, self.visible, new_positions)
-            );
-        }
-
         next_fog
+    }
+
+    fn compute_step(&mut self, curr_fog: &Fog, new_positions: &[usize]) -> Fog {
+        if self.fog_speed == 1 {
+            let next_fog = curr_fog.compute_step(self.edges, self.visible, new_positions);
+            debug_assert_eq!(next_fog, self.compute_step_general(curr_fog, new_positions));
+            next_fog
+        } else {
+            self.compute_step_general(curr_fog, new_positions)
+        }
     }
 }
 
