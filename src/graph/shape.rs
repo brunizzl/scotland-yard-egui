@@ -1,3 +1,4 @@
+use itertools::izip;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -39,11 +40,18 @@ impl BuildStep {
         ";
 
     pub const DEFAULT_Z: i32 = (crate::graph::Z_OFFSET_2D * 1000.0) as i32;
+
+    pub fn is_vertex(&self) -> bool {
+        matches!(self, Self::Vertex(_, _))
+    }
+    pub fn is_delete(&self) -> bool {
+        matches!(self, Self::DeleteEdge(_, _) | Self::DeleteVertex(_))
+    }
 }
 
 impl std::fmt::Display for BuildStep {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // writes a sequence, except long subsequences of consecutive entries are written with ..
+        // writes a sequence, except long subsequences of consecutive entries are written with SEQUENCE_SEP
         let write_sequence = |f: &mut std::fmt::Formatter<'_>, vs: &[usize]| {
             write!(f, "(")?;
             let mut i = 0;
@@ -56,7 +64,7 @@ impl std::fmt::Display for BuildStep {
                     y += 1;
                     streak += 1;
                 }
-                // arbitrary decision to no rewrite streaks of just two or three elements
+                // arbitrary decision to not rewrite streaks of just two or three elements
                 if streak > 3 {
                     write!(f, "{sep}{x}{SEQUENCE_SEP}{y}")?;
                     i += streak;
@@ -80,7 +88,9 @@ impl std::fmt::Display for BuildStep {
             Self::DeleteEdge(v1, v2) => write!(f, "DelE{v1},{v2}"),
             Self::CompleteBetween(xs, ys) => {
                 write!(f, "K")?;
-                write_sequence(f, xs)?;
+                if xs != ys {
+                    write_sequence(f, xs)?;
+                }
                 write_sequence(f, ys)
             },
             Self::Path(xs) => {
@@ -91,7 +101,7 @@ impl std::fmt::Display for BuildStep {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CustomBuild {
     pub basis: Shape,
     pub build_steps_string: String,
@@ -101,22 +111,76 @@ pub struct CustomBuild {
     pub name: String,
 }
 
+impl PartialEq for CustomBuild {
+    fn eq(&self, other: &Self) -> bool {
+        debug_assert!(!self.build_steps.iter().any(BuildStep::is_delete));
+        debug_assert!(!other.build_steps.iter().any(BuildStep::is_delete));
+
+        if self.basis != other.basis || self.build_steps.len() != other.build_steps.len() {
+            return false;
+        }
+        // first, we don't compare the build_steps_string, because it may have unapplied
+        // changes and if not, build_steps should contain the same information.
+        // second, the vertex position is irrelevant for the graph theoretic application,
+        // which is what we are interested in. thus: only compare if two build steps are vertices,
+        // not which exact vertices in particular.
+        let steps_eq = |(s1, s2): (&BuildStep, &BuildStep)| -> bool {
+            (s1.is_vertex() && s2.is_vertex()) || s1 == s2
+        };
+        izip!(self.build_steps.iter(), other.build_steps.iter()).all(steps_eq)
+    }
+}
+impl Eq for CustomBuild {}
+
+impl Ord for CustomBuild {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        debug_assert!(!self.build_steps.iter().any(BuildStep::is_delete));
+        debug_assert!(!other.build_steps.iter().any(BuildStep::is_delete));
+
+        let basis = self.basis.cmp(&other.basis);
+        let steps_len = self.build_steps.len().cmp(&other.build_steps.len());
+
+        // see comment in eq implementation above.
+        let zipped_steps = izip!(&self.build_steps, &other.build_steps);
+        let steps = zipped_steps.fold(std::cmp::Ordering::Equal, |acc, (s1, s2)| {
+            acc.then_with(|| {
+                if s1.is_vertex() && s2.is_vertex() {
+                    return std::cmp::Ordering::Equal;
+                }
+                s1.cmp(s2)
+            })
+        });
+
+        basis.then(steps_len).then(steps)
+    }
+}
+impl PartialOrd for CustomBuild {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl CustomBuild {
-    pub fn new(basis: Shape) -> Self {
-        let name = if crate::app::NATIVE {
+    const DEFAULT_NAME: &str = "unbenannt";
+
+    pub fn create_new_name() -> String {
+        if crate::app::NATIVE {
             use chrono::{DateTime, Local, Timelike};
             let now = DateTime::<Local>::from(std::time::SystemTime::now());
             let date = now.date_naive();
             let secs = now.time().num_seconds_from_midnight();
             format!("{date}-{secs}")
         } else {
-            "unbenannt".to_string()
-        };
+            Self::DEFAULT_NAME.to_string()
+        }
+    }
+
+    pub fn new(basis: Shape) -> Self {
         Self {
             basis,
             build_steps_string: String::new(),
             build_steps: Vec::new(),
-            name,
+            name: Self::create_new_name(),
         }
     }
 
@@ -211,38 +275,18 @@ impl CustomBuild {
         res
     }
 
-    /// returns an identifier. this is the name if that is available, else the degree sequence.
-    pub fn print_fingerprint(&self) -> String {
-        if !self.name.is_empty() {
+    /// returns an identifier. the user must ensure that this is unique.
+    pub fn print_name(&self) -> String {
+        if self.name != Self::DEFAULT_NAME {
             return self.name.clone();
         }
 
-        let nr_vertices = self
-            .build_steps
-            .iter()
-            .filter(|s| matches!(s, BuildStep::Vertex(_, _)))
-            .count();
-        let mut degrees = vec![0; nr_vertices];
-        for step in &self.build_steps {
-            if let BuildStep::Edge(u, v) = *step {
-                if u < nr_vertices {
-                    degrees[u] += 1;
-                }
-                if v < nr_vertices {
-                    degrees[v] += 1;
-                }
-            }
-        }
+        let nr_vertices = self.build_steps.iter().filter(|s| s.is_vertex()).count();
 
-        use std::fmt::Write;
-        let mut sep = "";
-        let mut result = String::new();
-        write!(result, "(").ok();
-        for deg in degrees {
-            write!(result, "{}{deg}", std::mem::replace(&mut sep, "-")).ok();
-        }
-        write!(result, ")").ok();
-        result
+        let is_edge = |s: &&_| matches!(s, BuildStep::Edge(_, _));
+        let nr_edges = self.build_steps.iter().filter(is_edge).count();
+
+        format!("{}-{nr_vertices}-{nr_edges}", Self::DEFAULT_NAME)
     }
 
     /// the removal build steps cannot be parsed and should only
@@ -283,7 +327,7 @@ impl CustomBuild {
         let remove_comma = |data: &mut &str| {
             remove_exact(data, ',');
         };
-        let parse_sequence = |data: &mut &str, sort: bool| {
+        let parse_sequence = |data: &mut &str, sort: bool| -> Box<[usize]> {
             remove_exact(data, '(');
             let mut sequence = Vec::new();
             while data.starts_with(|c: char| c.is_ascii_digit()) {
@@ -307,6 +351,7 @@ impl CustomBuild {
             }
             Box::from(sequence)
         };
+
         self.build_steps.clear();
         while !data.is_empty() {
             if data.starts_with("N") {
@@ -338,7 +383,10 @@ impl CustomBuild {
             } else if data.starts_with("K") {
                 data = &data[1..];
                 let xs = parse_sequence(&mut data, true);
-                let ys = parse_sequence(&mut data, true);
+                let mut ys = parse_sequence(&mut data, true);
+                if ys.is_empty() {
+                    ys = xs.clone();
+                }
                 self.build_steps.push(BuildStep::CompleteBetween(xs, ys));
             } else if data.starts_with("P") {
                 data = &data[1..];
@@ -429,7 +477,7 @@ impl Shape {
             Self::Tetrahedron => "Tetraeder".to_string(),
             Self::Icosahedron => "Ikosaeder".to_string(),
             Self::Custom(c) if self.is_pure_custom() => {
-                format!("Custom-{}", c.print_fingerprint())
+                format!("Custom-{}", c.print_name())
             },
             Self::Custom(c) => {
                 let basis = c.basis.to_sting();

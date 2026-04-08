@@ -280,18 +280,20 @@ impl Map {
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut change = false;
         ui.collapsing("Spielfeld", |ui| {
-            let mut new_shape = self.shape().clone();
+            let combo_box_id = &self.data as *const _;
+            let curr_shape = self.data.shape_mut();
+            let old_shape = curr_shape.clone();
             ui.label("Form:");
-            egui::ComboBox::from_id_salt(&self.data as *const _)
-                .selected_text(self.shape().name_str())
+            egui::ComboBox::from_id_salt(combo_box_id)
+                .selected_text(old_shape.name_str())
                 .show_ui(ui, |ui| {
                     macro_rules! radio {
                         ($repr:expr, $case:pat) => {
-                            let selected = matches!(new_shape, $case);
+                            let selected = matches!(old_shape, $case);
                             let name = $repr.name_str();
                             let button = egui::RadioButton::new(selected, name);
                             if ui.add(button).clicked() {
-                                new_shape = $repr;
+                                *curr_shape = $repr;
                             }
                         };
                     }
@@ -311,7 +313,7 @@ impl Map {
                     radio!(Random2D(1337), Random2D(_));
 
                     {
-                        let selected = new_shape.is_pure_custom();
+                        let selected = old_shape.is_pure_custom();
                         let custom_msg = "Custom";
                         let custom_radio = egui::RadioButton::new(selected, custom_msg);
                         if ui.add(custom_radio).clicked() {
@@ -319,21 +321,21 @@ impl Map {
                             self.resolution = basis.min_res();
                             let custom_data = shape::CustomBuild::new(basis);
                             let custom_box = Box::new(custom_data);
-                            new_shape = Custom(custom_box);
+                            *curr_shape = Custom(custom_box);
                             change = true;
                         }
                     }
-                    if NATIVE && !matches!(new_shape, Custom(_)) {
+                    if NATIVE && !matches!(old_shape, Custom(_)) {
                         let extend_msg = "erweitere aktuellen Graph";
                         let extend_radio = egui::RadioButton::new(false, extend_msg);
                         if ui.add(extend_radio).clicked() {
-                            let custom_data = shape::CustomBuild::new(new_shape.clone());
+                            let custom_data = shape::CustomBuild::new(old_shape.clone());
                             let custom_box = Box::new(custom_data);
-                            new_shape = Custom(custom_box);
+                            *curr_shape = Custom(custom_box);
                         }
                     }
                 });
-            match &mut new_shape {
+            match curr_shape {
                 Shape::DividedIcosahedron(pressure) => {
                     add_drag_value(ui, pressure, "Druck", 0..=self.resolution, 1);
                 },
@@ -348,22 +350,22 @@ impl Map {
                 },
                 Shape::SquareGrid => {
                     if ui.button(" ↪↩ ").on_hover_text("klebe zu Torus").clicked() {
-                        new_shape = Shape::SquareTorus;
+                        *curr_shape = Shape::SquareTorus;
                     }
                 },
                 Shape::SquareTorus => {
                     if ui.button("   ✂   ").on_hover_text("zerschneiden").clicked() {
-                        new_shape = Shape::SquareGrid;
+                        *curr_shape = Shape::SquareGrid;
                     }
                 },
                 Shape::TriangGrid => {
                     if ui.button(" ↪↩ ").on_hover_text("klebe zu Torus").clicked() {
-                        new_shape = Shape::TriangTorus;
+                        *curr_shape = Shape::TriangTorus;
                     }
                 },
                 Shape::TriangTorus => {
                     if ui.button("   ✂   ").on_hover_text("zerschneiden").clicked() {
-                        new_shape = Shape::TriangGrid;
+                        *curr_shape = Shape::TriangGrid;
                     }
                 },
                 Shape::Custom(c) => {
@@ -386,8 +388,10 @@ impl Map {
                             })
                             .inner;
                         if delete_button.clicked() {
+                            // important: keep basis.
                             c.build_steps.clear();
                             c.build_steps_string.clear();
+                            c.name = shape::CustomBuild::create_new_name();
                         }
                         ui.add_space(5.0);
                         let text_edit = egui::ScrollArea::vertical()
@@ -401,12 +405,13 @@ impl Map {
                     add_disabled_drag_value(ui);
                 },
             }
-            change |= &new_shape != self.shape();
+            change |= &old_shape != curr_shape;
             ui.add_space(8.0);
-            let min = new_shape.min_res();
-            let max = new_shape.max_res();
+            let min = curr_shape.min_res();
+            let max = curr_shape.max_res();
             change |= add_drag_value(ui, &mut self.resolution, "Auflösung", min..=max, 1);
             if change {
+                let new_shape = std::mem::replace(curr_shape, old_shape);
                 self.recompute(new_shape);
             }
             ui.label(format!("    ➡ {} Knoten", self.data.nr_vertices()));
