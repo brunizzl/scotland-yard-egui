@@ -105,7 +105,7 @@ impl std::fmt::Display for BuildStep {
                 write!(f, "P")?;
                 write_sequence(f, xs)
             },
-            Self::FogTestIsGonnected => write!(f, "N{FOG_TEST_IS_CONNECTED_NAME}"),
+            Self::FogTestIsGonnected => write!(f, "{FOG_TEST_IS_CONNECTED_NAME}"),
         }
     }
 }

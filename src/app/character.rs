@@ -886,7 +886,7 @@ impl State {
 
     /// forgets the current move history and instead inserts the passed fog clearing sequence as future moves.
     pub fn load_fog_cleaning_sequence(&mut self, map: &map::Map, sol: &bf::FogSolution) {
-        if !sol.is_cleanable() {
+        if !sol.is_cleanable() || self.characters.is_empty() {
             return;
         }
         self.forget_move_history();

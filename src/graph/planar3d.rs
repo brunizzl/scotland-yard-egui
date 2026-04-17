@@ -922,7 +922,7 @@ impl Embedding3D {
     /// turns self into a graph that we assume to be cleanable by one
     /// visibility-1 cleaner from speed-1 fog iff the orinal graph is conncted.
     /// see [`shape::BuildStep::FogTestIsGonnected`].
-    fn transform_to_fog_test_is_connected(&mut self) {
+    fn transform_to_fog_connectedness_test(&mut self) {
         // idea: we add a vertex for every ogiginal vertex and two vertices for every original edge.
         // the new vertex-vertices are placed below and to the left of the original.
         // for each edge, one edge-vertex is placed in the middle of the edge, one below and to the right of the original.
@@ -933,32 +933,32 @@ impl Embedding3D {
         //  - the two sets of edge-vertices (at og position vs lower right) become a complete bipartite graph
         //  - each copy of an original vertex if connected to it's original
         let (vertex_vertex_off, edge_vertex_off) = {
-            let mut og_bounding_box = egui::Rect::ZERO;
+            let mut og_bounding_box = egui::Rect::NOTHING;
             for pos in self.positions() {
                 og_bounding_box.extend_with(pos.xy());
             }
+            // let the region stretch a bit beyond the extreme vertices
             let size = f32::max(og_bounding_box.width(), og_bounding_box.height());
-            // add some distance between original and copies
             og_bounding_box = og_bounding_box.expand(size / 8.0);
-            let vs_off = Vec3::new(
-                -og_bounding_box.width() * 0.5,
-                og_bounding_box.height(),
-                0.0,
-            );
-            let es_off = Vec3::new(og_bounding_box.width() * 0.5, og_bounding_box.height(), 0.0);
+
+            let egui::Vec2 { x: dx, y: dy } = og_bounding_box.size();
+            let vs_off = Vec3::new(-0.5 * dx, dy, 0.0);
+            let es_off = Vec3::new(0.5 * dx, dy, 0.0);
             (vs_off, es_off)
         };
         let og_nr_vertices = self.nr_vertices();
         let og_nr_edges = self.edges().count_entries() / 2;
 
         // add new vertices
-        self.subdivide_all_edges(1, false);
-        debug_assert_eq!(self.nr_vertices(), og_nr_vertices + og_nr_edges);
-        let edge_vertices_old = (og_nr_vertices..(og_nr_vertices + og_nr_edges)).collect_vec();
         let vertex_vertices = (0..og_nr_vertices)
             .map(|v| self.add_vertex(self.positions()[v] + vertex_vertex_off))
             .collect_vec();
+        debug_assert_eq!(self.nr_vertices(), 2 * og_nr_vertices);
+
+        let edge_vertices_old = (self.nr_vertices()..).take(og_nr_edges).collect_vec();
+        self.subdivide_all_edges(1, false);
         debug_assert_eq!(self.nr_vertices(), 2 * og_nr_vertices + og_nr_edges);
+
         let edge_vertices_new = (edge_vertices_old.iter())
             .map(|&e| self.add_vertex(self.positions()[e] + edge_vertex_off))
             .collect_vec();
@@ -998,7 +998,7 @@ impl Embedding3D {
             };
             match step {
                 shape::BuildStep::FogTestIsGonnected => {
-                    result.transform_to_fog_test_is_connected();
+                    result.transform_to_fog_connectedness_test();
                     keep_symmetry = false;
                 },
                 shape::BuildStep::NeighNeighs(n) => {
