@@ -22,10 +22,17 @@ pub enum BuildStep {
     CompleteBetween(Box<[usize]>, Box<[usize]>),
     /// adds every edge between consecutive elements
     Path(Box<[usize]>),
+    /// if the graph so far has n vertices and m edges, this adds another n + 2m vertices and many edges in between.
+    /// the idea is that iff the graph before applying this build step is connected,
+    /// the graph after applying this build step should be clearable from speed-1 fog by a single visibility-1 cleaner.
+    /// at the time of writing this comment, we don't know whether this construction actually works.
+    FogTestIsGonnected,
 }
 
 /// operator that separates first and last element of a sequence of consecutive integers.
 const SEQUENCE_SEP: &str = "..=";
+/// name of [`BuildStep::AlexanderFogTestIsGonnected`]
+const FOG_TEST_IS_CONNECTED_NAME: &str = "ZsgTest";
 
 impl BuildStep {
     pub const EXPLAINER: &str = "\
@@ -34,7 +41,8 @@ impl BuildStep {
         V<x>,<y>,<z>: Knoten mit Koordinaten (<x>, <y>, <z>) / 1000\n\
         E<u>,<v>: Kante zwischen Knoten mit Indices <u> und <v>.\n\
         K(<X>)(<Y>): alle Kanten zwischen Folgen <X> und <Y>\n\
-        P(<X>): Kantenzug entlang Folge <X>\n\n\
+        P(<X>): Kantenzug entlang Folge <X>\n\
+        ZsgTest: (hoffentlich) entnebeln neu <=> zusammenhängend alt\n\n\
         eine Folge hat die Form <a1>, ..., <an>.\n\
         BITTE BEACHTE WERKZEUGE [±v] UND [±e]\
         ";
@@ -97,6 +105,7 @@ impl std::fmt::Display for BuildStep {
                 write!(f, "P")?;
                 write_sequence(f, xs)
             },
+            Self::FogTestIsGonnected => write!(f, "N{FOG_TEST_IS_CONNECTED_NAME}"),
         }
     }
 }
@@ -354,7 +363,10 @@ impl CustomBuild {
 
         self.build_steps.clear();
         while !data.is_empty() {
-            if data.starts_with("N") {
+            if data.starts_with(FOG_TEST_IS_CONNECTED_NAME) {
+                data = &data[(FOG_TEST_IS_CONNECTED_NAME.len())..];
+                self.build_steps.push(BuildStep::FogTestIsGonnected);
+            } else if data.starts_with("N") {
                 data = &data[1..];
                 let n = parse_usize(&mut data).unwrap_or(1);
                 self.build_steps.push(BuildStep::NeighNeighs(n));
