@@ -1942,9 +1942,8 @@ impl Info {
                 MouseTool::Draw | MouseTool::Erase | MouseTool::Paintbucket => {
                     egui::CursorIcon::Crosshair
                 },
-                MouseTool::AddVertex => egui::CursorIcon::Default,
-                MouseTool::DragVertex(None) => egui::CursorIcon::Grab,
-                MouseTool::DragVertex(Some(_)) => egui::CursorIcon::Grabbing,
+                MouseTool::AddVertex => egui::CursorIcon::Copy,
+                MouseTool::DragVertex(_) => egui::CursorIcon::Move,
                 MouseTool::AddEdge(_, None) => egui::CursorIcon::Grab,
                 MouseTool::AddEdge(_, Some(_)) => egui::CursorIcon::Grabbing,
             };
