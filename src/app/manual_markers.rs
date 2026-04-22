@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use egui::{Color32, Pos2, Ui};
 use itertools::izip;
 
-use super::{DrawContext, color, style};
+use super::{DrawContext, NATIVE, color, style};
 
 /// stripped down copy of [`egui::RadioButton`], but with added ability to directly decide the background color
 fn radio_button(checked: bool, fill: Color32, ui: &mut Ui) -> egui::Response {
@@ -183,14 +183,22 @@ impl ManualMarkers {
         }
     }
 
-    /// if the number of vertices changes, all history is deleted.
-    pub fn update_len(&mut self, nr_vertices: usize) {
+    /// if the number of vertices changes and the current map is not custom, all history is deleted.
+    /// note: deleting a vertex in a custom graph will shift the colors of all vertices with larger indices.
+    /// i don't see this as important to fix.
+    pub fn update_len(&mut self, nr_vertices: usize, shape: &crate::graph::Shape) {
         let fst = &mut self.history[0];
         if fst.state.len() != nr_vertices {
-            self.index = 0;
-            fst.state.clear();
-            fst.state.resize(nr_vertices, 0);
-            self.history.truncate(1);
+            if matches!(shape, crate::graph::Shape::Custom(_)) {
+                for entry in &mut self.history {
+                    entry.state.resize(nr_vertices, 0);
+                }
+            } else {
+                self.index = 0;
+                fst.state.clear();
+                fst.state.resize(nr_vertices, 0);
+                self.history.truncate(1);
+            }
         }
     }
 
@@ -209,7 +217,7 @@ impl ManualMarkers {
             if ui.button(" ⟳ ").on_hover_text("vorwärts (strg + y)").clicked() {
                 self.redo();
             }
-            if ui.button(" 🗑 ").on_hover_text("vergesse Vergangenheit").clicked() {
+            if NATIVE && ui.button(" 🗑 ").on_hover_text("vergesse Vergangenheit").clicked() {
                 let mut current = self.history.remove(self.index);
                 current.tool = DrawTool::None;
                 self.index = 0;

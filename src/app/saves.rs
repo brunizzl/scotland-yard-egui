@@ -90,26 +90,6 @@ impl OrdBy {
             Self::NrCops => "Nr Cops",
         }
     }
-
-    fn sort(self, states: &mut Vec<SavedState>, active: &mut Option<usize>) {
-        fn sort_<T, F: Fn(&T) -> K, K: Ord>(xs: &mut Vec<T>, active: &mut Option<usize>, f: F) {
-            let mut to_sort = izip!(std::mem::take(xs), 0..).collect_vec();
-            to_sort.sort_by_key(|(s, _)| f(s));
-            if let Some(i) = *active {
-                *active = to_sort.iter().position(|(_, j)| i == *j);
-            }
-            xs.extend(to_sort.into_iter().map(|(s, _)| s));
-        }
-        match self {
-            //as i understand, we can't return a non-static reference here :(
-            //rust std library: please fix. I dislike that clone very much.
-            Self::Name => sort_(states, active, |s| s.name.clone()),
-            Self::Date => sort_(states, active, |s| s.saved_at),
-            Self::Shape => sort_(states, active, |s| s.shape.clone()),
-            Self::Res => sort_(states, active, |s| s.resolution),
-            Self::NrCops => sort_(states, active, |s| s.characters.all().len()),
-        };
-    }
 }
 
 pub struct SavedStates {
@@ -118,6 +98,7 @@ pub struct SavedStates {
     deleted: Option<SavedState>,
     active: Option<usize>,
     ord: OrdBy,
+    reverse_ord: bool,
 }
 
 impl SavedStates {
@@ -146,20 +127,40 @@ impl SavedStates {
     const ORDER_STORAGE_KEY: &'static str = "app::save-states::order";
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut saves = if NATIVE {
+        let saves = if NATIVE {
             Self::load_from_filesystem()
         } else {
             load_or(cc.storage, Self::SAVES_STORAGE_KEY, Vec::new)
         };
         let (active, ord) = load_or(cc.storage, Self::ORDER_STORAGE_KEY, || (None, OrdBy::Name));
-        ord.sort(&mut saves, &mut None);
-        Self {
+        let mut result = Self {
             new_name: String::new(),
             saves,
             deleted: None,
             active,
             ord,
+            reverse_ord: false,
+        };
+        result.sort();
+        result
+    }
+
+    fn sort(&mut self) {
+        let mut with_old_positions = izip!(self.saves.drain(..), 0..).collect_vec();
+        with_old_positions.sort_by(|(a, _), (b, _)| match self.ord {
+            OrdBy::Name => a.name.cmp(&b.name),
+            OrdBy::Date => a.saved_at.cmp(&b.saved_at),
+            OrdBy::Shape => a.shape.cmp(&b.shape),
+            OrdBy::Res => a.resolution.cmp(&b.resolution),
+            OrdBy::NrCops => (a.characters.all().len()).cmp(&b.characters.all().len()),
+        });
+        if self.reverse_ord {
+            with_old_positions.reverse();
         }
+        if let Some(i) = self.active {
+            self.active = with_old_positions.iter().position(|(_, j)| i == *j);
+        }
+        self.saves.extend(with_old_positions.into_iter().map(|(s, _)| s));
     }
 
     pub fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -212,7 +213,7 @@ impl SavedStates {
         new_save.store_in_filesystem();
         self.active = Some(self.saves.len());
         self.saves.push(new_save);
-        self.ord.sort(&mut self.saves, &mut self.active);
+        self.sort();
     }
 
     pub fn update(
@@ -296,8 +297,18 @@ impl SavedStates {
                     }
                     if highlight(ui.button(ord.name()), self.ord == ord).clicked() {
                         self.ord = ord;
-                        ord.sort(&mut self.saves, &mut self.active);
+                        self.sort();
                     }
+                }
+
+                ui.add_space(8.0);
+                let (reversed_symbol, reversed_info) = match self.reverse_ord {
+                    false => ("▪◾◼", "Aktuell: Aufsteigend"),
+                    true => ("◼◾▪", "Aktuell: Absteigend"),
+                };
+                if ui.button(reversed_symbol).on_hover_text(reversed_info).clicked() {
+                    self.reverse_ord ^= true;
+                    self.sort();
                 }
             });
 
@@ -306,7 +317,7 @@ impl SavedStates {
                 let name = del.name.clone();
                 if ui.button(format!("\"{name}\" wiederherstellen")).clicked() {
                     self.saves.push(self.deleted.take().unwrap());
-                    self.ord.sort(&mut self.saves, &mut self.active);
+                    self.sort();
                 }
             }
             egui::ScrollArea::vertical().show(ui, |ui| {

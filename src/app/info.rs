@@ -1013,7 +1013,7 @@ impl Info {
         let nr_vertices = map.nr_vertices();
         if self.manual_markers.curr().len() != nr_vertices {
             self.characters.forget_move_history();
-            self.manual_markers.update_len(nr_vertices);
+            self.manual_markers.update_len(nr_vertices, map.shape());
         }
         self.register_change_now();
     }
