@@ -423,24 +423,36 @@ impl Map {
         let zoom = cam.zoom();
 
         let detail = {
-            let max_shown_len = self.data.max_scaling_edge_length();
-            let mut cum_len = 0.0;
-            let mut nr_counted = 0;
-            let samples = izip!(self.data.edges().neighbors(), self.data.positions());
-            for (neighs, &p1) in samples.take(10) {
-                for p2 in neighs.map(|n| self.data.positions()[n]) {
-                    let len = (p1 - p2).length();
-                    if len <= max_shown_len {
-                        cum_len += len;
-                        nr_counted += 1;
+            let nr_sampled_vertices = 10;
+            let max_samples_per_vertex = 6;
+            let mut samples = Vec::with_capacity(nr_sampled_vertices * max_samples_per_vertex);
+
+            let iter = izip!(self.data.edges().neighbors(), self.data.positions());
+            for (neighs, &p1) in iter.take(nr_sampled_vertices) {
+                for n in neighs.take(max_samples_per_vertex) {
+                    let p2 = self.data.positions()[n];
+                    let len = (p1 - p2).length() as f64;
+                    if !len.is_nan() {
+                        samples.push(len);
                     }
                 }
             }
-            if nr_counted > 0 {
-                //estimate average shown edge length
-                cum_len / (nr_counted as f32) * 10.0
+            if samples.is_empty() {
+                12.0 / (self.resolution as f32)
             } else {
-                12.0 / self.resolution as f32
+                samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                // we only consider edges that are not too much longer than the average we saw so far.
+                // how much is too much is determined by cutoff.
+                let cutoff = 1.5;
+                let mut running_avg = 1e10;
+                for (i, val) in izip!(0.., samples) {
+                    if val > running_avg * cutoff {
+                        break;
+                    }
+                    let fi = i as f64;
+                    running_avg = (running_avg * fi + val) / (fi + 1.0);
+                }
+                running_avg as f32 * 10.0
             }
         };
         let detail_factor = f32::min(detail, 4.0);

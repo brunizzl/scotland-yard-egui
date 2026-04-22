@@ -150,30 +150,6 @@ impl Embedding3D {
         &self.sym_group
     }
 
-    /// returns whitch edge lengh should be considered when displaying other features,
-    /// e.g. how large characters and markers are drawn.
-    /// also used to determine on tori which edges are not drawn, because the embedding looks ugly otherwise.
-    pub fn max_scaling_edge_length(&self) -> f32 {
-        if matches!(self.shape, Shape::SquareTorus | Shape::TriangTorus) {
-            // just above 0.5 vs just below sqrt(2)
-            if self.nr_vertices() > 4 { 0.55 } else { 1.4 }
-        } else if !self.vertices.is_empty() {
-            let is_custom = matches!(self.shape, Shape::Custom(_));
-            let safety_factor = if is_custom { 1.99 } else { 1.5 };
-            let p0 = self.vertices[0];
-            let min_dist_p0 = self
-                .edges()
-                .neighbors_of(0)
-                .map(|v1| (self.vertices[v1] - p0).length_sq())
-                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap_or(1e10)
-                .sqrt();
-            safety_factor * min_dist_p0
-        } else {
-            1e10
-        }
-    }
-
     #[inline(always)]
     fn add_vertex(&mut self, pos: Pos3) -> usize {
         let new_index = self.nr_vertices();
