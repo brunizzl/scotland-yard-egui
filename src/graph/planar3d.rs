@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use bool_csr::BoolCSR;
-use itertools::{Itertools, iproduct, izip};
+use itertools::{Itertools, izip};
 use smallvec::{SmallVec, smallvec};
 
 use crate::geo::{self, Pos3, Vec3, pos3, vec3};
@@ -897,69 +897,107 @@ impl Embedding3D {
 
     /// turns self into a graph that we assume to be cleanable by one
     /// visibility-1 cleaner from speed-1 fog iff the orinal graph is conncted.
-    /// see [`shape::BuildStep::FogTestIsGonnected`].
-    fn transform_to_fog_connectedness_test(&mut self) {
-        // idea: we add a vertex for every ogiginal vertex and two vertices for every original edge.
-        // the new vertex-vertices are placed below and to the left of the original.
-        // for each edge, one edge-vertex is placed in the middle of the edge, one below and to the right of the original.
-        // this means one edge-vertex is not created directly here, but by just subdividing each original edge once.
-        // new edges are added as follows:
-        //  - a vertex-vertex is connected to an edge-vertex if the original edge contains the original edge
-        //  - the vertex-vertices become a clique
-        //  - the two sets of edge-vertices (at og position vs lower right) become a complete bipartite graph
-        //  - each copy of an original vertex if connected to it's original
-        let (vertex_vertex_off, edge_vertex_off) = {
+    /// see [`shape::BuildStep::FogTestHamPath`].
+    fn tranform_to_fog_hamilton_path_test(
+        &mut self,
+        ends: Option<(usize, usize)>,
+        with_fuse: bool,
+    ) {
+        if self.positions().is_empty() {
+            return;
+        }
+
+        let og_nr_vertices = self.nr_vertices();
+        let og_nr_edges = self.edges.count_entries() / 2;
+        let (copies_off, copies_watcher_pos, fuse_watcher_pos, fuse_start, fuse_step) = {
             let mut og_bounding_box = egui::Rect::NOTHING;
             for pos in self.positions() {
                 og_bounding_box.extend_with(pos.xy());
             }
             // let the region stretch a bit beyond the extreme vertices
             let size = f32::max(og_bounding_box.width(), og_bounding_box.height());
-            og_bounding_box = og_bounding_box.expand(size / 8.0);
+            og_bounding_box = og_bounding_box.expand(size / 4.0);
 
+            let og_center = Pos3::from_xy_z(og_bounding_box.center(), Z_OFFSET_2D);
             let egui::Vec2 { x: dx, y: dy } = og_bounding_box.size();
-            let vs_off = Vec3::new(-0.5 * dx, dy, 0.0);
-            let es_off = Vec3::new(0.5 * dx, dy, 0.0);
-            (vs_off, es_off)
+            let copies_off = Vec3::new(dx, 0.0, 0.0);
+            let copies_watcher_pos = og_center + Vec3::new(dx, dy * 0.8, 0.0);
+            let fuse_watcher_pos = og_center + Vec3::new(0.0, dy * 0.8, 0.0);
+            let fuse_start = fuse_watcher_pos + Vec3::new(-dx, dy * 0.5, 0.0);
+            let fuse_step = Vec3::new(dx / (2 * og_nr_vertices) as f32 * 2.0, 0.0, 0.0);
+            (
+                copies_off,
+                copies_watcher_pos,
+                fuse_watcher_pos,
+                fuse_start,
+                fuse_step,
+            )
         };
-        let og_nr_vertices = self.nr_vertices();
-        let og_nr_edges = self.edges().count_entries() / 2;
 
-        // add new vertices
+        // add a copy for every original vertex
         let vertex_vertices = (0..og_nr_vertices)
-            .map(|v| self.add_vertex(self.positions()[v] + vertex_vertex_off))
+            .map(|v| self.add_vertex(self.positions()[v] + copies_off))
             .collect_vec();
         debug_assert_eq!(self.nr_vertices(), 2 * og_nr_vertices);
 
-        let edge_vertices_old = (self.nr_vertices()..).take(og_nr_edges).collect_vec();
+        // add a vertex in between each original edge and move these to mach the positions of the vertex copies
+        let edge_vertices = (self.nr_vertices()..).take(og_nr_edges).collect_vec();
         self.subdivide_all_edges(1, false);
         debug_assert_eq!(self.nr_vertices(), 2 * og_nr_vertices + og_nr_edges);
 
-        let edge_vertices_new = (edge_vertices_old.iter())
-            .map(|&e| self.add_vertex(self.positions()[e] + edge_vertex_off))
-            .collect_vec();
-        debug_assert_eq!(self.nr_vertices(), 2 * og_nr_vertices + 2 * og_nr_edges);
+        // connect the vertex copies to the original vertices
+        for (og_v, &copy_v) in izip!(0..og_nr_vertices, &vertex_vertices) {
+            self.edges.add_edge(og_v, copy_v);
+        }
 
-        // add new edges
-        for (&e_old, &e_new) in izip!(&edge_vertices_old, &edge_vertices_new) {
-            let og_edge = self.edges.neighbors_of(e_old).collect_vec();
-            debug_assert!(og_edge.iter().all(|&v| v < og_nr_vertices));
-            debug_assert_eq!(og_edge.len(), 2);
-            for og_v in og_edge {
-                self.edges.add_edge(vertex_vertices[og_v], e_new);
-            }
+        // add the vertex observing all vertex copies + all edge vertices
+        let copies_watcher = self.add_vertex(copies_watcher_pos);
+        for &v in vertex_vertices.iter().chain(edge_vertices.iter()) {
+            self.edges.add_edge(v, copies_watcher);
         }
-        for (&u, &v) in iproduct!(&vertex_vertices, &vertex_vertices) {
-            if u < v {
-                self.edges.add_edge(u, v);
-            }
-        }
-        for (&u, &v) in iproduct!(&edge_vertices_old, &edge_vertices_new) {
+
+        // turn original vertices into a clique
+        for (u, v) in (0..og_nr_vertices).tuple_combinations() {
             self.edges.add_edge(u, v);
         }
-        for (u, &v) in izip!(0..og_nr_vertices, &vertex_vertices) {
-            self.edges.add_edge(u, v);
+
+        if !with_fuse {
+            return;
         }
+
+        // add the vertex part of the og clique that connects to the fuse
+        let fuse_watcher = self.add_vertex(fuse_watcher_pos);
+        for v in 0..og_nr_vertices {
+            self.edges.add_edge(fuse_watcher, v);
+        }
+
+        let fuse = (0..(2 * og_nr_vertices))
+            .map(|i| self.add_vertex(fuse_start + (i as f32) * fuse_step))
+            .collect_vec();
+        self.edges.add_path_edges(fuse.iter().copied());
+
+        for (fuse_i, &v) in izip!(0.., &fuse) {
+            if fuse_i % 2 == 0 {
+                self.edges.add_edge(fuse_watcher, v);
+            } else {
+                let v_pos = self.positions()[v];
+                let middle = Pos3::average([fuse_watcher_pos, v_pos, v_pos].into_iter());
+                let middle_v = self.add_vertex(middle);
+                self.edges.add_edge(v, middle_v);
+                self.edges.add_edge(middle_v, fuse_watcher);
+            }
+        }
+        let &fuse_end = fuse.last().unwrap();
+        let fuse_divider_end = self.nr_vertices() - 1;
+        self.edges.add_edge(fuse_end, copies_watcher);
+        self.edges.add_edge(fuse_divider_end, copies_watcher);
+
+        if let Some((ham_fst, ham_last)) = ends {
+            self.edges.add_edge(vertex_vertices[ham_fst], fuse[0]);
+            self.edges.add_edge(ham_last, fuse_divider_end);
+        }
+
+        debug_assert_eq!(self.nr_vertices(), 5 * og_nr_vertices + 2 + og_nr_edges);
     }
 
     fn new_custom(c: Box<shape::CustomBuild>, res: usize) -> Self {
@@ -973,8 +1011,12 @@ impl Embedding3D {
                 }
             };
             match step {
+                shape::BuildStep::FogTestHamPath(ends) => {
+                    result.tranform_to_fog_hamilton_path_test(*ends, true);
+                    keep_symmetry = false;
+                },
                 shape::BuildStep::FogTestIsGonnected => {
-                    result.transform_to_fog_connectedness_test();
+                    result.tranform_to_fog_hamilton_path_test(None, false);
                     keep_symmetry = false;
                 },
                 shape::BuildStep::NeighNeighs(n) => {

@@ -27,12 +27,18 @@ pub enum BuildStep {
     /// the graph after applying this build step should be clearable from speed-1 fog by a single visibility-1 cleaner.
     /// at the time of writing this comment, we don't know whether this construction actually works.
     FogTestIsGonnected,
+    /// turns the graph build so far into a graph that is (hopefully) clearable from speed-1 fog by a single
+    /// visibility-1 cleaner iff the original graph has a hamilton path between the optonally given vertices.
+    /// leaving the argument empty builds everything except the final two edges, thereby leaving this part configurable.
+    FogTestHamPath(Option<(usize, usize)>),
 }
 
 /// operator that separates first and last element of a sequence of consecutive integers.
 const SEQUENCE_SEP: &str = "..=";
-/// name of [`BuildStep::AlexanderFogTestIsGonnected`]
+/// name of [`BuildStep::FogTestIsGonnected`]
 const FOG_TEST_IS_CONNECTED_NAME: &str = "ZsgTest";
+/// name of [`BuildStep::FogTestHamPath`]
+const FOG_TEST_HAM_PATH_NAME: &str = "HamTest";
 
 impl BuildStep {
     pub const EXPLAINER: &str = "\
@@ -106,6 +112,8 @@ impl std::fmt::Display for BuildStep {
                 write_sequence(f, xs)
             },
             Self::FogTestIsGonnected => write!(f, "{FOG_TEST_IS_CONNECTED_NAME}"),
+            Self::FogTestHamPath(None) => write!(f, "{FOG_TEST_HAM_PATH_NAME}"),
+            Self::FogTestHamPath(Some((a, b))) => write!(f, "{FOG_TEST_HAM_PATH_NAME}{a},{b}"),
         }
     }
 }
@@ -265,6 +273,10 @@ impl CustomBuild {
                     if let BuildStep::Path(xs) = s {
                         adjust_box(xs);
                     }
+                    if let BuildStep::FogTestHamPath(Some((a, b))) = s {
+                        decr_larger_vertex(a);
+                        decr_larger_vertex(b);
+                    }
                 }
                 // ensure to not skip a case
                 i = i.saturating_sub(nr_vertices_removed + nr_edges_removed);
@@ -363,7 +375,14 @@ impl CustomBuild {
 
         self.build_steps.clear();
         while !data.is_empty() {
-            if data.starts_with(FOG_TEST_IS_CONNECTED_NAME) {
+            if data.starts_with(FOG_TEST_HAM_PATH_NAME) {
+                data = &data[(FOG_TEST_HAM_PATH_NAME.len())..];
+                let ends = parse_usize(&mut data).and_then(|a| {
+                    remove_comma(&mut data);
+                    parse_usize(&mut data).map(|b| (a, b))
+                });
+                self.build_steps.push(BuildStep::FogTestHamPath(ends));
+            } else if data.starts_with(FOG_TEST_IS_CONNECTED_NAME) {
                 data = &data[(FOG_TEST_IS_CONNECTED_NAME.len())..];
                 self.build_steps.push(BuildStep::FogTestIsGonnected);
             } else if data.starts_with("N") {
