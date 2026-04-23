@@ -22,7 +22,7 @@ pub enum BuildStep {
     CompleteBetween(Box<[usize]>, Box<[usize]>),
     /// adds every edge between consecutive elements
     Path(Box<[usize]>),
-    /// if the graph so far has n vertices and m edges, this adds another n + 2m vertices and many edges in between.
+    /// if the graph so far has n vertices and m edges, this adds another n + m + 1 vertices and many edges in between.
     /// the idea is that iff the graph before applying this build step is connected,
     /// the graph after applying this build step should be clearable from speed-1 fog by a single visibility-1 cleaner.
     /// at the time of writing this comment, we don't know whether this construction actually works.
@@ -30,7 +30,8 @@ pub enum BuildStep {
     /// turns the graph build so far into a graph that is (hopefully) clearable from speed-1 fog by a single
     /// visibility-1 cleaner iff the original graph has a hamilton path between the optonally given vertices.
     /// leaving the argument empty builds everything except the final two edges, thereby leaving this part configurable.
-    FogTestHamPath(Option<(usize, usize)>),
+    /// at the time of writing this comment, we don't know whether this construction actually works.
+    FogTestHamPath(Option<[usize; 2]>),
 }
 
 /// operator that separates first and last element of a sequence of consecutive integers.
@@ -47,8 +48,8 @@ impl BuildStep {
         V<x>,<y>,<z>: Knoten mit Koordinaten (<x>, <y>, <z>) / 1000\n\
         E<u>,<v>: Kante zwischen Knoten mit Indices <u> und <v>.\n\
         K(<X>)(<Y>): alle Kanten zwischen Folgen <X> und <Y>\n\
-        P(<X>): Kantenzug entlang Folge <X>\n\
-        ZsgTest: (hoffentlich) entnebeln neu <=> zusammenhängend alt\n\n\
+        ZsgTest: entnebeln neu <=> zusammenhängend alt\n\
+        HamTest<u>,<v>: entnebeln neu <=> <u>-<v> hamilton pfad alt\n\n\
         eine Folge hat die Form <a1>, ..., <an>.\n\
         BITTE BEACHTE WERKZEUGE [±v] UND [±e]\
         ";
@@ -91,8 +92,6 @@ impl std::fmt::Display for BuildStep {
             write!(f, ")")
         };
         match self {
-            Self::NeighNeighs(1) => write!(f, "N"),
-            Self::SubdivEdges(1) => write!(f, "D"),
             Self::NeighNeighs(n) => write!(f, "N{n}"),
             Self::SubdivEdges(n) => write!(f, "D{n}"),
             Self::Vertex(v, [x, y, Self::DEFAULT_Z]) => write!(f, "V{v}({x},{y})"),
@@ -113,7 +112,7 @@ impl std::fmt::Display for BuildStep {
             },
             Self::FogTestIsGonnected => write!(f, "{FOG_TEST_IS_CONNECTED_NAME}"),
             Self::FogTestHamPath(None) => write!(f, "{FOG_TEST_HAM_PATH_NAME}"),
-            Self::FogTestHamPath(Some((a, b))) => write!(f, "{FOG_TEST_HAM_PATH_NAME}{a},{b}"),
+            Self::FogTestHamPath(Some([a, b])) => write!(f, "{FOG_TEST_HAM_PATH_NAME}{a},{b}"),
         }
     }
 }
@@ -273,9 +272,8 @@ impl CustomBuild {
                     if let BuildStep::Path(xs) = s {
                         adjust_box(xs);
                     }
-                    if let BuildStep::FogTestHamPath(Some((a, b))) = s {
-                        decr_larger_vertex(a);
-                        decr_larger_vertex(b);
+                    if let BuildStep::FogTestHamPath(ends @ Some(_)) = s {
+                        *ends = None;
                     }
                 }
                 // ensure to not skip a case
@@ -316,13 +314,14 @@ impl CustomBuild {
         let mut data_string = std::mem::take(&mut self.build_steps_string);
         data_string.retain(|c| !c.is_ascii_whitespace());
         let mut data: &str = &data_string;
-        let parse_usize = |data: &mut &str| -> Option<usize> {
+
+        fn parse_usize(data: &mut &str) -> Option<usize> {
             let int_end = data.find(|c: char| !c.is_ascii_digit()).unwrap_or(data.len());
             let (int_part, rest) = data.split_at(int_end);
             *data = rest;
             int_part.parse::<usize>().ok()
-        };
-        let parse_i32 = |data: &mut &str| -> Option<i32> {
+        }
+        fn parse_i32(data: &mut &str) -> Option<i32> {
             let sign = if data.starts_with("-") {
                 *data = &data[1..];
                 -1
@@ -334,7 +333,7 @@ impl CustomBuild {
             };
             let val = parse_usize(data)?;
             Some(sign * val as i32)
-        };
+        }
         fn remove_single(data: &mut &str, pattern: impl Fn(char) -> bool) {
             if data.chars().next().is_some_and(pattern) {
                 let mut first_match = true;
@@ -342,13 +341,13 @@ impl CustomBuild {
                 *data = data.trim_start_matches(is_first);
             }
         }
-        let remove_exact = |data: &mut &str, ch: char| {
+        fn remove_exact(data: &mut &str, ch: char) {
             remove_single(data, |c| c == ch);
-        };
-        let remove_comma = |data: &mut &str| {
+        }
+        fn remove_comma(data: &mut &str) {
             remove_exact(data, ',');
-        };
-        let parse_sequence = |data: &mut &str, sort: bool| -> Box<[usize]> {
+        }
+        fn parse_sequence(data: &mut &str, sort: bool) -> Box<[usize]> {
             remove_exact(data, '(');
             let mut sequence = Vec::new();
             while data.starts_with(|c: char| c.is_ascii_digit()) {
@@ -371,7 +370,7 @@ impl CustomBuild {
                 sequence.dedup();
             }
             Box::from(sequence)
-        };
+        }
 
         self.build_steps.clear();
         while !data.is_empty() {
@@ -379,7 +378,7 @@ impl CustomBuild {
                 data = &data[(FOG_TEST_HAM_PATH_NAME.len())..];
                 let ends = parse_usize(&mut data).and_then(|a| {
                     remove_comma(&mut data);
-                    parse_usize(&mut data).map(|b| (a, b))
+                    parse_usize(&mut data).map(|b| [a, b])
                 });
                 self.build_steps.push(BuildStep::FogTestHamPath(ends));
             } else if data.starts_with(FOG_TEST_IS_CONNECTED_NAME) {

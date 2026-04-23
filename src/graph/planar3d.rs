@@ -895,14 +895,12 @@ impl Embedding3D {
         Self::from_2d(as_2d, Shape::SingleVertex)
     }
 
-    /// turns self into a graph that we assume to be cleanable by one
-    /// visibility-1 cleaner from speed-1 fog iff the orinal graph is conncted.
-    /// see [`shape::BuildStep::FogTestHamPath`].
-    fn tranform_to_fog_hamilton_path_test(
-        &mut self,
-        ends: Option<(usize, usize)>,
-        with_fuse: bool,
-    ) {
+    /// turns self into a graph that we assume inshallah to be cleanable by one
+    /// visibility-1 cleaner from speed-1 fog iff the orinal graph has a hamilton path between `ends`.
+    /// see [`shape::BuildStep::FogTestHamPath`] or [`shape::BuildStep::FogTestIsGonnected`], which
+    /// ends the construction a bit earlier, turning the test for the hamiltion path into a test if the graph is connected.
+    /// note: a shortest route will still walk a hamilton path if it exists.
+    fn tranform_to_fog_hamilton_path_test(&mut self, ends: Option<[usize; 2]>, with_fuse: bool) {
         if self.positions().is_empty() {
             return;
         }
@@ -940,7 +938,7 @@ impl Embedding3D {
             .collect_vec();
         debug_assert_eq!(self.nr_vertices(), 2 * og_nr_vertices);
 
-        // add a vertex in between each original edge and move these to mach the positions of the vertex copies
+        // add a vertex in between each original edge
         let edge_vertices = (self.nr_vertices()..).take(og_nr_edges).collect_vec();
         self.subdivide_all_edges(1, false);
         debug_assert_eq!(self.nr_vertices(), 2 * og_nr_vertices + og_nr_edges);
@@ -971,6 +969,8 @@ impl Embedding3D {
             self.edges.add_edge(fuse_watcher, v);
         }
 
+        // the fuse has twice the length of the original nr of vertices,
+        // as the expected clearing route alternates between original vertices and edge_vertices.
         let fuse = (0..(2 * og_nr_vertices))
             .map(|i| self.add_vertex(fuse_start + (i as f32) * fuse_step))
             .collect_vec();
@@ -980,6 +980,8 @@ impl Embedding3D {
             if fuse_i % 2 == 0 {
                 self.edges.add_edge(fuse_watcher, v);
             } else {
+                // every second fuse vertex is not directly connected to the fuse_watcher,
+                // but via an in-between vertex. this makes the fuse more tedious to reset.
                 let v_pos = self.positions()[v];
                 let middle = Pos3::average([fuse_watcher_pos, v_pos, v_pos].into_iter());
                 let middle_v = self.add_vertex(middle);
@@ -992,7 +994,9 @@ impl Embedding3D {
         self.edges.add_edge(fuse_end, copies_watcher);
         self.edges.add_edge(fuse_divider_end, copies_watcher);
 
-        if let Some((ham_fst, ham_last)) = ends {
+        if let Some([ham_fst, ham_last]) = ends
+            && usize::max(ham_fst, ham_last) < og_nr_vertices
+        {
             self.edges.add_edge(vertex_vertices[ham_fst], fuse[0]);
             self.edges.add_edge(ham_last, fuse_divider_end);
         }
