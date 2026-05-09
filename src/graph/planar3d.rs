@@ -963,11 +963,17 @@ impl Embedding3D {
             return;
         }
 
+        // this vertex is meant to be used by the robber to exit fuse_watcher in the
+        // beginning after clearing the fuse.
+        let fuse_exit_pos = Pos3::average([copies_watcher_pos, fuse_watcher_pos]);
+        let fuse_exit = self.add_vertex(fuse_exit_pos);
+
         // add the vertex part of the og clique that connects to the fuse
         let fuse_watcher = self.add_vertex(fuse_watcher_pos);
         for v in 0..og_nr_vertices {
             self.edges.add_edge(fuse_watcher, v);
         }
+        self.edges.add_edge(fuse_watcher, fuse_exit);
 
         // the fuse has twice the length of the original nr of vertices,
         // as the expected clearing route alternates between original vertices and edge_vertices.
@@ -976,32 +982,37 @@ impl Embedding3D {
             .collect_vec();
         self.edges.add_path_edges(fuse.iter().copied());
 
-        for (fuse_i, &v) in izip!(0.., &fuse) {
-            if fuse_i % 2 == 0 {
-                self.edges.add_edge(fuse_watcher, v);
-            } else {
-                // every second fuse vertex is not directly connected to the fuse_watcher,
-                // but via an in-between vertex. this makes the fuse more tedious to reset.
-                let v_pos = self.positions()[v];
-                let middle = Pos3::average([fuse_watcher_pos, v_pos, v_pos].into_iter());
-                let middle_v = self.add_vertex(middle);
-                self.edges.add_edge(v, middle_v);
-                self.edges.add_edge(middle_v, fuse_watcher);
+        // the fuse is connetected to fuse_watcher to allow clearing.
+        // only the ends however are connected directly, to guarantee that clearing takes time.
+        if let [fuse_start, fuse_inner @ .., fuse_end] = &fuse[..] {
+            self.edges.add_edge(*fuse_start, fuse_watcher);
+            self.edges.add_edge(*fuse_end, fuse_watcher);
+            for (&inner_left, &inner_right) in fuse_inner.iter().tuple_windows() {
+                let lpos = self.positions()[inner_left];
+                let rpos = self.positions()[inner_right];
+                // connector connects to two consecutive fuse vertices and to fuse_watcher.
+                // this way the fuse can be cleared by alternating between fuse_watcher and the
+                // connector vertices.
+                // note that this only works, because fuse_start and fuse_end are connected to
+                // fuse_watcher directly, thereby guaranteeing no seepage from the ends.
+                let connector_pos = Pos3::average([fuse_watcher_pos, lpos, lpos, rpos, rpos]);
+                let connector = self.add_vertex(connector_pos);
+                self.edges.add_edge(connector, fuse_watcher);
+                self.edges.add_edge(connector, inner_left);
+                self.edges.add_edge(connector, inner_right);
             }
         }
+
         let &fuse_end = fuse.last().unwrap();
-        let fuse_divider_end = self.nr_vertices() - 1;
         self.edges.add_edge(fuse_end, copies_watcher);
-        self.edges.add_edge(fuse_divider_end, copies_watcher);
+        self.edges.add_edge(fuse_exit, copies_watcher);
 
         if let Some([ham_fst, ham_last]) = ends
             && usize::max(ham_fst, ham_last) < og_nr_vertices
         {
             self.edges.add_edge(vertex_vertices[ham_fst], fuse[0]);
-            self.edges.add_edge(ham_last, fuse_divider_end);
+            self.edges.add_edge(ham_last, fuse_exit);
         }
-
-        debug_assert_eq!(self.nr_vertices(), 5 * og_nr_vertices + 2 + og_nr_edges);
     }
 
     fn new_custom(c: Box<shape::CustomBuild>, res: usize) -> Self {
@@ -1261,7 +1272,7 @@ impl Embedding3D {
             let p2 = self.vertices[v2];
             let points = [to_screen.apply(p1), to_screen.apply(p2)];
 
-            let p_avg = Pos3::average([p1, p2].into_iter());
+            let p_avg = Pos3::average([p1, p2]);
             let opacity = (screen_dist(p_avg).clamp(-0.2, 1.0) + 0.2) / 1.2;
             let mut stroke = stroke;
             stroke.color = stroke.color.gamma_multiply(opacity);

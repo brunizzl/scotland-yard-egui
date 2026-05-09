@@ -97,13 +97,14 @@ impl Pos3 {
         }
     }
 
-    pub fn average(positions: impl ExactSizeIterator<Item = Self>) -> Pos3 {
+    pub fn average(positions: impl IntoIterator<Item = Self>) -> Pos3 {
         let mut acc = Vec3::ZERO;
-        let len = positions.len() as f32;
+        let mut len = 0.0;
         for x in positions {
             acc += x.to_vec3();
+            len += 1.0;
         }
-        Pos3::ZERO + acc / len
+        (acc / len).to_pos3()
     }
 
     pub const fn xy(self) -> Pos2 {

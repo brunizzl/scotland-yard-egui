@@ -746,7 +746,7 @@ impl BruteforceComputationState {
                         best_solution,
                     }) => {
                         let best = if best_solution { "-beste" } else { "" };
-                        format!("rechne (N{visibility}vis-{fog_speed}tempo{best})")
+                        format!("rechne (N-{visibility}vis-{fog_speed}tempo{best})")
                     },
                 };
                 let game_str = worker.game_type.as_tuple_string();
