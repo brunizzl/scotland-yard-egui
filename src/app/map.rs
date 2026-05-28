@@ -183,46 +183,6 @@ impl Map {
         if modifiers.command && matches!(tool, info::MouseTool::AddVertex) {
             *tool = info::MouseTool::DragVertex(None);
         }
-        if let info::MouseTool::DragVertex(dragged_vertex) = tool {
-            if !modifiers.command && !clicking {
-                *tool = info::MouseTool::AddVertex;
-                return false;
-            }
-            let (drag_start, drag_delta) = ui.input(|info| {
-                let start = info.pointer.button_pressed(egui::PointerButton::Primary);
-                let delta = info.pointer.delta();
-                (start, delta)
-            });
-            if drag_start {
-                let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
-                *dragged_vertex = Some(v);
-            }
-            if !clicking {
-                *dragged_vertex = None;
-            }
-            if let Some(v) = *dragged_vertex {
-                let delta_3d = {
-                    let prev = cam.to_screen().apply_inverse(pointer_pos - drag_delta, 0.0);
-                    let curr = cam.to_screen().apply_inverse(pointer_pos, 0.0);
-                    curr - prev
-                };
-                self.data.positions_mut()[v] += delta_3d;
-                if let Shape::Custom(custom_data) = self.data.shape_mut() {
-                    for step in &mut custom_data.build_steps {
-                        if let shape::BuildStep::Vertex(u, pos) = step
-                            && *u == v
-                        {
-                            pos[0] += (delta_3d.x * 1000.0) as i32;
-                            pos[1] += (delta_3d.y * 1000.0) as i32;
-                            pos[2] += (delta_3d.z * 1000.0) as i32;
-                            break;
-                        }
-                    }
-                    custom_data.build_steps_string = custom_data.print_build_steps(false);
-                }
-            }
-            return false;
-        }
 
         if let info::MouseTool::AddEdge(walk, _) = tool {
             if !*walk && modifiers.command {
@@ -233,12 +193,15 @@ impl Map {
             }
         }
 
-        if !clicked || !cam.to_screen().draw_rect().contains(pointer_pos) {
+        if !cam.to_screen().draw_rect().contains(pointer_pos) {
             return false;
         }
         let in_delete_mode = modifiers.shift;
         let new_step = match tool {
             info::MouseTool::AddEdge(walk, fst) => {
+                if !clicked {
+                    return false;
+                }
                 let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
                 let Some(u) = *fst else {
                     *fst = Some(v);
@@ -254,7 +217,43 @@ impl Map {
                     shape::BuildStep::Edge(u, v)
                 }
             },
+            info::MouseTool::DragVertex(dragged_vertex) => {
+                if !modifiers.command && !clicking {
+                    *tool = info::MouseTool::AddVertex;
+                    return false;
+                }
+                let (drag_start, drag_delta) = ui.input(|info| {
+                    let start = info.pointer.button_pressed(egui::PointerButton::Primary);
+                    let delta = info.pointer.delta();
+                    (start, delta)
+                });
+                if drag_start {
+                    let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
+                    *dragged_vertex = Some(v);
+                }
+                if !clicking {
+                    *dragged_vertex = None;
+                }
+                if let Some(v) = *dragged_vertex {
+                    let dv = {
+                        let prev = cam.to_screen().apply_inverse(pointer_pos - drag_delta, 0.0);
+                        let curr = cam.to_screen().apply_inverse(pointer_pos, 0.0);
+                        curr - prev
+                    };
+                    let mov = [
+                        (dv.x * 1000.0) as i32,
+                        (dv.y * 1000.0) as i32,
+                        (dv.z * 1000.0) as i32,
+                    ];
+                    shape::BuildStep::MoveVertex(v, mov)
+                } else {
+                    return false;
+                }
+            },
             info::MouseTool::AddVertex if !in_delete_mode => {
+                if !clicked {
+                    return false;
+                }
                 let v = self.data.nr_vertices();
                 let pos = cam.to_screen().apply_inverse(pointer_pos, Z_OFFSET_2D);
                 let x = (pos.x * 1000.0) as i32;
@@ -263,6 +262,9 @@ impl Map {
                 shape::BuildStep::Vertex(v, [x, y, z])
             },
             info::MouseTool::AddVertex if in_delete_mode => {
+                if !clicked {
+                    return false;
+                }
                 let (v, _) = self.find_closest_vertex_slow(cam, pointer_pos);
                 shape::BuildStep::DeleteVertex(v)
             },
@@ -270,7 +272,7 @@ impl Map {
         };
         let mut new_data = old_data.clone();
         new_data.build_steps.push(new_step);
-        new_data.normalize_build_steps();
+        new_data.combine_move_operations_naive();
         new_data.build_steps_string = new_data.print_build_steps(false);
         let new_shape = Shape::Custom(new_data);
         self.recompute(new_shape);

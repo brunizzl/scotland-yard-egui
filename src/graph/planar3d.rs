@@ -142,10 +142,6 @@ impl Embedding3D {
         &self.vertices
     }
 
-    pub fn positions_mut(&mut self) -> &mut [Pos3] {
-        &mut self.vertices
-    }
-
     pub fn sym_group(&self) -> &SymGroup {
         &self.sym_group
     }
@@ -982,7 +978,7 @@ impl Embedding3D {
             .collect_vec();
         self.edges.add_path_edges(fuse.iter().copied());
 
-        // the fuse is connetected to fuse_watcher to allow clearing.
+        // the fuse is connected to fuse_watcher to allow clearing.
         // only the ends however are connected directly, to guarantee that clearing takes time.
         if let [fuse_start, fuse_inner @ .., fuse_end] = &fuse[..] {
             self.edges.add_edge(*fuse_start, fuse_watcher);
@@ -1017,55 +1013,71 @@ impl Embedding3D {
 
     fn new_custom(c: Box<shape::CustomBuild>, res: usize) -> Self {
         let mut result = Self::new_map_from(&c.basis, res);
-        let mut keep_symmetry = true;
+        use shape::BuildStep;
         for step in &c.build_steps {
             let mut add_edge_between = |v1: usize, v2: usize| {
                 if v1 != v2 && v1.max(v2) < result.nr_vertices() && !result.edges.has_edge(v1, v2) {
                     result.edges.add_edge(v1, v2);
-                    keep_symmetry = false;
                 }
             };
             match step {
-                shape::BuildStep::FogTestHamPath(ends) => {
+                BuildStep::FogTestHamPath(ends) => {
                     result.tranform_to_fog_hamilton_path_test(*ends, true);
-                    keep_symmetry = false;
                 },
-                shape::BuildStep::FogTestIsGonnected => {
+                BuildStep::FogTestIsGonnected => {
                     result.tranform_to_fog_hamilton_path_test(None, false);
-                    keep_symmetry = false;
                 },
-                shape::BuildStep::NeighNeighs(n) => {
+                BuildStep::NeighNeighs(n) => {
                     result.edge_pow(*n);
                 },
-                shape::BuildStep::SubdivEdges(n) => {
+                BuildStep::SubdivEdges(n) => {
                     result.subdivide_all_edges(*n, false);
-                    keep_symmetry = false;
                 },
-                shape::BuildStep::Vertex(_, [x_int, y_int, z_int]) => {
+                BuildStep::Vertex(_, [x_int, y_int, z_int]) => {
                     let x = *x_int as f32 * 0.001;
                     let y = *y_int as f32 * 0.001;
                     let z = *z_int as f32 * 0.001;
                     let pos = Pos3::new(x, y, z);
                     result.add_vertex(pos);
-                    keep_symmetry = false;
                 },
-                shape::BuildStep::Edge(v1, v2) => {
+                BuildStep::Edge(v1, v2) => {
                     add_edge_between(*v1, *v2);
                 },
-                shape::BuildStep::CompleteBetween(xs, ys) => {
+                BuildStep::CompleteBetween(xs, ys) => {
                     for (&x, &y) in itertools::iproduct!(xs, ys) {
                         add_edge_between(x, y);
                     }
                 },
-                shape::BuildStep::Path(xs) => {
+                BuildStep::Path(xs) => {
                     for (&x, &y) in xs.iter().tuple_windows() {
                         add_edge_between(x, y);
                     }
                 },
-                shape::BuildStep::DeleteEdge(_, _) => unreachable!(),
-                shape::BuildStep::DeleteVertex(_) => unreachable!(),
+                &BuildStep::DeleteEdge(v1, v2) => {
+                    if result.edges.has_edge(v1, v2) {
+                        result.edges.remove_edge(v1, v2);
+                    }
+                },
+                &BuildStep::DeleteVertex(v) => {
+                    // don't allow creation of the empty graph :o
+                    if result.vertices.len() > v && result.vertices.len() > 1 {
+                        result.vertices.remove(v);
+                        result.edges.remove_vertex(v);
+                    }
+                },
+                &BuildStep::MoveVertex(v, [dx, dy, dz]) => {
+                    if let Some(pos) = result.vertices.get_mut(v) {
+                        *pos += Vec3::new(dx as f32 * 0.001, dy as f32 * 0.001, dz as f32 * 0.001);
+                    }
+                },
             }
         }
+
+        let keep_symmetry = c
+            .build_steps
+            .iter()
+            .all(|s| matches!(s, BuildStep::NeighNeighs(_) | BuildStep::SubdivEdges(_)));
+
         result.shape = shape::Shape::Custom(c);
         if !keep_symmetry {
             result.sym_group = SymGroup::None(NoSymmetry::new(result.vertices.len()));

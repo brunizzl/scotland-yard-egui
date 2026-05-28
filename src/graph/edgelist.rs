@@ -176,6 +176,37 @@ impl EdgeList {
         new_index
     }
 
+    pub fn remove_vertex(&mut self, v: usize) {
+        // remove neighbors list of vertex
+        {
+            let removal_start = self.max_neighbors * v;
+            let removal_range = removal_start..(removal_start + self.max_neighbors);
+            if self.entries.len() < removal_range.end {
+                return;
+            }
+            let mut i = 0;
+            self.entries.retain(|_| {
+                let remove = removal_range.contains(&i);
+                i += 1;
+                !remove
+            });
+            self.length -= 1;
+        }
+        // remove vertex mention in other neighbors + shift larger vertices down.
+        for neighs in self.neighbors_mut() {
+            for raw_neigh in neighs.iter_mut() {
+                let neigh = raw_neigh.get().unwrap();
+                if neigh == v {
+                    *raw_neigh = Index::NONE;
+                }
+                if neigh > v {
+                    raw_neigh.val -= 1;
+                }
+            }
+            neighs.sort_unstable();
+        }
+    }
+
     fn potential_neighbors(&self) -> Chunks<'_, Index> {
         debug_assert!(self.max_neighbors > 0 || self.entries.is_empty());
         self.entries.chunks(self.max_neighbors.max(1))

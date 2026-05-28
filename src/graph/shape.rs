@@ -14,6 +14,8 @@ pub enum BuildStep {
     Vertex(usize, [i32; 3]),
     /// delete vertex with this index.
     DeleteVertex(usize),
+    /// change the position of the vertex with this index by the given delta
+    MoveVertex(usize, [i32; 3]),
     /// connect vertices with these indices
     Edge(usize, usize),
     /// delete edge between vertices with these indices
@@ -59,6 +61,9 @@ impl BuildStep {
     pub fn is_vertex(&self) -> bool {
         matches!(self, Self::Vertex(_, _))
     }
+    pub fn is_move(&self) -> bool {
+        matches!(self, Self::MoveVertex(_, _))
+    }
     pub fn is_delete(&self) -> bool {
         matches!(self, Self::DeleteEdge(_, _) | Self::DeleteVertex(_))
     }
@@ -97,6 +102,7 @@ impl std::fmt::Display for BuildStep {
             Self::Vertex(v, [x, y, Self::DEFAULT_Z]) => write!(f, "V{v}({x},{y})"),
             Self::Vertex(v, [x, y, z]) => write!(f, "V{v}({x},{y},{z})"),
             Self::DeleteVertex(v) => write!(f, "DelV{v}"),
+            Self::MoveVertex(v, [dx, dy, dz]) => write!(f, "MovV{v}({dx},{dy},{dz})"),
             Self::Edge(v1, v2) => write!(f, "E{v1},{v2}"),
             Self::DeleteEdge(v1, v2) => write!(f, "DelE{v1},{v2}"),
             Self::CompleteBetween(xs, ys) => {
@@ -129,21 +135,33 @@ pub struct CustomBuild {
 
 impl PartialEq for CustomBuild {
     fn eq(&self, other: &Self) -> bool {
-        debug_assert!(!self.build_steps.iter().any(BuildStep::is_delete));
-        debug_assert!(!other.build_steps.iter().any(BuildStep::is_delete));
-
-        if self.basis != other.basis || self.build_steps.len() != other.build_steps.len() {
+        if self.basis != other.basis {
             return false;
         }
-        // first, we don't compare the build_steps_string, because it may have unapplied
+        // we don't compare the build_steps_string, because it may have unapplied
         // changes and if not, build_steps should contain the same information.
-        // second, the vertex position is irrelevant for the graph theoretic application,
-        // which is what we are interested in. thus: only compare if two build steps are vertices,
-        // not which exact vertices in particular.
-        let steps_eq = |(s1, s2): (&BuildStep, &BuildStep)| -> bool {
-            (s1.is_vertex() && s2.is_vertex()) || s1 == s2
-        };
-        izip!(self.build_steps.iter(), other.build_steps.iter()).all(steps_eq)
+        // also: the vertex position is irrelevant for the graph theoretic application
+        //   -> no need to keep move operations.
+        fn keep_important(steps: &[BuildStep]) -> impl Iterator<Item = &BuildStep> {
+            steps.iter().filter(|s| !s.is_move())
+        }
+        let mut self_iter = keep_important(&self.build_steps);
+        let mut other_iter = keep_important(&other.build_steps);
+        loop {
+            match (self_iter.next(), other_iter.next()) {
+                (Some(s1), Some(s2)) => {
+                    // the vertex position is irrelevant for the graph theoretic application,
+                    // which is what we are interested in. thus: only compare if two build steps are vertices,
+                    // not which exact vertices in particular.
+                    let steps_match = (s1.is_vertex() && s2.is_vertex()) || s1 == s2;
+                    if !steps_match {
+                        return false;
+                    }
+                },
+                (Some(_), None) | (None, Some(_)) => return false,
+                (None, None) => return true,
+            }
+        }
     }
 }
 impl Eq for CustomBuild {}
@@ -200,85 +218,17 @@ impl CustomBuild {
         }
     }
 
-    /// must be run after adding [`BuildStep::DeleteVertex`] or [`BuildStep::DeleteEdge`],
-    /// as these two are applied and then removed as steps in this function.
-    pub fn normalize_build_steps(&mut self) {
-        for step in &mut self.build_steps {
-            if let BuildStep::Edge(v1, v2) = step
-                && v1 > v2
-            {
-                *step = BuildStep::Edge(*v2, *v1);
-            }
-            if let BuildStep::DeleteEdge(v1, v2) = step
-                && v1 > v2
-            {
-                *step = BuildStep::DeleteEdge(*v2, *v1);
-            }
-        }
-        let mut i = 0;
-        // note: there should be at most a single deletion command each time, because these are
-        // invoked by clicking. therefore the O(nr_vertices^2) runtime here is ok.
-        while i < self.build_steps.len() {
-            let curr_step = &self.build_steps[i];
-            i += 1;
-            if let &BuildStep::DeleteEdge(v1, v2) = curr_step {
-                let del_cmd = curr_step.clone();
-                let to_del = BuildStep::Edge(v1, v2);
-                let remove_edge = |s: &mut _| *s == del_cmd || *s == to_del;
-                let nr_removed = self.build_steps.extract_if(.., remove_edge).count();
-                i = i.saturating_sub(nr_removed);
-            } else if let &BuildStep::DeleteVertex(v) = curr_step {
-                let del_cmd = curr_step.clone();
-                let remove_vertex =
-                    |s: &mut _| *s == del_cmd || matches!(s, BuildStep::Vertex(u, _) if *u == v);
-                let nr_vertices_removed = self.build_steps.extract_if(.., remove_vertex).count();
-                debug_assert!(nr_vertices_removed > 0); // at least the removeal command should be removed.
-                // vertices with larger index than the removed one must be adjusted.
-                let decr_larger_vertex = |u: &mut usize| {
-                    // only decrement if removal was successfull (more than the removal command are removed)
-                    if nr_vertices_removed > 1 && *u > v {
-                        *u -= 1;
-                    }
-                };
-                // all edges containing the removed vertex are also removed.
-                let remove_edge = |s: &mut BuildStep| {
-                    if let BuildStep::Edge(u1, u2) | BuildStep::DeleteEdge(u1, u2) = s {
-                        if *u1 == v || *u2 == v {
-                            return true;
-                        }
-                        decr_larger_vertex(u1);
-                        decr_larger_vertex(u2);
-                    }
-                    false
-                };
-                let nr_edges_removed = self.build_steps.extract_if(.., remove_edge).count();
-                // adjust the kept vertices:
-                for s in &mut self.build_steps {
-                    let adjust_box = |us: &mut Box<[usize]>| {
-                        let mut as_vec = std::mem::take(us).into_vec();
-                        as_vec.extract_if(.., |u| *u == v).count();
-                        for u in &mut as_vec {
-                            decr_larger_vertex(u);
-                        }
-                        *us = Box::from(as_vec);
-                    };
-                    if let BuildStep::CompleteBetween(xs, ys) = s {
-                        adjust_box(xs);
-                        adjust_box(ys);
-                    }
-                    if let BuildStep::Vertex(u, _) = s {
-                        decr_larger_vertex(u);
-                    }
-                    if let BuildStep::Path(xs) = s {
-                        adjust_box(xs);
-                    }
-                    if let BuildStep::FogTestHamPath(ends @ Some(_)) = s {
-                        *ends = None;
-                    }
-                }
-                // ensure to not skip a case
-                i = i.saturating_sub(nr_vertices_removed + nr_edges_removed);
-            }
+    /// test if the last two operations are moves of the same vertex. if so, combine them.
+    pub fn combine_move_operations_naive(&mut self) {
+        use BuildStep::MoveVertex;
+        while let [.., MoveVertex(u, du), MoveVertex(v, dv)] = &self.build_steps[..]
+            && u == v
+        {
+            let dcombined = [du[0] + dv[0], du[1] + dv[1], du[2] + dv[2]];
+            let new_step = MoveVertex(*u, dcombined);
+            _ = self.build_steps.pop();
+            _ = self.build_steps.pop();
+            self.build_steps.push(new_step);
         }
     }
 
@@ -384,6 +334,17 @@ impl CustomBuild {
             } else if data.starts_with(FOG_TEST_IS_CONNECTED_NAME) {
                 data = &data[(FOG_TEST_IS_CONNECTED_NAME.len())..];
                 self.build_steps.push(BuildStep::FogTestIsGonnected);
+            } else if data.starts_with("DelV") {
+                data = &data["DelV".len()..];
+                if let Some(v) = parse_usize(&mut data) {
+                    self.build_steps.push(BuildStep::DeleteVertex(v));
+                }
+            } else if data.starts_with("DelE") {
+                data = &data["DelE".len()..];
+                let v1 = parse_usize(&mut data).unwrap_or(0);
+                remove_comma(&mut data);
+                let v2 = parse_usize(&mut data).unwrap_or(0);
+                self.build_steps.push(BuildStep::DeleteEdge(v1, v2));
             } else if data.starts_with("N") {
                 data = &data[1..];
                 let n = parse_usize(&mut data).unwrap_or(1);
@@ -392,6 +353,18 @@ impl CustomBuild {
                 data = &data[1..];
                 let n = parse_usize(&mut data).unwrap_or(1);
                 self.build_steps.push(BuildStep::SubdivEdges(n));
+            } else if data.starts_with("MovV") {
+                data = &data["MovV".len()..];
+                if let Some(v) = parse_usize(&mut data) {
+                    remove_exact(&mut data, '(');
+                    let x = parse_i32(&mut data).unwrap_or(0);
+                    remove_comma(&mut data);
+                    let y = parse_i32(&mut data).unwrap_or(0);
+                    remove_comma(&mut data);
+                    let z = parse_i32(&mut data).unwrap_or(BuildStep::DEFAULT_Z);
+                    remove_exact(&mut data, ')');
+                    self.build_steps.push(BuildStep::MoveVertex(v, [x, y, z]));
+                }
             } else if data.starts_with("V") {
                 data = &data[1..];
                 if let Some(v) = parse_usize(&mut data) {
@@ -427,7 +400,7 @@ impl CustomBuild {
                 remove_single(&mut data, |_| true);
             }
         }
-        self.normalize_build_steps();
+        self.combine_move_operations_naive();
         self.build_steps_string = self.print_build_steps(false);
     }
 }
