@@ -161,7 +161,7 @@ impl Map {
     /// if self currently has shape [`Shape::Custom`], this function handles input to add vertices or edges
     /// via mouse clicking.
     /// returns whether a change to self was made.
-    fn extend_custom_graph(
+    fn modify_custom_graph(
         &mut self,
         ui: &mut Ui,
         cam: &Camera3D,
@@ -170,6 +170,9 @@ impl Map {
         let Shape::Custom(old_data) = self.shape() else {
             return false;
         };
+        if !tool.used_for_building() {
+            return false;
+        }
         let (modifiers, Some(pointer_pos), clicking, clicked) = ui.input(|info| {
             let modifiers = info.modifiers;
             let pos = info.pointer.latest_pos();
@@ -179,6 +182,39 @@ impl Map {
         }) else {
             return false;
         };
+
+        if modifiers.command {
+            enum Operation {
+                Redo,
+                Undo,
+            }
+            let action = ui.input(|info| {
+                if info.key_pressed(egui::Key::Z) {
+                    Some(Operation::Undo)
+                } else if info.key_pressed(egui::Key::Y) {
+                    Some(Operation::Redo)
+                } else {
+                    None
+                }
+            });
+            if let Some(operation) = action {
+                let mut new_data = old_data.clone();
+                match operation {
+                    Operation::Undo => {
+                        let last_step = new_data.build_steps.pop();
+                        new_data.future_build_steps.extend(last_step);
+                    },
+                    Operation::Redo => {
+                        let next_step = new_data.future_build_steps.pop();
+                        new_data.build_steps.extend(next_step);
+                    },
+                }
+                new_data.build_steps_string = new_data.print_build_steps(false);
+                let new_shape = Shape::Custom(new_data);
+                self.recompute(new_shape);
+                return true;
+            }
+        }
 
         if modifiers.command && matches!(tool, info::MouseTool::AddVertex) {
             *tool = info::MouseTool::DragVertex(None);
@@ -489,7 +525,7 @@ impl Map {
             cam.update_2d(ui, screen);
         }
         // only try to extend custom graph if mouse is not over menus.
-        let change = response.contains_pointer() && self.extend_custom_graph(ui, cam, tool);
+        let change = response.contains_pointer() && self.modify_custom_graph(ui, cam, tool);
 
         let scale = self.scale(cam);
         let color = if ui.global_style().visuals.dark_mode {

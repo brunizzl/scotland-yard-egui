@@ -602,6 +602,13 @@ impl MouseTool {
         [Self::Draw, Self::Erase, Self::Paintbucket].contains(self)
     }
 
+    pub fn used_for_building(&self) -> bool {
+        matches!(
+            self,
+            Self::AddVertex | Self::AddEdge(_, _) | Self::DragVertex(_)
+        )
+    }
+
     pub fn tools_for(shape: &graph::Shape) -> &[Self] {
         if matches!(shape, graph::Shape::Custom(_)) {
             &const {
@@ -1229,16 +1236,24 @@ impl Info {
                 if drag_active {
                     self.characters.undo_move(con.edges, con.positions, &mut self.queue);
                     change = true;
-                } else {
+                } else if tool.used_for_drawing() {
                     self.manual_markers.undo();
+                } else {
+                    // this is handled in Map::modify_custom_graph,
+                    // because there we can still modify the graph.
+                    debug_assert!(tool.used_for_building());
                 }
             }
             if info.modifiers.ctrl && info.key_pressed(Key::Y) {
                 if drag_active {
                     self.characters.redo_move(con.edges, con.positions, &mut self.queue);
                     change = true;
-                } else {
+                } else if tool.used_for_drawing() {
                     self.manual_markers.redo();
+                } else {
+                    // this is handled in Map::modify_custom_graph,
+                    // because there we can still modify the graph.
+                    debug_assert!(tool.used_for_building());
                 }
             }
             if info.modifiers.ctrl && info.key_pressed(Key::R) && drag_active {

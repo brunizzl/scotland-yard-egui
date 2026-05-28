@@ -128,6 +128,11 @@ pub struct CustomBuild {
     pub basis: Shape,
     pub build_steps_string: String,
     pub build_steps: Vec<BuildStep>,
+    /// if user currently wields a building tool:
+    /// extended whenever user hits [ctrl] + [z],
+    /// shrunk whenever user hits [ctrl] + [y].
+    #[serde(default)]
+    pub future_build_steps: Vec<BuildStep>,
     /// identifier chosen by user.
     #[serde(default)]
     pub name: String,
@@ -214,6 +219,7 @@ impl CustomBuild {
             basis,
             build_steps_string: String::new(),
             build_steps: Vec::new(),
+            future_build_steps: Vec::new(),
             name: Self::create_new_name(),
         }
     }
