@@ -1,4 +1,3 @@
-use itertools::izip;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -63,9 +62,6 @@ impl BuildStep {
     }
     pub fn is_move(&self) -> bool {
         matches!(self, Self::MoveVertex(_, _))
-    }
-    pub fn is_delete(&self) -> bool {
-        matches!(self, Self::DeleteEdge(_, _) | Self::DeleteVertex(_))
     }
 }
 
@@ -138,6 +134,12 @@ pub struct CustomBuild {
     pub name: String,
 }
 
+// also: the vertex position is irrelevant for the graph theoretic application
+//   -> no need to keep move operations.
+fn filter_ord_deciding(steps: &[BuildStep]) -> impl Iterator<Item = &BuildStep> {
+    steps.iter().filter(|s| !s.is_move())
+}
+
 impl PartialEq for CustomBuild {
     fn eq(&self, other: &Self) -> bool {
         if self.basis != other.basis {
@@ -145,13 +147,8 @@ impl PartialEq for CustomBuild {
         }
         // we don't compare the build_steps_string, because it may have unapplied
         // changes and if not, build_steps should contain the same information.
-        // also: the vertex position is irrelevant for the graph theoretic application
-        //   -> no need to keep move operations.
-        fn keep_important(steps: &[BuildStep]) -> impl Iterator<Item = &BuildStep> {
-            steps.iter().filter(|s| !s.is_move())
-        }
-        let mut self_iter = keep_important(&self.build_steps);
-        let mut other_iter = keep_important(&other.build_steps);
+        let mut self_iter = filter_ord_deciding(&self.build_steps);
+        let mut other_iter = filter_ord_deciding(&other.build_steps);
         loop {
             match (self_iter.next(), other_iter.next()) {
                 (Some(s1), Some(s2)) => {
@@ -173,24 +170,29 @@ impl Eq for CustomBuild {}
 
 impl Ord for CustomBuild {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        debug_assert!(!self.build_steps.iter().any(BuildStep::is_delete));
-        debug_assert!(!other.build_steps.iter().any(BuildStep::is_delete));
-
         let basis = self.basis.cmp(&other.basis);
-        let steps_len = self.build_steps.len().cmp(&other.build_steps.len());
 
-        // see comment in eq implementation above.
-        let zipped_steps = izip!(&self.build_steps, &other.build_steps);
-        let steps = zipped_steps.fold(std::cmp::Ordering::Equal, |acc, (s1, s2)| {
-            acc.then_with(|| {
-                if s1.is_vertex() && s2.is_vertex() {
-                    return std::cmp::Ordering::Equal;
-                }
-                s1.cmp(s2)
-            })
-        });
+        let mut self_iter = filter_ord_deciding(&self.build_steps);
+        let mut other_iter = filter_ord_deciding(&other.build_steps);
+        let steps = loop {
+            match (self_iter.next(), other_iter.next()) {
+                (Some(s1), Some(s2)) => {
+                    // see comment in eq implementation above.
+                    if s1.is_vertex() && s2.is_vertex() {
+                        continue;
+                    }
+                    let cmp_s12 = s1.cmp(s2);
+                    if cmp_s12.is_ne() {
+                        break cmp_s12;
+                    }
+                },
+                (Some(_), None) => break std::cmp::Ordering::Greater,
+                (None, Some(_)) => break std::cmp::Ordering::Less,
+                (None, None) => break std::cmp::Ordering::Equal,
+            }
+        };
 
-        basis.then(steps_len).then(steps)
+        basis.then(steps)
     }
 }
 impl PartialOrd for CustomBuild {
