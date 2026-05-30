@@ -159,8 +159,7 @@ impl Map {
     }
 
     /// if self currently has shape [`Shape::Custom`], this function handles input to add vertices or edges
-    /// via mouse clicking.
-    /// returns whether a change to self was made.
+    /// via mouse clicking (and other things). returns whether a change to self was made.
     fn modify_custom_graph(
         &mut self,
         ui: &mut Ui,
@@ -309,6 +308,7 @@ impl Map {
         let mut new_data = old_data.clone();
         new_data.build_steps.push(new_step);
         new_data.combine_move_operations_naive();
+        new_data.future_build_steps.clear();
         new_data.build_steps_string = new_data.print_build_steps(false);
         let new_shape = Shape::Custom(new_data);
         self.recompute(new_shape);
@@ -429,6 +429,7 @@ impl Map {
                             // important: keep basis.
                             c.build_steps.clear();
                             c.build_steps_string.clear();
+                            c.future_build_steps.clear();
                             c.name = shape::CustomBuild::create_new_name();
                         }
                         ui.add_space(5.0);
