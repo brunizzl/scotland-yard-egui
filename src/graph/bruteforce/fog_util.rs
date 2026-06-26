@@ -84,20 +84,24 @@ impl Fog {
         }
     }
 
-    pub fn as_slice(&self) -> &bitvec::slice::BitSlice {
+    /// note: us with caution, as we don't know the number of vertices.
+    /// the returned value is thus almost always too long.
+    fn as_slice(&self) -> &bitvec::slice::BitSlice {
         match self {
             Self::Smol(data) => bitvec::slice::BitSlice::from_element(data),
             Self::Big(data) => data.as_bitslice(),
         }
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut bitvec::slice::BitSlice {
-        match self {
+    pub fn as_mut_slice(&mut self, nr_vertices: usize) -> &mut bitvec::slice::BitSlice {
+        let raw = match self {
             Self::Smol(data) => bitvec::slice::BitSlice::from_element_mut(data),
             Self::Big(data) => data.as_mut_bitslice(),
-        }
+        };
+        &mut raw[..nr_vertices]
     }
 
+    /// note that this will usually contain more bits than number of vertices
     pub fn as_raw_mut_slice(&mut self) -> &mut [usize] {
         match self {
             Self::Smol(data) => std::slice::from_mut(data),
@@ -105,6 +109,7 @@ impl Fog {
         }
     }
 
+    /// note that this will usually contain more bits than number of vertices
     pub fn as_raw_slice(&self) -> &[usize] {
         match self {
             Self::Smol(data) => std::slice::from_ref(data),
@@ -112,7 +117,7 @@ impl Fog {
         }
     }
 
-    pub fn clear(&mut self) {
+    pub fn set_cleared(&mut self) {
         self.as_raw_mut_slice().fill(0);
     }
 
@@ -130,7 +135,7 @@ impl Fog {
     /// [`std::cmp::Ordering::Less`] if self is a subset of other and
     /// [`std::cmp::Ordering::Greater`] if self is a suberset of other.
     /// should none of these cases hold, [`None`] is returned.
-    fn subset_ord(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    pub fn subset_ord(&self, other: &Self) -> Option<std::cmp::Ordering> {
         use std::cmp::Ordering::{Equal, Greater, Less};
         let smol_ord = |a: usize, b: usize| {
             if a == b {

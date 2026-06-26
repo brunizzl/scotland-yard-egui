@@ -661,14 +661,14 @@ mod test {
 
     /// produces same result as [`cop_number`], but uses [`compute_cop_strategy`]
     /// instead of [`compute_safe_robber_positions`] to get there.
-    fn cop_number_cop_strat(rules: impl Rules + Clone, g: Embedding3D) -> Option<usize> {
+    fn cop_number_cop_strat(rules: impl Rules + Clone, g: &Embedding3D) -> Option<usize> {
         let mut nr = 1;
         let sym = g.sym_group().to_explicit();
         let (_, manager) = thread_manager::build_managers();
         loop {
-            let cops_strat =
-                compute_cop_strategy(rules.clone(), nr, g.edges().clone(), sym.clone(), &manager)
-                    .ok()?;
+            let rs = rules.clone();
+            let es = g.edges().clone();
+            let cops_strat = compute_cop_strategy(rs, nr, es, sym.clone(), &manager).ok()?;
             if cops_strat.cops_win {
                 return Some(nr);
             }
@@ -690,7 +690,9 @@ mod test {
             )
             .ok()?;
             if let Outcome::CopsWin = robber_strat {
-                assert_eq!(cop_number_cop_strat(rules, g), Some(nr));
+                let p = energy_bf::EnergyParams::STANDARD_GAME;
+                assert_eq!(energy_bf::cop_number(rules.clone(), p, &g), Some(nr));
+                assert_eq!(cop_number_cop_strat(rules.clone(), &g), Some(nr));
                 return Some(nr);
             }
             nr += 1;
