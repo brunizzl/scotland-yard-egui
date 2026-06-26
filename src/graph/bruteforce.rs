@@ -15,11 +15,15 @@ use queues::{CopStratQueue, RobberStratQueue};
 mod rules;
 pub use rules::*;
 
+mod fog_util;
+
 mod fog_bf;
 pub use fog_bf::*;
 
 mod standard_bf;
 pub use standard_bf::*;
+
+mod energy_bf;
 
 /// maximum number of cops for which a bruteforce computation can be started.
 /// is not too detrimental, that this number is small,
@@ -348,7 +352,7 @@ impl CopConfigurations {
 
 /// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
 /// wether that vertex is safe for the robber to stand on or not.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct SafeRobberPositions {
     safe: BTreeMap<usize, bv::BitVec<u32>>,
     nr_map_vertices: usize,
@@ -384,7 +388,7 @@ impl SafeRobberPositions {
 
             let vec_data_len = nr_entries.div_ceil(32);
             let mut bit_vec_data = Vec::<u32>::new();
-            bit_vec_data.try_reserve(vec_data_len).ok()?;
+            bit_vec_data.try_reserve_exact(vec_data_len).ok()?;
             bit_vec_data.resize(vec_data_len, u32::MAX);
 
             let alloced_safe_data = bv::BitVec::try_from_vec(bit_vec_data).ok()?;
@@ -393,6 +397,27 @@ impl SafeRobberPositions {
         }
 
         Some(Self { safe, nr_map_vertices })
+    }
+
+    /// clones self, except because these values can be absurdly large,
+    /// we take caution to not crash the program on allocation failure.
+    fn try_clone(&self) -> Option<Self> {
+        let mut safe = BTreeMap::new();
+        let nr_map_vertices = self.nr_map_vertices;
+        for (&fst_index, safe_data) in &self.safe {
+            let raw_old_data = safe_data.as_raw_slice();
+            let mut raw_new_data = Vec::new();
+            raw_new_data.try_reserve_exact(raw_old_data.len()).ok()?;
+            raw_new_data.resize(raw_old_data.len(), 0);
+            raw_new_data.clone_from_slice(raw_old_data);
+
+            let new_data = bv::BitVec::try_from_vec(raw_new_data).ok()?;
+            let old = safe.insert(fst_index, new_data);
+            debug_assert!(old.is_none());
+        }
+        let new = Self { safe, nr_map_vertices };
+        debug_assert!(&new == self);
+        Some(new)
     }
 
     pub fn nr_map_vertices(&self) -> usize {
