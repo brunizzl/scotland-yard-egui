@@ -1611,11 +1611,16 @@ impl Info {
             VertexColorInfo::BruteForceEnergyRes => {
                 if let Some(data) = &self.worker.curr_energy_strat()
                     && let Some(cops) = self.characters.raw_cops()
+                    && let Some(robber) = self.characters.active_robber()
                 {
+                    let energy_per_step = self.characters.robber_energy_params.energy_per_step;
                     let robber_energy = self.characters.current_robber_energy(10000);
                     let safe_vertices = data.safe_vertex_energies(cops);
-                    for (required_bank, util) in izip!(safe_vertices, utils_iter) {
-                        draw_if!(required_bank <= robber_energy, util);
+                    let dists = robber.dists();
+                    for (required_bank, &dist, util) in izip!(safe_vertices, dists, utils_iter) {
+                        let route_cost = dist as usize * energy_per_step;
+                        let bank_left = robber_energy.checked_sub(route_cost);
+                        draw_if!(Some(required_bank) <= bank_left, util);
                     }
                 }
             },

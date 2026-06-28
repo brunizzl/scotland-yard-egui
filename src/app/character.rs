@@ -1081,7 +1081,7 @@ impl State {
                         nächste Runde übertragen werden kann.",
                     );
 
-                if self.robber_energy_params == bf::EnergyParams::STANDARD_GAME {
+                if self.robber_energy_params != bf::EnergyParams::STANDARD_GAME {
                     self.use_energy = true;
                 }
             }
@@ -1198,6 +1198,10 @@ impl State {
                 ui.label(format!("Rundenindex: {round_index}"))
                     .on_hover_text("Anzahl von Copzügen direkt nach Räuberzügen");
             }
+            ui.label(format!(
+                "Räuberenergie: {}",
+                self.current_robber_energy(1000)
+            ));
 
             ui.add_space(8.0);
             if ui.button(" 🗑 ").on_hover_text("Spiel vergessen").clicked() {
@@ -1452,7 +1456,7 @@ impl State {
         let mut bank = initial_bank;
         let mut who_moved = self.who_moved().peekable();
         loop {
-            bank = usize::max(bank, params.bank_capacity);
+            bank = usize::min(bank, params.bank_capacity);
             while who_moved.peek().is_some_and(|id| !id.is_robber()) {
                 who_moved.next();
             }

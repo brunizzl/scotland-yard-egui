@@ -8,21 +8,6 @@ use super::*;
 // turns out the fog spreading logic is the same as the robber-can-many-edges-at-once logic. who would have thought?
 use super::fog_util as fog;
 
-pub type EnergyRatio = num::rational::Ratio<usize>;
-
-/// returns two rational numbers with same ratios but shared denominator.
-fn to_common_denom(x: EnergyRatio, y: EnergyRatio) -> (EnergyRatio, EnergyRatio) {
-    let (x_numer, x_denom) = x.reduced().into_raw();
-    let (y_numer, y_denom) = y.reduced().into_raw();
-    let common_denom = num::integer::lcm(x_denom, y_denom);
-    let new_x = EnergyRatio::new_raw(x_numer * common_denom / x_denom, common_denom);
-    let new_y = EnergyRatio::new_raw(y_numer * common_denom / y_denom, common_denom);
-    debug_assert_eq!(new_x, x);
-    debug_assert_eq!(new_y, y);
-    debug_assert_eq!(new_x.denom(), x.denom());
-    (new_x, new_y)
-}
-
 /// to the outside we handle energy as a ratio, where one unit is used up when the robber walks one edge.
 /// internally, the bank capacity and the allowance are brought to the same denominator.
 /// it is thus easier to say a step takes *denominator* much energy and every energy value becoming an integer.
@@ -55,34 +40,6 @@ impl EnergyParams {
         } else {
             format!("a = {a}/{d}, b = {b}/{d}")
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn from_ratios(
-        raw_allowance: EnergyRatio,
-        raw_bank_capacity: EnergyRatio,
-    ) -> Result<Self, String> {
-        if raw_allowance.denom() == &0 {
-            return Err(format!("allowance ist NaN: {raw_allowance}"));
-        }
-        if raw_bank_capacity.denom() == &0 {
-            return Err(format!("bank capacity ist NaN: {raw_bank_capacity}"));
-        }
-        if raw_allowance < EnergyRatio::ONE {
-            return Err(format!(
-                "allowance muss mindestens 1 sein, ist aber {raw_allowance}."
-            ));
-        }
-
-        let (a, b) = to_common_denom(raw_allowance, raw_bank_capacity);
-        let allowance = *a.numer();
-        let bank_capacity = *b.numer();
-        let energy_per_step = *a.denom();
-        Ok(Self {
-            energy_per_step,
-            allowance,
-            bank_capacity,
-        })
     }
 }
 
@@ -361,9 +318,11 @@ mod test {
 
             // happy case: robber wins
             {
-                let sufficient_allowance = EnergyRatio::new_raw(n + 1, n);
-                let bank = EnergyRatio::new_raw(n - 1, n);
-                let win_params = EnergyParams::from_ratios(sufficient_allowance, bank).unwrap();
+                let win_params = EnergyParams {
+                    energy_per_step: n,
+                    allowance: n + 1,
+                    bank_capacity: n - 1,
+                };
                 let edges = map.edges().clone();
                 let win_outcome =
                     compute_robber_energy_strat(rules, win_params, 1, edges, sym, &manager);
@@ -371,10 +330,10 @@ mod test {
             }
 
             // sad case: robber loses
-            if false {
-                let insufficient_allowance = EnergyRatio::new_raw(n + 2, n + 1);
-                let bank = EnergyRatio::new_raw(n, n + 1);
-                let lose_params = EnergyParams::from_ratios(insufficient_allowance, bank).unwrap();
+            // note that the graph in question sometimes still allows for quite some interesting
+            // robber strategies if the allowance is just slightly above 1 but still below 1 + 1/n.
+            {
+                let lose_params = EnergyParams::STANDARD_GAME;
                 let edges = map.edges().clone();
                 let lose_outcome =
                     compute_robber_energy_strat(rules, lose_params, 1, edges, sym, &manager);
