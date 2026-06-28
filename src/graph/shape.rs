@@ -492,7 +492,7 @@ impl Shape {
             },
             Self::Custom(c) => {
                 let basis = c.basis.to_sting();
-                let steps = c.print_build_steps(true);
+                let steps = c.print_name();
                 format!("Extended-{basis}-{steps}")
             },
         }

@@ -55,6 +55,11 @@ impl DrawContext<'_> {
     }
 }
 
+struct DragValResponse {
+    changed: bool,
+    name_label: egui::Response,
+}
+
 /// returns if val was changed.
 /// step is a multiplier for floats and is added / subtracted for ints.
 /// thus for floats, step is expected to be of form `1.0 + delta` for small growth rates
@@ -64,7 +69,7 @@ fn add_drag_value<T, U>(
     name: &str,
     range: std::ops::RangeInclusive<T>,
     step: U,
-) -> bool
+) -> DragValResponse
 where
     T: egui::emath::Numeric,
     U: Into<f64>,
@@ -89,8 +94,11 @@ where
                 f_val * step
             });
         }
-        ui.label(name);
-        prev != *val
+        let name_label = ui.label(name);
+        DragValResponse {
+            changed: prev != *val,
+            name_label,
+        }
     })
     .inner
 }

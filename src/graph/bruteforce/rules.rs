@@ -223,6 +223,30 @@ impl DynRules {
         }
     }
 
+    pub fn compute_safe_robber_energy_positions<S: SymmetryGroup + Serialize>(
+        self,
+        params: EnergyParams,
+        nr_cops: usize,
+        edges: EdgeList,
+        sym: S,
+        manager: &thread_manager::LocalManager,
+    ) -> Result<EnergyRobberStrat, String> {
+        match self {
+            Self::Lazy => {
+                let rs = LazyCops;
+                compute_robber_energy_strat(rs, params, nr_cops, edges, sym, manager)
+            },
+            Self::Eager => {
+                let rs = GeneralEagerCops(nr_cops as u32);
+                compute_robber_energy_strat(rs, params, nr_cops, edges, sym, manager)
+            },
+            Self::GeneralEagerCops(n) => {
+                let rs = GeneralEagerCops(n);
+                compute_robber_energy_strat(rs, params, nr_cops, edges, sym, manager)
+            },
+        }
+    }
+
     pub fn compute_any_fog_strategy(
         self,
         nr_cleaners: usize,

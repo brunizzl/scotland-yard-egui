@@ -129,8 +129,8 @@ impl Embedding3D {
         &self.edges
     }
 
-    pub fn into_edges(self) -> EdgeList {
-        self.edges
+    pub fn into_parts(self) -> (EdgeList, SymGroup) {
+        (self.edges, self.sym_group)
     }
 
     pub fn nr_vertices(&self) -> usize {

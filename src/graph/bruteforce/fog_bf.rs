@@ -467,7 +467,7 @@ mod test {
         }
 
         use crate::graph::{planar3d::Embedding3D, shape::Shape};
-        let from_shape = |shape, res| Embedding3D::new_map_from(&shape, res).into_edges();
+        let from_shape = |shape, res| Embedding3D::new_map_from(&shape, res).into_parts().0;
         assert_eq!(cleaning_number(from_shape(Shape::TriangGrid, 4), 1), Ok(1));
         // one cleaner guards a fixed edge, the other cleaners walk the six remaining vertices in parallel.
         assert_eq!(cleaning_number(from_shape(Shape::Cube, 0), 0), Ok(3));

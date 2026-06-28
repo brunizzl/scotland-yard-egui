@@ -24,6 +24,7 @@ mod standard_bf;
 pub use standard_bf::*;
 
 mod energy_bf;
+pub use energy_bf::*;
 
 /// maximum number of cops for which a bruteforce computation can be started.
 /// is not too detrimental, that this number is small,

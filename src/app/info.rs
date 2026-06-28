@@ -39,6 +39,7 @@ pub enum VertexColorInfo {
     Escape3Grid,
     Escape23Grid,
     BruteForceRes,
+    BruteForceEnergyRes,
     MinCopDist,
     MaxCopDist,
     AnyCopDist,
@@ -87,6 +88,10 @@ impl VertexColorInfo {
             dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
             aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
             die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.",
+            BruteForceEnergyRes => "Wenn Bruteforce Berechnung (mit Energie) ergeben hat, \
+            dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
+            aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
+            die dem Räuber für die gegebenen Coppositionen und mit seiner aktuellen Energie einen Sieg ermöglichen.",
             MinCopDist | MaxCopDist | AnyCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
             RobberDist => "Alle Punkte die eingestellten Abstand zu Räuber haben",
             RobberCone => "Kegel beginnend an Räuber in eingestellten Richtungen",
@@ -127,6 +132,7 @@ impl VertexColorInfo {
             Escape3Grid => "Winning Dilemma (Gitter)",
             Escape23Grid => "Winning Cones + Dilemma (Gitter)",
             BruteForceRes => "Bruteforce Räuberstrategie",
+            BruteForceEnergyRes => "Bruteforce Energie Strategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
             AnyCopDist => "jeder Cop Abstand",
@@ -182,6 +188,7 @@ pub enum VertexSymbolInfo {
     RobberDist,
     VertexEquivalenceClass,
     BruteforceCopMoves,
+    BruteforceRobberEnergy,
     Debugging,
 }
 
@@ -194,7 +201,7 @@ impl VertexSymbolInfo {
             RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
             Escape2 => {
                 "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
-            Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann."
+                Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann."
             },
             Escape2Grid => "alle Richtungen, in die der Räuber fliehen kann.",
             EscapeConeGrid => "jede Richtung, die in einem Fluchtkegel enthalten ist als Pfeil.",
@@ -204,16 +211,20 @@ impl VertexSymbolInfo {
             MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",
             VertexEquivalenceClass => {
                 "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
-            Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
-            Das macht Bruteforce etwas weniger speicherintensiv."
+                Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
+                Das macht Bruteforce etwas weniger speicherintensiv."
             },
             RobberDist => "Abstand von Räuberposition zu jedem Knoten",
             BruteforceCopMoves => {
                 "Wenn Cops optimal ziehen, lebt Räuber noch maximal so viele Züge"
             },
+            BruteforceRobberEnergy => {
+                "Räuber hat eine Gewinnstrategie wenn er nach einem Zug auf einem Knoten mit Zahl steht \
+                und er dann noch mindestens so viel Energie wie die Zahl an seiner Position gespeichert hat."
+            },
             Debugging => {
                 "Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
-            gerade spannend zum debuggen war"
+                gerade spannend zum debuggen war"
             },
         }
     }
@@ -234,6 +245,7 @@ impl VertexSymbolInfo {
             VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
             RobberDist => "Räuberabstand",
             BruteforceCopMoves => "Bruteforce Cop Züge",
+            BruteforceRobberEnergy => "Bruteforce Räuber Energie",
             Debugging => "Debugging",
         }
     }
@@ -791,11 +803,14 @@ impl Info {
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
         let fog_sol = {
-            let nr_cops = self.characters.active_cops().count();
             let vis = &mut self.options.fog_clearing_dist;
             let speed = &mut self.options.fog_speed;
-            let rules = self.characters.rules();
-            self.worker.draw_menu(nr_cops, rules, ui, map, vis, speed)
+            let game_type = self.characters.game_type(map);
+            let energy_params = self
+                .characters
+                .use_energy
+                .then_some(self.characters.robber_energy_params);
+            self.worker.draw_menu(game_type, energy_params, ui, vis, speed)
         };
         if let Some(sol) = fog_sol {
             self.characters.load_fog_cleaning_sequence(map, sol);
@@ -1261,12 +1276,11 @@ impl Info {
                     .continue_move_pattern(con.edges, con.positions, &mut self.queue);
                 change = true;
             }
-            if info.modifiers.ctrl && info.key_pressed(Key::O) && drag_active {
-                let game_type = self.characters.game_type(con);
-                if let Some(strat) = self.worker.strats_for(&game_type) {
-                    self.characters.make_optimal_move(strat, con, &mut self.queue);
-                    change = true;
-                }
+            if (info.modifiers.ctrl && info.key_pressed(Key::O) && drag_active)
+                && let Some(strat) = self.worker.curr_police_strat()
+            {
+                self.characters.make_optimal_move(strat, con, &mut self.queue);
+                change = true;
             }
 
             let pointer_pos = info.pointer.latest_pos()?;
@@ -1585,11 +1599,23 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
-                let game_type = self.characters.game_type(con);
-                if let Some(bf::Outcome::RobberWins(data)) = &self.worker.result_for(&game_type) {
-                    let safe_vertices = data.safe_vertices(self.characters.raw_cops());
+                if let Some(bf::Outcome::RobberWins(data)) = &self.worker.curr_robber_strat()
+                    && let Some(cops) = self.characters.raw_cops()
+                {
+                    let safe_vertices = data.safe_vertices(cops);
                     for (safe, util) in izip!(safe_vertices, utils_iter) {
                         draw_if!(safe, util);
+                    }
+                }
+            },
+            VertexColorInfo::BruteForceEnergyRes => {
+                if let Some(data) = &self.worker.curr_energy_strat()
+                    && let Some(cops) = self.characters.raw_cops()
+                {
+                    let robber_energy = self.characters.current_robber_energy(10000);
+                    let safe_vertices = data.safe_vertex_energies(cops);
+                    for (required_bank, util) in izip!(safe_vertices, utils_iter) {
+                        draw_if!(required_bank <= robber_energy, util);
                     }
                 }
             },
@@ -1622,22 +1648,23 @@ impl Info {
                 }
             },
             VertexColorInfo::CopsRotatedToEquivalence => {
-                let mut active_cops = self.characters.raw_cops();
-                let rotated = con.sym_group().to_representative(&mut active_cops);
-                for &v in &rotated[..] {
-                    self.currently_marked[v] = true;
-                    let pos = con.positions[v];
-                    if con.visible[v] {
-                        draw_circle_at(pos, self.options.automatic_marker_style.colors[0]);
-                    } else {
-                        //only draw half size
-                        let draw_pos = con.cam().transform(pos);
-                        let marker_circle = egui::Shape::circle_filled(
-                            draw_pos,
-                            con.scale * 3.0,
-                            self.options.automatic_marker_style.colors[0],
-                        );
-                        con.painter.add(marker_circle);
+                if let Some(mut cops) = self.characters.raw_cops() {
+                    let rotated = con.sym_group().to_representative(&mut cops);
+                    for &v in &rotated[..] {
+                        self.currently_marked[v] = true;
+                        let pos = con.positions[v];
+                        if con.visible[v] {
+                            draw_circle_at(pos, self.options.automatic_marker_style.colors[0]);
+                        } else {
+                            //only draw half size
+                            let draw_pos = con.cam().transform(pos);
+                            let marker_circle = egui::Shape::circle_filled(
+                                draw_pos,
+                                con.scale * 3.0,
+                                self.options.automatic_marker_style.colors[0],
+                            );
+                            con.painter.add(marker_circle);
+                        }
                     }
                 }
             },
@@ -1833,10 +1860,19 @@ impl Info {
                 draw!(0..);
             },
             VertexSymbolInfo::BruteforceCopMoves => {
-                let game_type = self.characters.game_type(con);
-                if let Some(strat) = self.worker.strats_for(&game_type) {
+                if let Some(strat) = self.worker.curr_police_strat()
+                    && let Some(cops) = self.characters.raw_cops()
+                {
                     let show = |&m: &_| m != bf::UTime::MAX;
-                    draw!(strat.times_for(self.characters.raw_cops()), show);
+                    draw!(strat.times_for(cops), show);
+                }
+            },
+            VertexSymbolInfo::BruteforceRobberEnergy => {
+                if let Some(strat) = self.worker.curr_energy_strat()
+                    && let Some(cops) = self.characters.raw_cops()
+                {
+                    let show = |&m: &_| m != usize::MAX;
+                    draw!(strat.safe_vertex_energies(cops), show);
                 }
             },
             VertexSymbolInfo::Debugging => {
@@ -1923,8 +1959,7 @@ impl Info {
         if !self.options.show_cop_strat {
             return;
         }
-        let game_type = self.characters.game_type(con);
-        let Some(strat) = self.worker.strats_for(&game_type) else {
+        let Some(strat) = self.worker.curr_police_strat() else {
             return;
         };
         let Some((best_cop_moves, cops_rs)) = self.characters.best_cop_moves(strat, con) else {

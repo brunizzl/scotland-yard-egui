@@ -441,6 +441,10 @@ pub struct State {
 
     #[serde(skip)]
     pub rules: bf::DynRules,
+    #[serde(skip)]
+    pub robber_energy_params: bf::EnergyParams,
+    #[serde(skip)]
+    pub use_energy: bool,
 }
 
 impl State {
@@ -474,6 +478,8 @@ impl State {
             cop_changed: false,
 
             rules: bf::DynRules::Lazy,
+            robber_energy_params: bf::EnergyParams::STANDARD_GAME,
+            use_energy: false,
         }
     }
 
@@ -759,7 +765,7 @@ impl State {
         let (character_index, next_v) = match current_turn {
             Id::Robber => {
                 let robber_v = self.active_robber().map(Character::vertex)?;
-                let ttl = strat.times_for(self.raw_cops()).collect_vec();
+                let ttl = strat.times_for(self.raw_cops()?).collect_vec();
                 let max_time_to_live = |v, n| if ttl[n] > ttl[v] { n } else { v };
                 let robber_neighs = con.edges.neighbors_of(robber_v);
                 // it may be optimal for the robber to do nothing -> start with robber_v.
@@ -1025,7 +1031,7 @@ impl State {
         );
 
         let mut change = false;
-        ui.collapsing("Figuren / Züge", |ui| {
+        ui.collapsing("Regeln / Figuren / Züge", |ui| {
             ui.horizontal(|ui| {
                 let mut rules = self.rules;
                 ui.radio_value(&mut rules, bf::DynRules::Lazy, "Lazy")
@@ -1047,6 +1053,39 @@ impl State {
                 }
                 self.rules = rules;
             });
+
+            ui.add(egui::Checkbox::new(&mut self.use_energy, "mit Energie"));
+            {
+                if !self.use_energy {
+                    self.robber_energy_params = bf::EnergyParams::STANDARD_GAME;
+                }
+
+                let bf::EnergyParams {
+                    energy_per_step,
+                    allowance,
+                    bank_capacity,
+                } = &mut self.robber_energy_params;
+                crate::app::add_drag_value(ui, energy_per_step, "Verbrauch", 1..=100, 1)
+                    .name_label
+                    .on_hover_text("Energiebedarf pro Schritt");
+                crate::app::add_drag_value(ui, allowance, "Einkommen (a)", 1..=100, 1)
+                    .name_label
+                    .on_hover_text(
+                        "Jede Runde bekommt der Räuber so viel Energie zu \
+                        seinem Ersparten dazu.",
+                    );
+                crate::app::add_drag_value(ui, bank_capacity, "max. Kapazität (b)", 0..=100, 1)
+                    .name_label
+                    .on_hover_text(
+                        "Maximum der ungenutzten Energie, die in die \
+                        nächste Runde übertragen werden kann.",
+                    );
+
+                if self.robber_energy_params == bf::EnergyParams::STANDARD_GAME {
+                    self.use_energy = true;
+                }
+            }
+            ui.add_space(8.0);
 
             ui.horizontal(|ui| {
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
@@ -1149,12 +1188,16 @@ impl State {
             print_move("vorletzter Zug", self.snd_last_moved());
             print_move("letzter Zug      ", self.last_moved());
             print_move("nächster Zug  ", self.next_moved());
-            ui.label(format!(
-                "Rundenindex: {}",
-                self.active_robber()
-                    .map_or(0, |r| r.past_vertices().len().saturating_sub(1))
-            ))
-            .on_hover_text("Anzahl von Räuberzügen (inklusive auf der Stelle)");
+            {
+                // this assumes that at least one cop does the "move in place" action if
+                // the cops choose to end their turn and that the robber does the same.
+                // the round ends are then the times a cop moves directly after the robber.
+                let robber_moved = self.who_moved().map(Id::is_robber);
+                let round_end = |&x: &(bool, bool)| matches!(x, (true, false));
+                let round_index = robber_moved.tuple_windows().filter(round_end).count();
+                ui.label(format!("Rundenindex: {round_index}"))
+                    .on_hover_text("Anzahl von Copzügen direkt nach Räuberzügen");
+            }
 
             ui.add_space(8.0);
             if ui.button(" 🗑 ").on_hover_text("Spiel vergessen").clicked() {
@@ -1355,20 +1398,21 @@ impl State {
 
     /// will only return the true number of active cops, if this is not more than [`bf::MAX_COPS`].
     /// this should not be detremental, because the [`GameType`] is (currently) only relevant in a bruteforce setting.
-    pub fn game_type(&self, con: &DrawContext<'_>) -> GameType {
+    pub fn game_type(&self, map: &crate::app::map::Map) -> GameType {
         GameType {
             nr_cops: self.active_cops().count().min(bf::MAX_COPS),
-            resolution: con.map.resolution(),
-            shape: con.map.shape().clone(),
+            resolution: map.resolution(),
+            shape: map.shape().clone(),
             rules: self.rules,
         }
     }
 
     /// returns the currently closest vertex of every avtive cop.
     /// note: this means the vertex changes while a cop is dragged, not only when a cop is released.
-    pub fn raw_cops(&self) -> bf::RawCops {
+    pub fn raw_cops(&self) -> Option<bf::RawCops> {
         let cops = self.active_cops().map(Character::vertex).take(bf::MAX_COPS);
-        bf::RawCops::from_iter(cops)
+        let result = bf::RawCops::from_iter(cops);
+        (!result.is_empty()).then_some(result)
     }
 
     /// if either no active piece was moved so far or if the next move should be made by a cop piece,
@@ -1392,5 +1436,37 @@ impl State {
             })
             .take(bf::MAX_COPS);
         Some(bf::RawCops::from_iter(cops_round_start))
+    }
+
+    /// maps each entry in [`Self::past_moves`] to the [`Id`] of the character that did this move
+    fn who_moved(&self) -> impl Iterator<Item = Id> {
+        self.past_moves.iter().map(|(i, _)| self.characters[*i].id)
+    }
+
+    /// this function assumes two things:
+    /// first, whenever a piece is not moving in a round, it must "move in place".
+    /// second, a robber move along multiple edges is split into one step per edge.
+    /// returned is the energy the robber has in his bank in the current situation.
+    pub fn current_robber_energy(&self, initial_bank: usize) -> usize {
+        let params = self.robber_energy_params;
+        let mut bank = initial_bank;
+        let mut who_moved = self.who_moved().peekable();
+        loop {
+            bank = usize::max(bank, params.bank_capacity);
+            while who_moved.peek().is_some_and(|id| !id.is_robber()) {
+                who_moved.next();
+            }
+            let mut nr_robber_steps = 0;
+            while who_moved.peek().is_some_and(|id| id.is_robber()) {
+                nr_robber_steps += 1;
+                who_moved.next();
+            }
+
+            bank += params.allowance;
+            bank = bank.saturating_sub(nr_robber_steps * params.energy_per_step);
+            if who_moved.peek().is_none() {
+                return bank;
+            }
+        }
     }
 }

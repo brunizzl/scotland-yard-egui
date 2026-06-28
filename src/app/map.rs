@@ -448,7 +448,7 @@ impl Map {
             ui.add_space(8.0);
             let min = curr_shape.min_res();
             let max = curr_shape.max_res();
-            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", min..=max, 1);
+            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", min..=max, 1).changed;
             if change {
                 let new_shape = std::mem::replace(curr_shape, old_shape);
                 self.recompute(new_shape);

@@ -598,7 +598,7 @@ fn verify_continuity_cops(
 
     let nr_map_vertices = data.cop_moves.nr_map_vertices();
     let mut max_rounds_left_cops_to_neigh = vec![UTime::MAX; nr_map_vertices];
-    let mut robber_rounds_decrease = vec![false; nr_map_vertices];
+    let mut found_move = vec![false; nr_map_vertices];
     for cops_index in data.cop_moves.all_positions() {
         let cops = data.cop_moves.eager_unpack(cops_index);
         // logging things
@@ -610,7 +610,11 @@ fn verify_continuity_cops(
             time_until_log_refresh = log_refresh_interval;
         }
 
-        robber_rounds_decrease.fill(false);
+        found_move.fill(false);
+        for &c in cops.iter() {
+            // if a cop has already caught the robber, we already won.
+            found_move[c] = true;
+        }
         for cops_neigh in rules.raw_cop_moves_from(edges, cops) {
             max_rounds_left_cops_to_neigh.fill(0);
             for (v, robber_neighs, cop_neigh_time) in
@@ -637,13 +641,13 @@ fn verify_continuity_cops(
                 // assuming police state `cops` occurs before police state `cops_neigh`,
                 // the moves to `cops_neigh` is actually optimal for the police.
                 if curr_rounds_left.saturating_sub(1) == robber_neigh_max {
-                    robber_rounds_decrease[v] = true;
+                    found_move[v] = true;
                 }
             }
         }
 
         if data.cops_win
-            && let Some(v) = robber_rounds_decrease.iter().position(|&x| !x)
+            && let Some(v) = found_move.iter().position(|&x| !x)
         {
             return Err(format!(
                 "Copstrategie hat keinen Zug für Räuber auf {v}, Cops auf {cops:?}."
