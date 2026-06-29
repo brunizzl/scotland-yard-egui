@@ -6,6 +6,7 @@
 use std::collections::{BinaryHeap, TryReserveError, VecDeque};
 
 use itertools::{Itertools, izip};
+use serde::{Deserialize, Serialize};
 
 use crate::graph::EdgeList;
 
@@ -13,7 +14,7 @@ use super::RawCops as RawCleaners;
 use super::fog_util::*;
 use super::{CopRules, MAX_COPS, thread_manager};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FogParams {
     pub visibility: usize,
     pub fog_speed: isize,

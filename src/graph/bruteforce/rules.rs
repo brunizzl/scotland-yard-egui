@@ -1,5 +1,7 @@
 use super::*;
 
+use serde::{Deserialize, Serialize};
+
 /// specifies which positions the police can reach within a single turn.
 /// (perhaps todo: also extend this to enable more flexible robber behavior)
 /// (perhaps todo: also extend this to enable more flexible winning conditions)
@@ -313,7 +315,7 @@ impl DynCopRules {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum DynRobberRules {
     #[default]
     Normal,

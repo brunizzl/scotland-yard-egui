@@ -439,13 +439,13 @@ pub struct State {
     #[serde(skip)]
     pub cop_changed: bool,
 
-    #[serde(skip)]
-    pub cop_rules: bf::DynCopRules,
-    #[serde(skip)]
+    #[serde(default)]
+    cop_rules: bf::DynCopRules,
+    #[serde(default)]
     robber_fog_params: bf::FogParams,
-    #[serde(skip)]
+    #[serde(default)]
     robber_energy_params: bf::EnergyParams,
-    #[serde(skip)]
+    #[serde(default)]
     robber_rules: bf::DynRobberRules,
 }
 

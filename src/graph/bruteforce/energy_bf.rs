@@ -4,6 +4,8 @@
 //!
 //! the cop movement rules are decided by [`crate::graph::bruteforce::rules`]. the cops have no energy bank.
 
+use serde::{Deserialize, Serialize};
+
 use super::*;
 // turns out the fog spreading logic is the same as the robber-can-many-edges-at-once logic. who would have thought?
 use super::fog_util as fog;
@@ -11,7 +13,7 @@ use super::fog_util as fog;
 /// to the outside we handle energy as a ratio, where one unit is used up when the robber walks one edge.
 /// internally, the bank capacity and the allowance are brought to the same denominator.
 /// it is thus easier to say a step takes *denominator* much energy and every energy value becoming an integer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EnergyParams {
     /// internal unit scaling: this is the denominator [`Self::allowance`] and
     /// [`Self::bank_capacity`] are divided by when one step takes one unit of energy.
