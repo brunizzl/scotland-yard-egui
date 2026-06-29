@@ -243,16 +243,16 @@ impl BruteforceComputationState {
 
         match res.data {
             WorkResultData::Robber(data) => {
-                self.robber_strats.insert(game_type.clone(), data);
+                self.robber_strats.insert(game_type, data);
             },
             WorkResultData::Cops(data) => {
-                self.cop_strats.insert(game_type.clone(), data);
+                self.cop_strats.insert(game_type, data);
             },
             WorkResultData::Fog(sol) => {
-                self.fog_strats.insert(game_type.clone(), sol);
+                self.fog_strats.insert(game_type, sol);
             },
             WorkResultData::RobberWithEnergy(data) => {
-                self.robber_energy_stats.insert(game_type.clone(), data);
+                self.robber_energy_stats.insert(game_type, data);
             },
             WorkResultData::None => {},
         }
@@ -297,8 +297,15 @@ impl BruteforceComputationState {
                 Ok(ok) => {
                     self.process_result(worker.game_type, ok);
                 },
-                Err(_) => {
-                    let msg = "Thread hatte Panik :(".into();
+                Err(err) => {
+                    let payload = match err.downcast_ref::<&'static str>() {
+                        Some(s) => *s,
+                        None => match err.downcast_ref::<String>() {
+                            Some(s) => &s[..],
+                            None => "Box<dyn Any>",
+                        },
+                    };
+                    let msg = format!("Thread hatte Panik:\n{payload}");
                     self.errors.push((worker.game_type, msg));
                 },
             }

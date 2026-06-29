@@ -490,10 +490,6 @@ impl State {
         self.cop_rules
     }
 
-    pub fn robber_rules(&self) -> bf::DynRobberRules {
-        self.robber_rules
-    }
-
     pub fn fog_params(&self) -> bf::FogParams {
         if let bf::DynRobberRules::Fog(params) = self.robber_rules {
             debug_assert_eq!(params, self.robber_fog_params);
@@ -1079,17 +1075,22 @@ impl State {
             ui.label("Räuber:");
             ui.horizontal(|ui| {
                 let rules = &mut self.robber_rules;
-                ui.radio_value(rules, bf::DynRobberRules::Normal, "Normal").on_hover_text("Räuber kann jede Runde bis zu ein Schritt machen.");
+                ui.radio_value(rules, bf::DynRobberRules::Normal, "Normal")
+                    .on_hover_text("Räuber kann jede Runde bis zu einen Schritt machen.");
                 let fog_radio = ui.radio(matches!(rules, bf::DynRobberRules::Fog(_)), "Nebel");
                 if fog_radio.clicked() {
                     *rules = bf::DynRobberRules::Fog(self.robber_fog_params);
                 }
-                fog_radio.on_hover_text("Räuber macht jeden möglichen Zug auf ein Mal");
-                let energy_radio = ui.radio(matches!(rules, bf::DynRobberRules::Energy(_)), "Energie");
+                fog_radio.on_hover_text("Räuber macht alle möglichen Züge gleichzeitig");
+                let energy_radio =
+                    ui.radio(matches!(rules, bf::DynRobberRules::Energy(_)), "Energie");
                 if energy_radio.clicked() {
                     *rules = bf::DynRobberRules::Energy(self.robber_energy_params);
                 }
-                energy_radio.on_hover_text("Räuber kriegt jede Runde Energie und kann ggf. Energie für mehr Schritte in Zukunft sparen.");
+                energy_radio.on_hover_text(
+                    "Räuber kriegt jede Runde Energie und \
+                    kann ggf. Energie für mehr Schritte in Zukunft sparen.",
+                );
             });
 
             match &mut self.robber_rules {
@@ -1099,34 +1100,43 @@ impl State {
                     crate::app::add_disabled_drag_value(ui);
                 },
                 bf::DynRobberRules::Fog(params) => {
-                    ui.add(egui::Checkbox::new(&mut params.best_solution, "Beste Strategie"))
-                        .on_hover_text("Wenn aktiv: Bruteforce sucht die Strategie mit minimaler Rundenzahl.");
+                    let best = &mut params.best_solution;
+                    ui.add(egui::Checkbox::new(best, "Beste Strategie")).on_hover_text(
+                        "Wenn aktiv: Bruteforce sucht die Strategie mit minimaler Rundenzahl.",
+                    );
+
                     add_drag_value(ui, &mut params.visibility, "Sichtweite", 0..=1000, 1)
                         .name_label
-                        .on_hover_text("In bis zu welcher Entfernung können Cops Nebel entfernen?");
+                        .on_hover_text("Bis zu so weit können Cops Nebel entfernen");
+
                     add_drag_value(ui, &mut params.fog_speed, "Nebeltempo", 0..=1000, 1)
                         .name_label
-                        .on_hover_text("Wie viele Kanten kann sich Nebel in einer Runde weiterbewegen?");
+                        .on_hover_text("So weit kann Nebel sich in einer Runde ausbreiten.");
+
                     self.robber_fog_params = *params;
-                }
+                },
                 bf::DynRobberRules::Energy(params) => {
-                add_drag_value(ui, &mut params.energy_per_step, "Verbrauch", 1..=100, 1)
-                    .name_label
-                    .on_hover_text("Energiebedarf pro Schritt");
-                add_drag_value(ui, &mut params.allowance, "Einkommen (a)", 1..=100, 1)
-                    .name_label
-                    .on_hover_text(
-                        "Jede Runde bekommt der Räuber so viel Energie zu \
-                        seinem Ersparten dazu.",
-                    );
-                add_drag_value(ui, &mut params.bank_capacity, "max. Kapazität (b)", 0..=100, 1)
-                    .name_label
-                    .on_hover_text(
-                        "Maximum der ungenutzten Energie, die in die \
+                    add_drag_value(ui, &mut params.energy_per_step, "Verbrauch", 1..=100, 1)
+                        .name_label
+                        .on_hover_text("Energiebedarf pro Schritt");
+
+                    add_drag_value(ui, &mut params.allowance, "Einkommen (a)", 1..=100, 1)
+                        .name_label
+                        .on_hover_text(
+                            "Jede Runde bekommt der Räuber so viel Energie zu \
+                            seinem Ersparten dazu.",
+                        );
+
+                    let capacity = &mut params.bank_capacity;
+                    add_drag_value(ui, capacity, "max. Kapazität (b)", 0..=100, 1)
+                        .name_label
+                        .on_hover_text(
+                            "Maximum der ungenutzten Energie, die in die \
                         nächste Runde übertragen werden kann.",
-                    );
+                        );
+
                     self.robber_energy_params = *params;
-                }
+                },
             }
             ui.add_space(5.0);
         });

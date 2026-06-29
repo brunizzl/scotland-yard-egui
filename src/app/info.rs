@@ -39,7 +39,6 @@ pub enum VertexColorInfo {
     Escape3Grid,
     Escape23Grid,
     BruteForceRes,
-    BruteForceEnergyRes,
     MinCopDist,
     MaxCopDist,
     AnyCopDist,
@@ -87,11 +86,9 @@ impl VertexColorInfo {
             BruteForceRes => "Wenn Bruteforce Berechnung ergeben hat, \
             dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
             aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
-            die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen.",
-            BruteForceEnergyRes => "Wenn Bruteforce Berechnung (mit Energie) ergeben hat, \
-            dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
-            aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
-            die dem Räuber für die gegebenen Coppositionen und mit seiner aktuellen Energie einen Sieg ermöglichen.",
+            die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen. \
+            (bzw. mit Energie: die Knoten auf die für aktuelle Räuberposition und Energie gezogen \
+            werden kann um zu entkommen)",
             MinCopDist | MaxCopDist | AnyCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
             RobberDist => "Alle Punkte die eingestellten Abstand zu Räuber haben",
             RobberCone => "Kegel beginnend an Räuber in eingestellten Richtungen",
@@ -132,7 +129,6 @@ impl VertexColorInfo {
             Escape3Grid => "Winning Dilemma (Gitter)",
             Escape23Grid => "Winning Cones + Dilemma (Gitter)",
             BruteForceRes => "Bruteforce Räuberstrategie",
-            BruteForceEnergyRes => "Bruteforce Energie Strategie",
             MinCopDist => "minimaler Cop Abstand",
             MaxCopDist => "maximaler Cop Abstand",
             AnyCopDist => "jeder Cop Abstand",
@@ -1580,24 +1576,20 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
+                use bf::Outcome::RobberWins;
                 let game_type = self.characters.game_type(con.map);
-                if let Some(bf::Outcome::RobberWins(data)) =
-                    &self.worker.robber_strat_for(&game_type)
+                if let Some(RobberWins(data)) = self.worker.robber_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                 {
                     let safe_vertices = data.safe_vertices(cops);
                     for (safe, util) in izip!(safe_vertices, utils_iter) {
                         draw_if!(safe, util);
                     }
-                }
-            },
-            VertexColorInfo::BruteForceEnergyRes => {
-                let game_type = self.characters.game_type(con.map);
-                if let Some(data) = &self.worker.energy_strat_for(&game_type)
+                } else if let Some(data) = &self.worker.energy_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                     && let Some(robber) = self.characters.active_robber()
-                    && let bf::DynRobberRules::Energy(params) = self.characters.robber_rules()
                 {
+                    let params = self.characters.energy_params();
                     let robber_energy = self.characters.current_robber_energy(10000);
                     let safe_vertices = data.safe_vertex_energies(cops);
                     let dists = robber.dists();
