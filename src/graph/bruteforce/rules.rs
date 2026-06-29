@@ -6,7 +6,7 @@ use super::*;
 ///
 /// note: the assumption is always to have the pieces placed on the graph vertices.
 /// only how far a single piece can move / how many cop pieces can move in a single turn can change.
-pub trait Rules {
+pub trait CopRules {
     /// for the current mutiset of police positions [`cops`],
     /// enumerate every multiset of police positions, that can be reached by the police in a single round,
     /// except the do-nothing move.
@@ -49,7 +49,7 @@ pub trait Rules {
 #[derive(Debug, Clone, Copy)]
 pub struct LazyCops;
 
-impl Rules for LazyCops {
+impl CopRules for LazyCops {
     fn raw_cop_moves_from<'a>(
         &'a self,
         edges: &'a EdgeList,
@@ -72,7 +72,7 @@ impl Rules for LazyCops {
 #[derive(Debug, Clone, Copy)]
 pub struct GeneralEagerCops(pub u32);
 
-impl Rules for GeneralEagerCops {
+impl CopRules for GeneralEagerCops {
     fn raw_cop_moves_from<'a>(
         &'a self,
         edges: &'a EdgeList,
@@ -152,14 +152,14 @@ impl Rules for GeneralEagerCops {
 /// this additional data however should only be cashed information like distances between vertices.
 /// Note: as of today (November 2025) no rules make use of this possibility.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
-pub enum DynRules {
+pub enum DynCopRules {
     #[default]
     Lazy,
     Eager,
     GeneralEagerCops(u32),
 }
 
-impl DynRules {
+impl DynCopRules {
     pub fn raw_cop_moves_from<'a>(&'a self, edges: &'a EdgeList, cops: RawCops) -> Vec<RawCops> {
         match self {
             Self::Lazy => {
@@ -247,50 +247,25 @@ impl DynRules {
         }
     }
 
-    pub fn compute_any_fog_strategy(
+    pub fn compute_fog_strategy(
         self,
+        params: FogParams,
         nr_cleaners: usize,
-        visibility: usize,
-        fog_speed: isize,
         edges: EdgeList,
         manager: &thread_manager::LocalManager,
     ) -> Result<FogSolution, String> {
         match self {
             Self::Lazy => {
                 let rs = LazyCops;
-                compute_any_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
+                compute_fog_strategy(rs, params, nr_cleaners, edges, manager)
             },
             Self::Eager => {
                 let rs = GeneralEagerCops(nr_cleaners as u32);
-                compute_any_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
+                compute_fog_strategy(rs, params, nr_cleaners, edges, manager)
             },
             Self::GeneralEagerCops(n) => {
                 let rs = GeneralEagerCops(n);
-                compute_any_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
-            },
-        }
-    }
-
-    pub fn compute_best_fog_strategy(
-        self,
-        nr_cleaners: usize,
-        visibility: usize,
-        fog_speed: isize,
-        edges: EdgeList,
-        manager: &thread_manager::LocalManager,
-    ) -> Result<FogSolution, String> {
-        match self {
-            Self::Lazy => {
-                let rs = LazyCops;
-                compute_best_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
-            },
-            Self::Eager => {
-                let rs = GeneralEagerCops(nr_cleaners as u32);
-                compute_best_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
-            },
-            Self::GeneralEagerCops(n) => {
-                let rs = GeneralEagerCops(n);
-                compute_best_fog_strategy(rs, visibility, nr_cleaners, fog_speed, edges, manager)
+                compute_fog_strategy(rs, params, nr_cleaners, edges, manager)
             },
         }
     }
@@ -334,6 +309,32 @@ impl DynRules {
             Self::Lazy => "Lazy".into(),
             Self::Eager => "Eager".into(),
             Self::GeneralEagerCops(n) => format!("Mix({n})"),
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DynRobberRules {
+    #[default]
+    Normal,
+    Fog(FogParams),
+    Energy(EnergyParams),
+}
+
+impl DynRobberRules {
+    /// this is meant as an idenifier in the ui
+    pub fn name(self) -> String {
+        match self {
+            Self::Normal => "Normal".to_string(),
+            Self::Fog(FogParams {
+                visibility,
+                fog_speed,
+                best_solution,
+            }) => {
+                let best = if best_solution { "beste" } else { "" };
+                format!("Nebel(speed={fog_speed},vis={visibility},{best})",)
+            },
+            Self::Energy(ep) => format!("Energie({})", ep.print_compact()),
         }
     }
 }

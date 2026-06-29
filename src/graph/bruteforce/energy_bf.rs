@@ -84,7 +84,7 @@ pub fn compute_robber_energy_strat<R, S>(
 ) -> Result<EnergyRobberStrat, String>
 where
     S: SymmetryGroup + Serialize,
-    R: Rules,
+    R: CopRules,
 {
     let EnergyParams {
         energy_per_step,
@@ -286,7 +286,7 @@ where
 }
 
 #[cfg(test)]
-pub fn cop_number(rules: impl Rules + Clone, p: EnergyParams, g: &Embedding3D) -> Option<usize> {
+pub fn cop_number(rules: impl CopRules + Clone, p: EnergyParams, g: &Embedding3D) -> Option<usize> {
     let mut nr = 1;
     let sym = g.sym_group().to_explicit();
     let (_, manager) = thread_manager::build_managers();

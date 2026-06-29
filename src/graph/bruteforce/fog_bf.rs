@@ -11,7 +11,30 @@ use crate::graph::EdgeList;
 
 use super::RawCops as RawCleaners;
 use super::fog_util::*;
-use super::{MAX_COPS, Rules, thread_manager};
+use super::{CopRules, MAX_COPS, thread_manager};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FogParams {
+    pub visibility: usize,
+    pub fog_speed: isize,
+    pub best_solution: bool,
+}
+
+impl FogParams {
+    pub fn new(visibility: usize, fog_speed: isize, best_solution: bool) -> Self {
+        Self {
+            visibility,
+            fog_speed,
+            best_solution,
+        }
+    }
+}
+
+impl Default for FogParams {
+    fn default() -> Self {
+        Self::new(1, 1, true)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackedCleaners(usize);
@@ -141,11 +164,10 @@ impl<T: Ord> Queue<T> for BinaryHeap<T> {
 /// unlike for the other bruteforce algorithms, no care is taken to ensure that out-of-memory errors are caught.
 /// this is because this algorithm is continuously allocating small chunks. first, this is very anoying to track
 /// and second not even guaranteed to be recoverable if something goes wrong anyway.
-fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
+fn compute_fog_strategy_impl<R: CopRules, Q: Queue<QueueEntry> + Default>(
     rules: R,
-    visibility: usize,
+    params: FogParams,
     nr_cleaners: usize,
-    fog_speed: isize,
     edges: EdgeList,
     manager: &thread_manager::LocalManager,
 ) -> Result<FogSolution, String> {
@@ -154,6 +176,13 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
     // otherwise the priorisation is dependent on however the queue decides to do it.
     // in that other case, we can thus not guarantee to find a solution with the fewest possible steps.
     let find_best = Q::IS_FIFO;
+    assert_eq!(find_best, params.best_solution);
+
+    let FogParams {
+        visibility,
+        fog_speed,
+        best_solution: _,
+    } = params;
 
     if nr_cleaners > MAX_COPS {
         let msg = format!("Rechnung kann für höchstens {MAX_COPS} Cleaner durchgeführt werden.");
@@ -318,34 +347,29 @@ fn compute_fog_strategy<R: Rules, Q: Queue<QueueEntry> + Default>(
     Ok(sol)
 }
 
-/// returns the strategy with the shortest number of moves, should it exist.
-pub fn compute_best_fog_strategy<R: Rules>(
-    rules: R,
-    visibility: usize,
-    nr_cleaners: usize,
-    fog_speed: isize,
-    edges: EdgeList,
-    manager: &thread_manager::LocalManager,
-) -> Result<FogSolution, String> {
-    type Q = VecDeque<QueueEntry>;
-    compute_fog_strategy::<R, Q>(rules, visibility, nr_cleaners, fog_speed, edges, manager)
-}
-
 /// if a strategy exists, an unspecified working strategy is returned.
-pub fn compute_any_fog_strategy<R: Rules>(
+pub fn compute_fog_strategy<R: CopRules>(
     rules: R,
-    visibility: usize,
+    params: FogParams,
     nr_cleaners: usize,
-    fog_speed: isize,
     edges: EdgeList,
     manager: &thread_manager::LocalManager,
 ) -> Result<FogSolution, String> {
-    type Q = BinaryHeap<QueueEntry>;
-    compute_fog_strategy::<R, Q>(rules, visibility, nr_cleaners, fog_speed, edges, manager)
+    if params.best_solution {
+        type Q = VecDeque<QueueEntry>;
+        compute_fog_strategy_impl::<R, Q>(rules, params, nr_cleaners, edges, manager)
+    } else {
+        type Q = BinaryHeap<QueueEntry>;
+        compute_fog_strategy_impl::<R, Q>(rules, params, nr_cleaners, edges, manager)
+    }
 }
 
 /// tries to walk the solution and fails if something fishy happens while doing so.
-fn verify_sequence<R: Rules>(rules: &R, sol: &FogSolution, edges: &EdgeList) -> Result<(), String> {
+fn verify_sequence<R: CopRules>(
+    rules: &R,
+    sol: &FogSolution,
+    edges: &EdgeList,
+) -> Result<(), String> {
     if !sol.is_cleanable() {
         return Err("Strategie existiert nicht.".to_string());
     };
@@ -404,10 +428,10 @@ mod test {
     ) -> Result<FogSolution, String> {
         let rules = super::super::GeneralEagerCops(u32::MAX);
         let (_, manager) = thread_manager::build_managers();
-        let any =
-            compute_any_fog_strategy(rules, vis, nr_cleaners, speed, edges.clone(), &manager)?;
-        let best =
-            compute_best_fog_strategy(rules, vis, nr_cleaners, speed, edges.clone(), &manager)?;
+        let any_params = FogParams::new(vis, speed, false);
+        let best_params = FogParams::new(vis, speed, true);
+        let any = compute_fog_strategy(rules, any_params, nr_cleaners, edges.clone(), &manager)?;
+        let best = compute_fog_strategy(rules, best_params, nr_cleaners, edges.clone(), &manager)?;
         assert_eq!(any.is_cleanable(), best.is_cleanable());
         assert!(best.sequence.len() <= any.sequence.len());
         Ok(best)

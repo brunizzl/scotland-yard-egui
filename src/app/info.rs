@@ -285,11 +285,6 @@ struct Options {
     marked_cop_dist: isize,
     /// determines dist marked in [`VertexColorInfo::RobberDist`]
     marked_robber_dist: isize,
-    /// how far can cleaners see when clearing fog? (see [`VertexColorInfo::Fog`])
-    fog_clearing_dist: isize,
-    /// how far can fog move in a single step?
-    #[serde(default)]
-    fog_speed: isize,
     /// see [`VertexColorInfo::SpecificVertex`]
     specific_shown_vertex: usize,
     /// the last two bits are always zero, therefore valid value for [`crate::graph::grid::Dirs`]
@@ -316,8 +311,6 @@ const DEFAULT_OPTIONS: Options = Options {
 
     marked_cop_dist: 10,
     marked_robber_dist: 10,
-    fog_clearing_dist: 1,
-    fog_speed: 1,
     specific_shown_vertex: 0,
     shown_escape_directions: 63,
     shown_u32_bit: 0,
@@ -350,7 +343,6 @@ impl Options {
             None,
             MarkedCopDist,
             MarkedRobberDist,
-            FogParams,
             VertexIndex,
             DirectionBits,
             U32Bits,
@@ -361,7 +353,6 @@ impl Options {
                 | VertexColorInfo::MaxCopDist
                 | VertexColorInfo::AnyCopDist => ShownValue::MarkedCopDist,
                 VertexColorInfo::RobberDist => ShownValue::MarkedRobberDist,
-                VertexColorInfo::Fog => ShownValue::FogParams,
                 VertexColorInfo::SpecificVertex => ShownValue::VertexIndex,
                 VertexColorInfo::Escape2Grid
                 | VertexColorInfo::EscapeConeGrid
@@ -384,11 +375,6 @@ impl Options {
             },
             ShownValue::MarkedRobberDist => {
                 add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", 0..=1000, 1);
-            },
-            ShownValue::FogParams => {
-                // this is a deviation from the usual philosophy of keeping everything the same height.
-                add_drag_value(ui, &mut self.fog_clearing_dist, "Sichtweite", 0..=1000, 1);
-                add_drag_value(ui, &mut self.fog_speed, "Nebeltempo", 0..=1000, 1);
             },
             ShownValue::VertexIndex => {
                 ui.horizontal(|ui| {
@@ -751,7 +737,7 @@ impl Info {
         eframe::set_value(storage, CHARACTERS, &self.characters);
         let rle_manually = crate::rle::encode(self.manual_markers.curr());
         eframe::set_value(storage, MARKED_MANUALLY, &rle_manually);
-        eframe::set_value(storage, RULES, &self.characters.rules());
+        eframe::set_value(storage, RULES, &self.characters.cops_rules());
     }
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -760,8 +746,8 @@ impl Info {
         let rle_manually = load_or(cc.storage, MARKED_MANUALLY, Vec::new);
         let marked_manually = crate::rle::decode(&rle_manually);
         let options = load_or(cc.storage, OPTIONS, || DEFAULT_OPTIONS);
-        let rules = load_or(cc.storage, RULES, || bf::DynRules::Lazy);
-        characters.rules = rules;
+        let rules = load_or(cc.storage, RULES, || bf::DynCopRules::Lazy);
+        characters.cop_rules = rules;
 
         Self {
             tool: MouseTool::Drag,
@@ -803,14 +789,8 @@ impl Info {
         //everything going on here happens on a nother thread -> no need to recompute our data
         //-> no need to log wether something changed
         let fog_sol = {
-            let vis = &mut self.options.fog_clearing_dist;
-            let speed = &mut self.options.fog_speed;
             let game_type = self.characters.game_type(map);
-            let energy_params = self
-                .characters
-                .use_energy
-                .then_some(self.characters.robber_energy_params);
-            self.worker.draw_menu(game_type, energy_params, ui, vis, speed)
+            self.worker.draw_menu(game_type, ui)
         };
         if let Some(sol) = fog_sol {
             self.characters.load_fog_cleaning_sequence(map, sol);
@@ -1018,12 +998,12 @@ impl Info {
         );
     }
 
-    fn update_fog(&mut self, con: &DrawContext<'_>) {
+    fn update_fog(&mut self, con: &DrawContext<'_>, fog_params: bf::FogParams) {
         self.fog_state.update(
             con.edges,
             &self.characters,
-            self.options.fog_clearing_dist,
-            self.options.fog_speed,
+            fog_params.visibility as isize,
+            fog_params.fog_speed,
         );
     }
 
@@ -1041,7 +1021,7 @@ impl Info {
     }
 
     /// recomputes everything
-    pub fn definitely_update(&mut self, con: &DrawContext<'_>) {
+    pub fn definitely_update(&mut self, con: &DrawContext<'_>, fog_params: bf::FogParams) {
         self.update_min_cop_dist(con.edges);
         self.update_max_cop_dist(con.edges);
         self.update_convex_cop_hull(con);
@@ -1050,12 +1030,12 @@ impl Info {
         self.update_dilemma(con);
         self.update_cop_advantage(con.edges);
         self.update_plane_cop_strat(con);
-        self.update_fog(con);
+        self.update_fog(con, fog_params);
     }
 
     /// recomputes only things currently shown or required by things currently shown
     /// and only if something relevant (e.g. a cop's position) changed
-    fn maybe_update(&mut self, con: &DrawContext<'_>) {
+    fn maybe_update(&mut self, con: &DrawContext<'_>, fog_params: bf::FogParams) {
         use VertexColorInfo as Color;
         use VertexSymbolInfo as Symbol;
 
@@ -1151,7 +1131,7 @@ impl Info {
             self.update_plane_cop_strat(con);
         }
         if self.options.vertex_color_info() == Color::Fog {
-            self.update_fog(con);
+            self.update_fog(con, fog_params);
         }
     }
 
@@ -1277,7 +1257,8 @@ impl Info {
                 change = true;
             }
             if (info.modifiers.ctrl && info.key_pressed(Key::O) && drag_active)
-                && let Some(strat) = self.worker.curr_police_strat()
+                && let Some(strat) =
+                    self.worker.police_strat_for(&self.characters.game_type(con.map))
             {
                 self.characters.make_optimal_move(strat, con, &mut self.queue);
                 change = true;
@@ -1599,7 +1580,9 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceRes => {
-                if let Some(bf::Outcome::RobberWins(data)) = &self.worker.curr_robber_strat()
+                let game_type = self.characters.game_type(con.map);
+                if let Some(bf::Outcome::RobberWins(data)) =
+                    &self.worker.robber_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                 {
                     let safe_vertices = data.safe_vertices(cops);
@@ -1609,16 +1592,17 @@ impl Info {
                 }
             },
             VertexColorInfo::BruteForceEnergyRes => {
-                if let Some(data) = &self.worker.curr_energy_strat()
+                let game_type = self.characters.game_type(con.map);
+                if let Some(data) = &self.worker.energy_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                     && let Some(robber) = self.characters.active_robber()
+                    && let bf::DynRobberRules::Energy(params) = self.characters.robber_rules()
                 {
-                    let energy_per_step = self.characters.robber_energy_params.energy_per_step;
                     let robber_energy = self.characters.current_robber_energy(10000);
                     let safe_vertices = data.safe_vertex_energies(cops);
                     let dists = robber.dists();
                     for (required_bank, &dist, util) in izip!(safe_vertices, dists, utils_iter) {
-                        let route_cost = dist as usize * energy_per_step;
+                        let route_cost = dist as usize * params.energy_per_step;
                         let bank_left = robber_energy.checked_sub(route_cost);
                         draw_if!(Some(required_bank) <= bank_left, util);
                     }
@@ -1865,7 +1849,8 @@ impl Info {
                 draw!(0..);
             },
             VertexSymbolInfo::BruteforceCopMoves => {
-                if let Some(strat) = self.worker.curr_police_strat()
+                let game_type = self.characters.game_type(con.map);
+                if let Some(strat) = self.worker.police_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                 {
                     let show = |&m: &_| m != bf::UTime::MAX;
@@ -1873,7 +1858,8 @@ impl Info {
                 }
             },
             VertexSymbolInfo::BruteforceRobberEnergy => {
-                if let Some(strat) = self.worker.curr_energy_strat()
+                let game_type = self.characters.game_type(con.map);
+                if let Some(strat) = self.worker.energy_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                 {
                     let show = |&m: &_| m != usize::MAX;
@@ -1964,7 +1950,8 @@ impl Info {
         if !self.options.show_cop_strat {
             return;
         }
-        let Some(strat) = self.worker.curr_police_strat() else {
+        let game_type = self.characters.game_type(con.map);
+        let Some(strat) = self.worker.police_strat_for(&game_type) else {
             return;
         };
         let Some((best_cop_moves, cops_rs)) = self.characters.best_cop_moves(strat, con) else {
@@ -2010,9 +1997,9 @@ impl Info {
         self.choose_pointer_symbol(ui.ctx(), con);
         self.process_general_input(ui, con);
         if self.last_change_frame == self.frame_number {
-            self.definitely_update(con);
+            self.definitely_update(con, self.characters.fog_params());
         } else {
-            self.maybe_update(con);
+            self.maybe_update(con, self.characters.fog_params());
         }
         self.characters.robber_changed = false;
         self.characters.cop_changed = false;

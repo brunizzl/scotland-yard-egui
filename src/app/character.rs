@@ -440,11 +440,13 @@ pub struct State {
     pub cop_changed: bool,
 
     #[serde(skip)]
-    pub rules: bf::DynRules,
+    pub cop_rules: bf::DynCopRules,
     #[serde(skip)]
-    pub robber_energy_params: bf::EnergyParams,
+    robber_fog_params: bf::FogParams,
     #[serde(skip)]
-    pub use_energy: bool,
+    robber_energy_params: bf::EnergyParams,
+    #[serde(skip)]
+    robber_rules: bf::DynRobberRules,
 }
 
 impl State {
@@ -477,14 +479,33 @@ impl State {
             robber_changed: false,
             cop_changed: false,
 
-            rules: bf::DynRules::Lazy,
+            cop_rules: bf::DynCopRules::Lazy,
+            robber_fog_params: bf::FogParams::default(),
             robber_energy_params: bf::EnergyParams::STANDARD_GAME,
-            use_energy: false,
+            robber_rules: bf::DynRobberRules::Normal,
         }
     }
 
-    pub fn rules(&self) -> bf::DynRules {
-        self.rules
+    pub fn cops_rules(&self) -> bf::DynCopRules {
+        self.cop_rules
+    }
+
+    pub fn robber_rules(&self) -> bf::DynRobberRules {
+        self.robber_rules
+    }
+
+    pub fn fog_params(&self) -> bf::FogParams {
+        if let bf::DynRobberRules::Fog(params) = self.robber_rules {
+            debug_assert_eq!(params, self.robber_fog_params);
+        }
+        self.robber_fog_params
+    }
+
+    pub fn energy_params(&self) -> bf::EnergyParams {
+        if let bf::DynRobberRules::Energy(params) = self.robber_rules {
+            debug_assert_eq!(params, self.robber_energy_params);
+        }
+        self.robber_energy_params
     }
 
     pub fn last_moved(&self) -> Option<&Character> {
@@ -727,7 +748,7 @@ impl State {
         // use current partial move as starting state to dismiss moves starting from cops_rs
         // that do not result in all cops which already moved in cops_now to occupy their current positions.
         // this could be done by passing a mask to `raw_cop_moves_from`, encoding which cops may still be moved.
-        let all_cop_moves = self.rules.raw_cop_moves_from(con.edges, cops_rs);
+        let all_cop_moves = self.cop_rules.raw_cop_moves_from(con.edges, cops_rs);
 
         let mut neigh_times = Vec::new();
         let best_cop_moves = all_cop_moves.into_iter().filter(move |&neigh_cops| {
@@ -896,7 +917,7 @@ impl State {
             return;
         }
         self.forget_move_history();
-        let rules = self.rules();
+        let rules = self.cops_rules();
         let mut cleaners = std::mem::take(&mut self.characters)
             .into_iter()
             .filter(|c| c.is_active() || c.id().is_robber())
@@ -1030,63 +1051,88 @@ impl State {
                 .sum()
         );
 
-        let mut change = false;
-        ui.collapsing("Regeln / Figuren / Züge", |ui| {
+        ui.collapsing("Regeln", |ui| {
+            ui.label("Polizei:");
             ui.horizontal(|ui| {
-                let mut rules = self.rules;
-                ui.radio_value(&mut rules, bf::DynRules::Lazy, "Lazy")
+                let mut rules = self.cop_rules;
+                ui.radio_value(&mut rules, bf::DynCopRules::Lazy, "Lazy")
                     .on_hover_text("Pro Runde darf ein Cop eine Kante ziehen.");
-                ui.radio_value(&mut rules, bf::DynRules::Eager, "Eager")
+                ui.radio_value(&mut rules, bf::DynCopRules::Eager, "Eager")
                     .on_hover_text("Pro Runde darf jeder Cop eine Kante ziehen.");
                 let mixed_radio =
-                    ui.radio(matches!(rules, bf::DynRules::GeneralEagerCops(_)), "Mix");
+                    ui.radio(matches!(rules, bf::DynCopRules::GeneralEagerCops(_)), "Mix");
                 if mixed_radio.clicked() {
-                    rules = bf::DynRules::GeneralEagerCops(1);
+                    rules = bf::DynCopRules::GeneralEagerCops(1);
                 }
                 mixed_radio.on_hover_text(
                     "Pro Runde dürfen maximal <Anzahl> viele Cops eine Kante ziehen.",
                 );
-                if let bf::DynRules::GeneralEagerCops(n) = &mut rules {
+                if let bf::DynCopRules::GeneralEagerCops(n) = &mut rules {
                     let range = 2..=(self.active_cops().count() as u32).max(2);
                     let drag = egui::DragValue::new(n).range(range);
                     ui.add(drag);
                 }
-                self.rules = rules;
+                self.cop_rules = rules;
             });
 
-            ui.add(egui::Checkbox::new(&mut self.use_energy, "mit Energie"));
-            {
-                if !self.use_energy {
-                    self.robber_energy_params = bf::EnergyParams::STANDARD_GAME;
+            ui.add_space(5.0);
+            ui.label("Räuber:");
+            ui.horizontal(|ui| {
+                let rules = &mut self.robber_rules;
+                ui.radio_value(rules, bf::DynRobberRules::Normal, "Normal").on_hover_text("Räuber kann jede Runde bis zu ein Schritt machen.");
+                let fog_radio = ui.radio(matches!(rules, bf::DynRobberRules::Fog(_)), "Nebel");
+                if fog_radio.clicked() {
+                    *rules = bf::DynRobberRules::Fog(self.robber_fog_params);
                 }
+                fog_radio.on_hover_text("Räuber macht jeden möglichen Zug auf ein Mal");
+                let energy_radio = ui.radio(matches!(rules, bf::DynRobberRules::Energy(_)), "Energie");
+                if energy_radio.clicked() {
+                    *rules = bf::DynRobberRules::Energy(self.robber_energy_params);
+                }
+                energy_radio.on_hover_text("Räuber kriegt jede Runde Energie und kann ggf. Energie für mehr Schritte in Zukunft sparen.");
+            });
 
-                let bf::EnergyParams {
-                    energy_per_step,
-                    allowance,
-                    bank_capacity,
-                } = &mut self.robber_energy_params;
-                crate::app::add_drag_value(ui, energy_per_step, "Verbrauch", 1..=100, 1)
+            match &mut self.robber_rules {
+                bf::DynRobberRules::Normal => {
+                    crate::app::add_disabled_drag_value(ui);
+                    crate::app::add_disabled_drag_value(ui);
+                    crate::app::add_disabled_drag_value(ui);
+                },
+                bf::DynRobberRules::Fog(params) => {
+                    ui.add(egui::Checkbox::new(&mut params.best_solution, "Beste Strategie"))
+                        .on_hover_text("Wenn aktiv: Bruteforce sucht die Strategie mit minimaler Rundenzahl.");
+                    add_drag_value(ui, &mut params.visibility, "Sichtweite", 0..=1000, 1)
+                        .name_label
+                        .on_hover_text("In bis zu welcher Entfernung können Cops Nebel entfernen?");
+                    add_drag_value(ui, &mut params.fog_speed, "Nebeltempo", 0..=1000, 1)
+                        .name_label
+                        .on_hover_text("Wie viele Kanten kann sich Nebel in einer Runde weiterbewegen?");
+                    self.robber_fog_params = *params;
+                }
+                bf::DynRobberRules::Energy(params) => {
+                add_drag_value(ui, &mut params.energy_per_step, "Verbrauch", 1..=100, 1)
                     .name_label
                     .on_hover_text("Energiebedarf pro Schritt");
-                crate::app::add_drag_value(ui, allowance, "Einkommen (a)", 1..=100, 1)
+                add_drag_value(ui, &mut params.allowance, "Einkommen (a)", 1..=100, 1)
                     .name_label
                     .on_hover_text(
                         "Jede Runde bekommt der Räuber so viel Energie zu \
                         seinem Ersparten dazu.",
                     );
-                crate::app::add_drag_value(ui, bank_capacity, "max. Kapazität (b)", 0..=100, 1)
+                add_drag_value(ui, &mut params.bank_capacity, "max. Kapazität (b)", 0..=100, 1)
                     .name_label
                     .on_hover_text(
                         "Maximum der ungenutzten Energie, die in die \
                         nächste Runde übertragen werden kann.",
                     );
-
-                if self.robber_energy_params != bf::EnergyParams::STANDARD_GAME {
-                    self.use_energy = true;
+                    self.robber_energy_params = *params;
                 }
             }
-            ui.add_space(8.0);
+            ui.add_space(5.0);
+        });
 
+        let mut change = false;
+        ui.collapsing("Figuren / Züge", |ui| {
             ui.horizontal(|ui| {
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
                 let minus_text = format!("- Figur ({minus_emoji})");
@@ -1329,12 +1375,12 @@ impl State {
         if robber_moved_last {
             return (Id::DEFAULT_COP, moved_this_turn);
         }
-        let max_moving_cops = match self.rules {
-            bf::DynRules::Lazy => {
+        let max_moving_cops = match self.cop_rules {
+            bf::DynCopRules::Lazy => {
                 return (Id::Robber, moved_this_turn);
             },
-            bf::DynRules::Eager => self.active_cops().count(),
-            bf::DynRules::GeneralEagerCops(nr) => nr as usize,
+            bf::DynCopRules::Eager => self.active_cops().count(),
+            bf::DynCopRules::GeneralEagerCops(nr) => nr as usize,
         };
         let mut nr_moved_cops = 0;
         for &(ch_i, _) in self.past_moves.iter().rev() {
@@ -1407,7 +1453,8 @@ impl State {
             nr_cops: self.active_cops().count().min(bf::MAX_COPS),
             resolution: map.resolution(),
             shape: map.shape().clone(),
-            rules: self.rules,
+            cop_rules: self.cop_rules,
+            robber_rules: self.robber_rules,
         }
     }
 
@@ -1452,7 +1499,7 @@ impl State {
     /// second, a robber move along multiple edges is split into one step per edge.
     /// returned is the energy the robber has in his bank in the current situation.
     pub fn current_robber_energy(&self, initial_bank: usize) -> usize {
-        let params = self.robber_energy_params;
+        let params = self.energy_params();
         let mut bank = initial_bank;
         let mut who_moved = self.who_moved().peekable();
         loop {

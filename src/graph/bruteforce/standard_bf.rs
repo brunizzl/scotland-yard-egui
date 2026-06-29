@@ -78,7 +78,7 @@ pub fn compute_safe_robber_positions<S, R>(
 ) -> Result<Outcome, String>
 where
     S: SymmetryGroup + Serialize,
-    R: Rules,
+    R: CopRules,
 {
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
@@ -280,7 +280,7 @@ where
 /// the robber must be neighboring a safe vertex next move.
 /// Further: there must exist a safe vertex for every police arrangement.
 pub fn verify_continuity_robber(
-    rules: impl Rules,
+    rules: impl CopRules,
     data: &RobberWinData,
     edges: &EdgeList,
     manager: &thread_manager::LocalManager,
@@ -442,7 +442,7 @@ pub fn compute_cop_strategy<S, R>(
 ) -> Result<CopStrategy, String>
 where
     S: SymmetryGroup + Serialize,
-    R: Rules,
+    R: CopRules,
 {
     if nr_cops == 0 {
         return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
@@ -585,7 +585,7 @@ where
 /// (that is a robber win), thus we need to quantify what _winning_ actually means:
 /// _for each robber move, there must be a cop move that decreases the number of rounds left_.
 fn verify_continuity_cops(
-    rules: impl Rules,
+    rules: impl CopRules,
     data: &CopStrategy,
     edges: &EdgeList,
     manager: &thread_manager::LocalManager,
@@ -665,7 +665,7 @@ mod test {
 
     /// produces same result as [`cop_number`], but uses [`compute_cop_strategy`]
     /// instead of [`compute_safe_robber_positions`] to get there.
-    fn cop_number_cop_strat(rules: impl Rules + Clone, g: &Embedding3D) -> Option<usize> {
+    fn cop_number_cop_strat(rules: impl CopRules + Clone, g: &Embedding3D) -> Option<usize> {
         let mut nr = 1;
         let sym = g.sym_group().to_explicit();
         let (_, manager) = thread_manager::build_managers();
@@ -680,7 +680,7 @@ mod test {
         }
     }
 
-    fn cop_number(rules: impl Rules + Clone, g: Embedding3D) -> Option<usize> {
+    fn cop_number(rules: impl CopRules + Clone, g: Embedding3D) -> Option<usize> {
         let mut nr = 1;
         let sym = g.sym_group().to_explicit();
         let (_, manager) = thread_manager::build_managers();
