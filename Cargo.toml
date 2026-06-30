@@ -14,7 +14,7 @@ eframe = { version = "0.35", default-features = false, features = [
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
     "persistence",   # Enable restoring app state when restarting the app.
     "wayland",
-    "accesskit",
+    #"accesskit",           # this one adds close to 100 dependencies.
     "web_screen_reader",
 ] }
 log = "0.4"
