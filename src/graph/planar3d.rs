@@ -891,18 +891,47 @@ impl Embedding3D {
         Self::from_2d(as_2d, Shape::SingleVertex)
     }
 
+    fn add_subdivided_edge(&mut self, v1: usize, v2: usize, nr_subdivisions: usize) {
+        let mut last_idx = v1;
+        if nr_subdivisions > 0 {
+            let p1 = self.vertices[v1];
+            let p2 = self.vertices[v2];
+            let step = (p2 - p1) / (nr_subdivisions + 1) as f32;
+            let mut last_pos = p1;
+            for _ in 1..=nr_subdivisions {
+                let curr_pos = last_pos + step;
+                let curr_idx = self.add_vertex(curr_pos);
+                self.edges.add_edge(last_idx, curr_idx);
+                (last_pos, last_idx) = (curr_pos, curr_idx);
+            }
+        }
+        self.edges.add_edge(last_idx, v2);
+    }
+
     /// turns self into a graph that we assume inshallah to be cleanable by one
     /// visibility-1 cleaner from speed-1 fog iff the orinal graph has a hamilton path between `ends`.
     /// see [`shape::BuildStep::FogTestHamPath`] or [`shape::BuildStep::FogTestIsGonnected`], which
     /// ends the construction a bit earlier, turning the test for the hamiltion path into a test if the graph is connected.
     /// note: a shortest route will still walk a hamilton path if it exists.
-    fn tranform_to_fog_hamilton_path_test(&mut self, ends: Option<[usize; 2]>, with_fuse: bool) {
+    fn tranform_to_fog_hamilton_path_test(
+        &mut self,
+        ends: Option<[usize; 2]>,
+        with_fuse: bool,
+        visibility: usize,
+    ) {
         if self.positions().is_empty() {
             return;
         }
+        // most edges the cleaner doesn't cross are subdivided into this many parts.
+        let nr_subdivs = visibility.saturating_sub(1);
 
         let og_nr_vertices = self.nr_vertices();
         let og_nr_edges = self.edges.count_entries() / 2;
+
+        // (assuming visibility == 1), the fuse has twice the length of the original nr of vertices,
+        // as the expected clearing route alternates between original vertices and edge_vertices.
+        let fuse_len = 2 * og_nr_vertices + nr_subdivs;
+
         let (copies_off, copies_watcher_pos, fuse_watcher_pos, fuse_start, fuse_step) = {
             let mut og_bounding_box = egui::Rect::NOTHING;
             for pos in self.positions() {
@@ -918,7 +947,7 @@ impl Embedding3D {
             let copies_watcher_pos = og_center + Vec3::new(dx, dy * 0.8, 0.0);
             let fuse_watcher_pos = og_center + Vec3::new(0.0, dy * 0.8, 0.0);
             let fuse_start = fuse_watcher_pos + Vec3::new(-dx, dy * 0.5, 0.0);
-            let fuse_step = Vec3::new(dx / (2 * og_nr_vertices) as f32 * 2.0, 0.0, 0.0);
+            let fuse_step = Vec3::new(dx / (fuse_len as f32) * 2.0, 0.0, 0.0);
             (
                 copies_off,
                 copies_watcher_pos,
@@ -938,6 +967,11 @@ impl Embedding3D {
         let edge_vertices = (self.nr_vertices()..).take(og_nr_edges).collect_vec();
         self.subdivide_all_edges(1, false);
         debug_assert_eq!(self.nr_vertices(), 2 * og_nr_vertices + og_nr_edges);
+        if nr_subdivs > 0 {
+            for &ev in &edge_vertices {
+                self.vertices[ev] += copies_off;
+            }
+        }
 
         // connect the vertex copies to the original vertices
         for (og_v, &copy_v) in izip!(0..og_nr_vertices, &vertex_vertices) {
@@ -947,12 +981,12 @@ impl Embedding3D {
         // add the vertex observing all vertex copies + all edge vertices
         let copies_watcher = self.add_vertex(copies_watcher_pos);
         for &v in vertex_vertices.iter().chain(edge_vertices.iter()) {
-            self.edges.add_edge(v, copies_watcher);
+            self.add_subdivided_edge(v, copies_watcher, nr_subdivs);
         }
 
-        // turn original vertices into a clique
+        // turn original vertices into a clique (except the clique edges may be subdivided)
         for (u, v) in (0..og_nr_vertices).tuple_combinations() {
-            self.edges.add_edge(u, v);
+            self.add_subdivided_edge(u, v, nr_subdivs);
         }
 
         if !with_fuse {
@@ -967,13 +1001,11 @@ impl Embedding3D {
         // add the vertex part of the og clique that connects to the fuse
         let fuse_watcher = self.add_vertex(fuse_watcher_pos);
         for v in 0..og_nr_vertices {
-            self.edges.add_edge(fuse_watcher, v);
+            self.add_subdivided_edge(fuse_watcher, v, nr_subdivs);
         }
         self.edges.add_edge(fuse_watcher, fuse_exit);
 
-        // the fuse has twice the length of the original nr of vertices,
-        // as the expected clearing route alternates between original vertices and edge_vertices.
-        let fuse = (0..(2 * og_nr_vertices))
+        let fuse = (0..fuse_len)
             .map(|i| self.add_vertex(fuse_start + (i as f32) * fuse_step))
             .collect_vec();
         self.edges.add_path_edges(fuse.iter().copied());
@@ -981,8 +1013,8 @@ impl Embedding3D {
         // the fuse is connected to fuse_watcher to allow clearing.
         // only the ends however are connected directly, to guarantee that clearing takes time.
         if let [fuse_start, fuse_inner @ .., fuse_end] = &fuse[..] {
-            self.edges.add_edge(*fuse_start, fuse_watcher);
-            self.edges.add_edge(*fuse_end, fuse_watcher);
+            self.add_subdivided_edge(*fuse_start, fuse_watcher, nr_subdivs);
+            self.add_subdivided_edge(*fuse_end, fuse_watcher, nr_subdivs);
             for (&inner_left, &inner_right) in fuse_inner.iter().tuple_windows() {
                 let lpos = self.positions()[inner_left];
                 let rpos = self.positions()[inner_right];
@@ -993,7 +1025,7 @@ impl Embedding3D {
                 // fuse_watcher directly, thereby guaranteeing no seepage from the ends.
                 let connector_pos = Pos3::average([fuse_watcher_pos, lpos, lpos, rpos, rpos]);
                 let connector = self.add_vertex(connector_pos);
-                self.edges.add_edge(connector, fuse_watcher);
+                self.add_subdivided_edge(connector, fuse_watcher, nr_subdivs);
                 self.edges.add_edge(connector, inner_left);
                 self.edges.add_edge(connector, inner_right);
             }
@@ -1001,7 +1033,7 @@ impl Embedding3D {
 
         let &fuse_end = fuse.last().unwrap();
         self.edges.add_edge(fuse_end, copies_watcher);
-        self.edges.add_edge(fuse_exit, copies_watcher);
+        self.add_subdivided_edge(fuse_exit, copies_watcher, nr_subdivs);
 
         if let Some([ham_fst, ham_last]) = ends
             && usize::max(ham_fst, ham_last) < og_nr_vertices
@@ -1021,11 +1053,11 @@ impl Embedding3D {
                 }
             };
             match step {
-                BuildStep::FogTestHamPath(ends) => {
-                    result.tranform_to_fog_hamilton_path_test(*ends, true);
+                BuildStep::FogTestHamPath(ends, vis) => {
+                    result.tranform_to_fog_hamilton_path_test(*ends, true, *vis);
                 },
                 BuildStep::FogTestIsGonnected => {
-                    result.tranform_to_fog_hamilton_path_test(None, false);
+                    result.tranform_to_fog_hamilton_path_test(None, false, 1);
                 },
                 BuildStep::NeighNeighs(n) => {
                     result.edge_pow(*n);

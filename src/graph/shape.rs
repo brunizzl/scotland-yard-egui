@@ -30,9 +30,9 @@ pub enum BuildStep {
     FogTestIsGonnected,
     /// turns the graph build so far into a graph that is (hopefully) clearable from speed-1 fog by a single
     /// visibility-1 cleaner iff the original graph has a hamilton path between the optonally given vertices.
-    /// leaving the argument empty builds everything except the final two edges, thereby leaving this part configurable.
-    /// at the time of writing this comment, we don't know whether this construction actually works.
-    FogTestHamPath(Option<[usize; 2]>),
+    /// leaving the first argument empty builds everything except the final two edges, thereby leaving this part configurable.
+    /// the second argument is the visibility of the cleaner. note that 0 is forbidden, so we bump 0 to 1.
+    FogTestHamPath(Option<[usize; 2]>, #[serde(default)] usize),
 }
 
 /// operator that separates first and last element of a sequence of consecutive integers.
@@ -113,8 +113,12 @@ impl std::fmt::Display for BuildStep {
                 write_sequence(f, xs)
             },
             Self::FogTestIsGonnected => write!(f, "{FOG_TEST_IS_CONNECTED_NAME}"),
-            Self::FogTestHamPath(None) => write!(f, "{FOG_TEST_HAM_PATH_NAME}"),
-            Self::FogTestHamPath(Some([a, b])) => write!(f, "{FOG_TEST_HAM_PATH_NAME}{a},{b}"),
+            Self::FogTestHamPath(None, 0) => write!(f, "{FOG_TEST_HAM_PATH_NAME}"),
+            Self::FogTestHamPath(None, vis) => write!(f, "{FOG_TEST_HAM_PATH_NAME}({vis})"),
+            Self::FogTestHamPath(Some([a, b]), 0) => write!(f, "{FOG_TEST_HAM_PATH_NAME}{a},{b}"),
+            Self::FogTestHamPath(Some([a, b]), vis) => {
+                write!(f, "{FOG_TEST_HAM_PATH_NAME}{a},{b}({vis})")
+            },
         }
     }
 }
@@ -338,7 +342,10 @@ impl CustomBuild {
                     remove_comma(&mut data);
                     parse_usize(&mut data).map(|b| [a, b])
                 });
-                self.build_steps.push(BuildStep::FogTestHamPath(ends));
+                remove_exact(&mut data, '(');
+                let vis = parse_usize(&mut data).unwrap_or_default();
+                remove_exact(&mut data, ')');
+                self.build_steps.push(BuildStep::FogTestHamPath(ends, vis));
             } else if data.starts_with(FOG_TEST_IS_CONNECTED_NAME) {
                 data = &data[(FOG_TEST_IS_CONNECTED_NAME.len())..];
                 self.build_steps.push(BuildStep::FogTestIsGonnected);
