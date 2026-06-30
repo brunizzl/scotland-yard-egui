@@ -975,7 +975,7 @@ impl Embedding3D {
         }
 
         // turn original vertices into a clique (except the clique edges may be subdivided)
-        for (u, v) in (0..og_nr_vertices).tuple_combinations() {
+        for [u, v] in (0..og_nr_vertices).array_combinations() {
             self.add_subdivided_edge(u, v, nr_subdivs);
         }
 

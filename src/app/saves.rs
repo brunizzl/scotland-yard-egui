@@ -48,8 +48,8 @@ impl SavedState {
         let store = || -> Result<(), ron::Error> {
             let config = ron::ser::PrettyConfig::new()
                 .compact_arrays(true)
-                .new_line("\n".into())
-                .indentor("\t".into());
+                .new_line(std::borrow::Cow::from("\n"))
+                .indentor(std::borrow::Cow::from("\t"));
             let as_str = ron::ser::to_string_pretty(self, config)?;
 
             let mut file = fs::File::create(self.path())?;

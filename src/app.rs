@@ -248,7 +248,7 @@ impl eframe::App for State {
         }
 
         if self.menu_visible {
-            egui::Panel::left("left panel").show_inside(ui, |ui| {
+            egui::Panel::left("left panel").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     const COMPILE_DATETIME: &str = compile_time::datetime_str!();
                     //add spaces to force minimum width of sidebar
@@ -288,7 +288,7 @@ impl eframe::App for State {
             });
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let (map_change, mut con) =
                 self.map.update_and_draw(ui, &mut self.camera, &mut self.info.tool);
             if map_change {

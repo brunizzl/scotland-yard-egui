@@ -450,7 +450,7 @@ impl DistGridGraph {
         let dist = |a, b| self.dist_to_0(a - b);
 
         let mut safe_boundaries = [const { Vec::new() }; 6];
-        'remove_pair_shadows: for (ch_cop1, ch_cop2) in cops_vec.iter().tuple_combinations() {
+        'remove_pair_shadows: for [ch_cop1, ch_cop2] in cops_vec.iter().array_combinations() {
             let cop1 = g.coordinates_of(ch_cop1.vertex());
             let cop2 = g.coordinates_of(ch_cop2.vertex());
             let cops_dist = dist(cop1, cop2);

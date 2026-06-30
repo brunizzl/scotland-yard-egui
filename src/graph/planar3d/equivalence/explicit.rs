@@ -419,7 +419,7 @@ impl<S: SymmetryGroup> From<&S> for ExplicitClasses {
             vec
         };
 
-        let mut vertex_representative = Vec::new();
+        let mut vertex_representative = Vec::with_capacity(sym.nr_vertices());
         let mut to_representative = BoolCSR::new();
         for v in 0..sym.nr_vertices() {
             vertex_representative.push(sym.repr_of(v));
