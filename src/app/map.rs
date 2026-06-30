@@ -307,7 +307,7 @@ impl Map {
         };
         let mut new_data = old_data.clone();
         new_data.build_steps.push(new_step);
-        new_data.combine_move_operations_naive();
+        new_data.combine_last_move_operations();
         new_data.future_build_steps.clear();
         new_data.build_steps_string = new_data.print_build_steps(false);
         let new_shape = Shape::Custom(new_data);
@@ -434,9 +434,11 @@ impl Map {
                         }
                         ui.add_space(5.0);
                         let text_edit = egui::ScrollArea::vertical()
+                            .min_scrolled_height(ui.content_rect().height() * 0.35)
                             .show(ui, |ui| ui.text_edit_multiline(&mut c.build_steps_string));
                         if text_edit.inner.lost_focus() || recompute_button.clicked() {
                             c.parse_build_steps();
+                            change |= true;
                         }
                     });
                 },

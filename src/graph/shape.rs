@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum BuildStep {
-    /// neighbors of neighbors become neighbors, procedure is iterated given number of times
+    /// distinct vertives of up to given distance become neighbors
     NeighNeighs(usize),
     /// every edge becomes a path with given number of new interior vertices
     SubdivEdges(usize),
@@ -98,6 +98,7 @@ impl std::fmt::Display for BuildStep {
             Self::Vertex(v, [x, y, Self::DEFAULT_Z]) => write!(f, "V{v}({x},{y})"),
             Self::Vertex(v, [x, y, z]) => write!(f, "V{v}({x},{y},{z})"),
             Self::DeleteVertex(v) => write!(f, "DelV{v}"),
+            Self::MoveVertex(v, [dx, dy, 0]) => write!(f, "MovV{v}({dx},{dy})"),
             Self::MoveVertex(v, [dx, dy, dz]) => write!(f, "MovV{v}({dx},{dy},{dz})"),
             Self::Edge(v1, v2) => write!(f, "E{v1},{v2}"),
             Self::DeleteEdge(v1, v2) => write!(f, "DelE{v1},{v2}"),
@@ -138,8 +139,10 @@ pub struct CustomBuild {
     pub name: String,
 }
 
-// also: the vertex position is irrelevant for the graph theoretic application
-//   -> no need to keep move operations.
+/// the vertex position is irrelevant for the graph theoretic application.
+/// this filters out the move operations.
+/// note: we don't filter out the [`BuildStep::Vertex`] and [`BuildStep::DeleteVertex`],
+/// because they actually matter. not the vertex position, but when it was created / deleted.
 fn filter_ord_deciding(steps: &[BuildStep]) -> impl Iterator<Item = &BuildStep> {
     steps.iter().filter(|s| !s.is_move())
 }
@@ -214,7 +217,7 @@ impl CustomBuild {
             let now = DateTime::<Local>::from(std::time::SystemTime::now());
             let date = now.date_naive();
             let secs = now.time().num_seconds_from_midnight();
-            format!("{date}-{secs}")
+            format!("{}-{date}-{secs}", Self::DEFAULT_NAME)
         } else {
             Self::DEFAULT_NAME.to_string()
         }
@@ -230,17 +233,46 @@ impl CustomBuild {
         }
     }
 
-    /// test if the last two operations are moves of the same vertex. if so, combine them.
-    pub fn combine_move_operations_naive(&mut self) {
-        use BuildStep::MoveVertex;
-        while let [.., MoveVertex(u, du), MoveVertex(v, dv)] = &self.build_steps[..]
+    /// tries to combine move operations at the end of [`Self::build_steps`].
+    pub fn combine_last_move_operations(&mut self) {
+        use BuildStep::{MoveVertex, Vertex};
+
+        // the slice at the very end of build_steps containing only move operations
+        let mut last_moves = {
+            let steps = &mut self.build_steps[..];
+            let len = steps.len();
+            let nr_last_moves = steps.iter().rev().position(|s| !s.is_move()).unwrap_or(len);
+            let last_moves = &mut steps[(len - nr_last_moves)..];
+            debug_assert_eq!(last_moves.len(), nr_last_moves);
+            debug_assert!(last_moves.iter().all(BuildStep::is_move));
+            // sorting allows us to only look at adjacent moves in the loop below
+            last_moves.sort();
+            last_moves
+        };
+
+        // idea: if two move operations belong to the same vertex,
+        // combine them in one and replace the other with a do-nothing-move.
+        // then remove all do-nothing-moves at once for linear runtime.
+        const ZERO_MOVE: BuildStep = MoveVertex(0, [0, 0, 0]);
+        while let [MoveVertex(u, du), MoveVertex(v, dv), ..] = last_moves {
+            if u == v {
+                for i in 0..3 {
+                    dv[i] += du[i];
+                }
+                last_moves[0] = ZERO_MOVE;
+            }
+            last_moves = &mut last_moves[1..];
+        }
+        self.build_steps.retain(|s| s != &ZERO_MOVE);
+
+        // final touch up: if a just-placed vertex is moved, we combine both operations.
+        if let [.., Vertex(u, pos), MoveVertex(v, dv)] = &mut self.build_steps[..]
             && u == v
         {
-            let dcombined = [du[0] + dv[0], du[1] + dv[1], du[2] + dv[2]];
-            let new_step = MoveVertex(*u, dcombined);
+            for i in 0..3 {
+                pos[i] += dv[i];
+            }
             _ = self.build_steps.pop();
-            _ = self.build_steps.pop();
-            self.build_steps.push(new_step);
         }
     }
 
@@ -294,7 +326,7 @@ impl CustomBuild {
                 1
             };
             let val = parse_usize(data)?;
-            Some(sign * val as i32)
+            Some(sign * i32::try_from(val).ok()?)
         }
         fn remove_single(data: &mut &str, pattern: impl Fn(char) -> bool) {
             if data.chars().next().is_some_and(pattern) {
@@ -312,8 +344,7 @@ impl CustomBuild {
         fn parse_sequence(data: &mut &str, sort: bool) -> Box<[usize]> {
             remove_exact(data, '(');
             let mut sequence = Vec::new();
-            while data.starts_with(|c: char| c.is_ascii_digit()) {
-                let x = parse_usize(data).unwrap();
+            while let Some(x) = parse_usize(data) {
                 if data.starts_with(SEQUENCE_SEP) {
                     *data = &data[(SEQUENCE_SEP.len())..];
                     if let Some(y) = parse_usize(data)
@@ -372,13 +403,13 @@ impl CustomBuild {
                 data = &data["MovV".len()..];
                 if let Some(v) = parse_usize(&mut data) {
                     remove_exact(&mut data, '(');
-                    let x = parse_i32(&mut data).unwrap_or(0);
+                    let dx = parse_i32(&mut data).unwrap_or(0);
                     remove_comma(&mut data);
-                    let y = parse_i32(&mut data).unwrap_or(0);
+                    let dy = parse_i32(&mut data).unwrap_or(0);
                     remove_comma(&mut data);
-                    let z = parse_i32(&mut data).unwrap_or(BuildStep::DEFAULT_Z);
+                    let dz = parse_i32(&mut data).unwrap_or(0);
                     remove_exact(&mut data, ')');
-                    self.build_steps.push(BuildStep::MoveVertex(v, [x, y, z]));
+                    self.build_steps.push(BuildStep::MoveVertex(v, [dx, dy, dz]));
                 }
             } else if data.starts_with("V") {
                 data = &data[1..];
@@ -415,7 +446,7 @@ impl CustomBuild {
                 remove_single(&mut data, |_| true);
             }
         }
-        self.combine_move_operations_naive();
+        self.combine_last_move_operations();
         self.build_steps_string = self.print_build_steps(false);
     }
 }
