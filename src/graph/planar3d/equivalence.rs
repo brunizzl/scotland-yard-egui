@@ -41,19 +41,13 @@ pub struct Identity {
     nr_vertices: usize,
 }
 
-impl Identity {
-    pub fn new(nr_vertices: usize) -> Self {
-        Identity { nr_vertices }
-    }
-}
-
 impl Automorphism for Identity {
     fn forward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
-        0..self.nr_vertices()
+        0..self.nr_vertices
     }
 
     fn backward(&self) -> impl ExactSizeIterator<Item = usize> + '_ + Clone {
-        0..self.nr_vertices()
+        0..self.nr_vertices
     }
 
     fn nr_vertices(&self) -> usize {
@@ -142,9 +136,8 @@ pub struct NoSymmetry {
 
 impl NoSymmetry {
     pub fn new(nr_vertices: usize) -> Self {
-        Self {
-            identity: [Identity::new(nr_vertices)],
-        }
+        let identity = [Identity { nr_vertices }];
+        Self { identity }
     }
 }
 
@@ -190,6 +183,10 @@ pub enum SymGroup {
 }
 
 impl SymGroup {
+    pub fn new_none(nr_vertices: usize) -> Self {
+        Self::None(NoSymmetry::new(nr_vertices))
+    }
+
     pub fn to_representative(&self, cops: &mut RawCops) -> RawCops {
         match self {
             Self::Explicit(e) => e.power_repr(cops).1,

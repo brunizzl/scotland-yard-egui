@@ -245,7 +245,7 @@ impl Embedding3D {
             inner_vertices.push(faces_inner);
         }
 
-        let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
+        let sym_group = SymGroup::new_none(vertices.len());
 
         sort_neigbors(&mut edges, &vertices);
         let mut res = Self {
@@ -388,7 +388,7 @@ impl Embedding3D {
         let edge_dividing_vertices =
             vec![BidirectionalRange::uninitialized(); hull.edges.used_space()];
         let inner_vertices = vec![0..0; hull.face_normals.len()];
-        let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
+        let sym_group = SymGroup::new_none(vertices.len());
 
         sort_neigbors(&mut edges, &vertices);
         let res = Self {
@@ -526,7 +526,7 @@ impl Embedding3D {
             }
         }
         sort_neigbors(&mut self.edges, &self.vertices);
-        self.sym_group = SymGroup::None(NoSymmetry::new(self.vertices.len()));
+        self.sym_group = SymGroup::new_none(self.vertices.len());
     }
 
     /// all vertices with distance <= `n` become neighbors (except no vertex is neighbor of itself).
@@ -746,7 +746,7 @@ impl Embedding3D {
             // note: we could convert `t` to an explicit representation here.
             // the only reason not to do it is that this takes O(nr_vertices^2) time,
             // while the rest of the function takes only O(nr_vertices^2).
-            sym_group: SymGroup::None(NoSymmetry::new(nr_vertices)),
+            sym_group: SymGroup::new_none(nr_vertices),
         }
     }
 
@@ -781,15 +781,10 @@ impl Embedding3D {
         }
 
         let (sym_group, shape) = if wrap {
-            (
-                SymGroup::Torus6(torus::TorusSymmetry6::new(nr_vertices)),
-                Shape::TriangTorus,
-            )
+            let t6 = torus::TorusSymmetry6::new(nr_vertices);
+            (SymGroup::Torus6(t6), Shape::TriangTorus)
         } else {
-            (
-                SymGroup::None(NoSymmetry::new(nr_vertices)),
-                Shape::TriangGrid,
-            )
+            (SymGroup::new_none(nr_vertices), Shape::TriangGrid)
         };
 
         sort_neigbors(&mut edges, &vertices);
@@ -835,15 +830,10 @@ impl Embedding3D {
         }
 
         let (sym_group, shape) = if wrap {
-            (
-                SymGroup::Torus4(torus::TorusSymmetry4::new(nr_vertices)),
-                Shape::SquareTorus,
-            )
+            let t4 = torus::TorusSymmetry4::new(nr_vertices);
+            (SymGroup::Torus4(t4), Shape::SquareTorus)
         } else {
-            (
-                SymGroup::None(NoSymmetry::new(nr_vertices)),
-                Shape::SquareGrid,
-            )
+            (SymGroup::new_none(nr_vertices), Shape::SquareGrid)
         };
 
         sort_neigbors(&mut edges, &vertices);
@@ -1105,14 +1095,11 @@ impl Embedding3D {
             }
         }
 
-        let keep_symmetry = c
-            .build_steps
-            .iter()
-            .all(|s| matches!(s, BuildStep::NeighNeighs(_) | BuildStep::SubdivEdges(_)));
+        let keep_symmetry = c.build_steps.iter().all(|s| matches!(s, BuildStep::NeighNeighs(_)));
 
         result.shape = shape::Shape::Custom(c);
         if !keep_symmetry {
-            result.sym_group = SymGroup::None(NoSymmetry::new(result.vertices.len()));
+            result.sym_group = SymGroup::new_none(result.vertices.len());
         }
         result
     }
@@ -1391,7 +1378,7 @@ impl Embedding3D {
         let (positions_2d, edges) = planar.into_parts();
         const Z: f32 = Z_OFFSET_2D;
         let vertices = positions_2d.iter().map(|p| pos3(p.x, p.y, Z)).collect_vec();
-        let sym_group = SymGroup::None(NoSymmetry::new(vertices.len()));
+        let sym_group = SymGroup::new_none(vertices.len());
         Self {
             surface: ConvexHull::empty(),
             shape,
