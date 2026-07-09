@@ -490,6 +490,10 @@ impl State {
         self.cop_rules
     }
 
+    pub fn robber_rules(&self) -> bf::DynRobberRules {
+        self.robber_rules
+    }
+
     pub fn fog_params(&self) -> bf::FogParams {
         if let bf::DynRobberRules::Fog(params) = self.robber_rules {
             debug_assert_eq!(params, self.robber_fog_params);

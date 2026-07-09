@@ -182,6 +182,7 @@ pub enum VertexSymbolInfo {
     MinCopDist,
     MaxCopDist,
     RobberDist,
+    RobberDistAvoidCops,
     VertexEquivalenceClass,
     BruteforceCopMoves,
     BruteforceRobberEnergy,
@@ -211,6 +212,9 @@ impl VertexSymbolInfo {
                 Das macht Bruteforce etwas weniger speicherintensiv."
             },
             RobberDist => "Abstand von Räuberposition zu jedem Knoten",
+            RobberDistAvoidCops => {
+                "Abstand von Räuberposition zu jedem Knoten, Polizisten sind Hindernisse."
+            },
             BruteforceCopMoves => {
                 "Wenn Cops optimal ziehen, lebt Räuber noch maximal so viele Züge"
             },
@@ -240,6 +244,7 @@ impl VertexSymbolInfo {
             MaxCopDist => "maximaler Cop Abstand",
             VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
             RobberDist => "Räuberabstand",
+            RobberDistAvoidCops => "Räuberabstand um Cops",
             BruteforceCopMoves => "Bruteforce Cop Züge",
             BruteforceRobberEnergy => "Bruteforce Räuber Energie",
             Debugging => "Debugging",
@@ -661,6 +666,8 @@ pub struct Info {
     min_cop_dist: Vec<isize>,
     /// elementwise maximum of `.distance` of active cops in `self.characters`
     max_cop_dist: Vec<isize>,
+    /// the distance of each vertex to the current robber position, except cop vertices must be avoided.
+    robber_dist_avoid_cops: Vec<isize>,
     /// outside hull interieur == -min_cop_dist, then expanded into interieur via [`EdgeList::calc_distances_to`]
     /// the robber can escape lazy cops on a continuous hull, if cop_advantage on robber's position is <= -2
     /// as a cop's position has value 0 and a cops neighbors value >= -1.
@@ -706,6 +713,7 @@ impl Default for Info {
             fog_state: graph::fog::GameSates::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
+            robber_dist_avoid_cops: Vec::new(),
             cop_advantage: Vec::new(),
             manual_markers: ManualMarkers::new(),
 
@@ -753,6 +761,7 @@ impl Info {
             fog_state: graph::fog::GameSates::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
+            robber_dist_avoid_cops: Vec::new(),
             cop_advantage: Vec::new(),
             manual_markers: ManualMarkers::new_init(marked_manually),
 
@@ -892,6 +901,24 @@ impl Info {
         self.max_cop_dist = max_cop_dist;
     }
 
+    fn update_robber_dist_avoid_cops(&mut self, edges: &EdgeList) {
+        let dists = &mut self.robber_dist_avoid_cops;
+        dists.clear();
+        dists.resize(edges.nr_vertices(), isize::MAX);
+
+        let Some(robber) = self.characters.active_robber() else {
+            return;
+        };
+        let robber_v = robber.last_resting_vertex();
+        let active_cops = self.characters.active_cops().map(Character::vertex).collect_vec();
+
+        self.queue.clear();
+        self.queue.push_back(robber_v);
+        dists[robber_v] = 0;
+        let select = |v, dists: &[_], new_dist| !active_cops.contains(&v) && dists[v] > new_dist;
+        edges.calc_distances_to_with(dists, select, &mut self.queue);
+    }
+
     /// this is not a direct implementation of the characterisation of
     /// "winning stage II vertices" given in the thesis,
     /// but instead an equilavent formulation which gives rise to a linear time algorithm:
@@ -1024,6 +1051,7 @@ impl Info {
         self.update_cop_advantage(con.edges);
         self.update_plane_cop_strat(con);
         self.update_fog(con, fog_params);
+        self.update_robber_dist_avoid_cops(con.edges);
     }
 
     /// recomputes only things currently shown or required by things currently shown
@@ -1034,6 +1062,7 @@ impl Info {
 
         let nr_vertices = con.edges.nr_vertices();
         let cop_moved = self.characters.cop_changed;
+        let character_moved = self.characters.robber_changed || cop_moved;
 
         let color = self.options.vertex_color_info();
         let symbol = self.options.vertex_number_info();
@@ -1099,6 +1128,13 @@ impl Info {
             || self.options.vertex_number_info() == Symbol::MaxCopDist
             || color == Color::MaxCopDist;
 
+        let update_robber_dist_avoid_cops = symbol == Symbol::RobberDistAvoidCops
+            || (color == Color::BruteForceRes
+                && matches!(
+                    self.characters.robber_rules(),
+                    bf::DynRobberRules::Energy(_)
+                ));
+
         if cop_moved && update_max_cop_dist {
             self.update_max_cop_dist(con.edges);
         }
@@ -1123,8 +1159,11 @@ impl Info {
         if cop_moved && update_plane_cop_strat {
             self.update_plane_cop_strat(con);
         }
-        if self.options.vertex_color_info() == Color::Fog {
+        if character_moved && self.options.vertex_color_info() == Color::Fog {
             self.update_fog(con, fog_params);
+        }
+        if character_moved && update_robber_dist_avoid_cops {
+            self.update_robber_dist_avoid_cops(con.edges);
         }
     }
 
@@ -1584,14 +1623,13 @@ impl Info {
                     }
                 } else if let Some(data) = &self.worker.energy_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
-                    && let Some(robber) = self.characters.active_robber()
                 {
                     let params = self.characters.energy_params();
                     let robber_energy = self.characters.current_robber_energy(10000);
                     let safe_vertices = data.safe_vertex_energies(cops);
-                    let dists = robber.dists();
+                    let dists = &self.robber_dist_avoid_cops;
                     for (required_bank, &dist, util) in izip!(safe_vertices, dists, utils_iter) {
-                        let route_cost = dist as usize * params.energy_per_step;
+                        let route_cost = (dist as usize).saturating_mul(params.energy_per_step);
                         let bank_left = robber_energy.checked_sub(route_cost);
                         draw_if!(Some(required_bank) <= bank_left, util);
                     }
@@ -1923,6 +1961,9 @@ impl Info {
                 if let Some(r) = self.characters.active_robber() {
                     draw_isize_slice(r.dists());
                 }
+            },
+            VertexSymbolInfo::RobberDistAvoidCops => {
+                draw_isize_slice(&self.robber_dist_avoid_cops);
             },
             VertexSymbolInfo::VertexEquivalenceClass => {
                 if let SymGroup::Explicit(e) = con.sym_group() {
