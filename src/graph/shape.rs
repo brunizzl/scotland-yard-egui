@@ -233,8 +233,25 @@ impl CustomBuild {
         }
     }
 
-    /// tries to combine move operations at the end of [`Self::build_steps`].
+    /// test if the last two operations are moves of the same vertex. if so, combine them.
     pub fn combine_last_move_operations(&mut self) {
+        use BuildStep::{MoveVertex, Vertex};
+        // snd last may also be the vertex itself, not just a move of an existing vertex.
+        while let [.., Vertex(u, du) | MoveVertex(u, du), MoveVertex(v, dv)] =
+            &mut self.build_steps[..]
+            && u == v
+        {
+            for i in 0..3 {
+                du[i] += dv[i];
+            }
+            _ = self.build_steps.pop();
+        }
+    }
+
+    /// tries to combine move operations at the end of [`Self::build_steps`].
+    /// note: this does'nt play nice with the undo and redo operations, hence is currently unused.
+    #[allow(dead_code)]
+    fn combine_and_sort_last_move_operations(&mut self) {
         use BuildStep::{MoveVertex, Vertex};
 
         // the slice at the very end of build_steps containing only move operations
