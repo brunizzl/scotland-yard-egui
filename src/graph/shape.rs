@@ -7,6 +7,7 @@ pub enum BuildStep {
     /// every edge becomes a path with given number of new interior vertices
     SubdivEdges(usize),
     /// vertex at given coordinates.
+    /// `.0` is the index. indices cannot have gaps and must be in order, starting from the number of vertices of the base shape.
     /// `.1` are the coordinates in better printable / parseable form.
     /// each coordinate is divided by `1000.0` to get to the corresponding
     /// float value in the graph coordinate system.
@@ -44,15 +45,16 @@ const FOG_TEST_HAM_PATH_NAME: &str = "HamTest";
 
 impl BuildStep {
     pub const EXPLAINER: &str = "\
-        N<number>: <number>-distance and closer vertices become neighbors\n\
-        D<number>: every edge becomes path with <number> many inner vertices\n\
-        V<x>,<y>,<z>: vertex at coordinates (<x>, <y>, <z>) / 1000\n\
+        N<dist>: <dist>-distance and closer vertices become neighbors\n\
+        D<divide>: every edge becomes path with <divide> many inner vertices\n\
+        V<index>(<x>,<y>): vertex at coordinates (<x>, <y>) / 1000\n    \
+            note that indices must be in order and no index skipped.\n\
         E<u>,<v>: edge between vertices with indices <u> and <v>.\n\
         K(<X>)(<Y>): all edges between sequences <X> and <Y>\n\
-        ZsgTest: (new is cleanable) <=> (old is connected)\n\
-        HamTest<u>,<v>: (new is cleanable) <=> (<u>-<v> hamilton path in old)\n\n\
-        a sequence has the form <a1>, ..., <an>.\n\
-        ALSO CONSIDER TOOLS [±v] AND [±e]\
+        ZsgTest: (new is 1-cleanable) <=> (old is connected)\n\
+        HamTest<u>,<v>: (new is 1-cleanable) <=> (<u>-<v> hamilton path in old)\n\n\
+        a sequence has the form <a1>, ..., <an> and is made up of indices.\n\
+        ALSO CONSIDER MOUSE TOOLS [±v] AND [±e]\
         ";
 
     pub const DEFAULT_Z: i32 = (crate::graph::Z_OFFSET_2D * 1000.0) as i32;
