@@ -305,7 +305,7 @@ impl BruteforceComputationState {
                             None => "Box<dyn Any>",
                         },
                     };
-                    let msg = format!("Thread hatte Panik:\n{payload}");
+                    let msg = format!("Thread panicked:\n{payload}");
                     self.errors.push((worker.game_type, msg));
                 },
             }
@@ -442,8 +442,8 @@ impl BruteforceComputationState {
                     let (autos, repr) = sym.symmetry.power_repr(&mut cops);
                     let v_rot = autos[0].apply_forward(v);
                     return Confidence::Err(format!(
-                        "Fehler: Cops {cops:?} repräsentiert von {repr:?} \
-                        uneinig in Knoten {v} (rotiert = {v_rot})."
+                        "Error: Cops {cops:?} represented by {repr:?} \
+                        differ in vertex {v} (mapped to {v_rot})."
                     ));
                 }
             }
@@ -467,12 +467,12 @@ impl BruteforceComputationState {
                 Ok(ok) => ok,
                 Err(err) => return WorkResult::new_robber_and_err(outcome, err),
             };
-            there.update("vergleiche Ergebnisse").ok();
+            there.update("compare results").ok();
             use bf::Outcome::*;
             outcome.confidence = match (&outcome.outcome, &outcome_without) {
                 (CopsWin, CopsWin) => Confidence::Both,
-                (CopsWin, RobberWins(_)) => Confidence::new_err("Ohne sym. gewinnt Räuber"),
-                (RobberWins(_), CopsWin) => Confidence::new_err("Ohne sym. gewinnen Cops"),
+                (CopsWin, RobberWins(_)) => Confidence::new_err("robber wins without sym."),
+                (RobberWins(_), CopsWin) => Confidence::new_err("cops win without sym."),
                 (RobberWins(sym), RobberWins(no_sym)) => Self::verify_robber_win_eq(sym, no_sym),
             };
             WorkResult::new_robber(outcome)
@@ -530,7 +530,7 @@ impl BruteforceComputationState {
                 Err(err) => return WorkResult::new_err(err),
             };
             let buff_reader = std::io::BufReader::new(file);
-            there.log.send("deserialisiere".into()).ok();
+            there.log.send("deserialise".into()).ok();
             match rmp_serde::decode::from_read::<_, GameOutcome>(buff_reader) {
                 Ok(res) => {
                     let error = if let bf::Outcome::RobberWins(data) = &res.outcome {
@@ -572,25 +572,25 @@ impl BruteforceComputationState {
 
     fn draw_robber_result(ui: &mut Ui, game_type: &GameType, outcome: &GameOutcome) {
         let outcome_str = match &outcome.outcome {
-            bf::Outcome::CopsWin => "verliert",
-            bf::Outcome::RobberWins(_) => "gewinnt",
+            bf::Outcome::CopsWin => "loses",
+            bf::Outcome::RobberWins(_) => "wins",
         };
 
         let cops_str = if game_type.nr_cops == 1 {
-            "einen Cop".to_owned()
+            "one cop".to_owned()
         } else {
-            game_type.nr_cops.to_string() + " Cops"
+            game_type.nr_cops.to_string() + " cops"
         };
 
         let confidence_str = match &outcome.confidence {
-            Confidence::Both => "(verifiziert)".to_string(),
-            Confidence::NoSymmetry => "(Algo ohne Symmetrie)".to_string(),
-            Confidence::SymmetryOnly => "(Algo mit Symmetrie)".to_string(),
-            Confidence::Err(err) => format!("Validierungsfehler: {err}"),
+            Confidence::Both => "(verified)".to_string(),
+            Confidence::NoSymmetry => "(algo without sym)".to_string(),
+            Confidence::SymmetryOnly => "(algo with sym)".to_string(),
+            Confidence::Err(err) => format!("validation error: {err}"),
         };
         ui.add(
             Label::new(format!(
-                "Räuber {outcome_str} gegen {cops_str} ({}) auf {} mit Auflösung {} {confidence_str}",
+                "robber {outcome_str} vs {cops_str} ({}) on {} with resolution {} {confidence_str}",
                 game_type.cop_rules.name(),
                 game_type.shape.to_sting(),
                 game_type.resolution
@@ -600,21 +600,17 @@ impl BruteforceComputationState {
     }
 
     fn draw_robber_energy_result(ui: &mut Ui, game_type: &GameType, strat: &bf::EnergyRobberStrat) {
-        let outcome_str = if strat.robber_wins {
-            "gewinnt"
-        } else {
-            "verliert"
-        };
+        let outcome_str = if strat.robber_wins { "wins" } else { "loses" };
 
         let cops_str = if game_type.nr_cops == 1 {
-            "einen Cop".to_owned()
+            "one cop".to_owned()
         } else {
-            game_type.nr_cops.to_string() + " Cops"
+            game_type.nr_cops.to_string() + " cops"
         };
 
         ui.add(
             Label::new(format!(
-                "Räuber ({}) {outcome_str} gegen {cops_str} ({}) auf {} mit Auflösung {}",
+                "robber ({}) {outcome_str} vs {cops_str} ({}) on {} with resolution {}",
                 strat.params.print_compact(),
                 game_type.cop_rules.name(),
                 game_type.shape.to_sting(),
@@ -627,16 +623,16 @@ impl BruteforceComputationState {
     fn draw_cops_result(ui: &mut Ui, game_type: &GameType, strat: &bf::CopStrategy) {
         let one_cop = game_type.nr_cops == 1;
         let cops_str = if one_cop {
-            "ein Cop".to_owned()
+            "one cop".to_owned()
         } else {
-            game_type.nr_cops.to_string() + " Cops"
+            game_type.nr_cops.to_string() + " cops"
         };
-        let outcome = if strat.cops_win { "gewinn" } else { "verlier" };
-        let outcome_end = if one_cop { "t" } else { "en" };
+        let outcome = if strat.cops_win { "win" } else { "lose" };
+        let outcome_end = if one_cop { "s" } else { "" };
 
         ui.add(
             Label::new(format!(
-                "{cops_str} ({}) {outcome}{outcome_end} auf {} mit Auflösung {} (max. {} Züge)",
+                "{cops_str} ({}) {outcome}{outcome_end} on {} with resolution {} (max. {} moves)",
                 game_type.cop_rules.name(),
                 game_type.shape.to_sting(),
                 game_type.resolution,
@@ -649,9 +645,7 @@ impl BruteforceComputationState {
     fn draw_fog_result(ui: &mut Ui, game_type: &GameType, sol: &bf::FogSolution) {
         let nr_cleaners = game_type.nr_cleaners();
         let rules = game_type.cop_rules.name();
-        let single_cleaner = nr_cleaners == 1;
-        let can = if single_cleaner { "kann" } else { "können" };
-        let not = if sol.is_cleanable() { "" } else { "NICHT " };
+        let not = if sol.is_cleanable() { "" } else { " NOT" };
         let shape = game_type.shape.to_sting();
         let res = game_type.resolution;
         let vis = sol.visibility;
@@ -659,8 +653,8 @@ impl BruteforceComputationState {
 
         ui.add(
             Label::new(format!(
-                "{nr_cleaners} Cleaner ({rules}, Sichtweite {vis}) \
-                {can} {shape} mit Auflösung {res} {not}von Nebel (Tempo {speed}) befreien",
+                "{nr_cleaners} cleaner ({rules}, vis-range {vis}, speed {speed}) \
+                can{not} clean {shape} with resolution {res}",
             ))
             .extend(),
         );
@@ -677,13 +671,13 @@ impl BruteforceComputationState {
         for (game_type, outcome) in &self.robber_strats {
             Self::draw_robber_result(ui, game_type, outcome);
             ui.horizontal(|ui| {
-                if NATIVE && ui.button("speichern").clicked() {
+                if NATIVE && ui.button("store").clicked() {
                     action = Some((Action::Store, game_type.clone()));
                 } else if outcome.confidence == Confidence::SymmetryOnly
-                    && ui.button("verifizieren").clicked()
+                    && ui.button("verify").clicked()
                 {
                     action = Some((Action::Verify, game_type.clone()));
-                } else if ui.button("löschen").clicked() {
+                } else if ui.button("delete").clicked() {
                     action = Some((Action::Delete, game_type.clone()));
                 }
             });
@@ -702,12 +696,12 @@ impl BruteforceComputationState {
         for (game_type, strat) in &self.cop_strats {
             Self::draw_cops_result(ui, game_type, strat);
             ui.horizontal(|ui| {
-                if NATIVE && ui.button("speichern").clicked() {
+                if NATIVE && ui.button("store").clicked() {
                     action = Some((Action::Store, game_type.clone()));
-                } else if ui.button("löschen").clicked() {
+                } else if ui.button("delete").clicked() {
                     action = Some((Action::Delete, game_type.clone()));
                 }
-                menu_button_closing_outside(ui, "meiste Züge", |ui| {
+                menu_button_closing_outside(ui, "most moves", |ui| {
                     for extreme_pos in &strat.extreme_positions {
                         ui.label(format!("{extreme_pos:?}"));
                     }
@@ -727,26 +721,26 @@ impl BruteforceComputationState {
         for (game_type, sol) in &mut self.fog_strats {
             Self::draw_fog_result(ui, game_type, sol);
             ui.horizontal(|ui| {
-                if ui.button("löschen").clicked() {
+                if ui.button("delete").clicked() {
                     action = Some((Action::Delete, game_type.clone()));
                 }
                 if sol.is_cleanable() {
-                    menu_button_closing_outside(ui, "Fun Facts", |ui| {
+                    menu_button_closing_outside(ui, "fun facts", |ui| {
                         ui.horizontal(|ui| {
-                            let not = if sol.works_in_reverse { "" } else { "NICHT " };
-                            ui.label(format!("Folge ist {not}umkehrbar."));
-                            if ui.button("umkehren").clicked() {
+                            let not = if sol.works_in_reverse { "" } else { "NOT " };
+                            ui.label(format!("sequence is {not}reversible."));
+                            if ui.button("reverse").clicked() {
                                 sol.sequence.reverse();
                             }
                         });
                         if sol.is_best_solution {
-                            ui.label("Folge ist kürzestmöglich.");
+                            ui.label("sequence is the shortest possible.");
                         }
                         let len = sol.sequence.len();
-                        ui.label(format!("Länge: {len}"));
+                        ui.label(format!("length: {len}"));
                     });
 
-                    menu_button_closing_outside(ui, "Zugfolge", |ui| {
+                    menu_button_closing_outside(ui, "move sequence", |ui| {
                         use std::fmt::Write;
                         let mut sequence_str = String::new();
                         let mut sep = "";
@@ -770,7 +764,7 @@ impl BruteforceComputationState {
         for (game_type, strat) in &self.robber_energy_stats {
             Self::draw_robber_energy_result(ui, game_type, strat);
             ui.horizontal(|ui| {
-                if ui.button("löschen").clicked() {
+                if ui.button("delete").clicked() {
                     action = Some((Action::Delete, game_type.clone()));
                 }
             });
@@ -805,11 +799,11 @@ impl BruteforceComputationState {
                 ui.add(Label::new(egui::RichText::new(animation).monospace()).extend());
 
                 let task_str = match worker.task {
-                    WorkTask::ComputeRobber => "rechne (R)".to_string(),
-                    WorkTask::ComputeCops => "rechne (C)".to_string(),
-                    WorkTask::VerifyRobber => "verifiziere".to_string(),
-                    WorkTask::LoadRobber | WorkTask::LoadCops => "lade".to_string(),
-                    WorkTask::StoreRobber | WorkTask::StoreCops => "speichere".to_string(),
+                    WorkTask::ComputeRobber => "computing (R)".to_string(),
+                    WorkTask::ComputeCops => "computing (C)".to_string(),
+                    WorkTask::VerifyRobber => "verifying".to_string(),
+                    WorkTask::LoadRobber | WorkTask::LoadCops => "loading".to_string(),
+                    WorkTask::StoreRobber | WorkTask::StoreCops => "storing".to_string(),
                 };
                 let game_str = worker.game_type.as_tuple_string();
                 ui.add(Label::new(format!("{task_str} {game_str}")).extend());
@@ -828,7 +822,7 @@ impl BruteforceComputationState {
                             m.send_command(cmd).ok();
                         }
                     }
-                    let abort_button = ui.add_enabled(paused, Button::new("abbrechen"));
+                    let abort_button = ui.add_enabled(paused, Button::new("abort"));
                     if abort_button.contains_pointer() && paused && mouse_down {
                         if let Some((gt, t, start)) = &self.abort_worker {
                             if gt == &worker.game_type && t == &worker.task {
@@ -866,13 +860,13 @@ impl BruteforceComputationState {
             ui.add_space(5.0);
             ui.add(
                 Label::new(format!(
-                    "Fehler für {}:\n{}",
+                    "error for {}:\n{}",
                     game_type.as_tuple_string(),
                     err
                 ))
                 .extend(),
             );
-            if ui.button("löschen").clicked() {
+            if ui.button("delete").clicked() {
                 delete = Some(i);
             }
         }
@@ -898,11 +892,11 @@ impl BruteforceComputationState {
             ui.horizontal(|ui| {
                 let nr_active = self.workers.len();
                 if NATIVE && nr_active > 0 {
-                    menu_button_closing_outside(ui, format!("{nr_active} aktiv"), |ui| {
+                    menu_button_closing_outside(ui, format!("{nr_active} active"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_workers(ui));
                     });
                 } else if NATIVE {
-                    ui.add_enabled(false, Button::new("0 aktiv"));
+                    ui.add_enabled(false, Button::new("0 active"));
                 }
 
                 let nr_done = self.robber_strats.len()
@@ -910,11 +904,11 @@ impl BruteforceComputationState {
                     + self.cop_strats.len()
                     + self.fog_strats.len();
                 if nr_done > 0 {
-                    menu_button_closing_outside(ui, format!("{nr_done} fertig"), |ui| {
+                    menu_button_closing_outside(ui, format!("{nr_done} done"), |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| self.draw_results(ui));
                     });
                 } else {
-                    ui.add_enabled(false, Button::new("0 fertig"));
+                    ui.add_enabled(false, Button::new("0 done"));
                 }
 
                 let nr_errs = self.errors.len();
@@ -929,15 +923,13 @@ impl BruteforceComputationState {
             ui.add_space(5.0);
 
             let disclaimer = if NATIVE {
-                "die Rechnung startet in einem eigenen Thread."
+                "computation starts in own thread (unlike in the website version)."
             } else {
-                "WARNUNG: weil WASM keine Threads mag, blockt \
-                die Websiteversion bei dieser Rechnung die GUI.\n\
-                Ausserdem: WASM is 32 bit, kann also nur 4GiB RAM benutzen, was die spannenden \
-                Bruteforceberechnungen nicht möglich macht."
+                "WARNING: as WASM dislikes threads, the computation blocks the gui in this website version.\n\
+                also: WASM is 32 bit, so we can use at most 4GiB RAM. many interesting computations need more."
             };
 
-            ui.label("Räuberstrategie:");
+            ui.label("Robber Strategy:");
             ui.horizontal(|ui| match game_type.robber_rules {
                 bf::DynRobberRules::Normal => {
                     let curr_computing = self.workers.iter().any(|w| {
@@ -946,7 +938,7 @@ impl BruteforceComputationState {
                     });
                     let curr_known = self.robber_strats.contains_key(&game_type);
                     let enable_compute = !curr_computing && !curr_known;
-                    let compute_button = Button::new("berechnen");
+                    let compute_button = Button::new("compute");
                     if ui
                         .add_enabled(enable_compute, compute_button)
                         .on_hover_text(disclaimer)
@@ -957,13 +949,13 @@ impl BruteforceComputationState {
                     let strat_on_disk =
                         self.robber_strats_stored.get(&game_type).is_some_and(|&x| x);
                     let enable_load = strat_on_disk && !curr_known;
-                    let load_button = Button::new("laden 🖴");
+                    let load_button = Button::new("load 🖴");
                     if ui.add_enabled(enable_load, load_button).clicked() {
                         self.load_robber_strat_for(game_type.clone());
                     }
                 },
                 bf::DynRobberRules::Fog(_) => {
-                    ui.label("kein Algorithmus implementiert");
+                    ui.label("fog has no descisions.");
                 },
                 bf::DynRobberRules::Energy(_) => {
                     let curr_computing = self
@@ -972,7 +964,7 @@ impl BruteforceComputationState {
                         .any(|w| w.game_type == game_type && w.task == WorkTask::ComputeRobber);
                     let curr_known = self.robber_energy_stats.contains_key(&game_type);
                     let enable_compute = !curr_computing && !curr_known;
-                    let compute_button = Button::new("berechnen (Energie)");
+                    let compute_button = Button::new("compute (energy)");
                     if ui
                         .add_enabled(enable_compute, compute_button)
                         .on_hover_text(disclaimer)
@@ -984,7 +976,7 @@ impl BruteforceComputationState {
             });
 
             ui.add_space(5.0);
-            ui.label("Copstrategie:");
+            ui.label("Cop Strategy:");
             ui.horizontal(|ui| match game_type.robber_rules {
                 bf::DynRobberRules::Normal => {
                     let computing_cop_strat = self.workers.iter().any(|worker| {
@@ -993,7 +985,7 @@ impl BruteforceComputationState {
 
                     let curr_known = self.cop_strats.contains_key(&game_type);
                     let enable_compute = !computing_cop_strat && !curr_known;
-                    let compute_button = Button::new("berechnen");
+                    let compute_button = Button::new("compute");
                     if ui
                         .add_enabled(enable_compute, compute_button)
                         .on_hover_text(disclaimer)
@@ -1003,7 +995,7 @@ impl BruteforceComputationState {
                     }
                     let strat_on_disk = self.cops_strats_stored.get(&game_type).is_some_and(|&x| x);
                     let enable_load = strat_on_disk && !curr_known;
-                    let load_button = Button::new("laden 🖴");
+                    let load_button = Button::new("load 🖴");
                     if ui.add_enabled(enable_load, load_button).clicked() {
                         self.load_cops_strat_for(game_type.clone());
                     }
@@ -1014,7 +1006,7 @@ impl BruteforceComputationState {
                     });
                     let curr_known = self.fog_strats.contains_key(&game_type);
                     let enable_compute = !computing_fog_strat && !curr_known;
-                    let compute_button = Button::new("berechnen (Nebel)");
+                    let compute_button = Button::new("compute (fog)");
                     if ui
                         .add_enabled(enable_compute, compute_button)
                         .on_hover_text(disclaimer)
@@ -1022,19 +1014,20 @@ impl BruteforceComputationState {
                     {
                         self.start_fog_computation_for(game_type.clone());
                     }
-                    let load_sol_to_characters_button = Button::new("als Züge ♟");
                     let solution = self.fog_strats.get(&game_type);
-                    let enable_load = solution.is_some_and(|sol| sol.is_cleanable());
+                    let enable_apply = solution.is_some_and(|sol| sol.is_cleanable());
+                    let apply_button = Button::new("apply to ♟");
+                    let explainer = "the pieces on screen forget what they did until now and get the winnig move sequence as their future moves";
                     if ui
-                        .add_enabled(enable_load, load_sol_to_characters_button)
-                        .on_hover_text("Ersetze Figurenbewegungen durch die entnebelnde Zugfolge.")
+                        .add_enabled(enable_apply, apply_button)
+                        .on_hover_text(explainer)
                         .clicked()
                     {
                         fog_solution = solution;
                     }
                 },
                 bf::DynRobberRules::Energy(_) => {
-                    ui.label("kein Algorithmus implementiert");
+                    ui.label("no algo implemented");
                 },
             });
             ui.add_space(5.0);

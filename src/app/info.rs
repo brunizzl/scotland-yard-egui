@@ -56,92 +56,110 @@ pub enum VertexColorInfo {
 
 impl VertexColorInfo {
     const fn description(self) -> &'static str {
-        use VertexColorInfo::*;
         match self {
-            None => "Es werden keine automatisch berechneten Punkte angezeigt",
-            NearNodes => "alle Knoten näher am Räuber als am nächsten Cop",
-            ConvexHull => "Wenn die Cops im 3D/Torus- Fall den gesamten Graphen durch die Hülle abdecken, \
-            wird trotzdem ein Rand gezeigt, da der Punkt am weitesten entfernt von jedem Cop vom Algorithmus \
-            hier immer als außerhalb der Hülle angenommen wird.",
-            ConvexHullBorder => "Punkte in Hülle, die mindestens einen Nachbarn ausserhalb Hülle haben. \
-            Weil diese Punkte nicht in Isolation interessant sind, sondern als Kreis um die Hülle, \
-            wird ein Punkt nur als Randpunkt makiert, wenn er erfolgreich in den Kreis um die Hülle \
-            aufgenommen werden konnte.",
-            SafeOutside => "Alle Knoten nicht in konvexer Hülle und mit Mindestabstand >= 2 zu nächstem Cop",
-            SafeBoundary => "Alle Knoten auf Rand von konvexer Hülle mit Mindestabstand >= 2 zu nächstem Cop",
-            Escape1 => "alle Punkte in der Konvexen Hülle, \
-            die näher an einem Punkt ausserhalb der Hülle sind, als der nächste Cop an diesem Punkt ist",
-            Escape2 => "Jedes Paar von benauchbarten Cops am Hüllenrand kontrolliert einen Randbereich. \
-            Will der Räuber durch diesen Bereich fliehen, dürfen die Cops in der Zeit, \
-            die der Räuber zum Rand braucht, diesen nicht auf Länge 0 kürzen können. \n\
-            Markiert werden alle Punkte, die schneller an jedem Punkt des Randabschnittes sind, \
-            als die Cops diesen Abschnitt dicht machen können.",
-            Escape2Grid => "Variante von Escape2 die nur auf Gittern (Zerschnitten + Tori) funktioniert",
-            EscapeConeGrid => "Knoten, an denen ein Kegel aus mindestens zwei Richtungen hervorgeht, 
-            so dass der Kegel keinen Cop oder Nachbarn eines Cops enthält. (Funktioniert nur auf Gittern)",
-            Escape3Grid => "Knoten von denen aus ein \"Fluchtoption 2\" Knoten erreicht werden kann, weil \
-            sich mehrere von denen überlappen (funzt noch bei weitem nicht immer. \
-            Diese Schätzung kann sowohl zu konservativ, als auch zu generös sein.)",
-            Escape23Grid => "Vereinigung aus Fluchtoptionen 2 und 3",
-            BruteForceRes => "Wenn Bruteforce Berechnung ergeben hat, \
-            dass der aktuelle Graph vom Räuber gewonnen wird und aktuell so viele Cops \
-            aktiv sind wie bei der Bruteforce Rechnung, werden mit dieser Option alle Knoten angezeigt, \
-            die dem Räuber für die gegebenen Coppositionen einen Sieg ermöglichen. \
-            (bzw. mit Energie: die Knoten auf die für aktuelle Räuberposition und Energie gezogen \
-            werden kann um zu entkommen)",
-            MinCopDist | MaxCopDist | AnyCopDist => "Punktweise, Abstand einstellbar bei ausgewählter Option",
-            RobberDist => "Alle Punkte die eingestellten Abstand zu Räuber haben",
-            RobberCone => "Kegel beginnend an Räuber in eingestellten Richtungen",
-            VertexEquivalenceClasses => "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
-            Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
-            Das macht Bruteforce etwas weniger speicherintensiv.",
-            RobberVertexClass => "Alle Knoten die in selber Symmetrieäquivalenzklasse sitzen \
-            wie die aktuelle Räuberposition",
-            CopsRotatedToEquivalence => "Coppositionen rotiert auf repräsentative Knoten selber Äquivalenzklasse",
-            CopsVoronoi => "Punkte mit mehreren nähesten Cops. Anzahl Cops von opak zu transparent:\n\
-            - drei Cops exakt\n\
-            - drei Cops ca. (zwei exakt und einer +1 oder einer exakt und zwei +1)\n\
-            - zwei Cops exakt, kein dritter +1\n\
-            - zwei Cops ca. (einer exakt und einer +1)",
-            Fog => "anderes Spiel: alle Figuren probieren gemeinsam das Spielfeld von Nebel zu befreien.\n\
-            Der Zug der Cleaner endet, wenn der Räuber gezogen hat.\n\
-            Starte mit Manuellen Markern als Nebel: habe Nebel ausgewählt + [Shift] + [T]",
-            CopStratPlaneDanger => "Knoten die Räuber nicht betreten sollte, wenn Cops bestimmte \
-            Strategie auf unendlicher Ebene fahren.",
-            Debugging => "Was auch immer gerade während des letzten mal kompilierens interessant war",
-            SpecificVertex => "Knoten mit bestimmten Index, nur relevant für Debugging",
+            Self::None => "No automatically computed vertex subsets are shown",
+            Self::NearNodes => "every vertex closer to the robber than to the closest cop",
+            Self::ConvexHull => {
+                "a vertex subset X is convex, if for every x, y in X hold that \
+                all vertices v on a shortest path from x to y are also in X. \n\
+                the convex hull of the police positions is the smallest convex set containing every police position. \n\
+                note: the convex hull algorithm is only an approximation on most graph glasses (but fast)"
+            },
+            Self::ConvexHullBorder => {
+                "vertices in convex hull with at least one eighbor outside hull.\
+                because these vertices are not interesting in isolation, \
+                they are only shown when correctly connected to paths / a circle"
+            },
+            Self::SafeOutside => {
+                "all vertices outside convex hull with distance >= 2 to closest cop"
+            },
+            Self::SafeBoundary => {
+                "all vertices in boundary of convex hull with distance >= 2 to closest cop"
+            },
+            Self::Escape1 => {
+                "every vertex inside convex hull that is closer to a vertex outside the hull \
+                than to the closest cop is to this vertex outside"
+            },
+            Self::Escape2 => {
+                "we assume for every cop pair, that only one can move each round. \
+                we further assume that the convex hull is continuous. \
+                marked are the vertices in the convex hull, that the robber can escape from under thes assumptions."
+            },
+            Self::Escape2Grid => "variant of Escape2 requiring (cut open or toroidal) grids",
+            Self::EscapeConeGrid => {
+                "(requires grids) vertices from which a safe cone extends. \
+                e.g. the cone has distance >= 2 to the closest cop."
+            },
+            Self::Escape3Grid => {
+                "(requires grids) vertices that allow an escape to an intersection of two cones"
+            },
+            Self::Escape23Grid => "(requires grids) union of escape options 2 and 3",
+            Self::BruteForceRes => {
+                "every vertex the bruteforce algorithm computed to be safe for the robber to move to, \
+                given the cops just moved to their current positions."
+            },
+            Self::MinCopDist | Self::MaxCopDist | Self::AnyCopDist => {
+                "shown distance can be adjusted if this option is selected."
+            },
+            Self::RobberDist => "all vertices with configured distance to the robber.",
+            Self::RobberCone => "a cone starting at the robber with selected directions",
+            Self::VertexEquivalenceClasses => {
+                "shows orbits of automorphisms stored with the current graph.\n\
+                note: automorphisms are only computed for some graph shapes."
+            },
+            Self::RobberVertexClass => {
+                "all vertices in same orbit (in the stored automorphism subgroup) as the robber position.\n\
+                note: automorphisms are only computed for some graph shapes."
+            },
+            Self::CopsRotatedToEquivalence => "cop state mapped to the representative cop state",
+            Self::CopsVoronoi => {
+                "vertices with multiple (roughly) closest cops. number of cops from opaque to transparent:\n\
+            - three cops exact\n\
+            - three Cops ca. (two exact and one +1 oder one exact and two +1)\n\
+            - two Cops exact, no third +1\n\
+            - two Cops ca. (one exakt and one +1)"
+            },
+            Self::Fog => {
+                "visualisation of robber rules set to \"fog\": all pieces work together to clean the graph from fog.\n\
+                a cleaning round ends with the robber ending his move.\n\
+                start with manual markers as fog: this option is selected + [shift] + [T]"
+            },
+            Self::CopStratPlaneDanger => "idea on infinite plane that turned out to not work.",
+            Self::Debugging => "surprise information",
+            Self::SpecificVertex => {
+                "the vertex with the specified index. only relevant for debugging."
+            },
         }
     }
 
     const fn name_str(self) -> &'static str {
-        use VertexColorInfo::*;
         match self {
-            None => "Keine",
-            NearNodes => "für Räuber nähere Knoten",
-            ConvexHull => "Konvexe Hülle um Cops",
-            ConvexHullBorder => "Grenze Konvexe Hülle",
-            SafeOutside => "Winning Outside",
-            SafeBoundary => "Winning Stage I",
-            Escape1 => "Winning Stage II",
-            Escape2 => "Winning Proximity",
-            Escape2Grid => "Winning Direction (Gitter)",
-            EscapeConeGrid => "Winning Cones (Gitter)",
-            Escape3Grid => "Winning Dilemma (Gitter)",
-            Escape23Grid => "Winning Cones + Dilemma (Gitter)",
-            BruteForceRes => "Bruteforce Räuberstrategie",
-            MinCopDist => "minimaler Cop Abstand",
-            MaxCopDist => "maximaler Cop Abstand",
-            AnyCopDist => "jeder Cop Abstand",
-            RobberDist => "Räuberabstand",
-            RobberCone => "Kegel von Räuber (Gitter)",
-            VertexEquivalenceClasses => "Symmetrieäquivalenzklassen",
-            RobberVertexClass => "Äquivalenzklasse Räuberknoten",
-            CopsRotatedToEquivalence => "Rotierte Coppositionen",
-            CopsVoronoi => "Cops Voronoi",
-            Fog => "Nebel",
-            CopStratPlaneDanger => "Cops Ebene Strat Gefahr",
-            Debugging => "Debugging",
-            SpecificVertex => "einzelner Knoten",
+            Self::None => "None",
+            Self::NearNodes => "Closer to Robber",
+            Self::ConvexHull => "Convex Hull of Cops",
+            Self::ConvexHullBorder => "Boundary of Convex Hull",
+            Self::SafeOutside => "Winning Outside",
+            Self::SafeBoundary => "Winning Stage I",
+            Self::Escape1 => "Winning Stage II",
+            Self::Escape2 => "Winning Proximity",
+            Self::Escape2Grid => "Winning Direction (Grid)",
+            Self::EscapeConeGrid => "Winning Cones (Grid)",
+            Self::Escape3Grid => "Winning Dilemma (Grid)",
+            Self::Escape23Grid => "Winning Cones + Dilemma (Grid)",
+            Self::BruteForceRes => "Bruteforce Robber Strategy",
+            Self::MinCopDist => "Minimum Cop Distance",
+            Self::MaxCopDist => "Maximum Cop Distance",
+            Self::AnyCopDist => "every Cop Distance",
+            Self::RobberDist => "Robber Distance",
+            Self::RobberCone => "Cone at Robber (Grid)",
+            Self::VertexEquivalenceClasses => "Orbits (from Automorphisms)",
+            Self::RobberVertexClass => "Robber Orbit",
+            Self::CopsRotatedToEquivalence => "Representative Cop State",
+            Self::CopsVoronoi => "Cops Voronoi",
+            Self::Fog => "Fog",
+            Self::CopStratPlaneDanger => "Cops Plane Strat Danger",
+            Self::Debugging => "Debugging",
+            Self::SpecificVertex => "Singe Vertex",
         }
     }
 
@@ -191,63 +209,61 @@ pub enum VertexSymbolInfo {
 
 impl VertexSymbolInfo {
     const fn description(self) -> &'static str {
-        use VertexSymbolInfo::*;
         match self {
-            None => "Es werden keine Zahlen angezeigt",
-            Indices => "primär relevant für Debugging",
-            RobberAdvantage => "Helfer zur Berechnung von Fluchtoption 1",
-            Escape2 => {
-                "jedes benachbarte Cop-Paar auf dem Hüllenrand hat einen Namen in { 0 .. 9, A .. }. \
-                Der Marker listet alle Paare auf, zwischen denen der Räuber durchschlüpfen kann."
+            Self::None => "no symbols are shown",
+            Self::Indices => "mostly used in debugging",
+            Self::RobberAdvantage => "helper to compute Winning Stage II",
+            Self::Escape2 => {
+                "every pair of cops guarding a section of the convex hull boundary has a name in { 0 .. 9, A .. }. \
+                the marker lists all pairs, which cannot prevent the robber walking through between them."
             },
-            Escape2Grid => "alle Richtungen, in die der Räuber fliehen kann.",
-            EscapeConeGrid => "jede Richtung, die in einem Fluchtkegel enthalten ist als Pfeil.",
-            Escape23Grid => "Kombination aus Fluchtoption 2 + 3 auf Gitter.",
-            Escape3Grid => "eine dieser Richtungen führt garantiert wieder auf einen Dilemmaknoten",
-            MinCopDist => "punktweises Minimum aus den Abständen aller Cops",
-            MaxCopDist => "punktweises Maximum aus den Abständen aller Cops",
-            VertexEquivalenceClass => {
-                "Für symmetrische Graphen werden Knoten, die mit einer symmetrierespektierenden \
-                Rotation + Spiegelung auf einander abgebildet werden, in die selbe Klasse gesteckt. \
-                Das macht Bruteforce etwas weniger speicherintensiv."
+            Self::Escape2Grid => {
+                "(requires grids) arrows corresponding to vertices marked in Winning Direction"
             },
-            RobberDist => "Abstand von Räuberposition zu jedem Knoten",
-            RobberDistAvoidCops => {
-                "Abstand von Räuberposition zu jedem Knoten, Polizisten sind Hindernisse."
+            Self::EscapeConeGrid => {
+                "(requires grids) arrows corresponding to vertices marked in Winning Cones"
             },
-            BruteforceCopMoves => {
-                "Wenn Cops optimal ziehen, lebt Räuber noch maximal so viele Züge"
+            Self::Escape23Grid => {
+                "(requires grids) combines arrows from Winning Direction and Winning Dilemma"
             },
-            BruteforceRobberEnergy => {
-                "Räuber hat eine Gewinnstrategie wenn er nach einem Zug auf einem Knoten mit Zahl steht \
-                und er dann noch mindestens so viel Energie wie die Zahl an seiner Position gespeichert hat."
+            Self::Escape3Grid => {
+                "(requires grids) arrows corresponding to vertices marked in Winning Dilemma"
             },
-            Debugging => {
-                "Überraschungsinfo, die zum letzten Kompilierzeitpunkt \
-                gerade spannend zum debuggen war"
+            Self::MinCopDist => "pointwise minimum of distances to all cops",
+            Self::MaxCopDist => "pointwise maximum of distances to all cops",
+            Self::VertexEquivalenceClass => "index of orbit under stored automorphism (sub) group",
+            Self::RobberDist => "distance from each vertex to the robber",
+            Self::RobberDistAvoidCops => "length of shortest cop-free route to robber",
+            Self::BruteforceCopMoves => {
+                "(requires a bruteforce cop strategy result) if cops follow the bruteforce strategy, \
+                the robber is captured after at most this number of additional moves."
             },
+            Self::BruteforceRobberEnergy => {
+                "robber has a winning strategy, if he ends his move on a vertex with \
+                number at most as high as the leftover bank after the move."
+            },
+            Self::Debugging => "surprise information",
         }
     }
 
     const fn name_str(self) -> &'static str {
-        use VertexSymbolInfo::*;
         match self {
-            None => "Keine",
-            Indices => "Knotenindizes",
-            RobberAdvantage => "Marker Flucht 1",
-            Escape2 => "Marker Flucht 2",
-            Escape2Grid => "Pfeile Flucht 2 (Gitter)",
-            EscapeConeGrid => "Pfeile Flucht Kegel (Gitter)",
-            Escape3Grid => "Pfeile Flucht 3 (Gitter)",
-            Escape23Grid => "Pfeile Flucht 2 & 3 (Gitter)",
-            MinCopDist => "minimaler Cop Abstand",
-            MaxCopDist => "maximaler Cop Abstand",
-            VertexEquivalenceClass => "Symmetrieäquivalenzklasse",
-            RobberDist => "Räuberabstand",
-            RobberDistAvoidCops => "Räuberabstand um Cops",
-            BruteforceCopMoves => "Bruteforce Cop Züge",
-            BruteforceRobberEnergy => "Bruteforce Räuber Energie",
-            Debugging => "Debugging",
+            Self::None => "None",
+            Self::Indices => "Vertex Indices",
+            Self::RobberAdvantage => "Marker Winning Stage II",
+            Self::Escape2 => "Marker Winning Proximity",
+            Self::Escape2Grid => "Winning Direction (Grid)",
+            Self::EscapeConeGrid => "Winning Cones (Grid)",
+            Self::Escape3Grid => "Winning Dilemma (Grid)",
+            Self::Escape23Grid => "Winning Cones + Dilemma (Grid)",
+            Self::MinCopDist => "Minimum Cop Distance",
+            Self::MaxCopDist => "Maximum Cop Distance",
+            Self::VertexEquivalenceClass => "Orbit Index",
+            Self::RobberDist => "Robber Distance",
+            Self::RobberDistAvoidCops => "Robber Distance avoid Cops",
+            Self::BruteforceCopMoves => "Bruteforce Cop Moves",
+            Self::BruteforceRobberEnergy => "Bruteforce Robber Energy",
+            Self::Debugging => "Debugging",
         }
     }
 
@@ -372,30 +388,30 @@ impl Options {
         };
         match val {
             ShownValue::MarkedCopDist => {
-                add_drag_value(ui, &mut self.marked_cop_dist, "Abstand", 0..=1000, 1);
+                add_drag_value(ui, &mut self.marked_cop_dist, "dist ⬌", 0..=1000, 1);
             },
             ShownValue::MarkedRobberDist => {
-                add_drag_value(ui, &mut self.marked_robber_dist, "Abstand", 0..=1000, 1);
+                add_drag_value(ui, &mut self.marked_robber_dist, "dist ⬌", 0..=1000, 1);
             },
             ShownValue::VertexIndex => {
                 ui.horizontal(|ui| {
                     ui.add(egui::DragValue::new(&mut self.specific_shown_vertex));
-                    ui.label("Index");
+                    ui.label("index");
                 });
             },
             ShownValue::DirectionBits => {
                 let mut shown = crate::graph::grid::Dirs(self.shown_escape_directions);
                 ui.horizontal(|ui| {
-                    if ui.button(" << ").clicked() {
+                    if ui.button(" « ").clicked() {
                         shown = shown.rotate_left_hex();
                     }
                     ui.add(egui::DragValue::new(&mut shown.0).range(0..=63).binary(6, true));
-                    if ui.button(" >> ").clicked() {
+                    if ui.button(" » ").clicked() {
                         shown = shown.rotate_right_hex();
                     }
-                    ui.label("Richtungen").on_hover_text(
-                        "Richtungen werden als Bitset gespeichert. \
-                        Bits für Richtungen e₃ und -e₃ werden auf Vierecksgitter ignoriert.",
+                    ui.label("directions").on_hover_text(
+                        "directions are stored as bitset. \
+                        bits for directions e₃ and -e₃ are ignored on the quad-grid.",
                     );
                 });
                 self.shown_escape_directions = shown.0;
@@ -410,7 +426,7 @@ impl Options {
                             .range(0..=32)
                             .custom_formatter(|x, _| {
                                 if x == 0.0 {
-                                    "Alle".to_string()
+                                    "all".to_string()
                                 } else {
                                     x.to_string()
                                 }
@@ -419,7 +435,7 @@ impl Options {
                     if ui.button(" + ").clicked() {
                         self.shown_u32_bit = isize::min(self.shown_u32_bit + 1, 32);
                     }
-                    ui.label("Komponente");
+                    ui.label("component");
                 });
             },
             ShownValue::None => {
@@ -430,20 +446,19 @@ impl Options {
 
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) -> bool {
         let mut menu_change = false;
-        ui.collapsing("Knoteninfo", |ui| {
+        ui.collapsing("Vertex Information", |ui| {
             //obv. whether to draw vertices or not has no influence over any actual information -> no need to update menu change
             ui.horizontal(|ui| {
-                ui.add(Checkbox::new(&mut self.draw_vertices, "Knoten"))
-                    .on_hover_text("Spielfeldform \"Custom\" zeigt Knoten immer an.");
+                ui.add(Checkbox::new(&mut self.draw_vertices, "Vertices"))
+                    .on_hover_text("map shape \"Custom\" always shows vertices.");
                 self.vertex_style.draw_options(ui, &[Color32::GRAY]);
             });
 
             ui.add_space(8.0);
-            ui.add(Checkbox::new(&mut self.show_cop_strat, "Polizeistrategie"))
+            ui.add(Checkbox::new(&mut self.show_cop_strat, "Police Strategy"))
                 .on_hover_text(
-                    "Wenn für aktuelle Anzahl Cops & für aktuellen Graphen Bruteforce \
-                    Polizeistrategie berechnet wurde und aktueller Spielstate von Cops \
-                    gewonnen wird, werden alle idealen Züge angezeigt.",
+                    "If a bruteforce police strategy was computed for the current game parameters, \
+                    the optimal police moves from the current state are shown as arrows.",
                 );
 
             ui.add_space(8.0);
@@ -452,7 +467,7 @@ impl Options {
                 self.automatic_marker_style.draw_options(ui, &[color::GREEN]);
             });
             let color_info_text = format!(
-                "{}\n\nrotiere durch letzte Marker mit [Q] + [1]/[2]/[3]/[4]",
+                "{}\n\nrotate through last markers with [Q] + [1]/[2]/[3]/[4]",
                 self.vertex_color_info().description(),
             );
             ComboBox::from_id_salt(&self.last_selected_vertex_color_infos as *const _)
@@ -485,11 +500,11 @@ impl Options {
 
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label("Symbole:");
+                ui.label("Symbols:");
                 self.number_style.draw_options(ui, &[]);
             });
             let symbol_info_text = format!(
-                "{}\n\nrotiere durch letzte Symbole mit [W] + [1]/[2]/[3]/[4]",
+                "{}\n\nrotate through last symbols with [W] + [1]/[2]/[3]/[4]",
                 self.vertex_number_info().description(),
             );
             ComboBox::from_id_salt(&self.last_selected_vertex_number_infos as *const _)
@@ -565,34 +580,34 @@ impl MouseTool {
 
     fn what(self) -> &'static str {
         match self {
-            MouseTool::Drag => "bewege Figuren ([E] + [1])",
+            MouseTool::Drag => "move pieces ([E] + [1])",
             MouseTool::Draw => {
-                "zeichne ([E] + [2])\n\
-                unabhängig vom aktiven Werkzeug kann die\n\
-                aktive Farbe des der Maus nähesten Knoten\n\
-                mit [m] gesetzt und mit [n] entfernt werden."
+                "draw ([E] + [2])\n\
+                regardless of the currently selected tool,\n\
+                the vertex closest to the mouse cursor can be\n\
+                added to the active layer with [m] or removed with [n]."
             },
             MouseTool::Erase => {
-                "radiere ([E] + [3])\n\
-                unabhängig vom aktiven Werkzeug kann die\n\
-                aktive Farbe des der Maus nähesten Knoten\n\
-                mit [m] gesetzt und mit [n] entfernt werden."
+                "erase ([E] + [3])\n\
+                regardless of the currently selected tool,\n\
+                the vertex closest to the mouse cursor can be\n\
+                added to the active layer with [m] or removed with [n]."
             },
             MouseTool::Paintbucket => {
-                "Farbeimer ([E] + [4])\n\
-                Verschiedene Farben interagieren nicht miteinander.\n\
-                Klicken auf eine bereits markierte Region löscht diese."
+                "paint bucket ([E] + [4])\n\
+                different color layers don't interact with each other.\n\
+                clicking on a marked component removes the component."
             },
             MouseTool::AddVertex => {
-                "füge Knoten zu Custom Graph hinzu ([E] + [5])\n\
-                [Shift] + [Klick] entfernt Knoten.\n\
-                [Strg] + ziehen mit linker Maustaste bewegt Knoten."
+                "add vertex to graph ([E] + [5])\n\
+                [shift] + [click] removes vertex.\n\
+                [ctrl] + dragging with left mouse button moves vertex"
             },
             MouseTool::DragVertex(_) => panic!("this is menu-wise only a subvariant of AddVertex."),
             MouseTool::AddEdge(_, _) => {
-                "füge Kante zu Custom Graph hinzu ([E] + [6])\n\
-                [Shift] + [Klick] entfernt Kante.\n\
-                [Strg] + [Klick] für Kantenzug."
+                "add edge to graph ([E] + [6])\n\
+                [shift] + [click] removes edge.\n\
+                [ctrl] + repeated [click] for chaining edges."
             },
         }
     }
@@ -822,7 +837,7 @@ impl Info {
                     ui.text_edit_singleline(&mut self.screenshot_name);
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Aufnehmen: ");
+                    ui.label("Take Screenshot: ");
                     self.take_tikz_screenshot = ui.button("TikZ").clicked();
                     self.take_cetz_screenshot = ui.button("CeTZ").clicked();
                 });
@@ -850,7 +865,7 @@ impl Info {
     pub fn draw_windows(&mut self, ctx: &egui::Context) {
         let automatic_shown = self.options.vertex_color_info() != VertexColorInfo::None;
         let mut new_tool = self.tool;
-        egui::Window::new("Manuelle Marker")
+        egui::Window::new("Manual Markers")
             .open(&mut self.options.show_manual_marker_window)
             .constrain_to(ctx.content_rect())
             .show(ctx, |ui| {
@@ -1212,23 +1227,20 @@ impl Info {
                 let seps = std::iter::repeat_n(", ".to_string(), nr_seps);
                 String::from_iter(vertices.into_iter().interleave(seps))
             };
-            let robber_vertex = self
-                .characters
-                .all()
-                .next()
-                .map_or("<Keiner>".to_string(), vertex_str);
+            let robber_vertex =
+                self.characters.all().next().map_or("<None>".to_string(), vertex_str);
 
             let comment = if is_tikz { "% " } else { "//" };
             format!(
                 "\n\
-                {comment} Form: {shape}\n\
-                {comment} Auflösung: {res}\n\
-                {comment} gezeigte Infopunkte: {color_info}\n\
-                {comment} gezeige Infozahlen: {number_info}\n\
-                {comment} Kameraposition: ({cam_x}, {cam_y}) Winkel: {angle} Zoom: {zoom}\n\
-                {comment} Positionen aktiver Polizisten: [{active_police_vertices}]\n\
-                {comment} Positionen inaktiver Polizisten: [{inactive_police_vertices}]\n\
-                {comment} Räuberknoten: {robber_vertex}\n\
+                {comment} shape: {shape}\n\
+                {comment} resolution: {res}\n\
+                {comment} shown vertex set: {color_info}\n\
+                {comment} shown vertex symbols: {number_info}\n\
+                {comment} camera position: ({cam_x}, {cam_y}) angle: {angle} zoom: {zoom}\n\
+                {comment} aktive cop positions: [{active_police_vertices}]\n\
+                {comment} inactive cop positions: [{inactive_police_vertices}]\n\
+                {comment} robber position: {robber_vertex}\n\
                 \n\
                 \n"
             )

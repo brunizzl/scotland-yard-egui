@@ -24,7 +24,7 @@ impl LocalManager {
             if let Some(cmd) = new_command {
                 match cmd {
                     Command::Abort => {
-                        return Err("manuell abgebrochen".into());
+                        return Err("manually aborted".into());
                     },
                     Command::Pause => {
                         //pause for short time, then redo check via endless loop.

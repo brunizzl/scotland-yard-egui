@@ -333,10 +333,10 @@ impl DynRobberRules {
                 fog_speed,
                 best_solution,
             }) => {
-                let best = if best_solution { "beste" } else { "" };
-                format!("Nebel(speed={fog_speed},vis={visibility},{best})",)
+                let best = if best_solution { ",best" } else { "" };
+                format!("Fog(speed={fog_speed},vis={visibility}{best})",)
             },
-            Self::Energy(ep) => format!("Energie({})", ep.print_compact()),
+            Self::Energy(ep) => format!("Energy({})", ep.print_compact()),
         }
     }
 }

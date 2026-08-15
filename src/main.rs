@@ -17,7 +17,7 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "Scotland Yard Visualisierung",
+        "Scotland Yard Visualisation",
         native_options,
         Box::new(|cc| Ok(Box::new(scotland_yard_egui::State::new(cc)))),
     )

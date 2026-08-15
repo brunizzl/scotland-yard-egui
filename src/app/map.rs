@@ -317,11 +317,11 @@ impl Map {
 
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
         let mut change = false;
-        ui.collapsing("Spielfeld", |ui| {
+        ui.collapsing("Map", |ui| {
             let combo_box_id = &self.data as *const _;
             let curr_shape = self.data.shape_mut();
             let old_shape = curr_shape.clone();
-            ui.label("Form:");
+            ui.label("Shape:");
             egui::ComboBox::from_id_salt(combo_box_id)
                 .selected_text(old_shape.name_str())
                 .show_ui(ui, |ui| {
@@ -364,7 +364,7 @@ impl Map {
                         }
                     }
                     if NATIVE && !matches!(old_shape, Custom(_)) {
-                        let extend_msg = "erweitere aktuellen Graph";
+                        let extend_msg = "extend current graph";
                         let extend_radio = egui::RadioButton::new(false, extend_msg);
                         if ui.add(extend_radio).clicked() {
                             let custom_data = shape::CustomBuild::new(old_shape.clone());
@@ -375,39 +375,39 @@ impl Map {
                 });
             match curr_shape {
                 Shape::DividedIcosahedron(pressure) => {
-                    add_drag_value(ui, pressure, "Druck", 0..=self.resolution, 1);
+                    add_drag_value(ui, pressure, "Pressure", 0..=self.resolution, 1);
                 },
                 Shape::RegularPolygon2D(nr_sides) => {
-                    add_drag_value(ui, nr_sides, "Seiten", 3..=10, 1);
+                    add_drag_value(ui, nr_sides, "Sites", 3..=10, 1);
                 },
                 Shape::Random2D(seed) => {
                     add_drag_value(ui, seed, "Seed", 0..=u32::MAX, 1);
                 },
                 Shape::TriangTorusSkewed(dy) => {
-                    add_drag_value(ui, dy, "Schräglage", 0..=800, 1);
+                    add_drag_value(ui, dy, "Skew", 0..=800, 1);
                 },
                 Shape::SquareGrid => {
-                    if ui.button(" ↪↩ ").on_hover_text("klebe zu Torus").clicked() {
+                    if ui.button(" ↪↩ ").on_hover_text("wrap to torus").clicked() {
                         *curr_shape = Shape::SquareTorus;
                     }
                 },
                 Shape::SquareTorus => {
-                    if ui.button("   ✂   ").on_hover_text("zerschneiden").clicked() {
+                    if ui.button("   ✂   ").on_hover_text("cut open").clicked() {
                         *curr_shape = Shape::SquareGrid;
                     }
                 },
                 Shape::TriangGrid => {
-                    if ui.button(" ↪↩ ").on_hover_text("klebe zu Torus").clicked() {
+                    if ui.button(" ↪↩ ").on_hover_text("wrap to torus").clicked() {
                         *curr_shape = Shape::TriangTorus;
                     }
                 },
                 Shape::TriangTorus => {
-                    if ui.button("   ✂   ").on_hover_text("zerschneiden").clicked() {
+                    if ui.button("   ✂   ").on_hover_text("cut open").clicked() {
                         *curr_shape = Shape::TriangGrid;
                     }
                 },
                 Shape::Custom(c) => {
-                    crate::app::menu_button_closing_outside(ui, "Bauschritte", |ui| {
+                    crate::app::menu_button_closing_outside(ui, "build steps", |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Name:");
                             ui.text_edit_singleline(&mut c.name);
@@ -417,11 +417,11 @@ impl Map {
                         ui.add_space(5.0);
                         let (recompute_button, delete_button) = ui
                             .horizontal(|ui| {
-                                let recompute = ui
-                                    .button("Übernehmen")
-                                    .on_hover_text("Parse Text, lösche Fehler, update Graph.");
+                                let recompute = ui.button("apply").on_hover_text(
+                                    "parse text, delete erronious parts, build graph",
+                                );
                                 ui.add_space(100.0);
-                                let delete = ui.button(" 🗑 ").on_hover_text("Lösche Graph");
+                                let delete = ui.button(" 🗑 ").on_hover_text("delete graph");
                                 (recompute, delete)
                             })
                             .inner;
@@ -450,12 +450,12 @@ impl Map {
             ui.add_space(8.0);
             let min = curr_shape.min_res();
             let max = curr_shape.max_res();
-            change |= add_drag_value(ui, &mut self.resolution, "Auflösung", min..=max, 1).changed;
+            change |= add_drag_value(ui, &mut self.resolution, "Resolution", min..=max, 1).changed;
             if change {
                 let new_shape = std::mem::replace(curr_shape, old_shape);
                 self.recompute(new_shape);
             }
-            ui.label(format!("    ➡ {} Knoten", self.data.nr_vertices()));
+            ui.label(format!("    ➡ {} Vertices", self.data.nr_vertices()));
         });
         change
     }

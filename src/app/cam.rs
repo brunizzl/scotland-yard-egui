@@ -94,13 +94,17 @@ impl Camera3D {
 
     pub fn draw_menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            ui.label("Kamera: ");
-            if ui.button("🏠").on_hover_text("setze Kamera zurück").clicked() {
+            ui.label("Camera: ");
+            if ui
+                .button("🏠")
+                .on_hover_text("reset camera position / angle")
+                .clicked()
+            {
                 self.reset();
             }
             ui.add_space(3.0);
             ui.add(DragValue::new(&mut self.zoom_speed).range(0.05..=4.0).speed(0.01))
-                .on_hover_text("Zoom-/Scroll-/Rotationsgeschwindigkeit");
+                .on_hover_text("zoom/scroll/rotation speed");
             ui.add_space(3.0);
             if ui.add(Button::new("🔄").sense(Sense::drag())).dragged() {
                 ui.ctx().request_repaint();
@@ -112,7 +116,7 @@ impl Camera3D {
             }
             ui.add_space(3.0);
             ui.checkbox(&mut self.allow_rotation_2d, "")
-                .on_hover_text("erlaube Rotieren mit Touchgesten für 2D Graphen");
+                .on_hover_text("enable rotations with touch moves for 2D graphs");
         });
     }
 

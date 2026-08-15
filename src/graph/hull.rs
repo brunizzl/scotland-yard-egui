@@ -554,7 +554,7 @@ fn retain_safe_inner_boundary(
 
                 //at this point something went wrong and we try to continue on a best effort basis
                 println!(
-                    "fehler in hull::retain_safe_inner_boundary an {:?} (indices {:?}): \
+                    "error in hull::retain_safe_inner_boundary at {:?} (indices {:?}): \
                     bnd = {:?}, n-bnd = {:?}, yes = {:?}, n-yes = {:?}, n-perhaps = {:?}",
                     check_vals,
                     check_front..check_end,
@@ -585,7 +585,7 @@ fn retain_safe_inner_boundary(
                             }
                         }
                         if best_val != usize::MAX {
-                            println!("^ entschieden für {best_val}");
+                            println!("^ chose {best_val}");
                             break 'next_vertex best_val;
                         }
                     }};
@@ -594,7 +594,7 @@ fn retain_safe_inner_boundary(
                 take_largest!(|v| edges.neighbors_of(v).filter(|&n| keep[n] == Keep::Yes));
                 take_largest!(|v| edges.neighbors_of(v).filter(|&n| keep[n] != Keep::No));
 
-                println!("^ ungelöst");
+                println!("^ unsolved");
                 if check_vals.is_empty() {
                     break 'check_all;
                 }

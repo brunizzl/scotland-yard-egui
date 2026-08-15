@@ -211,13 +211,13 @@ impl ManualMarkers {
         automatic_markers: &[bool],
     ) {
         ui.horizontal(|ui| {
-            if ui.button(" ⟲ ").on_hover_text("zurück (strg + z)").clicked() {
+            if ui.button(" ⟲ ").on_hover_text("undo ([ctrl] + [Z])").clicked() {
                 self.undo();
             }
-            if ui.button(" ⟳ ").on_hover_text("vorwärts (strg + y)").clicked() {
+            if ui.button(" ⟳ ").on_hover_text("redo ([ctrl] + [Y])").clicked() {
                 self.redo();
             }
-            if NATIVE && ui.button(" 🗑 ").on_hover_text("vergesse Vergangenheit").clicked() {
+            if NATIVE && ui.button(" 🗑 ").on_hover_text("forget past").clicked() {
                 let mut current = self.history.remove(self.index);
                 current.tool = DrawTool::None;
                 self.index = 0;
@@ -260,7 +260,7 @@ impl ManualMarkers {
                 let bit_i = 1u8 << i;
                 {
                     let button = radio_button(self.active_bit == i, opts.colors[i], ui);
-                    let hover_choose = format!("wähle Farbe (f + {})", i + 1);
+                    let hover_choose = format!("choose color (f + {})", i + 1);
                     if button.on_hover_text(hover_choose).clicked() {
                         self.active_bit = i;
                         opts.shown |= bit_i;
@@ -270,13 +270,12 @@ impl ManualMarkers {
                     .width(0.0)
                     .show_index(ui, layer, 8, |i| i.to_string())
                     .on_hover_text(
-                        "Ebene\n(Die Größe wird per Ebene eingestellt und \
-                        Farben auf der selben Ebene werden gemischt, \
-                        sofern gemeinsam an einem Knoten vorhanden.)",
+                        "draw layer\n(size is adjusted per draw layer and \
+                        colors on the same vertex and draw layer are mixed.)",
                     );
 
                 let mut show = opts.shown & bit_i != 0;
-                if ui.checkbox(&mut show, "").on_hover_text("Anzeigen").clicked() {
+                if ui.checkbox(&mut show, "").on_hover_text("show").clicked() {
                     opts.shown ^= bit_i;
                     debug_assert_eq!(show, (opts.shown & bit_i) != 0);
                 };
@@ -288,7 +287,7 @@ impl ManualMarkers {
                     let salt = crate::rand::Lcg::usize_hash(i);
                     style::draw_options(ui, size, active, default, salt);
                 }
-                if ui.button(" 🗑 ").on_hover_text("diese Marker löschen").clicked() {
+                if ui.button(" 🗑 ").on_hover_text("delete layer").clicked() {
                     let active = std::mem::replace(&mut self.active_bit, i);
                     self.log_action(DrawTool::SetOp);
                     self.active_bit = active;
@@ -299,9 +298,9 @@ impl ManualMarkers {
                 }
 
                 let what_set = if automatic_markers_shown {
-                    "automatische Marker"
+                    "automatic vertex markers"
                 } else {
-                    "aktive manuelle Marker"
+                    "aktive manual markers"
                 };
                 enum Op {
                     Add,
@@ -310,9 +309,9 @@ impl ManualMarkers {
                 }
                 for operation in [Op::Add, Op::Prod, Op::Sub] {
                     let hint = match operation {
-                        Op::Add => format!("füge {what_set} hinzu (Vereinigung)"),
-                        Op::Prod => format!("behalte nur {what_set} (Schnitt)"),
-                        Op::Sub => format!("entferne {what_set} (Differenz)"),
+                        Op::Add => format!("add {what_set} (union)"),
+                        Op::Prod => format!("only keep {what_set} (intersection)"),
+                        Op::Sub => format!("remove {what_set} (set difference)"),
                     };
                     let name = match operation {
                         Op::Add => " + ",

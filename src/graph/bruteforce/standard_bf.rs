@@ -81,25 +81,25 @@ where
     R: CopRules,
 {
     if nr_cops == 0 {
-        return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
+        return Err("at least one cop must be on the graph.".to_owned());
     }
     if nr_cops > MAX_COPS {
         return Err(format!(
-            "Rechnung kann für höchstens {MAX_COPS} Cops durchgeführt werden."
+            "computation can only be performed for up to {MAX_COPS} many cops."
         ));
     }
 
-    manager.update("liste Polizeipositionen")?;
+    manager.update("list police positions")?;
     let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
 
-    manager.update("reserviere Speicher für Räuberstrategiefunktion")?;
+    manager.update("aquire storage for robber strategy function")?;
     let Some(mut f) = SafeRobberPositions::new(edges.nr_vertices(), &cop_moves) else {
-        return Err("Zu wenig Speicherplatz (Räuberstrategiefunktion zu groß)".to_owned());
+        return Err("not enough RAM (robber strategy function too large)".to_owned());
     };
 
-    manager.update("reserviere Speicher für Queue")?;
+    manager.update("aquire storage for queue")?;
     let Some(mut queue) = RobberStratQueue::new(&cop_moves) else {
-        return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
+        return Err("not enoug RAM (initial queue too long)".to_owned());
     };
 
     let max_degree_less_than_nr_cops = edges.max_degree() < nr_cops;
@@ -107,7 +107,7 @@ where
     for (i, index) in izip!(0.., cop_moves.all_positions()) {
         if i % 4096 == 0 {
             let percent = 100.0 * (i as f32) / (cop_moves.nr_configurations() as f32);
-            let msg = format!("initialisiere Räuberstrategiefunktion: {percent:.2}%");
+            let msg = format!("initialise robber strategy function: {percent:.2}%");
             manager.update(msg)?;
         }
 
@@ -159,7 +159,7 @@ where
         if time_until_log_refresh == 0 {
             let nr_safe = f.robber_safe_when(curr_cop_positions).count_ones();
             manager.update(format!(
-                "berechne Räuberstrategie:\n{:.2}% in Queue ({}), Runde {}, {:.2}% sicher",
+                "compute robber strategy:\n{:.2}% in queue ({}), round {}, {:.2}% safe",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len(),
                 queue.rounds_complete(),
@@ -300,7 +300,7 @@ pub fn verify_continuity_robber(
         i_config += 1;
         if time_until_log_refresh == 0 {
             let done_percent = (i_config as f64) / (nr_configs as f64) * 100.0;
-            manager.update(format!("verifiziere Kontinuität: {done_percent:.2}%"))?;
+            manager.update(format!("verify continuity: {done_percent:.2}%"))?;
             time_until_log_refresh = log_refresh_interval;
         }
 
@@ -323,7 +323,7 @@ pub fn verify_continuity_robber(
         // verify some safe vertex exists for every cop arrangement
         if !some_safe {
             return Err(format!(
-                "Räuber ist nicht sicher, wenn Cops {cops:?} besetzen.",
+                "robber is not safe when cops are placed at {cops:?}.",
             ));
         }
 
@@ -337,8 +337,8 @@ pub fn verify_continuity_robber(
             ) {
                 if safe_last_move && !safe_before_curr {
                     return Err(format!(
-                        "Räuberstrategie nicht kontinuierlich an Knoten {v},\
-                        wenn Cops von {cops_neighs:?} zu {cops:?} ziehen."
+                        "robber strategy is non-continuouse at vertex {v},\
+                        when cops move from {cops_neighs:?} to {cops:?}."
                     ));
                 }
             }
@@ -445,28 +445,28 @@ where
     R: CopRules,
 {
     if nr_cops == 0 {
-        return Err("Mindestens ein Cop muss auf Spielfeld sein.".to_owned());
+        return Err("at least one cop must be on the graph.".to_owned());
     }
     if nr_cops > MAX_COPS {
         return Err(format!(
-            "Rechnung kann für höchstens {MAX_COPS} Cops durchgeführt werden."
+            "computation can only be performed for up to {MAX_COPS} many cops."
         ));
     }
 
-    manager.update("liste Polizeipositionen")?;
+    manager.update("list police positions")?;
     let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
 
-    manager.update("reserviere Speicher für Cop Startegie")?;
+    manager.update("aquire storage for cop strategy function")?;
     let Some(mut f) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
-        return Err("Zu wenig Speicherplatz (Copstrat zu groß)".to_owned());
+        return Err("not enoug RAM (cop strategy function too large)".to_owned());
     };
 
-    manager.update("reserviere Speicher für Queue")?;
+    manager.update("aquire storage for queue")?;
     let Some(mut queue) = CopStratQueue::new(&cop_moves) else {
-        return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
+        return Err("not enoug RAM (initial queue too long)".to_owned());
     };
 
-    manager.update("initialisiere Queue")?;
+    manager.update("initialise queue")?;
     for (i, index) in izip!(0.., cop_moves.all_positions()) {
         if i % 4096 == 0 {
             manager.recieve()?;
@@ -491,7 +491,7 @@ where
         time_until_log_refresh -= 1;
         if time_until_log_refresh == 0 {
             manager.update(format!(
-                "berechne Copstrategie:\n{:.2}% in Queue ({}), max {}",
+                "compute cop strategy:\n{:.2}% in queue ({}), max {}",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len(),
                 queue.curr_max()
@@ -506,7 +506,7 @@ where
             const OVERFLOW_NEIGH_TIME: UTime = UTime::MAX - 1;
             if max_neigh_time == OVERFLOW_NEIGH_TIME {
                 return Err(format!(
-                    "Cops brauchen mehr Züge als in {} passen",
+                    "cops require more moves than fit into {}",
                     std::any::type_name::<UTime>()
                 ));
             }
@@ -546,7 +546,7 @@ where
         }
     }
 
-    manager.update("berechne Fun Facts")?;
+    manager.update("compute fun facts")?;
     let mut max_moves = 0;
     let mut cops_win = true;
     for vals in f.time.values() {
@@ -606,7 +606,7 @@ fn verify_continuity_cops(
         i_config += 1;
         if time_until_log_refresh == 0 {
             let done_percent = (i_config as f64) / (nr_configs as f64) * 100.0;
-            manager.update(format!("verifiziere Kontinuität: {done_percent:.2}%"))?;
+            manager.update(format!("verify continuity: {done_percent:.2}%"))?;
             time_until_log_refresh = log_refresh_interval;
         }
 
@@ -634,8 +634,8 @@ fn verify_continuity_cops(
                 // the found number of moves left in the current position is not optimal.
                 if curr_rounds_left.saturating_sub(1) > robber_neigh_max {
                     return Err(format!(
-                        "Copstrategie nicht optimal an Knoten {v},\
-                        wenn Cops von {cops_neigh:?} zu {cops:?} ziehen."
+                        "cop strategy not optimal in vertex {v},\
+                        when cops move from {cops_neigh:?} to {cops:?}."
                     ));
                 }
                 // assuming police state `cops` occurs before police state `cops_neigh`,
@@ -650,7 +650,7 @@ fn verify_continuity_cops(
             && let Some(v) = found_move.iter().position(|&x| !x)
         {
             return Err(format!(
-                "Copstrategie hat keinen Zug für Räuber auf {v}, Cops auf {cops:?}."
+                "cop strategy has no move for robber at {v} and cops at {cops:?}."
             ));
         }
     }

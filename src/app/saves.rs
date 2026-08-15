@@ -57,7 +57,7 @@ impl SavedState {
             Ok(())
         };
         if let Err(e) = store() {
-            log::debug!("Fehler beim speichern von Speicherstand: {e}");
+            log::debug!("Error while storing state: {e}");
         }
     }
 
@@ -66,7 +66,7 @@ impl SavedState {
             return;
         }
         if let Err(e) = std::fs::remove_file(self.path()) {
-            log::debug!("Fehler beim löschen von Speicherstand: {e}");
+            log::debug!("Error while deleting state: {e}");
         }
     }
 }
@@ -84,9 +84,9 @@ impl OrdBy {
     const fn name(self) -> &'static str {
         match self {
             Self::Name => "Name",
-            Self::Date => "Datum",
-            Self::Shape => "Form",
-            Self::Res => "Aufl.",
+            Self::Date => "Date",
+            Self::Shape => "Shape",
+            Self::Res => "Res.",
             Self::NrCops => "Nr Cops",
         }
     }
@@ -117,7 +117,7 @@ impl SavedStates {
         for entry in path {
             match try_load(entry) {
                 Ok(safe) => res.push(safe),
-                Err(e) => log::debug!("Fehler beim laden von Speicherstand: {e}"),
+                Err(e) => log::debug!("Error while loading state: {e}"),
             }
         }
         res
@@ -189,7 +189,7 @@ impl SavedStates {
 
     fn add(&mut self, map: &map::Map, info: &info::Info) {
         let name = if self.new_name.is_empty() {
-            "unbenannt".to_string()
+            "unnamed".to_string()
         } else {
             self.new_name.clone()
         };
@@ -239,7 +239,7 @@ impl SavedStates {
             }
         }
 
-        crate::app::menu_button_closing_outside(ui, " 🖴  laden / speichern", |ui| {
+        crate::app::menu_button_closing_outside(ui, " 🖴  load / store", |ui| {
             let text_galleys = {
                 let max_width = ui.content_rect().width() * 0.9;
                 self.saves
@@ -250,7 +250,7 @@ impl SavedStates {
                             let saved_at = chrono::DateTime::<chrono::Local>::from(s.saved_at);
                             let date = saved_at.date_naive();
                             let time = saved_at.time().round_subsecs(0);
-                            format!(", {date} um {time}")
+                            format!(", {date} at {time}")
                         } else {
                             String::new()
                         };
@@ -259,7 +259,7 @@ impl SavedStates {
                             let res = s.resolution;
                             let name = s.name.as_str();
                             let nr_chars = s.characters.all().len();
-                            format!("{name}\n{nr_chars:2} Figuren auf {shape} ({res}){time}")
+                            format!("{name}\n{nr_chars:2} pieces on {shape} ({res}){time}")
                         };
                         let widget = WidgetText::RichText(RichText::new(text).into());
                         widget.into_galley(
@@ -279,7 +279,7 @@ impl SavedStates {
             }
 
             ui.horizontal(|ui| {
-                ui.label("speichern als: ");
+                ui.label("store as: ");
                 ui.text_edit_singleline(&mut self.new_name);
                 if ui.button("Ok").clicked() {
                     self.add(map, info);
@@ -289,7 +289,7 @@ impl SavedStates {
             ui.separator();
             ui.horizontal(|ui| {
                 use strum::IntoEnumIterator;
-                ui.label("sortieren:");
+                ui.label("sort:");
                 for ord in OrdBy::iter() {
                     if !NATIVE && ord == OrdBy::Date {
                         //date is scuffed in wasm -> skip
@@ -303,8 +303,8 @@ impl SavedStates {
 
                 ui.add_space(8.0);
                 let (reversed_symbol, reversed_info) = match self.reverse_ord {
-                    false => ("▪◾◼", "Aktuell: Aufsteigend"),
-                    true => ("◼◾▪", "Aktuell: Absteigend"),
+                    false => ("▪◾◼", "currently: ascending"),
+                    true => ("◼◾▪", "currently: descending"),
                 };
                 if ui.button(reversed_symbol).on_hover_text(reversed_info).clicked() {
                     self.reverse_ord ^= true;
@@ -315,7 +315,7 @@ impl SavedStates {
             ui.separator();
             if let Some(del) = &self.deleted {
                 let name = del.name.clone();
-                if ui.button(format!("\"{name}\" wiederherstellen")).clicked() {
+                if ui.button(format!("restore \"{name}\"")).clicked() {
                     self.saves.push(self.deleted.take().unwrap());
                     self.sort();
                 }
@@ -325,12 +325,12 @@ impl SavedStates {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         let button = highlight(ui.button(text), Some(i) == self.active);
-                        if button.on_hover_text("laden").clicked() {
+                        if button.on_hover_text("load").clicked() {
                             self.saves[i].set(map, info, cam);
                             self.active = Some(i);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(" 🗑 ").on_hover_text("löschen").clicked() {
+                            if ui.button(" 🗑 ").on_hover_text("delete").clicked() {
                                 self.delete(i);
                             }
                         });

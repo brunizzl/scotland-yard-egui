@@ -28,8 +28,8 @@ impl Id {
 
     pub fn job_str(&self) -> &'static str {
         match self {
-            Id::Cop(_) => "Cop",
-            Id::Robber => "Räuber",
+            Id::Cop(_) => "cop",
+            Id::Robber => "robber",
         }
     }
 
@@ -295,20 +295,20 @@ impl Character {
             {
                 let mut change = None;
                 resp.context_menu(|ui| {
-                    if ui.button("⟲ ziehe auf Stelle").clicked() {
+                    if ui.button("⟲ stay put and end move").clicked() {
                         self.past_vertices.push(self.nearest_vertex);
                         change = Some(Change::Released);
                     }
                     // change a cop's apperance or status
                     if let Id::Cop(i) = &mut self.id {
                         if ui
-                            .checkbox(&mut self.enabled, "Aktiv")
-                            .on_hover_text("berücksichte Cop bei Berechnungen")
+                            .checkbox(&mut self.enabled, "active")
+                            .on_hover_text("consider cop in computations")
                             .clicked()
                         {
                             change = Some(Change::ToggleActive);
                         };
-                        if ui.button("🗑 löschen").clicked() {
+                        if ui.button("🗑 delete").clicked() {
                             change = Some(Change::Delete);
                         }
                         ui.set_max_width(0.0);
@@ -1051,21 +1051,21 @@ impl State {
                 .sum()
         );
 
-        ui.collapsing("Regeln", |ui| {
-            ui.label("Polizei:");
+        ui.collapsing("Rules", |ui| {
+            ui.label("Police:");
             ui.horizontal(|ui| {
                 let mut rules = self.cop_rules;
                 ui.radio_value(&mut rules, bf::DynCopRules::Lazy, "Lazy")
-                    .on_hover_text("Pro Runde darf ein Cop eine Kante ziehen.");
+                    .on_hover_text("at most one cop may move in a round.");
                 ui.radio_value(&mut rules, bf::DynCopRules::Eager, "Eager")
-                    .on_hover_text("Pro Runde darf jeder Cop eine Kante ziehen.");
+                    .on_hover_text("every cop can move in a round.");
                 let mixed_radio =
                     ui.radio(matches!(rules, bf::DynCopRules::GeneralEagerCops(_)), "Mix");
                 if mixed_radio.clicked() {
                     rules = bf::DynCopRules::GeneralEagerCops(1);
                 }
                 mixed_radio.on_hover_text(
-                    "Pro Runde dürfen maximal <Anzahl> viele Cops eine Kante ziehen.",
+                    "at most <number> many cops may move in a round.",
                 );
                 if let bf::DynCopRules::GeneralEagerCops(n) = &mut rules {
                     let range = 2..=(self.active_cops().count() as u32).max(2);
@@ -1076,24 +1076,23 @@ impl State {
             });
 
             ui.add_space(5.0);
-            ui.label("Räuber:");
+            ui.label("Robber:");
             ui.horizontal(|ui| {
                 let rules = &mut self.robber_rules;
                 ui.radio_value(rules, bf::DynRobberRules::Normal, "Normal")
-                    .on_hover_text("Räuber kann jede Runde bis zu einen Schritt machen.");
-                let fog_radio = ui.radio(matches!(rules, bf::DynRobberRules::Fog(_)), "Nebel");
+                    .on_hover_text("robber can move once every round.");
+                let fog_radio = ui.radio(matches!(rules, bf::DynRobberRules::Fog(_)), "Fog");
                 if fog_radio.clicked() {
                     *rules = bf::DynRobberRules::Fog(self.robber_fog_params);
                 }
-                fog_radio.on_hover_text("Räuber macht alle möglichen Züge gleichzeitig");
+                fog_radio.on_hover_text("robber (fog) does every possible move at once.");
                 let energy_radio =
-                    ui.radio(matches!(rules, bf::DynRobberRules::Energy(_)), "Energie");
+                    ui.radio(matches!(rules, bf::DynRobberRules::Energy(_)), "Energy");
                 if energy_radio.clicked() {
                     *rules = bf::DynRobberRules::Energy(self.robber_energy_params);
                 }
                 energy_radio.on_hover_text(
-                    "Räuber kriegt jede Runde Energie und \
-                    kann ggf. Energie für mehr Schritte in Zukunft sparen.",
+                    "robber gets an energy allowance each round an can possibly store some energy for future moves."
                 );
             });
 
@@ -1105,38 +1104,37 @@ impl State {
                 },
                 bf::DynRobberRules::Fog(params) => {
                     let best = &mut params.best_solution;
-                    ui.add(egui::Checkbox::new(best, "Beste Strategie")).on_hover_text(
-                        "Wenn aktiv: Bruteforce sucht die Strategie mit minimaler Rundenzahl.",
+                    ui.add(egui::Checkbox::new(best, "best strategy")).on_hover_text(
+                        "if active: bruteforce algo finds solution with minimum number of rounds. \
+                        note: this takes siginificantly longer to compute on most graphs",
                     );
 
-                    add_drag_value(ui, &mut params.visibility, "Sichtweite", 0..=1000, 1)
+                    add_drag_value(ui, &mut params.visibility, "vis-range 🔭", 0..=1000, 1)
                         .name_label
-                        .on_hover_text("Bis zu so weit können Cops Nebel entfernen");
+                        .on_hover_text("up to which distance can cops remove fog");
 
-                    add_drag_value(ui, &mut params.fog_speed, "Nebeltempo", 0..=1000, 1)
+                    add_drag_value(ui, &mut params.fog_speed, "fog speed 💨", 0..=1000, 1)
                         .name_label
-                        .on_hover_text("So weit kann Nebel sich in einer Runde ausbreiten.");
+                        .on_hover_text("number of edges fog can cross in a round");
 
                     self.robber_fog_params = *params;
                 },
                 bf::DynRobberRules::Energy(params) => {
-                    add_drag_value(ui, &mut params.energy_per_step, "Verbrauch", 1..=100, 1)
+                    add_drag_value(ui, &mut params.energy_per_step, "drain rate 💧", 1..=100, 1)
                         .name_label
-                        .on_hover_text("Energiebedarf pro Schritt");
+                        .on_hover_text("required number of energy units to cross a single edge (can be seen as denominator of the other two)");
 
-                    add_drag_value(ui, &mut params.allowance, "Einkommen (a)", 1..=100, 1)
+                    add_drag_value(ui, &mut params.allowance, "allowance ⛽ (a)", 1..=100, 1)
                         .name_label
                         .on_hover_text(
-                            "Jede Runde bekommt der Räuber so viel Energie zu \
-                            seinem Ersparten dazu.",
+                            "charge rate (allowance): number of energy units newly recieved each round",
                         );
 
                     let capacity = &mut params.bank_capacity;
-                    add_drag_value(ui, capacity, "max. Kapazität (b)", 0..=100, 1)
+                    add_drag_value(ui, capacity, "capacity 🍺 (c)", 0..=100, 1)
                         .name_label
                         .on_hover_text(
-                            "Maximum der ungenutzten Energie, die in die \
-                        nächste Runde übertragen werden kann.",
+                            "the maximum ammount of energy that can be carried over a round boundary",
                         );
 
                     self.robber_energy_params = *params;
@@ -1146,17 +1144,17 @@ impl State {
         });
 
         let mut change = false;
-        ui.collapsing("Figuren / Züge", |ui| {
+        ui.collapsing("Pieces / Moves", |ui| {
             ui.horizontal(|ui| {
                 let minus_emoji = self.characters.last().map_or("🚫", |c| c.id.emoji());
-                let minus_text = format!("- Figur ({minus_emoji})");
-                let plus_text = format!("+ Figur ({})", self.next_id().emoji());
-                if ui.button(minus_text).on_hover_text("F2").clicked() {
+                let minus_text = format!("- piece ({minus_emoji})");
+                let plus_text = format!("+ piece ({})", self.next_id().emoji());
+                if ui.button(minus_text).on_hover_text("[F2]").clicked() {
                     self.characters.pop();
                     self.forget(self.characters.len());
                     change = true;
                 }
-                if ui.button(plus_text).on_hover_text("F2").clicked() {
+                if ui.button(plus_text).on_hover_text("[F2]").clicked() {
                     let pos = cam.in_front_of_cam();
                     self.new_character_at(pos, cam);
                     change = true;
@@ -1172,9 +1170,9 @@ impl State {
                             ui.label(cop.id.emoji());
                             let was_enabled = cop.enabled;
                             ui.checkbox(&mut cop.enabled, "")
-                                .on_hover_text("berücksichte Cop bei Berechnungen");
+                                .on_hover_text("consider cop in calculations");
                             change |= was_enabled != cop.enabled;
-                            if ui.button(" 🗑 ").on_hover_text("löschen").clicked() {
+                            if ui.button(" 🗑 ").on_hover_text("delete").clicked() {
                                 delete = Some(i);
                             }
                         });
@@ -1187,28 +1185,28 @@ impl State {
                 }
             };
             ui.add_space(5.0);
-            crate::app::menu_button_closing_outside(ui, format!("alle Cops ({nr_cops})"), |ui| {
+            crate::app::menu_button_closing_outside(ui, format!("all cops ({nr_cops})"), |ui| {
                 egui::ScrollArea::vertical().show(ui, draw_cops);
             });
             ui.add_space(8.0);
-            ui.checkbox(&mut self.show_allowed_next_steps, "zeige Zugoptionen")
-                .on_hover_text("F3");
-            ui.checkbox(&mut self.show_past_steps, "zeige Züge")
-                .on_hover_text("F4");
+            ui.checkbox(&mut self.show_allowed_next_steps, "show move options")
+                .on_hover_text("[F3]");
+            ui.checkbox(&mut self.show_past_steps, "show past moves")
+                .on_hover_text("[F4]");
             ui.horizontal(|ui| {
                 //⏭⏮⏩⏪
-                if ui.button(" ⏮ ").on_hover_text("zurück zum Anfang der Zeit").clicked() {
+                if ui.button(" ⏮ ").on_hover_text("back to the dawn of time").clicked() {
                     self.undo_multiple_moves(map.edges(), map.positions(), queue, usize::MAX);
                     change = true;
                 }
-                if ui.button(" ⏪ ").on_hover_text("5% der Zeit zurückspulen").clicked() {
+                if ui.button(" ⏪ ").on_hover_text("undo 5% of moves").clicked() {
                     let nr = self.five_percent_of_moves();
                     self.undo_multiple_moves(map.edges(), map.positions(), queue, nr);
                     change = true;
                 }
                 if ui
                     .button(" ⟲ ")
-                    .on_hover_text("einen Zug in Vergangenheit (strg + z)")
+                    .on_hover_text("undo single move ([ctrl] + [Z])")
                     .clicked()
                 {
                     self.undo_move(map.edges(), map.positions(), queue);
@@ -1216,22 +1214,18 @@ impl State {
                 }
                 if ui
                     .button(" ⟳ ")
-                    .on_hover_text("einen Zug in Zukunft (strg + y)")
+                    .on_hover_text("redo single move ([ctrl] + [Y])")
                     .clicked()
                 {
                     self.redo_move(map.edges(), map.positions(), queue);
                     change = true;
                 }
-                if ui.button(" ⏩ ").on_hover_text("5% der Zeit vorspulen").clicked() {
+                if ui.button(" ⏩ ").on_hover_text("redo 5% of moves").clicked() {
                     let nr = self.five_percent_of_moves();
                     self.redo_multiple_moves(map.edges(), map.positions(), queue, nr);
                     change = true;
                 }
-                if ui
-                    .button(" ⏭ ")
-                    .on_hover_text("vorspulen ans Ende der Zeit")
-                    .clicked()
-                {
+                if ui.button(" ⏭ ").on_hover_text("forward to the end of time").clicked() {
                     self.redo_multiple_moves(map.edges(), map.positions(), queue, usize::MAX);
                     change = true;
                 }
@@ -1245,9 +1239,9 @@ impl State {
                 );
                 ui.label(format!("{move_name}: {ch_name}"));
             };
-            print_move("vorletzter Zug", self.snd_last_moved());
-            print_move("letzter Zug      ", self.last_moved());
-            print_move("nächster Zug  ", self.next_moved());
+            print_move("snd last move", self.snd_last_moved());
+            print_move("last move    ", self.last_moved());
+            print_move("next move    ", self.next_moved());
             {
                 // this assumes that at least one cop does the "move in place" action if
                 // the cops choose to end their turn and that the robber does the same.
@@ -1255,33 +1249,30 @@ impl State {
                 let robber_moved = self.who_moved().map(Id::is_robber);
                 let round_end = |&x: &(bool, bool)| matches!(x, (true, false));
                 let round_index = robber_moved.tuple_windows().filter(round_end).count();
-                ui.label(format!("Rundenindex: {round_index}"))
-                    .on_hover_text("Anzahl von Copzügen direkt nach Räuberzügen");
+                ui.label(format!("round index: {round_index}"))
+                    .on_hover_text("number of cop moves preceeded by robber moves");
             }
             ui.label(format!(
-                "Räuberenergie: {}",
+                "robber energy: {}",
                 self.current_robber_energy(1000)
             ));
 
             ui.add_space(8.0);
-            if ui.button(" 🗑 ").on_hover_text("Spiel vergessen").clicked() {
+            if ui.button(" 🗑 ").on_hover_text("forget current game").clicked() {
                 self.forget_move_history();
                 change = true;
             }
 
             ui.add_space(8.0);
             let mut make_random_steps = self.random_steps.is_some();
-            ui.add(egui::Checkbox::new(
-                &mut make_random_steps,
-                "zufällige Schritte",
-            ));
+            ui.add(egui::Checkbox::new(&mut make_random_steps, "random moves"));
             {
                 let nr = &mut self.nr_random_steps_at_once;
-                add_drag_value(ui, nr, "Züge pro Update", 1..=100, 1);
+                add_drag_value(ui, nr, "moves per update", 1..=100, 1);
 
                 let mut period = self.random_update_period.as_secs_f32();
                 const STEP: f32 = std::f32::consts::SQRT_2;
-                add_drag_value(ui, &mut period, "Updaterate [s]", 0.125..=16.0, STEP);
+                add_drag_value(ui, &mut period, "update rate [s]", 0.125..=16.0, STEP);
                 self.random_update_period = Duration::from_secs_f32(period);
             }
             if make_random_steps != self.random_steps.is_some() {

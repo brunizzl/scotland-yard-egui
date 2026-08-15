@@ -44,15 +44,15 @@ const FOG_TEST_HAM_PATH_NAME: &str = "HamTest";
 
 impl BuildStep {
     pub const EXPLAINER: &str = "\
-        N<zahl>: <zahl>-distanz und nähere Knoten werden Nachbarn\n\
-        D<zahl>: Jede Kante wird Weg mit <zahl> vielen inneren Knoten\n\
-        V<x>,<y>,<z>: Knoten mit Koordinaten (<x>, <y>, <z>) / 1000\n\
-        E<u>,<v>: Kante zwischen Knoten mit Indices <u> und <v>.\n\
-        K(<X>)(<Y>): alle Kanten zwischen Folgen <X> und <Y>\n\
-        ZsgTest: entnebeln neu <=> zusammenhängend alt\n\
-        HamTest<u>,<v>: entnebeln neu <=> <u>-<v> hamilton pfad alt\n\n\
-        eine Folge hat die Form <a1>, ..., <an>.\n\
-        BITTE BEACHTE WERKZEUGE [±v] UND [±e]\
+        N<number>: <number>-distance and closer vertices become neighbors\n\
+        D<number>: every edge becomes path with <number> many inner vertices\n\
+        V<x>,<y>,<z>: vertex at coordinates (<x>, <y>, <z>) / 1000\n\
+        E<u>,<v>: edge between vertices with indices <u> and <v>.\n\
+        K(<X>)(<Y>): all edges between sequences <X> and <Y>\n\
+        ZsgTest: (new is cleanable) <=> (old is connected)\n\
+        HamTest<u>,<v>: (new is cleanable) <=> (<u>-<v> hamilton path in old)\n\n\
+        a sequence has the form <a1>, ..., <an>.\n\
+        ALSO CONSIDER TOOLS [±v] AND [±e]\
         ";
 
     pub const DEFAULT_Z: i32 = (crate::graph::Z_OFFSET_2D * 1000.0) as i32;
@@ -209,7 +209,7 @@ impl PartialOrd for CustomBuild {
 }
 
 impl CustomBuild {
-    const DEFAULT_NAME: &str = "unbenannt";
+    const DEFAULT_NAME: &str = "unnamed";
 
     pub fn create_new_name() -> String {
         if crate::app::NATIVE {
@@ -504,26 +504,27 @@ impl Shape {
     pub fn name_str(&self) -> &'static str {
         match self {
             Self::SingleVertex => "SingleVertex",
-            Self::Tetrahedron => "Tetraeder",
-            Self::Octahedron => "Oktaeder",
-            Self::Icosahedron => "Ikosaeder",
-            Self::DividedIcosahedron(_) => "aufgepusteter Ikosaeder",
-            Self::Cube => "Würfel",
-            Self::Football => "Fußball",
+            Self::Tetrahedron => "Tetrahedron",
+            Self::Octahedron => "Octahedron",
+            Self::Icosahedron => "Icosahedron",
+            Self::DividedIcosahedron(_) => "inflated Icosahedron",
+            Self::Cube => "Cube",
+            Self::Football => "Football",
             Self::FabianHamann => "Fabian Hamanns Graph",
-            Self::Dodecahedron => "Dodekaeder",
-            Self::TriangTorus => "Torus (Dreiecke)",
-            Self::TriangTorusSkewed(_) => "Schiefer Torus (Dreiecke)",
-            Self::SquareTorus => "Torus (Vierecke)",
-            Self::TriangGrid => "Gitter (Dreiecke)",
-            Self::SquareGrid => "Gitter (Vierecke)",
-            Self::RegularPolygon2D(_) => "2D Polygon trianguliert",
-            Self::Random2D(_) => "2D Kreisscheibe trianguliert",
+            Self::Dodecahedron => "Dodecahedron",
+            Self::TriangTorus => "Torus (Triangles)",
+            Self::TriangTorusSkewed(_) => "Skewed Torus (Triangles)",
+            Self::SquareTorus => "Torus (Squares)",
+            Self::TriangGrid => "Grid (Triangles)",
+            Self::SquareGrid => "Grid (Squares)",
+            Self::RegularPolygon2D(_) => "2D Polygon triangulated",
+            Self::Random2D(_) => "2D Disk triangulated",
             Self::Custom(_) if self.is_pure_custom() => "Custom",
-            Self::Custom(_) => "erweitere aktuellen Graph",
+            Self::Custom(_) => "extend current Graph",
         }
     }
 
+    /// these are the names used for file names etc. we thus want to keep them stable.
     pub fn to_sting(&self) -> String {
         match self {
             Self::SingleVertex => "Einzelner-Knoten".to_string(),

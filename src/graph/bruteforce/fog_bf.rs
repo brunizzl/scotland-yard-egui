@@ -186,18 +186,18 @@ fn compute_fog_strategy_impl<R: CopRules, Q: Queue<QueueEntry> + Default>(
     } = params;
 
     if nr_cleaners > MAX_COPS {
-        let msg = format!("Rechnung kann für höchstens {MAX_COPS} Cleaner durchgeführt werden.");
+        let msg = format!("computation can be performed for at most {MAX_COPS} cleaners.");
         return Err(msg);
     }
     let nr_vertices = edges.nr_vertices();
     if nr_vertices.checked_pow(nr_cleaners as u32).is_none() {
-        return Err("Cleanerpositionen passen nicht in usize.".to_string());
+        return Err("cleanerpositions don't fit into usize.".to_string());
     }
     if nr_vertices == 0 {
-        return Err("Graph darf nicht leer sein.".to_string());
+        return Err("graph must be nonempty".to_string());
     }
     if !find_best && !edges.is_connected() {
-        return Err("Graph muss zusammenhängend sein".to_string());
+        return Err("graph must be connected".to_string());
     }
 
     let mut sol = FogSolution {
@@ -210,7 +210,7 @@ fn compute_fog_strategy_impl<R: CopRules, Q: Queue<QueueEntry> + Default>(
         is_best_solution: find_best,
     };
 
-    manager.update("initialisiere Variablen")?;
+    manager.update("initialise variables")?;
     // `visible.neighbors_of(v)` are all vertices in sight of a cleaner standing at vertex `v`.
     let visible = compute_near_vertices(&edges, visibility);
 
@@ -236,15 +236,15 @@ fn compute_fog_strategy_impl<R: CopRules, Q: Queue<QueueEntry> + Default>(
         let positions = super::CopConfigurations::new(&edges, &sym, nr_cleaners, manager)?;
         let nr_initial_states = positions.nr_configurations();
         if states.try_reserve(nr_initial_states).is_err() {
-            return Err("nicht genug Speicher für States.".to_string());
+            return Err("not enough RAM for states.".to_string());
         }
         if queue.try_reserve(nr_initial_states).is_err() {
-            return Err("nicht genug Speicher für Queue.".to_string());
+            return Err("not enough RAM for queue.".to_string());
         }
         for (i, position_index) in izip!(0.., positions.all_positions()) {
             if i % 4096 == 0 {
                 let percent = 100.0 * (i as f32) / (nr_initial_states as f32);
-                manager.update(format!("initialisiere Cleanerstates: {percent:.2}%"))?;
+                manager.update(format!("initialise cleaner states: {percent:.2}%"))?;
             }
             let initial_unpacked = positions.eager_unpack(position_index).sorted();
             add_initial(&initial_unpacked, &mut states, &mut queue);
@@ -267,8 +267,8 @@ fn compute_fog_strategy_impl<R: CopRules, Q: Queue<QueueEntry> + Default>(
         if time_until_log_refresh == 0 {
             let len = queue.len();
             manager.update(format!(
-                "berechne Reinigungsstrategie: {len} in Queue, \
-                max {most_cleaned_so_far}/{nr_vertices} Knoten sauber"
+                "compute cleaning strategy: {len} in queue, \
+                max {most_cleaned_so_far}/{nr_vertices} vertices cleaned"
             ))?;
             time_until_log_refresh = 1_000;
         }
@@ -312,7 +312,7 @@ fn compute_fog_strategy_impl<R: CopRules, Q: Queue<QueueEntry> + Default>(
     };
     drop(queue);
 
-    manager.update("schreibe Lösung")?;
+    manager.update("write solution")?;
     let mut reversed_sequence = vec![final_packed_cleaners];
     let mut curr_packed_cleaners = final_packed_cleaners;
     let is_cleaned = |state: &&FogState| state.fog.count_foggy() == 0;
@@ -372,7 +372,7 @@ fn verify_sequence<R: CopRules>(
     edges: &EdgeList,
 ) -> Result<(), String> {
     if !sol.is_cleanable() {
-        return Err("Strategie existiert nicht.".to_string());
+        return Err("strategy doesn't exist".to_string());
     };
     assert_eq!(sol.nr_vertices, edges.nr_vertices());
     let visible = compute_near_vertices(edges, sol.visibility);
@@ -390,18 +390,18 @@ fn verify_sequence<R: CopRules>(
             .contains(&curr_cleaners)
         {
             return Err(format!(
-                "Komme nicht von {prev_cleaners:?} zu {curr_cleaners:?} in einer Runde.",
+                "cannot reach {curr_cleaners:?} from {prev_cleaners:?} within one round.",
             ));
         }
         let curr_fog = fog_step_data.compute_step(&prev_fog, &curr_cleaners);
         for v in 0..sol.nr_vertices {
             let v_close_to_fog = fog_spread.neighbors_of(v).any(|n| prev_fog.is_foggy_at(n));
             if curr_fog.is_foggy_at(v) && !v_close_to_fog {
-                return Err("Nebel breitet sich zu schnell aus.".to_string());
+                return Err("fog moves too fast.".to_string());
             }
             let v_visible = curr_cleaners.iter().any(|&c| visible.neighbors_of(c).contains(&v));
             if prev_fog.is_foggy_at(v) && !curr_fog.is_foggy_at(v) && !v_visible {
-                return Err("Nebel verschwindet von alleine.".to_string());
+                return Err("fog vanishes unseen.".to_string());
             }
         }
         prev_fog = curr_fog;
@@ -412,7 +412,9 @@ fn verify_sequence<R: CopRules>(
         .filter(|&v| prev_fog.is_foggy_at(v))
         .collect_vec();
     if !still_foggy.is_empty() {
-        return Err(format!("Diese Knoten {still_foggy:?} sind noch nebelig."));
+        return Err(format!(
+            "these vertices {still_foggy:?} are foggy at the end."
+        ));
     }
     Ok(())
 }

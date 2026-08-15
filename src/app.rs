@@ -197,22 +197,21 @@ impl State {
 }
 
 fn draw_usage_info(ui: &mut Ui) {
-    menu_button_closing_outside(ui, " ？ Hilfe", |ui| {
+    menu_button_closing_outside(ui, " ？ Help", |ui| {
         ui.add(
             Label::new(
                 "\
-Spielfeld rotieren / verschieben: 
-ziehen mit rechter Maustaste oder scrollen, 
-horizontal: shift + scrollen
+rotate / move view: 
+- drag with right mouse button or 
+- scroll (vertical), scroll + [shift] (horizontal)
 
 zoom: 
-strg + scrollen
+[ctrl] + scrolling
 
-verschieben einer Figur:
-ziehen mit linker Maustaste
+move piece / draw / etc:
+drag with left mouse button
 
-Viele Menüpunkte zeigen Extrainformation, 
-wenn die Maus über ihnen schwebt.",
+Many menu items show further information on mouse mover.",
             )
             .extend(),
         );
@@ -252,9 +251,9 @@ impl eframe::App for State {
                 ui.horizontal(|ui| {
                     const COMPILE_DATETIME: &str = compile_time::datetime_str!();
                     //add spaces to force minimum width of sidebar
-                    let compile_info = format!("kompiliert: {COMPILE_DATETIME} ");
+                    let compile_info = format!("last compiled: {COMPILE_DATETIME} ");
                     ui.add(Label::new(compile_info).extend());
-                    if ui.button("⏴").on_hover_text("Menü einklappen (strg + b)").clicked() {
+                    if ui.button("⏴").on_hover_text("minimise menu ([ctrl] + [B])").clicked() {
                         self.menu_visible = false;
                     }
                 });
@@ -299,11 +298,7 @@ impl eframe::App for State {
             if !self.menu_visible {
                 let pos = Rect::from_center_size(pos2(12.0, 2.0), Vec2::ZERO);
                 let open = Button::new("⏵");
-                if ui
-                    .put(pos, open)
-                    .on_hover_text("Menü ausklappen (strg + b)")
-                    .clicked()
-                {
+                if ui.put(pos, open).on_hover_text("show menu ([ctrl] + [B])").clicked() {
                     self.menu_visible = true;
                 }
             }

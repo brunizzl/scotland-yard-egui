@@ -28,7 +28,7 @@ pub const FIFTH_ROOT_OF_TWO: f64 = 1.148_698_354_997_035;
 
 pub fn draw_size_menu(ui: &mut Ui, size: &mut f32) {
     ui.horizontal(|ui| {
-        ui.label("Größe: ");
+        ui.label("Size: ");
         super::add_drag_value(ui, size, "", 0.125..=8.0, FIFTH_ROOT_OF_TWO);
     });
 }
@@ -71,9 +71,9 @@ pub fn draw_options(
                 for (i, color, default) in izip!(1.., colors, default_colors) {
                     ui.horizontal(|ui| {
                         ui.label(if default_colors.len() > 1 {
-                            format!("Farbe {i}:")
+                            format!("Color {i}:")
                         } else {
-                            String::from("Farbe: ")
+                            String::from("Color: ")
                         });
 
                         ui.color_edit_button_srgba(color);

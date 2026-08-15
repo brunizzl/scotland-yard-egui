@@ -35,12 +35,12 @@ impl EnergyParams {
         let Self {
             energy_per_step: d,
             allowance: a,
-            bank_capacity: b,
+            bank_capacity: c,
         } = self;
         if d == 1 {
-            format!("a = {a}, b = {b}")
+            format!("a = {a}, c = {c}")
         } else {
-            format!("a = {a}/{d}, b = {b}/{d}")
+            format!("a = {a}/{d}, c = {c}/{d}")
         }
     }
 }
@@ -95,28 +95,28 @@ where
     } = params;
 
     if energy_per_step == 0 {
-        return Err("Unendliche Räuberenergie ist im Programm ausgeschlossen".to_string());
+        return Err("infinite robber energy is not considered.".to_string());
     }
     if allowance < energy_per_step {
         return Err(format!(
-            "Räuber hat {allowance}/{energy_per_step} < 1 Schritte pro Runde."
+            "robber has {allowance}/{energy_per_step} < 1 steps per round."
         ));
     }
 
     let nr_map_vertices = edges.nr_vertices();
     if nr_map_vertices == 0 {
-        return Err("Spielfeld darf nicht leer sein".to_string());
+        return Err("map must be nonempty".to_string());
     }
     if !edges.is_connected() {
-        return Err("Spielfeld muss zusammenhängend sein".to_string());
+        return Err("map must be connected".to_string());
     }
 
-    manager.update("liste Polizeipositionen")?;
+    manager.update("list cop positions")?;
     let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
 
-    manager.update("reserviere Speicher für Queue")?;
+    manager.update("reserve storage for queue")?;
     let Some(mut queue) = RobberStratQueue::new(&cop_moves) else {
-        return Err("Zu wenig Speicherplatz (initiale Queue zu lang)".to_owned());
+        return Err("not enough RAM (initial queue too long)".to_owned());
     };
 
     // a game state is a tuple (C, r, e), where C is a cop positions multiset (the cop state),
@@ -129,12 +129,12 @@ where
     let mut safe_lvls = Vec::new();
     safe_lvls.reserve_exact(bank_capacity + 1);
     {
-        let err = || "Zu wenig Speicherplatz (Räuberstrategiefunktion zu groß)".to_string();
+        let err = || "not enough RAM (robber strategy function too large)".to_string();
         let mut safe_lvl = SafeRobberPositions::new(nr_map_vertices, &cop_moves).ok_or_else(err)?;
         for (i, index) in izip!(0.., cop_moves.all_positions()) {
             if i % 4096 == 0 {
                 let percent = 100.0 * (i as f32) / (cop_moves.nr_configurations() as f32);
-                let msg = format!("initialisiere Räuberstrategiefunktion: {percent:.2}%");
+                let msg = format!("initialise robber strategy function: {percent:.2}%");
                 manager.update(msg)?;
             }
 
@@ -174,7 +174,7 @@ where
         if time_until_log_refresh == 0 {
             let nr_safe = safe_lvls[0].robber_safe_when(curr_cop_positions).count_ones();
             manager.update(format!(
-                "berechne Räuberstrategie:\n{:.2}% in Queue ({}), Runde {}, {:.2}% sicher",
+                "compute robber strategy:\n{:.2}% in queue ({}), runde {}, {:.2}% safe",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len(),
                 queue.rounds_complete(),
