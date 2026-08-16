@@ -134,7 +134,7 @@ fn add_arrow(painter: &Painter, origin: Pos2, vec: Vec2, stroke: Stroke, tip_sca
     painter.line_segment([origin, tip], stroke);
 }
 
-fn menu_button_closing_outside<'a, R>(
+pub fn menu_button_closing_outside<'a, R>(
     ui: &mut Ui,
     atoms: impl egui::IntoAtoms<'a>,
     add_contents: impl FnOnce(&mut Ui) -> R,

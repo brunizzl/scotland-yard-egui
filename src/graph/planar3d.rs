@@ -875,7 +875,7 @@ impl Embedding3D {
         res
     }
 
-    fn new_single_vertex() -> Self {
+    pub fn new_single_vertex() -> Self {
         let mut as_2d = super::Embedding2D::default();
         as_2d.add_vertex(egui::Pos2::new(0.0, 0.0));
         Self::from_2d(as_2d, Shape::SingleVertex)
@@ -1033,34 +1033,34 @@ impl Embedding3D {
         }
     }
 
-    fn new_custom(c: Box<shape::CustomBuild>, res: usize) -> Self {
-        let mut result = Self::new_map_from(&c.basis, res);
+    /// note: this function will not update [`Self::shape`]. this must be done separately.
+    pub fn extend_custom(&mut self, steps: &[shape::BuildStep]) {
         use shape::BuildStep;
-        for step in &c.build_steps {
+        for step in steps {
             let mut add_edge_between = |v1: usize, v2: usize| {
-                if v1 != v2 && v1.max(v2) < result.nr_vertices() && !result.edges.has_edge(v1, v2) {
-                    result.edges.add_edge(v1, v2);
+                if v1 != v2 && v1.max(v2) < self.nr_vertices() && !self.edges.has_edge(v1, v2) {
+                    self.edges.add_edge(v1, v2);
                 }
             };
             match step {
                 BuildStep::FogTestHamPath(ends, vis) => {
-                    result.tranform_to_fog_hamilton_path_test(*ends, true, *vis);
+                    self.tranform_to_fog_hamilton_path_test(*ends, true, *vis);
                 },
                 BuildStep::FogTestIsGonnected => {
-                    result.tranform_to_fog_hamilton_path_test(None, false, 1);
+                    self.tranform_to_fog_hamilton_path_test(None, false, 1);
                 },
                 BuildStep::NeighNeighs(n) => {
-                    result.edge_pow(*n);
+                    self.edge_pow(*n);
                 },
                 BuildStep::SubdivEdges(n) => {
-                    result.subdivide_all_edges(*n, false);
+                    self.subdivide_all_edges(*n, false);
                 },
                 BuildStep::Vertex(_, [x_int, y_int, z_int]) => {
                     let x = *x_int as f32 * 0.001;
                     let y = *y_int as f32 * 0.001;
                     let z = *z_int as f32 * 0.001;
                     let pos = Pos3::new(x, y, z);
-                    result.add_vertex(pos);
+                    self.add_vertex(pos);
                 },
                 BuildStep::Edge(v1, v2) => {
                     add_edge_between(*v1, *v2);
@@ -1076,31 +1076,35 @@ impl Embedding3D {
                     }
                 },
                 &BuildStep::DeleteEdge(v1, v2) => {
-                    if result.edges.has_edge(v1, v2) {
-                        result.edges.remove_edge(v1, v2);
+                    if self.edges.has_edge(v1, v2) {
+                        self.edges.remove_edge(v1, v2);
                     }
                 },
                 &BuildStep::DeleteVertex(v) => {
                     // don't allow creation of the empty graph :o
-                    if result.vertices.len() > v && result.vertices.len() > 1 {
-                        result.vertices.remove(v);
-                        result.edges.remove_vertex(v);
+                    if self.vertices.len() > v && self.vertices.len() > 1 {
+                        self.vertices.remove(v);
+                        self.edges.remove_vertex(v);
                     }
                 },
                 &BuildStep::MoveVertex(v, [dx, dy, dz]) => {
-                    if let Some(pos) = result.vertices.get_mut(v) {
+                    if let Some(pos) = self.vertices.get_mut(v) {
                         *pos += Vec3::new(dx as f32 * 0.001, dy as f32 * 0.001, dz as f32 * 0.001);
                     }
                 },
             }
         }
 
-        let keep_symmetry = c.build_steps.iter().all(|s| matches!(s, BuildStep::NeighNeighs(_)));
-
-        result.shape = shape::Shape::Custom(c);
+        let keep_symmetry = steps.iter().all(|s| matches!(s, BuildStep::NeighNeighs(_)));
         if !keep_symmetry {
-            result.sym_group = SymGroup::new_none(result.vertices.len());
+            self.sym_group = SymGroup::new_none(self.vertices.len());
         }
+    }
+
+    fn new_custom(c: Box<shape::CustomBuild>, res: usize) -> Self {
+        let mut result = Self::new_map_from(&c.basis, res);
+        result.extend_custom(&c.build_steps);
+        result.shape = shape::Shape::Custom(c);
         result
     }
 
@@ -1304,7 +1308,7 @@ impl Embedding3D {
             let points = [to_screen.apply(p1), to_screen.apply(p2)];
 
             let p_avg = Pos3::average([p1, p2]);
-            let opacity = (screen_dist(p_avg).clamp(-0.2, 1.0) + 0.2) / 1.2;
+            let opacity = (screen_dist(p_avg).clamp(-0.8, 1.0) + 0.8) / 1.8;
             let mut stroke = stroke;
             stroke.color = stroke.color.gamma_multiply(opacity);
 
@@ -1350,7 +1354,7 @@ impl Embedding3D {
                 self.draw_short_edges(to_screen, painter, stroke);
                 true
             },
-            Shape::Custom(_) => {
+            Shape::Custom(_) | Shape::FromFile(_) => {
                 if self.shape.is_3d() {
                     self.draw_camera_facing_edges(to_screen, painter, stroke, visible);
                     false
@@ -1391,14 +1395,13 @@ impl Embedding3D {
     }
 
     pub fn new_map_from(shape: &Shape, res: usize) -> Self {
-        use Shape::*;
         let new_shape = shape.clone();
         let result = match new_shape {
-            SingleVertex => Self::new_single_vertex(),
-            Icosahedron => Self::new_subdivided_icosahedron(res),
-            Octahedron => Self::new_subdivided_octahedron(res),
-            Tetrahedron => Self::new_subdivided_tetrahedron(res),
-            DividedIcosahedron(pressure) => {
+            Shape::SingleVertex => Self::new_single_vertex(),
+            Shape::Icosahedron => Self::new_subdivided_icosahedron(res),
+            Shape::Octahedron => Self::new_subdivided_octahedron(res),
+            Shape::Tetrahedron => Self::new_subdivided_tetrahedron(res),
+            Shape::DividedIcosahedron(pressure) => {
                 let res1 = usize::min(res, pressure as usize);
                 let res2 = if res1 == 0 {
                     res
@@ -1407,21 +1410,24 @@ impl Embedding3D {
                 };
                 Self::new_subdivided_subdivided_icosahedron(res1, res2, new_shape)
             },
-            RegularPolygon2D(nr_sides) => {
+            Shape::RegularPolygon2D(nr_sides) => {
                 let sides = nr_sides as usize;
                 Self::new_2d_triangulated_regular_polygon(sides, res)
             },
-            Cube => Self::new_subdivided_cube(res),
-            Dodecahedron => Self::new_subdivided_dodecahedron(res, false, false),
-            Football => Self::new_subdivided_football(res, false),
-            FabianHamann => Self::new_subdivided_football(res, true),
-            Random2D(seed) => Self::from_2d(super::random_triangulated(res, 8, seed), new_shape),
-            TriangTorus => Self::new_subdivided_triangle_grid(res as isize, true),
-            SquareTorus => Self::new_subdivided_squares_grid(res as isize, true),
-            TriangGrid => Self::new_subdivided_triangle_grid(res as isize, false),
-            SquareGrid => Self::new_subdivided_squares_grid(res as isize, false),
-            TriangTorusSkewed(dy) => Self::new_skewed_torus(res as isize, dy),
-            Custom(c) => Self::new_custom(c, res),
+            Shape::Cube => Self::new_subdivided_cube(res),
+            Shape::Dodecahedron => Self::new_subdivided_dodecahedron(res, false, false),
+            Shape::Football => Self::new_subdivided_football(res, false),
+            Shape::FabianHamann => Self::new_subdivided_football(res, true),
+            Shape::Random2D(seed) => {
+                Self::from_2d(super::random_triangulated(res, 8, seed), new_shape)
+            },
+            Shape::TriangTorus => Self::new_subdivided_triangle_grid(res as isize, true),
+            Shape::SquareTorus => Self::new_subdivided_squares_grid(res as isize, true),
+            Shape::TriangGrid => Self::new_subdivided_triangle_grid(res as isize, false),
+            Shape::SquareGrid => Self::new_subdivided_squares_grid(res as isize, false),
+            Shape::TriangTorusSkewed(dy) => Self::new_skewed_torus(res as isize, dy),
+            Shape::Custom(c) => Self::new_custom(c, res),
+            Shape::FromFile(ff) => shape::FromFile::build(ff, res),
         };
         assert_eq!(&result.shape, shape);
         result

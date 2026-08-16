@@ -307,7 +307,7 @@ impl Map {
         };
         let mut new_data = old_data.clone();
         new_data.build_steps.push(new_step);
-        new_data.combine_last_move_operations();
+        shape::combine_last_move_operations(&mut new_data.build_steps);
         new_data.future_build_steps.clear();
         new_data.build_steps_string = new_data.print_build_steps(false);
         let new_shape = Shape::Custom(new_data);
@@ -364,13 +364,16 @@ impl Map {
                         }
                     }
                     if NATIVE && !matches!(old_shape, Custom(_)) {
-                        let extend_msg = "extend current graph";
+                        let extend_msg = "Extend Current Graph";
                         let extend_radio = egui::RadioButton::new(false, extend_msg);
                         if ui.add(extend_radio).clicked() {
                             let custom_data = shape::CustomBuild::new(old_shape.clone());
                             let custom_box = Box::new(custom_data);
                             *curr_shape = Custom(custom_box);
                         }
+                    }
+                    if NATIVE {
+                        radio!(FromFile(Box::default()), FromFile(_));
                     }
                 });
             match curr_shape {
@@ -442,6 +445,9 @@ impl Map {
                         }
                     });
                 },
+                Shape::FromFile(ff) => {
+                    change |= ff.update(ui, self.resolution as usize);
+                },
                 _ => {
                     add_disabled_drag_value(ui);
                 },
@@ -455,7 +461,12 @@ impl Map {
                 let new_shape = std::mem::replace(curr_shape, old_shape);
                 self.recompute(new_shape);
             }
-            ui.label(format!("    ➡ {} Vertices", self.data.nr_vertices()));
+            let nr_vertices = self.data.nr_vertices();
+            ui.label(if nr_vertices == 1 {
+                "    ➡ one vertex".to_string()
+            } else {
+                format!("    ➡ {nr_vertices} vertices")
+            });
         });
         change
     }
