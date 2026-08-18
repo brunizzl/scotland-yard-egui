@@ -378,16 +378,20 @@ impl TimeToWin {
     pub fn nr_map_vertices(&self) -> usize {
         self.nr_map_vertices
     }
+}
 
+impl std::ops::Index<CompactCopsIndex> for TimeToWin {
+    type Output = [UTime];
     /// returns current number for each vertex in graph given cops placed like `index`
-    pub fn nr_moves_left(&self, index: CompactCopsIndex) -> &[UTime] {
+    fn index(&self, index: CompactCopsIndex) -> &Self::Output {
         let start = index.rest_index * self.nr_map_vertices();
         let stop = start + self.nr_map_vertices();
         &self.time.get(&index.fst_index).unwrap()[start..stop]
     }
-
+}
+impl std::ops::IndexMut<CompactCopsIndex> for TimeToWin {
     /// returns current number for each vertex in graph given cops placed like `index`
-    pub fn nr_moves_left_mut(&mut self, index: CompactCopsIndex) -> &mut [UTime] {
+    fn index_mut(&mut self, index: CompactCopsIndex) -> &mut Self::Output {
         let start = index.rest_index * self.nr_map_vertices();
         let stop = start + self.nr_map_vertices();
         &mut self.time.get_mut(&index.fst_index).unwrap()[start..stop]
@@ -414,7 +418,7 @@ impl CopStrategy {
         if self.extreme_positions.is_empty() {
             let max_moves = self.max_moves as UTime;
             for index in self.cop_moves.all_positions() {
-                if self.time_to_win.nr_moves_left(index).contains(&max_moves) {
+                if self.time_to_win[index].contains(&max_moves) {
                     self.extreme_positions
                         .push(self.cop_moves.unpack(index).collect_vec());
                     if self.extreme_positions.len() == 20 {
@@ -428,7 +432,7 @@ impl CopStrategy {
     /// the equivalent of [`RobberWinData::safe_vertices`]
     pub fn times_for(&self, mut cops: RawCops) -> impl ExactSizeIterator<Item = UTime> {
         let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, &mut cops);
-        let time_left = self.time_to_win.nr_moves_left(cop_positions);
+        let time_left = &self.time_to_win[cop_positions];
         autos[0].forward().map(|v| time_left[v])
     }
 }
@@ -457,7 +461,7 @@ where
     let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
 
     manager.update("aquire storage for cop strategy function")?;
-    let Some(mut f) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
+    let Some(mut time_to_win) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
         return Err("not enoug RAM (cop strategy function too large)".to_owned());
     };
 
@@ -472,11 +476,11 @@ where
             manager.recieve()?;
         }
 
-        let robber_positions = f.nr_moves_left_mut(index);
+        let times_at_index = &mut time_to_win[index];
         for cop_pos in cop_moves.unpack(index) {
-            robber_positions[cop_pos] = 0;
+            times_at_index[cop_pos] = 0;
             for n in edges.neighbors_of(cop_pos) {
-                robber_positions[n] = 0;
+                times_at_index[n] = 0;
             }
         }
     }
@@ -499,7 +503,7 @@ where
             time_until_log_refresh = 2000;
         }
 
-        let curr_times = f.nr_moves_left(curr_cop_positions);
+        let curr_times = &time_to_win[curr_cop_positions];
         let mut curr_is_at_max = false;
         for (v, neighs) in izip!(0.., edges.neighbors()) {
             let max_neigh_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
@@ -526,21 +530,21 @@ where
         for (neigh_rotations, rotated_neigh_cop_positions) in
             rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions)
         {
-            let mut f_neighbor_changed = false;
+            let mut neigh_time_changed = false;
             for neigh_rotate in neigh_rotations {
                 for (v, neigh_time) in izip!(
                     neigh_rotate.backward(),
-                    f.nr_moves_left_mut(rotated_neigh_cop_positions)
+                    &mut time_to_win[rotated_neigh_cop_positions]
                 ) {
                     let this_time = times_should_cops_move_to_curr[v];
                     if *neigh_time > this_time {
                         debug_assert!(this_time < queue.curr_max());
-                        f_neighbor_changed = true;
+                        neigh_time_changed = true;
                         *neigh_time = this_time;
                     }
                 }
             }
-            if f_neighbor_changed {
+            if neigh_time_changed {
                 queue.push(rotated_neigh_cop_positions);
             }
         }
@@ -549,7 +553,7 @@ where
     manager.update("compute fun facts")?;
     let mut max_moves = 0;
     let mut cops_win = true;
-    for vals in f.time.values() {
+    for vals in time_to_win.time.values() {
         for &val in vals {
             if val == UTime::MAX {
                 cops_win = false;
@@ -561,7 +565,7 @@ where
 
     let mut res = CopStrategy {
         symmetry: sym.into_enum().into(),
-        time_to_win: f,
+        time_to_win,
         cop_moves,
         max_moves: max_moves as usize,
         extreme_positions: Vec::new(),

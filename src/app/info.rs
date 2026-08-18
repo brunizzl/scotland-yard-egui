@@ -1643,7 +1643,7 @@ impl Info {
                     for (required_bank, &dist, util) in izip!(safe_vertices, dists, utils_iter) {
                         let route_cost = (dist as usize).saturating_mul(params.energy_per_step);
                         let bank_left = robber_energy.checked_sub(route_cost);
-                        draw_if!(Some(required_bank) <= bank_left, util);
+                        draw_if!(Some(required_bank as usize) <= bank_left, util);
                     }
                 }
             },
@@ -1901,7 +1901,7 @@ impl Info {
                 if let Some(strat) = self.worker.energy_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                 {
-                    let show = |&m: &_| m != usize::MAX;
+                    let show = |&m: &_| m != bf::IEnergy::MAX;
                     draw!(strat.safe_vertex_energies(cops), show);
                 }
             },
