@@ -1637,7 +1637,7 @@ impl Info {
                     && let Some(cops) = self.characters.raw_cops()
                 {
                     let params = self.characters.energy_params();
-                    let robber_energy = self.characters.current_robber_energy(10000);
+                    let robber_energy = self.characters.curr_robber_energy();
                     let safe_vertices = data.safe_vertex_energies(cops);
                     let dists = &self.robber_dist_avoid_cops;
                     for (required_bank, &dist, util) in izip!(safe_vertices, dists, utils_iter) {
@@ -1901,7 +1901,7 @@ impl Info {
                 if let Some(strat) = self.worker.energy_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                 {
-                    let show = |&m: &_| m != bf::IEnergy::MAX;
+                    let show = |&m: &_| m != bf::UEnergy::MAX;
                     draw!(strat.safe_vertex_energies(cops), show);
                 }
             },

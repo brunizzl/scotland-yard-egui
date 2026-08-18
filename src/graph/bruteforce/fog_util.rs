@@ -93,40 +93,6 @@ impl Fog {
         }
     }
 
-    pub fn as_mut_slice(&mut self, nr_vertices: usize) -> &mut bitvec::slice::BitSlice {
-        let raw = match self {
-            Self::Smol(data) => bitvec::slice::BitSlice::from_element_mut(data),
-            Self::Big(data) => data.as_mut_bitslice(),
-        };
-        &mut raw[..nr_vertices]
-    }
-
-    /// note that this will usually contain more bits than number of vertices
-    pub fn as_raw_mut_slice(&mut self) -> &mut [usize] {
-        match self {
-            Self::Smol(data) => std::slice::from_mut(data),
-            Self::Big(data) => data.as_raw_mut_slice(),
-        }
-    }
-
-    /// note that this will usually contain more bits than number of vertices
-    pub fn as_raw_slice(&self) -> &[usize] {
-        match self {
-            Self::Smol(data) => std::slice::from_ref(data),
-            Self::Big(data) => data.as_raw_slice(),
-        }
-    }
-
-    pub fn set_cleared(&mut self) {
-        self.as_raw_mut_slice().fill(0);
-    }
-
-    pub fn or_assign(&mut self, other: &Self) {
-        for (self_chunk, other_chunk) in izip!(self.as_raw_mut_slice(), other.as_raw_slice()) {
-            *self_chunk |= other_chunk;
-        }
-    }
-
     fn iter_foggy(&self) -> impl Iterator<Item = usize> {
         self.as_slice().iter_ones()
     }
@@ -193,6 +159,44 @@ impl Fog {
             }
         }
         next_fog
+    }
+}
+
+// these functions are (as of writing this comment) only used in the naive energy robber computation.
+#[cfg(test)]
+impl Fog {
+    pub fn as_mut_slice(&mut self, nr_vertices: usize) -> &mut bitvec::slice::BitSlice {
+        let raw = match self {
+            Self::Smol(data) => bitvec::slice::BitSlice::from_element_mut(data),
+            Self::Big(data) => data.as_mut_bitslice(),
+        };
+        &mut raw[..nr_vertices]
+    }
+
+    /// note that this will usually contain more bits than number of vertices
+    pub fn as_raw_mut_slice(&mut self) -> &mut [usize] {
+        match self {
+            Self::Smol(data) => std::slice::from_mut(data),
+            Self::Big(data) => data.as_raw_mut_slice(),
+        }
+    }
+
+    /// note that this will usually contain more bits than number of vertices
+    pub fn as_raw_slice(&self) -> &[usize] {
+        match self {
+            Self::Smol(data) => std::slice::from_ref(data),
+            Self::Big(data) => data.as_raw_slice(),
+        }
+    }
+
+    pub fn set_cleared(&mut self) {
+        self.as_raw_mut_slice().fill(0);
+    }
+
+    pub fn or_assign(&mut self, other: &Self) {
+        for (self_chunk, other_chunk) in izip!(self.as_raw_mut_slice(), other.as_raw_slice()) {
+            *self_chunk |= other_chunk;
+        }
     }
 }
 

@@ -402,6 +402,7 @@ impl SafeRobberPositions {
 
     /// clones self, except because these values can be absurdly large,
     /// we take caution to not crash the program on allocation failure.
+    #[allow(dead_code)]
     fn try_clone(&self) -> Option<Self> {
         let mut safe = BTreeMap::new();
         let nr_map_vertices = self.nr_map_vertices;

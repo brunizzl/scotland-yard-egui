@@ -446,6 +446,8 @@ pub struct State {
     #[serde(default)]
     robber_energy_params: bf::EnergyParams,
     #[serde(default)]
+    init_robber_energy: usize,
+    #[serde(default)]
     robber_rules: bf::DynRobberRules,
 }
 
@@ -482,6 +484,7 @@ impl State {
             cop_rules: bf::DynCopRules::Lazy,
             robber_fog_params: bf::FogParams::default(),
             robber_energy_params: bf::EnergyParams::STANDARD_GAME,
+            init_robber_energy: 0,
             robber_rules: bf::DynRobberRules::Normal,
         }
     }
@@ -1246,16 +1249,24 @@ impl State {
                 // this assumes that at least one cop does the "move in place" action if
                 // the cops choose to end their turn and that the robber does the same.
                 // the round ends are then the times a cop moves directly after the robber.
-                let robber_moved = self.who_moved().map(Id::is_robber);
-                let round_end = |&x: &(bool, bool)| matches!(x, (true, false));
-                let round_index = robber_moved.tuple_windows().filter(round_end).count();
+                let who_moved = self.who_moved_where().map(|(id, _)| id);
+                let round_end = |&x: &(Id, Id)| matches!(x, (Id::Robber, Id::Cop(_)));
+                let round_index = who_moved.tuple_windows().filter(round_end).count();
                 ui.label(format!("round index: {round_index}"))
                     .on_hover_text("number of cop moves preceeded by robber moves");
             }
-            ui.label(format!(
-                "robber energy: {}",
-                self.current_robber_energy(1000)
-            ));
+
+            ui.add_space(5.0);
+            ui.horizontal(|ui| {
+                let (with_bank, curr_bank) = match &self.robber_rules {
+                    bf::DynRobberRules::Energy(_) => (true, self.curr_robber_energy()),
+                    _ => (false, 0),
+                };
+                ui.label(format!("robber bank now: {curr_bank}  init:"));
+
+                let drag = egui::DragValue::new(&mut self.init_robber_energy);
+                ui.add_enabled(with_bank, drag);
+            });
 
             ui.add_space(8.0);
             if ui.button(" 🗑 ").on_hover_text("forget current game").clicked() {
@@ -1495,26 +1506,28 @@ impl State {
     }
 
     /// maps each entry in [`Self::past_moves`] to the [`Id`] of the character that did this move
-    fn who_moved(&self) -> impl Iterator<Item = Id> {
-        self.past_moves.iter().map(|(i, _)| self.characters[*i].id)
+    fn who_moved_where(&self) -> impl Iterator<Item = (Id, usize)> {
+        self.past_moves.iter().map(|&(i, v)| (self.characters[i].id, v))
     }
 
     /// this function assumes two things:
     /// first, whenever a piece is not moving in a round, it must "move in place".
     /// second, a robber move along multiple edges is split into one step per edge.
     /// returned is the energy the robber has in his bank in the current situation.
-    pub fn current_robber_energy(&self, initial_bank: usize) -> usize {
+    pub fn curr_robber_energy(&self) -> usize {
         let params = self.energy_params();
-        let mut bank = initial_bank;
-        let mut who_moved = self.who_moved().peekable();
+        let mut bank = self.init_robber_energy;
+        let mut who_moved = self.who_moved_where().peekable();
+        let mut robber_v = usize::MAX;
         loop {
             bank = usize::min(bank, params.bank_capacity);
-            while who_moved.peek().is_some_and(|id| !id.is_robber()) {
+            while let Some((Id::Cop(_), _)) = who_moved.peek() {
                 who_moved.next();
             }
             let mut nr_robber_steps = 0;
-            while who_moved.peek().is_some_and(|id| id.is_robber()) {
-                nr_robber_steps += 1;
+            while let Some((Id::Robber, v)) = who_moved.peek() {
+                nr_robber_steps += (*v != robber_v) as usize;
+                robber_v = *v;
                 who_moved.next();
             }
 
