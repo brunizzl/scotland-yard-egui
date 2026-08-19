@@ -378,7 +378,6 @@ where
 }
 
 /// all arguments also taken by [`super::compute_safe_robber_positions`] do the same as they do there.
-#[allow(dead_code)]
 pub fn compute_robber_energy_strat<R, S>(
     rules: R,
     params: EnergyParams,
@@ -482,20 +481,25 @@ where
             // from the (close to) highest energy state previously.
             {
                 debug_assert!(vertex_queue.is_empty());
-                for (v, &min_curr, to_curr) in izip!(
+                for (v, &curr_at_v, prev_at_v) in izip!(
                     0..,
                     &min_energy[curr_cop_positions],
                     &mut energy_should_cops_move_to_curr
                 ) {
-                    *to_curr = match min_curr {
+                    // initialise each energy value with the required previous energy,
+                    // assuming the robber was already at v in the last round.
+                    *prev_at_v = match curr_at_v {
                         // infinity - allowance is still infinity.
                         INFINITY => INFINITY as isize,
-                        // note that we allow negative values here.
-                        // TODO: why? (without, it falls apart completely)
-                        _ => min_curr as isize - allowance,
+                        // note that we must allow negative values here.
+                        // in the case where the value is negative, the interpretation is that this
+                        // is not the final computed value, but v is the destination with
+                        // the robber previously standing sufficiently far away.
+                        // these far previous robber positions are discovered in the while loop below.
+                        _ => curr_at_v as isize - allowance,
                     };
                     // only enter v into queue if the current value could have been attained by moving to this position.
-                    if *to_curr + energy_per_step <= bank_capacity + allowance {
+                    if *prev_at_v + energy_per_step <= bank_capacity {
                         vertex_queue.push_back(v);
                     }
                 }
@@ -503,14 +507,19 @@ where
                     energy_should_cops_move_to_curr[cop] = INFINITY as isize;
                 }
                 while let Some(v) = vertex_queue.pop_front() {
-                    let at_curr = energy_should_cops_move_to_curr[v];
-                    let to_curr = at_curr + energy_per_step;
-                    if to_curr > bank_capacity + allowance {
+                    let prev_at_v = energy_should_cops_move_to_curr[v];
+                    debug_assert!(prev_at_v <= bank_capacity);
+                    let prev_to_v = prev_at_v + energy_per_step;
+                    if prev_to_v > bank_capacity {
                         continue;
                     }
+                    // check for each neighbor n of v, wether it would be better to not end and a move there as robber,
+                    // but instead continue the move and walk to v.
+                    // (with the additional precondition that it makes sense to walk to / start in n in the first place.)
                     for n in edges.neighbors_of(v) {
-                        if energy_should_cops_move_to_curr[n] > to_curr && !prev_cops.contains(&n) {
-                            energy_should_cops_move_to_curr[n] = to_curr;
+                        let prev_at_n = &mut energy_should_cops_move_to_curr[n];
+                        if *prev_at_n > prev_to_v && !prev_cops.contains(&n) {
+                            *prev_at_n = prev_to_v;
                             vertex_queue.push_back(n);
                         }
                     }
@@ -524,19 +533,12 @@ where
                     auto_prev_to_repr.backward(),
                     &mut min_energy[prev_cops_repr]
                 ) {
-                    let to_curr_min_energy = energy_should_cops_move_to_curr[v];
-                    if (*prev_min_energy as isize) < to_curr_min_energy {
+                    let to_curr = energy_should_cops_move_to_curr[v];
+                    if (*prev_min_energy as isize) < to_curr {
                         prev_energy_changed = true;
 
-                        debug_assert!(to_curr_min_energy <= INFINITY as isize);
-                        *prev_min_energy = if to_curr_min_energy <= bank_capacity {
-                            to_curr_min_energy as UEnergy
-                        } else {
-                            // if the required energy value cannot be attained by the robber in game (after moving),
-                            // we say the robber needs infinite energy.
-                            // this has the advantage that all invalid energy states have the same value.
-                            INFINITY
-                        };
+                        debug_assert!(to_curr <= bank_capacity || to_curr == INFINITY as isize);
+                        *prev_min_energy = to_curr as UEnergy;
                     }
                 }
             }
@@ -615,6 +617,18 @@ mod test {
                     compute_robber_energy_strat_naive(rules, win_params, 1, edges, sym, &manager)
                         .unwrap();
 
+                let mut nr_wrong = 0;
+                let mut nr_total = 0;
+                for pos in win_outcome_a.cop_moves.all_positions() {
+                    nr_total += 1;
+                    let energy_a = &win_outcome_a.min_safe_energy[pos];
+                    let energy_b = &win_outcome_b.min_safe_energy[pos];
+                    if energy_a != energy_b {
+                        nr_wrong += 1;
+                        println!("{pos:?}\n{energy_a:?}\n{energy_b:?}\n");
+                    }
+                }
+                println!(" -> {nr_wrong} / {nr_total} wrong\n\n");
                 // TODO: investigate why this fails for n == 4 and n == 5 (but oooonly in edge cases)
                 assert!(win_outcome_a.min_safe_energy == win_outcome_b.min_safe_energy);
                 assert!(win_outcome_b.robber_wins);
@@ -641,6 +655,5 @@ mod test {
                 assert!(!lose_outcome_a.robber_wins);
             }
         }
-        assert!(false);
     }
 }
