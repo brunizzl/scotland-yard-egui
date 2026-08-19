@@ -600,7 +600,12 @@ impl BruteforceComputationState {
     }
 
     fn draw_robber_energy_result(ui: &mut Ui, game_type: &GameType, strat: &bf::EnergyRobberStrat) {
-        let outcome_str = if strat.robber_wins { "wins" } else { "loses" };
+        let min_initial = strat.min_initial_robber_energy;
+        let outcome_str = if min_initial < bf::INFINITY {
+            format!("wins with initial bank ≥ {min_initial}")
+        } else {
+            "loses".to_string()
+        };
 
         let cops_str = if game_type.nr_cops == 1 {
             "one cop".to_owned()

@@ -26,13 +26,6 @@ pub enum Id {
 impl Id {
     pub const DEFAULT_COP: Id = Id::Cop(0);
 
-    pub fn job_str(&self) -> &'static str {
-        match self {
-            Id::Cop(_) => "cop",
-            Id::Robber => "robber",
-        }
-    }
-
     //alternatives for cops: 👮🛂🛃🐈🔫🚔🐂🍩 "👁", "🚨", "🚴", "🚤",
     const COP_EMOJIES: &'static [&'static str] = &[
         "👮", "🍩", "🚔", "🐂", "🔫", "🛂", "🛃", "🚓", "🚁", "💂", "🏇",
@@ -78,7 +71,7 @@ enum Pos {
     /// this is only relevant, when a new graph is computed: it places the character at the node on the new graph
     /// closest to where he was before.
     OnVertex(Pos3),
-    /// position to where is is currently held while dragging,
+    /// position where character is currently held while dragging,
     /// only active while dragging or while sitting outside of graph
     /// (coordinates are in the intermediate system of ToScreen).
     OnScreen(Pos2),
@@ -513,18 +506,6 @@ impl State {
 
     pub fn last_moved(&self) -> Option<&Character> {
         self.past_moves.last().map(|&(c, _)| &self.characters[c])
-    }
-
-    pub fn snd_last_moved(&self) -> Option<&Character> {
-        let nr_past = self.past_moves.len();
-        (nr_past >= 2).then(|| {
-            let (c, _) = self.past_moves[nr_past - 2];
-            &self.characters[c]
-        })
-    }
-
-    pub fn next_moved(&self) -> Option<&Character> {
-        self.future_moves.last().map(|&(c, _)| &self.characters[c])
     }
 
     /// moves are both `self.past_moves` and `self.future_moves`.
@@ -1235,16 +1216,35 @@ impl State {
             });
 
             ui.add_space(8.0);
-            let mut print_move = |move_name: &str, ch: Option<&Character>| {
-                let ch_name = ch.map_or_else(
-                    || " 🚫   ".to_string(),
-                    |c| format!("{} ({})", c.id.job_str(), c.id.emoji()),
-                );
-                ui.label(format!("{move_name}: {ch_name}"));
-            };
-            print_move("snd last move", self.snd_last_moved());
-            print_move("last move    ", self.last_moved());
-            print_move("next move    ", self.next_moved());
+            {
+                let max_last = 7;
+                let mut last_moves_line = String::from("last moves:");
+                if self.past_moves.len() > max_last {
+                    last_moves_line += "  . . .";
+                }
+                for &(c_i, _) in self.past_moves.iter().rev().take(max_last).rev() {
+                    last_moves_line += " ";
+                    last_moves_line += self.characters[c_i].id().emoji();
+                }
+                if self.past_moves.is_empty() {
+                    last_moves_line += " none";
+                }
+                ui.label(last_moves_line);
+
+                let max_future = 6;
+                let mut future_moves_line = String::from("future moves:");
+                for &(c_i, _) in self.future_moves.iter().rev().take(max_future) {
+                    future_moves_line += " ";
+                    future_moves_line += self.characters[c_i].id().emoji();
+                }
+                if self.future_moves.len() > max_future {
+                    future_moves_line += " . . .";
+                }
+                if self.future_moves.is_empty() {
+                    future_moves_line += " none";
+                }
+                ui.label(future_moves_line);
+            }
             {
                 // this assumes that at least one cop does the "move in place" action if
                 // the cops choose to end their turn and that the robber does the same.
@@ -1262,7 +1262,8 @@ impl State {
                     bf::DynRobberRules::Energy(_) => (true, self.curr_robber_energy()),
                     _ => (false, 0),
                 };
-                ui.label(format!("robber bank now: {curr_bank}  init:"));
+                ui.label(format!("robber bank (b) now: {curr_bank}  init:"))
+                    .on_hover_text("makes sense when the robber rules are set to \"Energy\".");
 
                 let drag = egui::DragValue::new(&mut self.init_robber_energy);
                 ui.add_enabled(with_bank, drag);
@@ -1283,7 +1284,7 @@ impl State {
 
                 let mut period = self.random_update_period.as_secs_f32();
                 const STEP: f32 = std::f32::consts::SQRT_2;
-                add_drag_value(ui, &mut period, "update rate [s]", 0.125..=16.0, STEP);
+                add_drag_value(ui, &mut period, "update period [s]", 0.125..=16.0, STEP);
                 self.random_update_period = Duration::from_secs_f32(period);
             }
             if make_random_steps != self.random_steps.is_some() {
@@ -1517,23 +1518,23 @@ impl State {
     pub fn curr_robber_energy(&self) -> usize {
         let params = self.energy_params();
         let mut bank = self.init_robber_energy;
-        let mut who_moved = self.who_moved_where().peekable();
-        let mut robber_v = usize::MAX;
+        let mut who_moved_where = self.who_moved_where().peekable();
+        let mut robber_v = None;
         loop {
             bank = usize::min(bank, params.bank_capacity);
-            while let Some((Id::Cop(_), _)) = who_moved.peek() {
-                who_moved.next();
+            while let Some((Id::Cop(_), _)) = who_moved_where.peek() {
+                who_moved_where.next();
             }
             let mut nr_robber_steps = 0;
-            while let Some((Id::Robber, v)) = who_moved.peek() {
-                nr_robber_steps += (*v != robber_v) as usize;
-                robber_v = *v;
-                who_moved.next();
+            while let Some(&(Id::Robber, v)) = who_moved_where.peek() {
+                nr_robber_steps += robber_v.is_some_and(|rv| rv != v) as usize;
+                robber_v = Some(v);
+                who_moved_where.next();
             }
 
             bank += params.allowance;
             bank = bank.saturating_sub(nr_robber_steps * params.energy_per_step);
-            if who_moved.peek().is_none() {
+            if who_moved_where.peek().is_none() {
                 return bank;
             }
         }
