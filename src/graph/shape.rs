@@ -53,7 +53,6 @@ impl BuildStep {
             note that indices must be in order and no index skipped.\n\
         E<u>,<v>: edge between vertices with indices <u> and <v>.\n\
         K(<X>)(<Y>): all edges between sequences <X> and <Y>\n\
-        ZsgTest: (new is 1-cleanable) <=> (old is connected)\n\
         HamTest<u>,<v>: (new is 1-cleanable) <=> (<u>-<v> hamilton path in old)\n\n\
         a sequence has the form <a1>, ..., <an> and is made up of indices.\n\
         ALSO CONSIDER MOUSE TOOLS [±v] AND [±e]\
@@ -298,8 +297,9 @@ pub fn combine_last_move_operations(steps: &mut Vec<BuildStep>) {
     }
 }
 
-/// tries to combine move operations at the end of [`Self::build_steps`].
-/// note: this does'nt play nice with the undo and redo operations, hence is currently unused.
+/// tries to combine move operations at the end of the input.
+/// note: this makes most sense for [`CustomBuild::build_steps`],
+/// but does'nt play nice with the undo and redo operations, hence is currently unused.
 #[allow(dead_code)]
 fn combine_and_sort_last_move_operations(steps: &mut Vec<BuildStep>) {
     use BuildStep::{MoveVertex, Vertex};
@@ -484,6 +484,12 @@ impl CustomBuild {
 /// or a folder with name [`FromFile::class_name`] with entries `0.txt`, `1.txt`, `2.txt`, ...
 /// the respective files must contain the text representation of [`BuildStep`]'s.
 /// if the folder is chosen, the resolution decides which file is parsed.
+///
+/// note: this struct makes it clear, that the resolution should really just have been a
+/// value held by each shape variant where a resolution makes sense.
+/// before we change this however, we need to think about how saves
+/// keep their file format. we would loose old saves otherwise.
+/// note to note: one could in princible manually edit the files. this would be at bit tedious though.
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FromFile {
     /// the only thing deciding the _logical entitiy_. e.g. [`Eq`] and [`Ord`] are only decided on this.
@@ -650,7 +656,7 @@ impl Shape {
             Self::Tetrahedron => "Tetrahedron",
             Self::Octahedron => "Octahedron",
             Self::Icosahedron => "Icosahedron",
-            Self::DividedIcosahedron(_) => "inflated Icosahedron",
+            Self::DividedIcosahedron(_) => "Inflated Icosahedron",
             Self::Cube => "Cube",
             Self::Football => "Football",
             Self::FabianHamann => "Fabian Hamanns Graph",

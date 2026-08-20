@@ -1104,7 +1104,7 @@ impl State {
                     self.robber_fog_params = *params;
                 },
                 bf::DynRobberRules::Energy(params) => {
-                    add_drag_value(ui, &mut params.energy_per_step, "drain rate 💧", 1..=100, 1)
+                    add_drag_value(ui, &mut params.energy_per_step, "denominator 💧", 1..=100, 1)
                         .name_label
                         .on_hover_text("required number of energy units to cross a single edge (can be seen as denominator of the other two)");
 

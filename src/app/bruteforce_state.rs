@@ -1032,7 +1032,7 @@ impl BruteforceComputationState {
                     }
                 },
                 bf::DynRobberRules::Energy(_) => {
-                    ui.label("no algo implemented");
+                    ui.label("no algorithm implemented");
                 },
             });
             ui.add_space(5.0);

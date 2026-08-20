@@ -87,7 +87,7 @@ impl OrdBy {
             Self::Date => "Date",
             Self::Shape => "Shape",
             Self::Res => "Res.",
-            Self::NrCops => "Nr Cops",
+            Self::NrCops => "Num Cops",
         }
     }
 }

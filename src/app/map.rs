@@ -410,7 +410,7 @@ impl Map {
                     }
                 },
                 Shape::Custom(c) => {
-                    crate::app::menu_button_closing_outside(ui, "build steps", |ui| {
+                    crate::app::menu_button_closing_outside(ui, "Build Steps", |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Name:");
                             ui.text_edit_singleline(&mut c.name);

@@ -49,7 +49,6 @@ pub enum VertexColorInfo {
     CopsRotatedToEquivalence,
     CopsVoronoi,
     Fog,
-    CopStratPlaneDanger, //makes only sense in infinite plane
     Debugging,
     SpecificVertex,
 }
@@ -57,7 +56,7 @@ pub enum VertexColorInfo {
 impl VertexColorInfo {
     const fn description(self) -> &'static str {
         match self {
-            Self::None => "No automatically computed vertex subsets are shown",
+            Self::None => "no automatically computed vertex subsets are shown",
             Self::NearNodes => "every vertex closer to the robber than to the closest cop",
             Self::ConvexHull => {
                 "a vertex subset X is convex, if for every x, y in X hold that \
@@ -66,7 +65,7 @@ impl VertexColorInfo {
                 note: the convex hull algorithm is only an approximation on most graph glasses (but fast)"
             },
             Self::ConvexHullBorder => {
-                "vertices in convex hull with at least one eighbor outside hull.\
+                "vertices in convex hull with at least one neighbor outside hull.\
                 because these vertices are not interesting in isolation, \
                 they are only shown when correctly connected to paths / a circle"
             },
@@ -102,7 +101,9 @@ impl VertexColorInfo {
                 "shown distance can be adjusted if this option is selected."
             },
             Self::RobberDist => "all vertices with configured distance to the robber.",
-            Self::RobberCone => "a cone starting at the robber with selected directions",
+            Self::RobberCone => {
+                "(requires grids) an infinite cone starting at the robber position with selected directions"
+            },
             Self::VertexEquivalenceClasses => {
                 "shows orbits of automorphisms stored with the current graph.\n\
                 note: automorphisms are only computed for some graph shapes."
@@ -114,17 +115,16 @@ impl VertexColorInfo {
             Self::CopsRotatedToEquivalence => "cop state mapped to the representative cop state",
             Self::CopsVoronoi => {
                 "vertices with multiple (roughly) closest cops. number of cops from opaque to transparent:\n\
-            - three cops exact\n\
-            - three Cops ca. (two exact and one +1 oder one exact and two +1)\n\
-            - two Cops exact, no third +1\n\
-            - two Cops ca. (one exakt and one +1)"
+                - three cops exact\n\
+                - three Cops ca. (two exact and one +1 oder one exact and two +1)\n\
+                - two Cops exact, no third +1\n\
+                - two Cops ca. (one exakt and one +1)"
             },
             Self::Fog => {
                 "visualisation of robber rules set to \"fog\": all pieces work together to clean the graph from fog.\n\
                 a cleaning round ends with the robber ending his move.\n\
                 start with manual markers as fog: this option is selected + [shift] + [T]"
             },
-            Self::CopStratPlaneDanger => "idea on infinite plane that turned out to not work.",
             Self::Debugging => "surprise information",
             Self::SpecificVertex => {
                 "the vertex with the specified index. only relevant for debugging."
@@ -149,7 +149,7 @@ impl VertexColorInfo {
             Self::BruteForceRes => "Bruteforce Robber Strategy",
             Self::MinCopDist => "Minimum Cop Distance",
             Self::MaxCopDist => "Maximum Cop Distance",
-            Self::AnyCopDist => "every Cop Distance",
+            Self::AnyCopDist => "Every Cop Distance",
             Self::RobberDist => "Robber Distance",
             Self::RobberCone => "Cone at Robber (Grid)",
             Self::VertexEquivalenceClasses => "Orbits (from Automorphisms)",
@@ -157,7 +157,6 @@ impl VertexColorInfo {
             Self::CopsRotatedToEquivalence => "Representative Cop State",
             Self::CopsVoronoi => "Cops Voronoi",
             Self::Fog => "Fog",
-            Self::CopStratPlaneDanger => "Cops Plane Strat Danger",
             Self::Debugging => "Debugging",
             Self::SpecificVertex => "Singe Vertex",
         }
@@ -179,8 +178,6 @@ impl VertexColorInfo {
             VertexColorInfo::CopsRotatedToEquivalence => {
                 !matches!(map.data().sym_group(), SymGroup::None(_))
             },
-            // don't ever show this info (obsolete)
-            VertexColorInfo::CopStratPlaneDanger => false,
             // show the remaining options all the time
             _ => true,
         }
@@ -229,8 +226,8 @@ impl VertexSymbolInfo {
             Self::Escape3Grid => {
                 "(requires grids) arrows corresponding to vertices marked in Winning Dilemma"
             },
-            Self::MinCopDist => "pointwise minimum of distances to all cops",
-            Self::MaxCopDist => "pointwise maximum of distances to all cops",
+            Self::MinCopDist => "distance to closest cop",
+            Self::MaxCopDist => "distance to furthest cop",
             Self::VertexEquivalenceClass => "index of orbit under stored automorphism (sub) group",
             Self::RobberDist => "distance from each vertex to the robber",
             Self::RobberDistAvoidCops => "length of shortest cop-free route to robber",
@@ -674,7 +671,6 @@ pub struct Info {
     escapable: graph::EscapableNodes,
     escapable_grid: graph::EscapableDirections,
     dilemma: graph::DilemmaNodes,
-    plane_cop_strat: graph::PlaneCopStat,
     fog_state: graph::fog::GameSates,
 
     /// elementwise minimum of `.distance` of active cops in `self.characters`
@@ -724,7 +720,6 @@ impl Default for Info {
             escapable: graph::EscapableNodes::new(),
             escapable_grid: graph::EscapableDirections::new(),
             dilemma: graph::DilemmaNodes::new(),
-            plane_cop_strat: graph::PlaneCopStat::new(),
             fog_state: graph::fog::GameSates::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
@@ -772,7 +767,6 @@ impl Info {
             escapable: graph::EscapableNodes::new(),
             escapable_grid: graph::EscapableDirections::new(),
             dilemma: graph::DilemmaNodes::new(),
-            plane_cop_strat: graph::PlaneCopStat::new(),
             fog_state: graph::fog::GameSates::new(),
             min_cop_dist: Vec::new(),
             max_cop_dist: Vec::new(),
@@ -868,6 +862,7 @@ impl Info {
         egui::Window::new("Manual Markers")
             .open(&mut self.options.show_manual_marker_window)
             .constrain_to(ctx.content_rect())
+            .auto_sized()
             .show(ctx, |ui| {
                 new_tool = new_tool.draw_buttons(&graph::Shape::TriangTorus, ui);
                 self.manual_markers.draw_selection_window_contents(
@@ -939,11 +934,13 @@ impl Info {
     /// but instead an equilavent formulation which gives rise to a linear time algorithm:
     /// the function `f: vertices -> N` is computed as follows.
     ///
+    /// ```
     /// f(v) := if not v in cop hull interior {
     ///     -min dist(v, cop) over all cops
     /// } else {
     ///     (min f(u) over all u neighbors of v) + 1
     /// }
+    /// ```
     fn update_cop_advantage(&mut self, edges: &EdgeList) {
         assert_eq!(edges.nr_vertices(), self.cop_hull_data.hull().len());
         assert_eq!(edges.nr_vertices(), self.min_cop_dist.len());
@@ -1022,17 +1019,6 @@ impl Info {
         );
     }
 
-    fn update_plane_cop_strat(&mut self, con: &DrawContext<'_>) {
-        self.plane_cop_strat.update(
-            con.map.shape(),
-            con.edges,
-            self.cop_hull_data.hull(),
-            self.escapable.escapable(),
-            &self.characters,
-            &mut self.queue,
-        );
-    }
-
     fn update_fog(&mut self, con: &DrawContext<'_>, fog_params: bf::FogParams) {
         self.fog_state.update(
             con.edges,
@@ -1064,7 +1050,6 @@ impl Info {
         self.update_escapable_grid(con);
         self.update_dilemma(con);
         self.update_cop_advantage(con.edges);
-        self.update_plane_cop_strat(con);
         self.update_fog(con, fog_params);
         self.update_robber_dist_avoid_cops(con.edges);
     }
@@ -1088,14 +1073,9 @@ impl Info {
             || matches!(color, Color::Escape1)
             || matches!(symbol, Symbol::RobberAdvantage);
 
-        debug_assert_eq!(self.plane_cop_strat.danger_zones().len(), nr_vertices);
-        let update_plane_cop_strat = show_debug || matches!(color, Color::CopStratPlaneDanger);
-
         debug_assert_eq!(self.escapable.escapable().len(), nr_vertices);
-        let update_escapable = show_debug
-            || update_plane_cop_strat
-            || matches!(color, Color::Escape2)
-            || matches!(symbol, Symbol::Escape2);
+        let update_escapable =
+            show_debug || matches!(color, Color::Escape2) || matches!(symbol, Symbol::Escape2);
 
         debug_assert_eq!(self.dilemma.overlap.len(), nr_vertices);
         let update_dilemma = show_debug
@@ -1104,7 +1084,6 @@ impl Info {
 
         debug_assert_eq!(self.escapable_grid.esc_directions.len(), nr_vertices);
         let update_esc_grid = show_debug
-            || update_plane_cop_strat
             || update_dilemma
             || matches!(
                 color,
@@ -1170,9 +1149,6 @@ impl Info {
         }
         if cop_moved && update_cop_advantage {
             self.update_cop_advantage(con.edges);
-        }
-        if cop_moved && update_plane_cop_strat {
-            self.update_plane_cop_strat(con);
         }
         if character_moved && self.options.vertex_color_info() == Color::Fog {
             self.update_fog(con, fog_params);
@@ -1788,12 +1764,6 @@ impl Info {
                     for (&foggy, util) in izip!(fog, utils_iter) {
                         draw_if!(foggy, util);
                     }
-                }
-            },
-            VertexColorInfo::CopStratPlaneDanger => {
-                for (&dang, util) in izip!(self.plane_cop_strat.danger_zones(), utils_iter) {
-                    let color = || color::u32_marker_color(dang, colors);
-                    draw_if!(dang != 0, util, color);
                 }
             },
             VertexColorInfo::SpecificVertex => {

@@ -15,9 +15,6 @@ pub use escapable_grid::EscapableDirections;
 mod escapable_extra;
 pub use escapable_extra::DilemmaNodes;
 
-mod plane_cop_strat;
-pub use plane_cop_strat::PlaneCopStat;
-
 struct SafeSegment {
     /// indexes into [`CopsHull::flat_boundary_segments`]
     boundary_indices: Range<usize>,

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// note: the assumption is always to have the pieces placed on the graph vertices.
 /// only how far a single piece can move / how many cop pieces can move in a single turn can change.
 pub trait CopRules {
-    /// for the current mutiset of police positions [`cops`],
+    /// for the current mutiset of police positions `cops`,
     /// enumerate every multiset of police positions, that can be reached by the police in a single round,
     /// except the do-nothing move.
     ///
@@ -23,11 +23,11 @@ pub trait CopRules {
         cops: RawCops,
     ) -> impl Iterator<Item = RawCops> + 'a + Clone;
 
-    /// for the current (equivalence class representative of a) mutiset of police positions [`positions`],
+    /// for the current (equivalence class representative of a) mutiset of police positions `positions`,
     /// enumerate every (equivalence class representative of a) multiset of police positions,
     /// that can be reached by the police in a single round.
     ///
-    /// The vertices are connected via [`edges`] and have automorphism group [`sym`].
+    /// The vertices are connected via `edges` and have automorphism group `sym`.
     /// because these positions stored in [`CopConfigurations`] may be stored in a different rotation and / or flipped,
     /// that rotation + flip to get from the move as rotated in the input to the output
     /// is also returned (see [`CopConfigurations::pack`]).
@@ -149,7 +149,7 @@ impl CopRules for GeneralEagerCops {
     }
 }
 
-/// this is an enumeration of the types implementing [`Rules`].
+/// this is an enumeration of the types implementing [`CopRules`].
 /// in principle, these types may carry more data than is stored in their counterpart here.
 /// this additional data however should only be cashed information like distances between vertices.
 /// Note: as of today (November 2025) no rules make use of this possibility.

@@ -61,7 +61,7 @@ pub struct MinSafeEnergy {
 }
 
 impl MinSafeEnergy {
-    /// returns [`Self`] if enough memory is available
+    /// construct self if enough memory is available
     fn new(nr_map_vertices: usize, cop_moves: &CopConfigurations, init: UEnergy) -> Option<Self> {
         let mut time = BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {

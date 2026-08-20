@@ -101,8 +101,8 @@ impl std::hash::Hash for RawCops {
     }
 }
 
-/// returns the number of distinct mutlisets with [`cardinality`] many elements
-/// chosen from a set with [`universe_size`] many elements.
+/// returns the number of distinct mutlisets with `cardinality` many elements
+/// chosen from a set with `universe_size` many elements.
 fn multiset_count(universe_size: usize, cardinality: usize) -> Option<usize> {
     fn binomial_coefficient(n: usize, k: usize) -> Option<usize> {
         if k == 0 {
@@ -146,8 +146,8 @@ fn multiset_index(universe_size: usize, multiset: &[usize]) -> Option<usize> {
 }
 
 /// this corresponds to one entry in CopConfigurations:
-/// [`self.fst_cop`] is expected to be a vertex symmetry class representative and the (rotated / mirrored) position of one of the cops.
-/// [`self.rest_cops`] represents the compacted sorted tuple of the other cops positions (obv. rotated the same as fst_cop).
+/// [`Self::fst_cop`] is expected to be a vertex symmetry class representative and the (rotated / mirrored) position of one of the cops.
+/// [`Self::rest_cops`] represents the compacted sorted tuple of the other cops positions (obv. rotated the same as fst_cop).
 /// thus `(0..nr_symmetry_classes).contains(&self.fst_cop)`
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct CompactCops {
@@ -155,8 +155,8 @@ struct CompactCops {
     rest_cops: usize,
 }
 
-/// same structure as [`CompactCops`], except [`self.rest_index`] is an index into the [`CopConfigurations::configurations`] entry
-/// at key [`self.fst_index`]
+/// same structure as [`CompactCops`], except [`Self::rest_index`] is an index into the [`CopConfigurations::configurations`] entry
+/// at key [`Self::fst_index`]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct CompactCopsIndex {
     fst_index: usize,
@@ -205,7 +205,7 @@ impl CopConfigurations {
         }
     }
 
-    /// returns [`Self`] if enough memory is available
+    /// constructs self if enough memory is available
     pub fn new<S: SymmetryGroup>(
         edges: &EdgeList,
         sym: &S,
@@ -318,7 +318,7 @@ impl CopConfigurations {
     }
 
     /// returns the index where the (rotated / mirrored) configuration represented by cops is stored as `_.1`
-    /// and returns the transformation that rotated and / or mirrored the input in order to find it in [`self.configurations`]
+    /// and returns the transformation that rotated and / or mirrored the input in order to find it in [`Self::configurations`]
     pub fn pack<'a, S: SymmetryGroup>(
         &self,
         symmetry: &'a S,
@@ -381,7 +381,7 @@ impl RobberPosRange {
 }
 
 impl SafeRobberPositions {
-    /// returns [`Self`] if enough memory is available
+    /// constructs self if enough memory is available
     fn new(nr_map_vertices: usize, cop_moves: &CopConfigurations) -> Option<Self> {
         let mut safe = BTreeMap::new();
         for (&fst_index, indices) in &cop_moves.configurations {

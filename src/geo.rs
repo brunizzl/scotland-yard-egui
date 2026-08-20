@@ -37,7 +37,7 @@ pub fn project_to_line(Line2(a, dir): Line2, p: Pos2) -> Pos2 {
     a + Vec2::dot(p - a, dir) / dir.length_sq() * dir
 }
 
-/// returns [`t`] in [`a + t * da = b + s * db`]
+/// returns `t` in `a + t * da = b + s * db`
 pub fn intersection_step(Line2(a, da): Line2, Line2(b, db): Line2) -> f32 {
     //a, da == p, r
     //b, db == q, s
