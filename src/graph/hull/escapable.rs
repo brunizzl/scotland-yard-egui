@@ -1,10 +1,10 @@
 use super::*;
 
-/// relies just on [`InSet::No`] and [`InSet::Interieur`], doesn't need [`InSet::OnBoundary`] for `hull` to function.
+/// relies just on [`InHull::No`] and [`InHull::Interieur`], doesn't need [`InHull::OnBoundary`] for `hull` to function.
 /// `all_elements` contains every element of `hull`.
 fn find_unordered_boundary(
     boundary: &mut Vec<usize>,
-    hull: &[InSet],
+    hull: &[InHull],
     edges: &EdgeList,
     all_elements: &[usize],
 ) {

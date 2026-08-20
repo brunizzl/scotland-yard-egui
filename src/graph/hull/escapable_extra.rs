@@ -63,7 +63,7 @@ impl DilemmaNodes {
         &mut self,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
-        cops_hull: &[InSet],
+        cops_hull: &[InHull],
     ) -> std::ops::Range<usize> {
         let all_dirs = &self.all_dirs[..];
         // guarentee only vertices where multiple escape options exist are marked as escapeable.
@@ -149,7 +149,7 @@ impl DilemmaNodes {
         escape_directions: &EscapableDirections,
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
-        cops_hull: &[InSet],
+        cops_hull: &[InHull],
         active_cops_coords: &[Coords],
         new_regions: std::ops::Range<usize>,
     ) {
@@ -365,7 +365,7 @@ impl DilemmaNodes {
     pub fn update<'a>(
         &mut self,
         edges: &EdgeList,
-        hull: &[InSet],
+        hull: &[InHull],
         esc_dirs: &EscapableDirections,
         queue: &mut VecDeque<usize>,
         active_cops: impl Iterator<Item = &'a Character>,

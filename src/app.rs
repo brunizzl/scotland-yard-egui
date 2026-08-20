@@ -247,7 +247,7 @@ impl eframe::App for State {
         }
 
         if self.menu_visible {
-            egui::Panel::left("left panel").show(ui, |ui| {
+            egui::Panel::left("left panel").resizable(false).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     const COMPILE_DATETIME: &str = compile_time::datetime_str!();
                     //add spaces to force minimum width of sidebar

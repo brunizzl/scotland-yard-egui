@@ -44,7 +44,7 @@ impl EscapableDirections {
         }
     }
 
-    fn initialize_directions(&mut self, convex_cop_hull: &[InSet]) {
+    fn initialize_directions(&mut self, convex_cop_hull: &[InHull]) {
         assert!(self.graph.represents_current_map);
         assert_eq!(self.graph.nr_vertices(), convex_cop_hull.len());
         assert_eq!(self.graph.nr_vertices(), self.esc_directions.len());

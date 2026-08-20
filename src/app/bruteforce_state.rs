@@ -960,7 +960,7 @@ impl BruteforceComputationState {
                     }
                 },
                 bf::DynRobberRules::Fog(_) => {
-                    ui.label("fog has no descisions.");
+                    ui.label("fog can't make descisions");
                 },
                 bf::DynRobberRules::Energy(_) => {
                     let curr_computing = self
@@ -1032,7 +1032,7 @@ impl BruteforceComputationState {
                     }
                 },
                 bf::DynRobberRules::Energy(_) => {
-                    ui.label("no algorithm implemented");
+                    ui.label("no algorithm implemented (yet)");
                 },
             });
             ui.add_space(5.0);

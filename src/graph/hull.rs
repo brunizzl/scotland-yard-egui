@@ -15,6 +15,47 @@ pub use escapable_grid::EscapableDirections;
 mod escapable_extra;
 pub use escapable_extra::DilemmaNodes;
 
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InHull {
+    No = 0,
+    Interieur = 1,
+    OnBoundary = 2,
+    Unknown = 4,
+    NewlyAdded = 8,
+}
+const _: () = assert!(std::mem::size_of::<InHull>() == 1);
+
+impl InHull {
+    const fn finished_construction(self) -> bool {
+        matches!(self, InHull::No | InHull::Interieur | InHull::OnBoundary)
+    }
+
+    #[inline(always)]
+    pub const fn contained(self) -> bool {
+        debug_assert!(self.finished_construction());
+        !self.outside()
+    }
+
+    #[inline(always)]
+    pub const fn on_boundary(self) -> bool {
+        debug_assert!(self.finished_construction());
+        matches!(self, InHull::OnBoundary)
+    }
+
+    #[inline(always)]
+    pub const fn in_interieur(self) -> bool {
+        debug_assert!(self.finished_construction());
+        matches!(self, InHull::Interieur)
+    }
+
+    #[inline(always)]
+    pub const fn outside(self) -> bool {
+        debug_assert!(self.finished_construction());
+        matches!(self, InHull::No)
+    }
+}
+
 struct SafeSegment {
     /// indexes into [`CopsHull::flat_boundary_segments`]
     boundary_indices: Range<usize>,
@@ -31,7 +72,7 @@ struct SafeSegment {
 ///    every connected component other than the one with the vertex furthest away is also contained.
 pub struct CopsHull {
     /// one entry per vertex in graph
-    hull: Vec<InSet>,
+    hull: Vec<InHull>,
 
     /// one entry per vertex in graph
     dist_to_hull: Vec<isize>,
@@ -53,7 +94,7 @@ impl CopsHull {
         }
     }
 
-    pub fn hull(&self) -> &[InSet] {
+    pub fn hull(&self) -> &[InHull] {
         &self.hull
     }
 
@@ -85,7 +126,7 @@ impl CopsHull {
         queue.clear();
 
         self.hull.clear();
-        self.hull.resize(edges.nr_vertices(), InSet::Unknown);
+        self.hull.resize(edges.nr_vertices(), InHull::Unknown);
         let hull = &mut self.hull[..];
         for i in 0..cops.len() {
             let cop_i = &cops[i];
@@ -94,38 +135,39 @@ impl CopsHull {
             }
             for cop_j in cops[(i + 1)..].iter().filter(|c| c.is_active()) {
                 //walk from cop i to cop j on all shortest paths
-                hull[cop_i.vertex()] = InSet::NewlyAdded;
+                hull[cop_i.vertex()] = InHull::NewlyAdded;
                 queue.push_back(cop_i.vertex());
                 while let Some(node) = queue.pop_front() {
                     let curr_dist_to_j = cop_j.dists()[node];
                     for neigh in edges.neighbors_of(node) {
-                        if cop_j.dists()[neigh] < curr_dist_to_j && hull[neigh] != InSet::NewlyAdded
+                        if cop_j.dists()[neigh] < curr_dist_to_j
+                            && hull[neigh] != InHull::NewlyAdded
                         {
-                            hull[neigh] = InSet::NewlyAdded;
+                            hull[neigh] = InHull::NewlyAdded;
                             queue.push_back(neigh);
                         }
                     }
                 }
-                //change these paths from InSet::NewlyAdded to InSet::Yes
+                //change these paths from InHull::NewlyAdded to InHull::Yes
                 //(to allow new paths to go through the current one)
                 queue.push_back(cop_i.vertex());
-                hull[cop_i.vertex()] = InSet::Interieur;
-                edges.recolor_region((InSet::NewlyAdded, InSet::Interieur), hull, queue);
+                hull[cop_i.vertex()] = InHull::Interieur;
+                edges.recolor_region((InHull::NewlyAdded, InHull::Interieur), hull, queue);
             }
         }
-        //color outside as InSet::No (note: this might miss some edge cases; best to not place cops at rim)
+        //color outside as InHull::No (note: this might miss some edge cases; best to not place cops at rim)
         for &p in vertices_outside_hull {
-            if hull[p] == InSet::Unknown {
-                hull[p] = InSet::No;
+            if hull[p] == InHull::Unknown {
+                hull[p] = InHull::No;
                 queue.push_back(p);
             }
         }
-        edges.recolor_region((InSet::Unknown, InSet::No), hull, queue);
+        edges.recolor_region((InHull::Unknown, InHull::No), hull, queue);
 
-        //color remaining InSet::Perhaps as InSet::Interieur
+        //color remaining InHull::Perhaps as InHull::Interieur
         for x in hull {
-            if *x == InSet::Unknown {
-                *x = InSet::Interieur;
+            if *x == InHull::Unknown {
+                *x = InHull::Interieur;
             }
         }
     }
@@ -146,16 +188,16 @@ impl CopsHull {
         let hull = &mut self.hull[..];
         debug_assert!(
             hull.iter()
-                .all(|&h| h.finished_construction() && h != InSet::OnBoundary)
+                .all(|&h| h.finished_construction() && h != InHull::OnBoundary)
         );
 
         self.flat_boundary_segments.clear();
         self.safe_segments.clear();
 
-        // after we discovered something vertex `v` is on the boundary, we set `hull[v] == InSet::OnBoundary`.
+        // after we discovered something vertex `v` is on the boundary, we set `hull[v] == InHull::OnBoundary`.
         // what is considered as outside id defined as our input.
-        let inside_next_to = |v: usize, hull: &[InSet], outside: InSet| -> Option<usize> {
-            if hull[v] == InSet::Interieur {
+        let inside_next_to = |v: usize, hull: &[InHull], outside: InHull| -> Option<usize> {
+            if hull[v] == InHull::Interieur {
                 neighs_of(v).find(|&n| hull[n] == outside)
             } else {
                 None
@@ -163,7 +205,7 @@ impl CopsHull {
         };
 
         let new_on_boundary =
-            |v: usize, hull: &[InSet]| inside_next_to(v, hull, InSet::No).is_some();
+            |v: usize, hull: &[InHull]| inside_next_to(v, hull, InHull::No).is_some();
 
         // mark boundary vertices that are not safe
         for cop in cops {
@@ -174,13 +216,13 @@ impl CopsHull {
             for v in std::iter::once(cop_v).chain(neighs_of(cop_v)) {
                 if new_on_boundary(v, hull) {
                     debug_assert!(min_cop_dist[v] <= 1);
-                    hull[v] = InSet::OnBoundary;
+                    hull[v] = InHull::OnBoundary;
                     self.flat_boundary_segments.push(v);
                 }
             }
         }
 
-        const BND_WITHNESS: InSet = InSet::Unknown;
+        const BND_WITHNESS: InHull = InHull::Unknown;
         // we guarantee to find every safe boundary component by iterating trough every vertex.
         // how far we have iterated previously, is remembered here.
         let mut search_start = 0;
@@ -188,24 +230,24 @@ impl CopsHull {
             // find first not-yet handled vertex of a winning boundary component
             let (fst_on_boundary, fst_withness) = 'find_new_component: {
                 for v in search_start..hull.len() {
-                    if let Some(fst_withness) = inside_next_to(v, hull, InSet::No) {
+                    if let Some(fst_withness) = inside_next_to(v, hull, InHull::No) {
                         if min_cop_dist[v] > 1 {
                             search_start = v + 1;
                             break 'find_new_component (v, fst_withness);
                         } else {
-                            debug_assert_eq!(hull[v], InSet::OnBoundary);
+                            debug_assert_eq!(hull[v], InHull::OnBoundary);
                         }
                     }
                 }
                 debug_assert!((0..hull.len()).all(|v| !new_on_boundary(v, hull)));
-                debug_assert!(hull.iter().copied().all(InSet::finished_construction));
+                debug_assert!(hull.iter().copied().all(InHull::finished_construction));
                 return;
             };
             // mark every suitable withness vertex as withness
             debug_assert!(queue.is_empty());
             queue.push_back(fst_withness);
             while let Some(w) = queue.pop_front() {
-                if hull[w] == InSet::No && is_edge(fst_on_boundary, w) {
+                if hull[w] == InHull::No && is_edge(fst_on_boundary, w) {
                     hull[w] = BND_WITHNESS;
                     queue.extend(neighs_of(w));
                 }
@@ -213,7 +255,7 @@ impl CopsHull {
             for w in neighs_of(fst_on_boundary) {
                 if hull[w] == BND_WITHNESS {
                     for ww in neighs_of(w) {
-                        if hull[ww] == InSet::No {
+                        if hull[ww] == InHull::No {
                             hull[ww] = BND_WITHNESS;
                         }
                     }
@@ -237,7 +279,7 @@ impl CopsHull {
                         withness = w;
                         let mut find_front_withness = || -> bool {
                             for ww in neighs_of(withness) {
-                                if hull[ww] == InSet::No && is_edge(v, ww) {
+                                if hull[ww] == InHull::No && is_edge(v, ww) {
                                     hull[ww] = BND_WITHNESS;
                                     withness = ww;
                                     return true;
@@ -256,13 +298,13 @@ impl CopsHull {
                 // this part is only needed on square grids.
                 'mark_withness_withness: loop {
                     for n in neighs_of(withness) {
-                        if hull[n] == InSet::No {
+                        if hull[n] == InHull::No {
                             hull[n] = BND_WITHNESS;
                         }
                     }
                     // this is needed for an outher corner on a quad grid
                     for w in neighs_of(v) {
-                        if hull[w] == InSet::No {
+                        if hull[w] == InHull::No {
                             for ww in neighs_of(w) {
                                 if hull[ww] == BND_WITHNESS {
                                     hull[w] = BND_WITHNESS;
@@ -277,10 +319,10 @@ impl CopsHull {
 
                 // push to queue, update boundary state
                 self.flat_boundary_segments.push(v);
-                hull[v] = InSet::OnBoundary;
+                hull[v] = InHull::OnBoundary;
                 'test_neighbors: for n in neighs_of(v) {
                     // add new guarding cops that are near by
-                    if hull[n] == InSet::OnBoundary && min_cop_dist[n] <= 1 {
+                    if hull[n] == InHull::OnBoundary && min_cop_dist[n] <= 1 {
                         debug_assert_eq!(min_cop_dist[n], 1);
                         'find_guard_cop: for nn in neighs_of(n) {
                             if min_cop_dist[nn] == 0 {
@@ -296,13 +338,13 @@ impl CopsHull {
                         }
                     }
 
-                    if hull[n] != InSet::Interieur {
+                    if hull[n] != InHull::Interieur {
                         continue 'test_neighbors;
                     }
                     queue.push_back(n);
 
                     // if n is an "inner corner" on the quad torus, we need this dance here.
-                    if neighs_of(n).any(|nn| matches!(hull[nn], BND_WITHNESS | InSet::No)) {
+                    if neighs_of(n).any(|nn| matches!(hull[nn], BND_WITHNESS | InHull::No)) {
                         continue 'test_neighbors;
                     }
                     let mut nn_withnesses_vec = smallvec::SmallVec::<[_; 8]>::new();
@@ -312,7 +354,7 @@ impl CopsHull {
                     let nn_withnesses = &nn_withnesses_vec[..];
                     for nn in neighs_of(n) {
                         if nn != v
-                            && hull[nn] == InSet::Interieur
+                            && hull[nn] == InHull::Interieur
                             && !is_edge(v, nn)
                             && nn_withnesses.iter().any(|&w| is_edge(nn, w))
                         {
@@ -329,12 +371,12 @@ impl CopsHull {
             queue.push_back(fst_withness);
             while let Some(w) = queue.pop_front() {
                 if hull[w] == BND_WITHNESS {
-                    hull[w] = InSet::No;
+                    hull[w] = InHull::No;
                     queue.extend(neighs_of(w));
                 }
             }
             debug_assert!(!BND_WITHNESS.finished_construction());
-            debug_assert!(hull.iter().copied().all(InSet::finished_construction));
+            debug_assert!(hull.iter().copied().all(InHull::finished_construction));
 
             let guard_cops = &guard_cops_vec[..];
             if guard_cops.is_empty() {
@@ -395,7 +437,7 @@ impl CopsHull {
 
     fn compute_dist_to_hull(&mut self, edges: &EdgeList, queue: &mut VecDeque<usize>) {
         assert_eq!(edges.nr_vertices(), self.hull.len());
-        debug_assert!(self.hull.iter().copied().all(InSet::finished_construction));
+        debug_assert!(self.hull.iter().copied().all(InHull::finished_construction));
 
         queue.clear();
         self.dist_to_hull.clear();
@@ -438,7 +480,7 @@ enum Keep {
 /// as this is computed (potentially) many times in a single frame, it tries to never iterate over all vertices.
 #[derive(Default)]
 struct CopPairHull {
-    hull: Vec<InSet>,         //one entry per vertex
+    hull: Vec<InHull>,        //one entry per vertex
     all_vertices: Vec<usize>, //indices of all vertices
 }
 
@@ -449,21 +491,21 @@ impl CopPairHull {
         edges: &EdgeList,
         queue: &mut VecDeque<usize>,
     ) {
-        self.hull.resize(edges.nr_vertices(), InSet::No);
-        debug_assert!(self.hull.iter().all(|&x| x == InSet::No));
+        self.hull.resize(edges.nr_vertices(), InHull::No);
+        debug_assert!(self.hull.iter().all(|&x| x == InHull::No));
         debug_assert!(queue.is_empty());
 
         let mut all_entries = std::mem::take(&mut self.all_vertices);
         all_entries.clear();
 
-        self.hull[cop_1.vertex()] = InSet::Interieur;
+        self.hull[cop_1.vertex()] = InHull::Interieur;
         queue.push_back(cop_1.vertex());
         all_entries.push(cop_1.vertex());
         while let Some(v) = queue.pop_front() {
             let curr_dist_to_2 = cop_2.dists()[v];
             for n in edges.neighbors_of(v) {
-                if cop_2.dists()[n] < curr_dist_to_2 && self.hull[n] == InSet::No {
-                    self.hull[n] = InSet::Interieur;
+                if cop_2.dists()[n] < curr_dist_to_2 && self.hull[n] == InHull::No {
+                    self.hull[n] = InHull::Interieur;
                     queue.push_back(n);
                     all_entries.push(n);
                 }
@@ -479,11 +521,11 @@ impl CopPairHull {
         debug_assert!(queue.is_empty());
 
         //should be faster than iterating over whole array most of the time (by far)
-        self.hull[cop_1.vertex()] = InSet::No;
+        self.hull[cop_1.vertex()] = InHull::No;
         queue.push_back(cop_1.vertex());
-        edges.recolor_region_with(InSet::No, &mut self.hull, |_, _| true, queue);
+        edges.recolor_region_with(InHull::No, &mut self.hull, |_, _| true, queue);
 
-        debug_assert!(self.hull.iter().all(|&x| x == InSet::No));
+        debug_assert!(self.hull.iter().all(|&x| x == InHull::No));
     }
 }
 
