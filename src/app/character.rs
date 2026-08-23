@@ -1019,6 +1019,7 @@ impl State {
     }
 
     /// returns a menu change (e.g. a new character was added, one removed...)
+    #[must_use]
     pub fn draw_menu(
         &mut self,
         ui: &mut Ui,
@@ -1468,7 +1469,6 @@ impl State {
     pub fn game_type(&self, map: &crate::app::map::Map) -> GameType {
         GameType {
             nr_cops: self.active_cops().count().min(bf::MAX_COPS),
-            resolution: map.resolution(),
             shape: map.shape().clone(),
             cop_rules: self.cop_rules,
             robber_rules: self.robber_rules,

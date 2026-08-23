@@ -710,17 +710,17 @@ mod test {
     #[test]
     fn test_cop_numbers() {
         let eager = GeneralEagerCops(MAX_COPS as u32);
-        let c_e = |s, res| cop_number(eager, Embedding3D::new_map_from(&s, res));
-        let c_l = |s, res| cop_number(LazyCops, Embedding3D::new_map_from(&s, res));
+        let c_e = |s| cop_number(eager, Embedding3D::new_map_from(s));
+        let c_l = |s| cop_number(LazyCops, Embedding3D::new_map_from(s));
 
-        assert_eq!(c_l(Shape::Cube, 0), Some(2));
-        assert_eq!(c_l(Shape::Dodecahedron, 0), Some(3));
-        assert_eq!(c_e(Shape::Dodecahedron, 0), Some(3));
-        assert_eq!(c_l(Shape::Icosahedron, 1), Some(3));
-        assert_eq!(c_e(Shape::Icosahedron, 1), Some(2));
-        assert_eq!(c_l(Shape::TriangTorus, 3), Some(2));
-        assert_eq!(c_l(Shape::TriangTorus, 4), Some(3));
-        assert_eq!(c_e(Shape::TriangTorus, 4), Some(2));
-        assert_eq!(c_l(Shape::SquareGrid, 5), Some(2));
+        assert_eq!(c_l(Shape::Cube(Resolution(0))), Some(2));
+        assert_eq!(c_l(Shape::Dodecahedron(Resolution(0))), Some(3));
+        assert_eq!(c_e(Shape::Dodecahedron(Resolution(0))), Some(3));
+        assert_eq!(c_l(Shape::Icosahedron(Resolution(1))), Some(3));
+        assert_eq!(c_e(Shape::Icosahedron(Resolution(1))), Some(2));
+        assert_eq!(c_l(Shape::triang_torus(Resolution(3))), Some(2));
+        assert_eq!(c_l(Shape::triang_torus(Resolution(4))), Some(3));
+        assert_eq!(c_e(Shape::triang_torus(Resolution(4))), Some(2));
+        assert_eq!(c_l(Shape::square_grid(Resolution(5))), Some(2));
     }
 }

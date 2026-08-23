@@ -16,14 +16,13 @@ struct SavedState {
     name: String,
     saved_at: std::time::SystemTime,
     shape: crate::graph::Shape,
-    resolution: isize,
     characters: character::State,
     manual_markers: Vec<(usize, u8)>, //run length encoding of info's manual markers
 }
 
 impl SavedState {
     fn set(&mut self, map: &mut map::Map, info: &mut info::Info, cam: &mut Camera3D) {
-        map.change_to(self.shape.clone(), self.resolution);
+        map.change_to(self.shape.clone());
         info.characters = self.characters.clone_without_distances();
         info.manual_markers = ManualMarkers::new_init(crate::rle::decode(&self.manual_markers));
         info.adjust_to_new_map(map.data());
@@ -36,8 +35,8 @@ impl SavedState {
         let secs = saved_at.time().num_seconds_from_midnight();
         std::path::PathBuf::from(format!(
             "saves/{}-{}-{date}-{secs}.ron",
-            self.shape.to_sting(),
-            self.resolution,
+            self.shape.variant_string(),
+            self.shape.resolution(),
         ))
     }
 
@@ -112,7 +111,33 @@ impl SavedStates {
             let mut file = fs::File::open(entry.path())?;
             let mut s = String::new();
             let file_str = file.read_to_string(&mut s).map(|_| s)?;
-            ron::from_str(&file_str).map_err(|e| e.code)
+            match ron::from_str(&file_str) {
+                Ok(state) => Ok(state),
+                Err(err) => {
+                    /// we used to keep shape and resolution separate.
+                    /// to still allow loading old safes, we keep the old structure around here.
+                    #[derive(Deserialize, Serialize)]
+                    struct SavedStateV1 {
+                        name: String,
+                        saved_at: std::time::SystemTime,
+                        shape: crate::graph::shape::v1::Shape,
+                        resolution: usize,
+                        characters: character::State,
+                        manual_markers: Vec<(usize, u8)>, //run length encoding of info's manual markers
+                    }
+                    if let Ok(old) = ron::from_str::<SavedStateV1>(&file_str) {
+                        Ok(SavedState {
+                            name: old.name,
+                            saved_at: old.saved_at,
+                            shape: (old.shape, crate::graph::Resolution(old.resolution)).into(),
+                            characters: old.characters,
+                            manual_markers: old.manual_markers,
+                        })
+                    } else {
+                        Err(err.code)
+                    }
+                },
+            }
         };
         for entry in path {
             match try_load(entry) {
@@ -151,7 +176,7 @@ impl SavedStates {
             OrdBy::Name => a.name.cmp(&b.name),
             OrdBy::Date => a.saved_at.cmp(&b.saved_at),
             OrdBy::Shape => a.shape.cmp(&b.shape),
-            OrdBy::Res => a.resolution.cmp(&b.resolution),
+            OrdBy::Res => a.shape.resolution().cmp(&b.shape.resolution()),
             OrdBy::NrCops => (a.characters.all().len()).cmp(&b.characters.all().len()),
         });
         if self.reverse_ord {
@@ -198,15 +223,13 @@ impl SavedStates {
         } else {
             std::time::SystemTime::UNIX_EPOCH
         };
-        let map_shape = map.shape().clone();
-        let map_resolution = map.resolution() as isize;
+        let shape = map.shape().clone();
         let characters = info.characters.clone_without_distances();
         let manual_markers = crate::rle::encode(info.manual_markers.curr());
         let new_save = SavedState {
             name,
             saved_at,
-            shape: map_shape,
-            resolution: map_resolution,
+            shape,
             characters,
             manual_markers,
         };
@@ -223,12 +246,10 @@ impl SavedStates {
         info: &mut info::Info,
         cam: &mut Camera3D,
     ) {
-        if let Some(save) = self.active.and_then(|i| self.saves.get(i)) {
-            let same_shape = &save.shape == map.shape();
-            let same_res = save.resolution == map.resolution() as isize;
-            if !same_shape || !same_res {
-                self.active = None;
-            }
+        if let Some(save) = self.active.and_then(|i| self.saves.get(i))
+            && &save.shape != map.shape()
+        {
+            self.active = None;
         }
 
         fn highlight(button: egui::Response, highlight: bool) -> egui::Response {
@@ -256,7 +277,7 @@ impl SavedStates {
                         };
                         let text = {
                             let shape = s.shape.emoji();
-                            let res = s.resolution;
+                            let res = s.shape.resolution();
                             let name = s.name.as_str();
                             let nr_chars = s.characters.all().len();
                             format!("{name}\n{nr_chars:2} pieces on {shape} ({res}){time}")

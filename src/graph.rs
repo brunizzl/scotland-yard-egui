@@ -22,7 +22,7 @@ pub use planar3d::*;
 pub mod bruteforce;
 
 pub mod shape;
-pub use shape::Shape;
+pub use shape::{Resolution, Shape, Wrap};
 
 /// compressed sparse row matrix for bool entries, e.g. no actual value array exists
 /// great to e.g. store neighbors in a sparse (for example planar) graph

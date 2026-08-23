@@ -10,8 +10,6 @@ pub struct Map {
     data: Embedding3D,
     visible: Vec<bool>, //one entry per vertex, stores if that vertex can currently be seen on screen
     extreme_vertices: Vec<usize>,
-
-    resolution: isize,
 }
 
 mod storage_keys {
@@ -28,32 +26,30 @@ impl Map {
         &self.data
     }
 
-    pub fn resolution(&self) -> usize {
-        self.resolution as usize
-    }
-
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         use storage_keys::*;
-        let shape = load_or(cc.storage, SHAPE, || Shape::Icosahedron);
-        let resolution = {
-            let last_res = load_or(cc.storage, RESOLUTION, || 12);
-            //to not accidentally lag on restart, we limit maximal initial resolution for
-            //graphs that are slow to build. currently this is only Random2D.
-            if last_res > 50 && matches!(shape, Shape::Random2D(_)) {
-                50
-            } else {
-                last_res
-            }
-        };
+        let shape = load_or(cc.storage, SHAPE, || {
+            type OldShape = shape::v1::Shape;
+            let old: OldShape = load_or(cc.storage, SHAPE, || OldShape::Icosahedron);
+            let res = {
+                let last_res = load_or(cc.storage, RESOLUTION, || 12);
+                //to not accidentally lag on restart, we limit maximal initial resolution for
+                //graphs that are slow to build. currently this is only Random2D.
+                if last_res > 50 && matches!(old, OldShape::Random2D(_)) {
+                    50
+                } else {
+                    last_res
+                }
+            };
+            (old, shape::Resolution(res)).into()
+        });
 
         let mut result = Self {
             data: Embedding3D::default(),
             visible: Vec::new(),
             extreme_vertices: Vec::new(),
-
-            resolution,
         };
-        result.recompute(shape);
+        result.change_to(shape);
 
         result
     }
@@ -61,7 +57,6 @@ impl Map {
     pub fn save(&self, storage: &mut dyn eframe::Storage) {
         use storage_keys::*;
         eframe::set_value(storage, SHAPE, &self.shape());
-        eframe::set_value(storage, RESOLUTION, &self.resolution);
     }
 
     /// really shitty approximation of convex hull for 2D graphs
@@ -109,8 +104,8 @@ impl Map {
 
     /// this function takes `&mut self` instead of returning a new `Self`,
     /// because sometimes info is kept, e.g. `self.camera` if current and new shape are both 3D / 2D
-    fn recompute(&mut self, new_shape: Shape) {
-        self.data = Embedding3D::new_map_from(&new_shape, self.resolution as usize);
+    pub fn change_to(&mut self, new_shape: Shape) {
+        self.data = Embedding3D::new_map_from(new_shape);
         if self.is_3d() {
             self.extreme_vertices.clear();
         } else {
@@ -118,11 +113,6 @@ impl Map {
         }
         self.visible.clear();
         self.visible.resize(self.data.nr_vertices(), true);
-    }
-
-    pub fn change_to(&mut self, shape: Shape, resolution: isize) {
-        self.resolution = resolution;
-        self.recompute(shape);
     }
 
     /// this is really needed if one wants to find many vertices per frame,
@@ -210,7 +200,7 @@ impl Map {
                 }
                 new_data.build_steps_string = new_data.print_build_steps(false);
                 let new_shape = Shape::Custom(new_data);
-                self.recompute(new_shape);
+                self.change_to(new_shape);
                 return true;
             }
         }
@@ -311,155 +301,20 @@ impl Map {
         new_data.future_build_steps.clear();
         new_data.build_steps_string = new_data.print_build_steps(false);
         let new_shape = Shape::Custom(new_data);
-        self.recompute(new_shape);
+        self.change_to(new_shape);
         true
     }
 
+    #[must_use]
     pub fn draw_menu(&mut self, ui: &mut Ui) -> bool {
-        let mut change = false;
         ui.collapsing("Map", |ui| {
-            let combo_box_id = &self.data as *const _;
             let curr_shape = self.data.shape_mut();
             let old_shape = curr_shape.clone();
-            ui.label("Shape:");
-            egui::ComboBox::from_id_salt(combo_box_id)
-                .selected_text(old_shape.name_str())
-                .show_ui(ui, |ui| {
-                    macro_rules! radio {
-                        ($repr:expr, $case:pat) => {
-                            let selected = matches!(old_shape, $case);
-                            let name = $repr.name_str();
-                            let button = egui::RadioButton::new(selected, name);
-                            if ui.add(button).clicked() {
-                                *curr_shape = $repr;
-                            }
-                        };
-                    }
-                    use Shape::*;
-                    radio!(Tetrahedron, Tetrahedron);
-                    radio!(Octahedron, Octahedron);
-                    radio!(Icosahedron, Icosahedron);
-                    radio!(DividedIcosahedron(0), DividedIcosahedron(_));
-                    radio!(Dodecahedron, Dodecahedron);
-                    radio!(Cube, Cube);
-                    radio!(Football, Football);
-                    radio!(FabianHamann, FabianHamann);
-                    radio!(TriangTorus, TriangTorus | TriangGrid);
-                    radio!(TriangTorusSkewed(0), TriangTorusSkewed(_));
-                    radio!(SquareTorus, SquareTorus | SquareGrid);
-                    //radio!(RegularPolygon2D(6), RegularPolygon2D(_));
-                    radio!(Random2D(1337), Random2D(_));
-
-                    {
-                        let selected = old_shape.is_pure_custom();
-                        let custom_msg = "Custom";
-                        let custom_radio = egui::RadioButton::new(selected, custom_msg);
-                        if ui.add(custom_radio).clicked() {
-                            let basis = Shape::SingleVertex;
-                            self.resolution = basis.min_res();
-                            let custom_data = shape::CustomBuild::new(basis);
-                            let custom_box = Box::new(custom_data);
-                            *curr_shape = Custom(custom_box);
-                            change = true;
-                        }
-                    }
-                    if NATIVE && !matches!(old_shape, Custom(_)) {
-                        let extend_msg = "Extend Current Graph";
-                        let extend_radio = egui::RadioButton::new(false, extend_msg);
-                        if ui.add(extend_radio).clicked() {
-                            let custom_data = shape::CustomBuild::new(old_shape.clone());
-                            let custom_box = Box::new(custom_data);
-                            *curr_shape = Custom(custom_box);
-                        }
-                    }
-                    if NATIVE {
-                        radio!(FromFile(Box::default()), FromFile(_));
-                    }
-                });
-            match curr_shape {
-                Shape::DividedIcosahedron(pressure) => {
-                    add_drag_value(ui, pressure, "Pressure", 0..=self.resolution, 1);
-                },
-                Shape::RegularPolygon2D(nr_sides) => {
-                    add_drag_value(ui, nr_sides, "Sites", 3..=10, 1);
-                },
-                Shape::Random2D(seed) => {
-                    add_drag_value(ui, seed, "Seed", 0..=u32::MAX, 1);
-                },
-                Shape::TriangTorusSkewed(dy) => {
-                    add_drag_value(ui, dy, "Skew", 0..=800, 1);
-                },
-                Shape::SquareGrid => {
-                    if ui.button(" ↪↩ ").on_hover_text("wrap to torus").clicked() {
-                        *curr_shape = Shape::SquareTorus;
-                    }
-                },
-                Shape::SquareTorus => {
-                    if ui.button("   ✂   ").on_hover_text("cut open").clicked() {
-                        *curr_shape = Shape::SquareGrid;
-                    }
-                },
-                Shape::TriangGrid => {
-                    if ui.button(" ↪↩ ").on_hover_text("wrap to torus").clicked() {
-                        *curr_shape = Shape::TriangTorus;
-                    }
-                },
-                Shape::TriangTorus => {
-                    if ui.button("   ✂   ").on_hover_text("cut open").clicked() {
-                        *curr_shape = Shape::TriangGrid;
-                    }
-                },
-                Shape::Custom(c) => {
-                    crate::app::menu_button_closing_outside(ui, "Build Steps", |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Name:");
-                            ui.text_edit_singleline(&mut c.name);
-                        });
-                        ui.add_space(5.0);
-                        ui.label(shape::BuildStep::EXPLAINER);
-                        ui.add_space(5.0);
-                        let (recompute_button, delete_button) = ui
-                            .horizontal(|ui| {
-                                let recompute = ui.button("apply").on_hover_text(
-                                    "parse text, delete erronious parts, build graph",
-                                );
-                                ui.add_space(100.0);
-                                let delete = ui.button(" 🗑 ").on_hover_text("delete graph");
-                                (recompute, delete)
-                            })
-                            .inner;
-                        if delete_button.clicked() {
-                            // important: keep basis.
-                            c.build_steps.clear();
-                            c.build_steps_string.clear();
-                            c.future_build_steps.clear();
-                            c.name = shape::CustomBuild::create_new_name();
-                        }
-                        ui.add_space(5.0);
-                        let text_edit = egui::ScrollArea::vertical()
-                            .min_scrolled_height(ui.content_rect().height() * 0.35)
-                            .show(ui, |ui| ui.text_edit_multiline(&mut c.build_steps_string));
-                        if text_edit.inner.lost_focus() || recompute_button.clicked() {
-                            c.parse_build_steps();
-                            change |= true;
-                        }
-                    });
-                },
-                Shape::FromFile(ff) => {
-                    change |= ff.update(ui, self.resolution as usize);
-                },
-                _ => {
-                    add_disabled_drag_value(ui);
-                },
-            }
-            change |= &old_shape != curr_shape;
-            ui.add_space(8.0);
-            let min = curr_shape.min_res();
-            let max = curr_shape.max_res();
-            change |= add_drag_value(ui, &mut self.resolution, "Resolution", min..=max, 1).changed;
-            if change {
+            let shape_changed = curr_shape.draw_menu(ui);
+            debug_assert!(curr_shape == &old_shape || shape_changed);
+            if shape_changed {
                 let new_shape = std::mem::replace(curr_shape, old_shape);
-                self.recompute(new_shape);
+                self.change_to(new_shape);
             }
             let nr_vertices = self.data.nr_vertices();
             ui.label(if nr_vertices == 1 {
@@ -467,8 +322,10 @@ impl Map {
             } else {
                 format!("    ➡ {nr_vertices} vertices")
             });
-        });
-        change
+            shape_changed
+        })
+        .body_returned
+        .is_some_and(|change| change)
     }
 
     pub fn scale(&self, cam: &Camera3D) -> f32 {
@@ -490,7 +347,7 @@ impl Map {
                 }
             }
             if samples.is_empty() {
-                12.0 / (self.resolution as f32)
+                12.0 / (self.shape().resolution() as f32)
             } else {
                 samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 // we only consider edges that are not too much longer than the average we saw so far.
@@ -516,7 +373,7 @@ impl Map {
     }
 
     pub fn tolerance(&self) -> f32 {
-        f32::min(0.25, 1.25 / self.resolution as f32)
+        f32::min(0.25, 1.25 / self.shape().resolution() as f32)
     }
 
     fn identity(&self) -> &Self {

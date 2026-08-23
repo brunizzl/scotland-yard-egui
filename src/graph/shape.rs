@@ -478,25 +478,61 @@ impl CustomBuild {
         combine_last_move_operations(&mut self.build_steps);
         self.build_steps_string = self.print_build_steps(false);
     }
+
+    #[must_use]
+    pub fn draw_menu(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut change = false;
+        crate::app::menu_button_closing_outside(ui, "Build Steps", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                ui.text_edit_singleline(&mut self.name);
+            });
+            ui.add_space(5.0);
+            ui.label(BuildStep::EXPLAINER);
+            ui.add_space(5.0);
+            ui.label(format!("Base: {}", self.basis.name_str()));
+            ui.add_space(5.0);
+            let (recompute_button, delete_button) = ui
+                .horizontal(|ui| {
+                    let recompute = ui
+                        .button("apply")
+                        .on_hover_text("parse text, delete erronious parts, build graph");
+                    ui.add_space(100.0);
+                    let delete = ui.button(" 🗑 ").on_hover_text("delete graph");
+                    (recompute, delete)
+                })
+                .inner;
+            if delete_button.clicked() {
+                // important: keep basis.
+                self.build_steps.clear();
+                self.build_steps_string.clear();
+                self.future_build_steps.clear();
+                self.name = CustomBuild::create_new_name();
+                change |= true;
+            }
+            ui.add_space(5.0);
+            let text_edit = egui::ScrollArea::vertical()
+                .min_scrolled_height(ui.content_rect().height() * 0.35)
+                .show(ui, |ui| {
+                    ui.text_edit_multiline(&mut self.build_steps_string)
+                });
+            if text_edit.inner.lost_focus() || recompute_button.clicked() {
+                self.parse_build_steps();
+                change |= true;
+            }
+        });
+        change
+    }
 }
 
 /// in folder "custom-graphs", one can eighter store a single [`FromFile::class_name`].txt
 /// or a folder with name [`FromFile::class_name`] with entries `0.txt`, `1.txt`, `2.txt`, ...
 /// the respective files must contain the text representation of [`BuildStep`]'s.
 /// if the folder is chosen, the resolution decides which file is parsed.
-///
-/// note: this struct makes it clear, that the resolution should really just have been a
-/// value held by each shape variant where a resolution makes sense.
-/// before we change this however, we need to think about how saves
-/// keep their file format. we would loose old saves otherwise.
-/// note to note: one could in princible manually edit the files. this would be at bit tedious though.
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FromFile {
-    /// the only thing deciding the _logical entitiy_. e.g. [`Eq`] and [`Ord`] are only decided on this.
     class_name: String,
-    /// once this is set after creation, this will never be [`None`].
-    #[serde(skip)]
-    resulution: Option<usize>,
+    resolution: Resolution,
     #[serde(skip)]
     data: Option<(Vec<BuildStep>, String)>,
     #[serde(skip)]
@@ -505,13 +541,15 @@ pub struct FromFile {
 
 impl PartialEq for FromFile {
     fn eq(&self, other: &Self) -> bool {
-        self.class_name.eq(&other.class_name)
+        self.class_name.eq(&other.class_name) && self.resolution.eq(&other.resolution)
     }
 }
 impl Eq for FromFile {}
 impl Ord for FromFile {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.class_name.cmp(&other.class_name)
+        self.class_name
+            .cmp(&other.class_name)
+            .then(self.resolution.cmp(&other.resolution))
     }
 }
 impl PartialOrd for FromFile {
@@ -523,12 +561,11 @@ impl PartialOrd for FromFile {
 impl FromFile {
     pub const FOLDER_NAME: &str = "custom-graphs";
 
-    fn reload(&mut self, res: usize) {
-        self.resulution = Some(res);
-
+    fn reload(&mut self) {
         let mut file = 'open_file: {
             let folder = Self::FOLDER_NAME;
             let name = self.class_name.as_str();
+            let res = self.resolution.0;
 
             let res_path = format!("{folder}/{name}/{res}.txt");
             let res_err = match std::fs::File::open(&res_path) {
@@ -542,7 +579,7 @@ impl FromFile {
             };
             self.build_error = Some(format!(
                 "cannot open graph as single file \"{single_path}\":\n{single_err}\n\n\
-                    and not with resolution \"{res_path}\":\n{res_err}"
+                    and not with resolution as \"{res_path}\":\n{res_err}"
             ));
             return;
         };
@@ -559,7 +596,7 @@ impl FromFile {
         self.build_error = None;
     }
 
-    pub fn update(&mut self, ui: &mut egui::Ui, res: usize) -> bool {
+    pub fn update(&mut self, ui: &mut egui::Ui) -> bool {
         let name_edit = ui.horizontal(|ui| {
             ui.label("Name:");
             use egui::Widget;
@@ -576,22 +613,24 @@ impl FromFile {
                 crate::app::menu_button_closing_outside(ui, "☺", |ui| {
                     ui.label("parsed data:");
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.label(steps_str);
+                        ui.add(egui::Label::new(steps_str).wrap_mode(egui::TextWrapMode::Extend));
                     });
                 });
             }
             text_response
         });
-        let change = name_edit.inner.changed() || self.resulution.is_none_or(|r| r != res);
+        let res_changed = self.resolution.draw_menu(0..=10_000, ui);
+        let change = name_edit.inner.changed() || res_changed;
         if change {
-            self.reload(res);
+            self.reload();
         }
         change
     }
 
-    pub fn build(mut this: Box<Self>, res: usize) -> super::Embedding3D {
-        if this.resulution.is_none_or(|r| r != res) {
-            this.reload(res);
+    pub fn build(mut this: Box<Self>) -> super::Embedding3D {
+        if this.data.is_none() && this.build_error.is_none() {
+            println!("rebuild");
+            this.reload();
         }
         let fallback = |this| {
             let mut single_vertex = super::Embedding3D::new_single_vertex();
@@ -615,25 +654,38 @@ impl FromFile {
     }
 }
 
+/// shallow wrapper to make clear which parameter of the [`Shape`] variants encodes the resolution
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+pub struct Resolution(pub usize);
+
+impl Resolution {
+    #[must_use]
+    pub fn draw_menu(&mut self, range: std::ops::RangeInclusive<usize>, ui: &mut egui::Ui) -> bool {
+        crate::app::add_drag_value(ui, &mut self.0, "Resolution", range, 1).changed
+    }
+}
+
+/// shallow wrapper to encode if a grid is wrapped into a torus
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+pub struct Wrap(pub bool);
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum Shape {
     /// only (intendet to be) used as [`CustomBuild::basis`].
     SingleVertex,
-    Tetrahedron,
-    Octahedron,
-    Icosahedron,
-    DividedIcosahedron(isize),
-    Cube,
-    Football,
-    FabianHamann,
-    Dodecahedron,
-    TriangTorus,
-    TriangTorusSkewed(isize),
-    SquareTorus,
-    TriangGrid,
-    SquareGrid,
-    RegularPolygon2D(isize),
-    Random2D(u32),
+    Tetrahedron(Resolution),
+    Octahedron(Resolution),
+    Icosahedron(Resolution),
+    InflatedIcosahedron(Resolution, usize),
+    Cube(Resolution),
+    Football(Resolution),
+    FabianHamann(Resolution),
+    Dodecahedron(Resolution),
+    TriangTorusSkewed(isize, isize),
+    TriangGrid(Resolution, Wrap),
+    SquareGrid(Resolution, Wrap),
+    RegularPolygon2D(Resolution, usize),
+    Random2D(Resolution, u32),
     /// really plays two roles:
     /// either with basis shape [`Shape::SingleVertex`] as completely custom graph
     /// or with a different shape as extension of this (then non-trivial) base graph.
@@ -644,6 +696,19 @@ pub enum Shape {
 }
 
 impl Shape {
+    pub fn triang_grid(r: Resolution) -> Self {
+        Self::TriangGrid(r, Wrap(false))
+    }
+    pub fn triang_torus(r: Resolution) -> Self {
+        Self::TriangGrid(r, Wrap(true))
+    }
+    pub fn square_grid(r: Resolution) -> Self {
+        Self::SquareGrid(r, Wrap(false))
+    }
+    pub fn square_torus(r: Resolution) -> Self {
+        Self::SquareGrid(r, Wrap(true))
+    }
+
     /// returns `true` iff variant [`Self::Custom`] is held and
     /// the basis shape is [`Self::SingleVertex`].
     pub fn is_pure_custom(&self) -> bool {
@@ -653,51 +718,79 @@ impl Shape {
     pub fn name_str(&self) -> &'static str {
         match self {
             Self::SingleVertex => "SingleVertex",
-            Self::Tetrahedron => "Tetrahedron",
-            Self::Octahedron => "Octahedron",
-            Self::Icosahedron => "Icosahedron",
-            Self::DividedIcosahedron(_) => "Inflated Icosahedron",
-            Self::Cube => "Cube",
-            Self::Football => "Football",
-            Self::FabianHamann => "Fabian Hamanns Graph",
-            Self::Dodecahedron => "Dodecahedron",
-            Self::TriangTorus => "Torus (Triangles)",
-            Self::TriangTorusSkewed(_) => "Skewed Torus (Triangles)",
-            Self::SquareTorus => "Torus (Squares)",
-            Self::TriangGrid => "Grid (Triangles)",
-            Self::SquareGrid => "Grid (Squares)",
-            Self::RegularPolygon2D(_) => "2D Polygon triangulated",
-            Self::Random2D(_) => "2D Disk triangulated",
+            Self::Tetrahedron(_) => "Tetrahedron",
+            Self::Octahedron(_) => "Octahedron",
+            Self::Icosahedron(_) => "Icosahedron",
+            Self::InflatedIcosahedron(_, _) => "Inflated Icosahedron",
+            Self::Cube(_) => "Cube",
+            Self::Football(_) => "Football",
+            Self::FabianHamann(_) => "Fabian Hamanns Graph",
+            Self::Dodecahedron(_) => "Dodecahedron",
+            Self::TriangGrid(_, Wrap(true)) => "Torus (Triangles)",
+            Self::TriangGrid(_, Wrap(false)) => "Grid (Triangles)",
+            Self::TriangTorusSkewed(_, _) => "Skewed Torus (Triangles)",
+            Self::SquareGrid(_, Wrap(true)) => "Torus (Squares)",
+            Self::SquareGrid(_, Wrap(false)) => "Grid (Squares)",
+            Self::RegularPolygon2D(_, _) => "2D Polygon triangulated",
+            Self::Random2D(_, _) => "2D Disk triangulated",
             Self::Custom(_) if self.is_pure_custom() => "Custom",
             Self::Custom(_) => "Extend Current Graph",
             Self::FromFile(_) => "From File",
         }
     }
 
+    pub fn resolution(&self) -> usize {
+        match self {
+            Self::Tetrahedron(r)
+            | Self::Octahedron(r)
+            | Self::Icosahedron(r)
+            | Self::InflatedIcosahedron(r, _)
+            | Self::Cube(r)
+            | Self::Football(r)
+            | Self::FabianHamann(r)
+            | Self::Dodecahedron(r)
+            | Self::TriangGrid(r, _)
+            | Self::SquareGrid(r, _)
+            | Self::RegularPolygon2D(r, _)
+            | Self::Random2D(r, _) => r.0,
+
+            Self::SingleVertex => 0,
+            Self::TriangTorusSkewed(dx, _) => *dx as usize,
+            Self::Custom(c) => c.basis.resolution(),
+            Self::FromFile(ff) => ff.resolution.0,
+        }
+    }
+
     /// these are the names used for file names etc. we thus want to keep them stable.
-    pub fn to_sting(&self) -> String {
+    pub fn variant_string(&self) -> String {
+        let name_prefix = |w: Wrap| match w {
+            Wrap(false) => "Gitter",
+            Wrap(true) => "Torus",
+        };
         match self {
             Self::SingleVertex => "Einzelner-Knoten".to_string(),
-            Self::Cube => "Wuerfel".to_string(),
-            Self::DividedIcosahedron(pressure) => format!("Ikosaeder-{pressure}x-aufgepustet"),
-            Self::Dodecahedron => "Dodekaeder".to_string(),
-            Self::FabianHamann => "Fabian-Hamann".to_string(),
-            Self::Football => "Fussball".to_string(),
-            Self::Octahedron => "Oktaeder".to_string(),
-            Self::Random2D(seed) => format!("Zufaellig-{seed}"),
-            Self::TriangTorus => "Torus-Dreiecke".to_string(),
-            Self::TriangTorusSkewed(dy) => format!("Torus-Dreiecke-Schief-{dy}"),
-            Self::SquareTorus => "Torus-Vierecke".to_string(),
-            Self::TriangGrid => "Gitter-Dreiecke".to_string(),
-            Self::SquareGrid => "Gitter-Vierecke".to_string(),
-            Self::RegularPolygon2D(nr_sides) => format!("2d-Polygon-{nr_sides}-seitig"),
-            Self::Tetrahedron => "Tetraeder".to_string(),
-            Self::Icosahedron => "Ikosaeder".to_string(),
+            Self::Cube(_) => "Wuerfel".to_string(),
+            Self::InflatedIcosahedron(_, pressure) => {
+                format!("Ikosaeder-{pressure}x-aufgepustet")
+            },
+            Self::Dodecahedron(_) => "Dodekaeder".to_string(),
+            Self::FabianHamann(_) => "Fabian-Hamann".to_string(),
+            Self::Football(_) => "Fussball".to_string(),
+            Self::Octahedron(_) => "Oktaeder".to_string(),
+            Self::Random2D(_, seed) => format!("Zufaellig-{seed}"),
+            Self::TriangGrid(_, w) => format!("{}-Dreiecke", name_prefix(*w)),
+            Self::SquareGrid(_, w) => format!("{}-Vierecke", name_prefix(*w)),
+            Self::TriangTorusSkewed(_, dy) => format!("Torus-Dreiecke-Schief-{dy}"),
+            Self::RegularPolygon2D(_, nr_sides) => {
+                format!("2d-Polygon-{nr_sides}-seitig")
+            },
+            Self::Tetrahedron(_) => "Tetraeder".to_string(),
+            Self::Icosahedron(_) => "Ikosaeder".to_string(),
             Self::Custom(c) if self.is_pure_custom() => {
                 format!("Custom-{}", c.print_name())
             },
             Self::Custom(c) => {
-                let basis = c.basis.to_sting();
+                let basis = c.basis.variant_string();
                 let steps = c.print_name();
                 format!("Extended-{basis}-{steps}")
             },
@@ -705,99 +798,275 @@ impl Shape {
         }
     }
 
+    #[must_use]
+    fn draw_combo_box(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut change = false;
+        let combo_box_id = self as *const _;
+        let name = self.name_str();
+        let combo_box_content = |ui: &mut egui::Ui| {
+            let r = Resolution(self.resolution());
+            macro_rules! radio {
+                ($repr:expr, $case:pat $(if $guard:expr)?) => {
+                    let selected = matches!(&self, $case $(if $guard)?);
+                    let name = $repr.name_str();
+                    let button = egui::RadioButton::new(selected, name);
+                    if ui.add(button).clicked() {
+                        *self = $repr;
+                        change = true;
+                    }
+                };
+            }
+            radio!(Self::Tetrahedron(r), Self::Tetrahedron(_));
+            radio!(Self::Octahedron(r), Self::Octahedron(_));
+            radio!(Self::Icosahedron(r), Self::Icosahedron(_));
+            radio!(
+                Self::InflatedIcosahedron(r, 0),
+                Self::InflatedIcosahedron(_, _)
+            );
+            radio!(Self::Dodecahedron(r), Self::Dodecahedron(_));
+            radio!(Self::Cube(r), Self::Cube(_));
+            radio!(Self::Football(r), Self::Football(_));
+            radio!(Self::FabianHamann(r), Self::FabianHamann(_));
+            radio!(Self::TriangGrid(r, Wrap(true)), Self::TriangGrid(_, _));
+            radio!(
+                Self::TriangTorusSkewed(r.0 as isize, 0),
+                Self::TriangTorusSkewed(_, _)
+            );
+            radio!(Self::SquareGrid(r, Wrap(true)), Self::SquareGrid(_, _));
+            radio!(Self::RegularPolygon2D(r, 6), Self::RegularPolygon2D(_, _));
+            radio!(Self::Random2D(r, 1337), Self::Random2D(_, _));
+            radio!(
+                Self::Custom(Box::new(CustomBuild::new(Self::SingleVertex))),
+                s if s.is_pure_custom()
+            );
+
+            if crate::app::NATIVE && !matches!(self, Self::Custom(_)) {
+                let extend_msg = "Extend Current Graph";
+                let extend_radio = egui::RadioButton::new(false, extend_msg);
+                if ui.add(extend_radio).clicked() {
+                    *self = Self::Custom(Box::new(CustomBuild::new(self.clone())));
+                    change = true;
+                }
+            }
+            if crate::app::NATIVE {
+                radio!(Self::FromFile(Box::default()), Self::FromFile(_));
+            }
+        };
+        ui.label("Shape:");
+        egui::ComboBox::from_id_salt(combo_box_id)
+            .selected_text(name)
+            .show_ui(ui, combo_box_content);
+        change
+    }
+
+    #[must_use]
+    pub fn draw_menu(&mut self, ui: &mut egui::Ui) -> bool {
+        let base_changed = self.draw_combo_box(ui);
+
+        let special_params_changed = match self {
+            Self::SingleVertex
+            | Self::Tetrahedron(_)
+            | Self::Octahedron(_)
+            | Self::Icosahedron(_)
+            | Self::Cube(_)
+            | Self::Football(_)
+            | Self::FabianHamann(_)
+            | Self::Dodecahedron(_) => crate::app::add_disabled_drag_value(ui),
+            Self::InflatedIcosahedron(r, pressure) => {
+                crate::app::add_drag_value(ui, pressure, "Pressure", 0..=(r.0), 1).changed
+            },
+            Shape::RegularPolygon2D(_, nr_sides) => {
+                crate::app::add_drag_value(ui, nr_sides, "Sides", 3..=10, 1).changed
+            },
+            Shape::Random2D(_, seed) => {
+                crate::app::add_drag_value(ui, seed, "Seed", 0..=u32::MAX, 1).changed
+            },
+            Shape::TriangTorusSkewed(dx, dy) => {
+                let skew = crate::app::add_drag_value(ui, dy, "Skew", 0..=800, 1).changed;
+                let res = crate::app::add_drag_value(ui, dx, "Resolution", 3..=800, 1).changed;
+                skew || res
+            },
+            Shape::SquareGrid(_, wrap) | Shape::TriangGrid(_, wrap) => {
+                let (symbol, tip) = match wrap {
+                    Wrap(false) => (" ↪↩ ", "wrap to torus"),
+                    Wrap(true) => ("   ✂   ", "cut open"),
+                };
+                let flip = ui.button(symbol).on_hover_text(tip).clicked();
+                wrap.0 ^= flip;
+                flip
+            },
+            Shape::Custom(c) => c.draw_menu(ui),
+            Shape::FromFile(ff) => ff.update(ui),
+        };
+
+        let allowed_range = self.resolution_range();
+        let resolution_changed = match self {
+            Self::Tetrahedron(r)
+            | Self::Octahedron(r)
+            | Self::Icosahedron(r)
+            | Self::InflatedIcosahedron(r, _)
+            | Self::Cube(r)
+            | Self::Football(r)
+            | Self::FabianHamann(r)
+            | Self::Dodecahedron(r)
+            | Self::TriangGrid(r, _)
+            | Self::SquareGrid(r, _)
+            | Self::RegularPolygon2D(r, _)
+            | Self::Random2D(r, _) => r.draw_menu(allowed_range, ui),
+            Self::SingleVertex | Shape::Custom(_) => crate::app::add_disabled_drag_value(ui),
+            // these two already drew their resolution themselfs above.
+            Shape::TriangTorusSkewed(_, _) | Shape::FromFile(_) => false,
+        };
+
+        base_changed || special_params_changed || resolution_changed
+    }
+
     pub fn emoji(&self) -> &'static str {
         match self {
             Self::SingleVertex => "(1)",
-            Self::Tetrahedron => "🌐Tet",
-            Self::Octahedron => "🌐Oct",
-            Self::Icosahedron => "🌐Ico",
-            Self::DividedIcosahedron(_) => "🌐Ico💨",
-            Self::Cube => "🎲",
-            Self::Football => "⚽",
-            Self::FabianHamann => "⚽F.H.",
-            Self::Dodecahedron => "🌐Dod",
-            Self::TriangTorus => "🍩6",
-            Self::TriangTorusSkewed(_) => "🍩6S",
-            Self::SquareTorus => "🍩4",
-            Self::TriangGrid => "✂🍩6",
-            Self::SquareGrid => "✂🍩4",
-            Self::RegularPolygon2D(_) => "⬣",
-            Self::Random2D(_) => "⏺",
+            Self::Tetrahedron(_) => "🌐Tet",
+            Self::Octahedron(_) => "🌐Oct",
+            Self::Icosahedron(_) => "🌐Ico",
+            Self::InflatedIcosahedron(_, _) => "🌐Ico💨",
+            Self::Cube(_) => "🎲",
+            Self::Football(_) => "⚽",
+            Self::FabianHamann(_) => "⚽F.H.",
+            Self::Dodecahedron(_) => "🌐Dod",
+            Self::TriangGrid(_, Wrap(true)) => "🍩6",
+            Self::SquareGrid(_, Wrap(true)) => "🍩4",
+            Self::TriangGrid(_, Wrap(false)) => "✂🍩6",
+            Self::SquareGrid(_, Wrap(false)) => "✂🍩4",
+            Self::TriangTorusSkewed(_, _) => "🍩6S",
+            Self::RegularPolygon2D(_, _) => "⬣",
+            Self::Random2D(_, _) => "⏺",
             Self::Custom(_) if self.is_pure_custom() => "🔨",
             Self::Custom(_) => "+🔨",
             Self::FromFile(_) => "📁",
         }
     }
 
-    pub fn min_res(&self) -> isize {
+    pub fn resolution_range(&self) -> std::ops::RangeInclusive<usize> {
         match self {
-            Self::SingleVertex
-            | Self::Tetrahedron
-            | Self::Octahedron
-            | Self::Icosahedron
-            | Self::DividedIcosahedron(_)
-            | Self::Cube
-            | Self::Football
-            | Self::FabianHamann
-            | Self::Dodecahedron
-            | Self::RegularPolygon2D(_)
-            | Self::Random2D(_) => 0,
+            Self::SingleVertex => 0..=0,
 
-            Self::TriangTorus | Self::SquareTorus | Self::TriangGrid | Self::SquareGrid => 2,
-            Self::TriangTorusSkewed(_) => 3,
+            Self::Tetrahedron(_)
+            | Self::Octahedron(_)
+            | Self::Icosahedron(_)
+            | Self::InflatedIcosahedron(_, _)
+            | Self::Cube(_)
+            | Self::Football(_)
+            | Self::FabianHamann(_)
+            | Self::Dodecahedron(_)
+            | Self::RegularPolygon2D(_, _)
+            | Self::Random2D(_, _) => 0..=200,
 
-            Self::Custom(c) => c.basis.min_res(),
-            Self::FromFile(_) => 0,
-        }
-    }
+            Self::TriangGrid(_, _) | Self::SquareGrid(_, _) => 2..=800,
+            Self::TriangTorusSkewed(_, _) => 3..=800,
 
-    pub fn max_res(&self) -> isize {
-        match self {
-            Self::SingleVertex => 0,
-            Self::Tetrahedron
-            | Self::Octahedron
-            | Self::Icosahedron
-            | Self::DividedIcosahedron(_)
-            | Self::Cube
-            | Self::Football
-            | Self::FabianHamann
-            | Self::Dodecahedron
-            | Self::RegularPolygon2D(_)
-            | Self::Random2D(_) => 200,
-
-            Self::TriangTorus
-            | Self::TriangTorusSkewed(_)
-            | Self::SquareTorus
-            | Self::TriangGrid
-            | Self::SquareGrid => 800,
-
-            Self::Custom(c) => c.basis.max_res(),
-            Self::FromFile(_) => 10000,
+            Self::Custom(c) => c.basis.resolution_range(),
+            Self::FromFile(_) => 0..=10_000,
         }
     }
 
     pub fn is_3d(&self) -> bool {
         match self {
-            Self::Tetrahedron
-            | Self::Octahedron
-            | Self::Icosahedron
-            | Self::DividedIcosahedron(_)
-            | Self::Cube
-            | Self::Football
-            | Self::FabianHamann
-            | Self::Dodecahedron => true,
+            Self::Tetrahedron(_)
+            | Self::Octahedron(_)
+            | Self::Icosahedron(_)
+            | Self::InflatedIcosahedron(_, _)
+            | Self::Cube(_)
+            | Self::Football(_)
+            | Self::FabianHamann(_)
+            | Self::Dodecahedron(_) => true,
 
             Self::SingleVertex
-            | Self::TriangTorus
-            | Self::TriangTorusSkewed(_)
-            | Self::SquareTorus
-            | Self::TriangGrid
-            | Self::SquareGrid
-            | Self::RegularPolygon2D(_)
-            | Self::Random2D(_) => false,
+            | Self::TriangTorusSkewed(_, _)
+            | Self::TriangGrid(_, _)
+            | Self::SquareGrid(_, _)
+            | Self::RegularPolygon2D(_, _)
+            | Self::Random2D(_, _) => false,
 
             Self::Custom(c) => c.basis.is_3d(),
             Self::FromFile(_) => false,
+        }
+    }
+}
+
+/// it used to be the case that [`Shape`] didn't include the resolution, which was stored externally.
+/// in hindside, this is obviously stupid and thus now fixed.
+/// as a relict of ye olde time, we however keep this structure around here to still allow us to read old data.
+pub mod v1 {
+    use super::{CustomBuild, Resolution};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+    pub struct FromFile {
+        pub class_name: String,
+    }
+
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+    pub enum Shape {
+        /// only (intendet to be) used as [`CustomBuild::basis`].
+        SingleVertex,
+        Tetrahedron,
+        Octahedron,
+        Icosahedron,
+        DividedIcosahedron(isize),
+        Cube,
+        Football,
+        FabianHamann,
+        Dodecahedron,
+        TriangTorus,
+        TriangTorusSkewed(isize),
+        TriangGrid,
+        SquareTorus,
+        SquareGrid,
+        RegularPolygon2D(isize),
+        Random2D(u32),
+        /// really plays two roles:
+        /// either with basis shape [`Shape::SingleVertex`] as completely custom graph
+        /// or with a different shape as extension of this (then non-trivial) base graph.
+        /// (the second role is -currently- only available if compiled natively)
+        Custom(Box<CustomBuild>),
+        /// for obvious reasons only available if compiled natively.
+        FromFile(Box<FromFile>),
+    }
+
+    impl From<(Shape, Resolution)> for super::Shape {
+        fn from((raw_shape, res): (Shape, Resolution)) -> Self {
+            match raw_shape {
+                Shape::SingleVertex => super::Shape::SingleVertex,
+                Shape::Tetrahedron => super::Shape::Tetrahedron(res),
+                Shape::Octahedron => super::Shape::Octahedron(res),
+                Shape::Icosahedron => super::Shape::Icosahedron(res),
+                Shape::DividedIcosahedron(p) => super::Shape::InflatedIcosahedron(res, p as usize),
+                Shape::Cube => super::Shape::Cube(res),
+                Shape::Football => super::Shape::Football(res),
+                Shape::FabianHamann => super::Shape::FabianHamann(res),
+                Shape::Dodecahedron => super::Shape::Dodecahedron(res),
+                Shape::TriangTorus => super::Shape::triang_torus(res),
+                Shape::TriangGrid => super::Shape::triang_grid(res),
+                Shape::TriangTorusSkewed(skew) => {
+                    super::Shape::TriangTorusSkewed(res.0 as isize, skew)
+                },
+                Shape::SquareTorus => super::Shape::square_torus(res),
+                Shape::SquareGrid => super::Shape::square_grid(res),
+                Shape::RegularPolygon2D(sides) => {
+                    super::Shape::RegularPolygon2D(res, sides as usize)
+                },
+                Shape::Random2D(seed) => super::Shape::Random2D(res, seed),
+                Shape::Custom(c) => super::Shape::Custom(c),
+                Shape::FromFile(ff) => {
+                    let mut from_file = super::FromFile {
+                        class_name: ff.class_name,
+                        resolution: res,
+                        data: None,
+                        build_error: None,
+                    };
+                    from_file.reload();
+                    super::Shape::FromFile(Box::new(from_file))
+                },
+            }
         }
     }
 }

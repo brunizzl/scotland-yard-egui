@@ -55,15 +55,15 @@ impl DrawContext<'_> {
     }
 }
 
-struct DragValResponse {
-    changed: bool,
-    name_label: egui::Response,
+pub struct DragValResponse {
+    pub changed: bool,
+    pub name_label: egui::Response,
 }
 
 /// returns if val was changed.
 /// step is a multiplier for floats and is added / subtracted for ints.
 /// thus for floats, step is expected to be of form `1.0 + delta` for small growth rates
-fn add_drag_value<T, U>(
+pub fn add_drag_value<T, U>(
     ui: &mut Ui,
     val: &mut T,
     name: &str,
@@ -103,15 +103,14 @@ where
     .inner
 }
 
-fn add_disabled_drag_value(ui: &mut Ui) -> bool {
+pub fn add_disabled_drag_value(ui: &mut Ui) -> bool {
     ui.horizontal(|ui| {
         ui.add_enabled(false, egui::Button::new(" - "));
         let mut val: isize = 0;
         ui.add_enabled(false, egui::DragValue::new(&mut val));
         ui.add_enabled(false, egui::Button::new(" + "));
-        false
-    })
-    .inner
+    });
+    false
 }
 
 fn add_arrow(painter: &Painter, origin: Pos2, vec: Vec2, stroke: Stroke, tip_scale: f32) {

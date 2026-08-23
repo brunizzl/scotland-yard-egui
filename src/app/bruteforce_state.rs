@@ -11,7 +11,6 @@ use crate::graph::{Embedding3D, NoSymmetry};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GameType {
     pub nr_cops: usize,
-    pub resolution: usize,
     pub shape: crate::graph::Shape,
     pub cop_rules: bf::DynCopRules,
     pub robber_rules: bf::DynRobberRules,
@@ -23,8 +22,8 @@ impl GameType {
             "{}/{}-{}-{}{}.msgpack",
             folder,
             self.nr_cops,
-            self.shape.to_sting(),
-            self.resolution,
+            self.shape.variant_string(),
+            self.shape.resolution(),
             self.cop_rules.id_string(self.nr_cops),
         ))
     }
@@ -35,13 +34,13 @@ impl GameType {
             self.cop_rules.name(),
             self.nr_cops,
             self.robber_rules.name(),
-            self.shape.to_sting(),
-            self.resolution
+            self.shape.variant_string(),
+            self.shape.resolution()
         )
     }
 
     fn build_graph(&self) -> Embedding3D {
-        Embedding3D::new_map_from(&self.shape, self.resolution)
+        Embedding3D::new_map_from(self.shape.clone())
     }
 
     fn nr_cleaners(&self) -> usize {
@@ -592,8 +591,8 @@ impl BruteforceComputationState {
             Label::new(format!(
                 "robber {outcome_str} vs {cops_str} ({}) on {} with resolution {} {confidence_str}",
                 game_type.cop_rules.name(),
-                game_type.shape.to_sting(),
-                game_type.resolution
+                game_type.shape.variant_string(),
+                game_type.shape.resolution()
             ))
             .extend(),
         );
@@ -618,8 +617,8 @@ impl BruteforceComputationState {
                 "robber ({}) {outcome_str} vs {cops_str} ({}) on {} with resolution {}",
                 strat.params.print_compact(),
                 game_type.cop_rules.name(),
-                game_type.shape.to_sting(),
-                game_type.resolution
+                game_type.shape.variant_string(),
+                game_type.shape.resolution()
             ))
             .extend(),
         );
@@ -639,8 +638,8 @@ impl BruteforceComputationState {
             Label::new(format!(
                 "{cops_str} ({}) {outcome}{outcome_end} on {} with resolution {} (max. {} moves)",
                 game_type.cop_rules.name(),
-                game_type.shape.to_sting(),
-                game_type.resolution,
+                game_type.shape.variant_string(),
+                game_type.shape.resolution(),
                 strat.max_moves,
             ))
             .extend(),
@@ -651,8 +650,8 @@ impl BruteforceComputationState {
         let nr_cleaners = game_type.nr_cleaners();
         let rules = game_type.cop_rules.name();
         let not = if sol.is_cleanable() { "" } else { " NOT" };
-        let shape = game_type.shape.to_sting();
-        let res = game_type.resolution;
+        let shape = game_type.shape.variant_string();
+        let res = game_type.shape.resolution();
         let vis = sol.visibility;
         let speed = sol.fog_speed;
 
@@ -881,6 +880,7 @@ impl BruteforceComputationState {
     }
 
     /// a returned fog solution is meant to be turned into a move sequence of characters.
+    #[must_use]
     pub fn draw_menu(&mut self, game_type: GameType, ui: &mut Ui) -> Option<&FogSolution> {
         let mut fog_solution = None;
         ui.collapsing("Bruteforce", |ui| {

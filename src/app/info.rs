@@ -163,15 +163,15 @@ impl VertexColorInfo {
     }
 
     fn selectable_with(self, map: &map::Map) -> bool {
-        use graph::Shape::*;
+        use graph::{Shape, Wrap};
         let shape = map.shape();
         match self {
             VertexColorInfo::Escape2Grid | VertexColorInfo::EscapeConeGrid => {
-                matches!(shape, TriangTorus | TriangGrid | SquareTorus | SquareGrid)
+                matches!(shape, Shape::TriangGrid(_, _) | Shape::SquareGrid(_, _))
             },
             VertexColorInfo::Escape3Grid
             | VertexColorInfo::Escape23Grid
-            | VertexColorInfo::RobberCone => shape == &TriangGrid,
+            | VertexColorInfo::RobberCone => matches!(shape, Shape::TriangGrid(_, Wrap(false))),
             VertexColorInfo::RobberVertexClass | VertexColorInfo::VertexEquivalenceClasses => {
                 matches!(map.data().sym_group(), SymGroup::Explicit(_))
             },
@@ -265,13 +265,15 @@ impl VertexSymbolInfo {
     }
 
     fn selectable_with(self, map: &map::Map) -> bool {
-        use graph::Shape::*;
+        use graph::{Shape, Wrap};
         let shape = map.shape();
         match self {
             VertexSymbolInfo::Escape2Grid | VertexSymbolInfo::EscapeConeGrid => {
-                matches!(shape, TriangTorus | TriangGrid | SquareTorus | SquareGrid)
+                matches!(shape, Shape::TriangGrid(_, _) | Shape::SquareGrid(_, _))
             },
-            VertexSymbolInfo::Escape3Grid | VertexSymbolInfo::Escape23Grid => shape == &TriangGrid,
+            VertexSymbolInfo::Escape3Grid | VertexSymbolInfo::Escape23Grid => {
+                matches!(shape, Shape::TriangGrid(_, Wrap(false)))
+            },
             VertexSymbolInfo::VertexEquivalenceClass => {
                 matches!(map.data().sym_group(), SymGroup::Explicit(_))
             },
@@ -441,6 +443,7 @@ impl Options {
         }
     }
 
+    #[must_use]
     pub fn draw_menu(&mut self, ui: &mut Ui, map: &map::Map) -> bool {
         let mut menu_change = false;
         ui.collapsing("Vertex Information", |ui| {
@@ -864,7 +867,7 @@ impl Info {
             .constrain_to(ctx.content_rect())
             .auto_sized()
             .show(ctx, |ui| {
-                new_tool = new_tool.draw_buttons(&graph::Shape::TriangTorus, ui);
+                new_tool = new_tool.draw_buttons(&graph::Shape::SingleVertex, ui);
                 self.manual_markers.draw_selection_window_contents(
                     ui,
                     &mut self.options.manual,
@@ -1179,8 +1182,8 @@ impl Info {
             }
         };
         let header = {
-            let shape = con.map.shape().to_sting();
-            let res = con.map.resolution();
+            let shape = con.map.shape().variant_string();
+            let res = con.map.shape().resolution();
             let color_info = self.options.vertex_color_info().name_str();
             let number_info = self.options.vertex_number_info().name_str();
             let cam_x = con.cam().position.x;
@@ -2018,11 +2021,12 @@ impl Info {
 
         // draw toroidal graphs multiple times
         // maybe todo: consider skewed torus?
+        use graph::{Shape, Wrap};
         let (dx, dy, indices) = if matches!(
             con.map.shape(),
-            graph::Shape::TriangTorus | graph::Shape::SquareTorus
+            Shape::TriangGrid(_, Wrap(true)) | Shape::SquareGrid(_, Wrap(true))
         ) {
-            let res = con.map.resolution();
+            let res = con.map.shape().resolution();
             let length_to_wrap = res as f32;
             let dx = length_to_wrap * (con.positions[0] - con.positions[1]);
             let dy = length_to_wrap * (con.positions[0] - con.positions[res]);

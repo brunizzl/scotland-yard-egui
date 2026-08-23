@@ -265,9 +265,10 @@ impl Embedding3D {
         res
     }
 
-    fn new_subdivided_icosahedron(divisions: usize) -> Self {
+    fn new_subdivided_icosahedron(divisions: Resolution) -> Self {
         let ico = ConvexHull::new_icosahedron();
-        Self::subdivide_surface_with_triangles(ico, divisions, true, Shape::Icosahedron)
+        let shape = Shape::Icosahedron(divisions);
+        Self::subdivide_surface_with_triangles(ico, divisions.0, true, shape)
     }
 
     fn new_subdivided_subdivided_icosahedron(d1: usize, d2: usize, shape: Shape) -> Self {
@@ -275,14 +276,16 @@ impl Embedding3D {
         Self::subdivide_surface_with_triangles(ico, d2, false, shape)
     }
 
-    fn new_subdivided_tetrahedron(divisions: usize) -> Self {
+    fn new_subdivided_tetrahedron(divisions: Resolution) -> Self {
         let tet = ConvexHull::new_tetrahedron();
-        Self::subdivide_surface_with_triangles(tet, divisions, true, Shape::Tetrahedron)
+        let shape = Shape::Tetrahedron(divisions);
+        Self::subdivide_surface_with_triangles(tet, divisions.0, true, shape)
     }
 
-    fn new_subdivided_octahedron(divisions: usize) -> Self {
+    fn new_subdivided_octahedron(divisions: Resolution) -> Self {
         let oct = ConvexHull::new_octahedron();
-        Self::subdivide_surface_with_triangles(oct, divisions, true, Shape::Octahedron)
+        let shape = Shape::Octahedron(divisions);
+        Self::subdivide_surface_with_triangles(oct, divisions.0, true, shape)
     }
 
     /// face_info stores circumference in .0 and weather to make the inner vertices of given face type visible in .1
@@ -537,7 +540,7 @@ impl Embedding3D {
     }
 
     /// custom subdivision of graph described in Fabian Hamann's masters thesis.
-    pub fn new_subdivided_football(divisions: usize, show_hex_mid: bool) -> Self {
+    pub fn new_subdivided_football(divisions: Resolution, show_hex_mid: bool) -> Self {
         let vertices = Self::football_vertices();
         let edges = edges_from_uniform_positions(&vertices);
         debug_assert_eq!(vertices.len(), 60);
@@ -545,12 +548,12 @@ impl Embedding3D {
 
         let face_info = [(6, show_hex_mid), (5, false)];
         let shape = if show_hex_mid {
-            Shape::FabianHamann
+            Shape::FabianHamann(divisions)
         } else {
-            Shape::Football
+            Shape::Football(divisions)
         };
         let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info, shape);
-        res.subdivide_all_edges(divisions, true);
+        res.subdivide_all_edges(divisions.0, true);
         res
     }
 
@@ -585,26 +588,21 @@ impl Embedding3D {
     }
 
     fn new_subdivided_dodecahedron(
-        divisions: usize,
+        divisions: Resolution,
         show_divisions: bool,
         triangulate: bool,
     ) -> Self {
         let vertices = Self::dodecahedron_vertices();
         let edges = edges_from_uniform_positions(&vertices);
         let face_info = [(5, show_divisions || triangulate)];
+        let shape = || Shape::Dodecahedron(divisions);
 
-        let (mut res, _faces) =
-            Self::embed_archimedian_solid(vertices, edges, &face_info, Shape::Dodecahedron);
+        let (mut res, _faces) = Self::embed_archimedian_solid(vertices, edges, &face_info, shape());
         if triangulate {
             res.surface.normalize_positions();
-            res = Self::subdivide_surface_with_triangles(
-                res.surface,
-                divisions,
-                false,
-                Shape::Dodecahedron,
-            );
+            res = Self::subdivide_surface_with_triangles(res.surface, divisions.0, false, shape());
         } else {
-            res.subdivide_all_edges(divisions, true);
+            res.subdivide_all_edges(divisions.0, true);
         }
         res
     }
@@ -615,7 +613,7 @@ impl Embedding3D {
         self.edge_dividing_vertices[edge_index]
     }
 
-    fn new_subdivided_cube(divisions: usize) -> Self {
+    fn new_subdivided_cube(divisions: Resolution) -> Self {
         let p = 1.0;
         let n = -1.0;
         let mut vertices = vec![
@@ -631,31 +629,32 @@ impl Embedding3D {
         normalize_positions(&mut vertices);
         let edges = edges_from_uniform_positions(&vertices);
         let face_info = [(4, false)];
-        let (mut res, faces) =
-            Self::embed_archimedian_solid(vertices, edges, &face_info, Shape::Cube);
-        res.subdivide_all_edges(divisions, true);
+        let shape = Shape::Cube(divisions);
+        let (mut res, faces) = Self::embed_archimedian_solid(vertices, edges, &face_info, shape);
+        res.subdivide_all_edges(divisions.0, true);
 
         // add inner vertices
         res.inner_vertices.clear();
+        let nr_divs = divisions.0;
         for face in faces {
             let [v1, v2, v3, v4] = face[..] else {
                 panic!();
             };
             debug_assert!(res.surface.edges.has_path(&face));
             debug_assert!(res.surface.edges.has_edge(v1, v4));
-            if divisions == 0 {
+            if nr_divs == 0 {
                 let nr = res.nr_vertices();
                 res.inner_vertices.push(nr..nr);
                 continue;
             }
             let corner = res.vertices[v1];
-            let scale = 1.0 / (divisions as f32 + 1.0);
+            let scale = 1.0 / (nr_divs as f32 + 1.0);
             let dir_a = scale * (res.vertices[v2] - corner);
             let dir_b = scale * (res.vertices[v4] - corner);
 
             let start = res.nr_vertices();
-            for ia in 1..=divisions {
-                for ib in 1..=divisions {
+            for ia in 1..=nr_divs {
+                for ib in 1..=nr_divs {
                     res.edges.add_vertex();
                     res.vertices.push(corner + (ia as f32) * dir_a + (ib as f32) * dir_b);
                 }
@@ -663,14 +662,14 @@ impl Embedding3D {
             let end = res.nr_vertices();
             res.inner_vertices.push(start..end);
 
-            let index = |ia, ib| start + ia * divisions + ib;
+            let index = |ia, ib| start + ia * nr_divs + ib;
 
             let edge_12 = res.subdivided_edge(v1, v2);
             let edge_43 = res.subdivided_edge(v4, v3);
             for (ia, start_a, end_a) in izip!(0.., edge_12, edge_43) {
                 res.edges.add_edge(index(ia, 0), start_a);
-                res.edges.add_edge(index(ia, divisions - 1), end_a);
-                for (ib1, ib2) in (0..divisions).tuple_windows() {
+                res.edges.add_edge(index(ia, nr_divs - 1), end_a);
+                for (ib1, ib2) in (0..nr_divs).tuple_windows() {
                     res.edges.add_edge(index(ia, ib1), index(ia, ib2));
                 }
             }
@@ -678,13 +677,13 @@ impl Embedding3D {
             let edge_14 = res.subdivided_edge(v1, v4);
             for (ib, start_b, end_b) in izip!(0.., edge_14, edge_23) {
                 res.edges.add_edge(index(0, ib), start_b);
-                res.edges.add_edge(index(divisions - 1, ib), end_b);
-                for (ia1, ia2) in (0..divisions).tuple_windows() {
+                res.edges.add_edge(index(nr_divs - 1, ib), end_b);
+                for (ia1, ia2) in (0..nr_divs).tuple_windows() {
                     res.edges.add_edge(index(ia1, ib), index(ia2, ib));
                 }
             }
         }
-        let sym = ExplicitClasses::new_for_subdivided_platonic(&res, divisions);
+        let sym = ExplicitClasses::new_for_subdivided_platonic(&res, nr_divs);
         res.sym_group = SymGroup::Explicit(sym.unwrap());
         res
     }
@@ -738,7 +737,7 @@ impl Embedding3D {
         sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexHull::empty(),
-            shape: Shape::TriangTorusSkewed(dy),
+            shape: Shape::TriangTorusSkewed(dx, dy),
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
@@ -753,19 +752,19 @@ impl Embedding3D {
     /// rendered flat as two subdivided equilateral triangles.
     /// if wrap: connect the left and right sides and the top and bottom sides.
     /// this is topologically a torus.
-    fn new_subdivided_triangle_grid(len: isize, wrap: bool) -> Self {
+    fn new_subdivided_triangle_grid(Resolution(len): Resolution, wrap: Wrap) -> Self {
         assert!(len >= 2);
-        let nr_vertices = (len * len) as usize;
+        let nr_vertices = len * len;
         let mut vertices = Vec::with_capacity(nr_vertices);
         let mut edges = EdgeList::new(6, nr_vertices);
-        let this = grid::GridGraph::new(len as usize, grid::Norm::Hex, wrap);
+        let this = grid::GridGraph::new(len, grid::Norm::Hex, wrap.0);
 
         let scale = 1.0 / (len as f32 + 1.0);
         let x_step = scale * vec3(1.0, 0.0, 0.0);
         let y_step = scale * vec3(-0.5, f32::sqrt(3.0) / 2.0, 0.0);
         let corner = pos3(-0.25, -f32::sqrt(3.0) / 4.0, Z_OFFSET_2D);
-        for x in 0..len {
-            for y in 0..len {
+        for x in 0..(len as isize) {
+            for y in 0..(len as isize) {
                 let pos = corner + (x as f32) * x_step + (y as f32) * y_step;
                 vertices.push(pos);
 
@@ -780,17 +779,14 @@ impl Embedding3D {
             }
         }
 
-        let (sym_group, shape) = if wrap {
-            let t6 = torus::TorusSymmetry6::new(nr_vertices);
-            (SymGroup::Torus6(t6), Shape::TriangTorus)
-        } else {
-            (SymGroup::new_none(nr_vertices), Shape::TriangGrid)
+        let sym_group = match wrap {
+            Wrap(true) => SymGroup::Torus6(torus::TorusSymmetry6::new(nr_vertices)),
+            Wrap(false) => SymGroup::new_none(nr_vertices),
         };
-
         sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexHull::empty(),
-            shape,
+            shape: Shape::TriangGrid(Resolution(len), wrap),
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
@@ -802,19 +798,19 @@ impl Embedding3D {
     /// rendered flat as one large subdivided square.
     /// if wrap: connect the left and right sides and the top and bottom sides.
     /// this is topologically a torus.
-    fn new_subdivided_squares_grid(len: isize, wrap: bool) -> Self {
+    fn new_subdivided_squares_grid(Resolution(len): Resolution, wrap: Wrap) -> Self {
         assert!(len >= 2);
-        let nr_vertices = (len * len) as usize;
+        let nr_vertices = len * len;
         let mut vertices = Vec::with_capacity(nr_vertices);
         let mut edges = EdgeList::new(6, nr_vertices);
-        let this = grid::GridGraph::new(len as usize, grid::Norm::Quad, wrap);
+        let this = grid::GridGraph::new(len, grid::Norm::Quad, wrap.0);
 
         let scale = 1.0 / (len as f32 + 1.0);
         let x_step = scale * vec3(1.0, 0.0, 0.0);
         let y_step = scale * vec3(0.0, 1.0, 0.0);
         let corner = pos3(-0.5, -0.5, Z_OFFSET_2D);
-        for x in 0..len {
-            for y in 0..len {
+        for x in 0..(len as isize) {
+            for y in 0..(len as isize) {
                 let pos = corner + (x as f32) * x_step + (y as f32) * y_step;
                 vertices.push(pos);
 
@@ -829,17 +825,14 @@ impl Embedding3D {
             }
         }
 
-        let (sym_group, shape) = if wrap {
-            let t4 = torus::TorusSymmetry4::new(nr_vertices);
-            (SymGroup::Torus4(t4), Shape::SquareTorus)
-        } else {
-            (SymGroup::new_none(nr_vertices), Shape::SquareGrid)
+        let sym_group = match wrap {
+            Wrap(true) => SymGroup::Torus4(torus::TorusSymmetry4::new(nr_vertices)),
+            Wrap(false) => SymGroup::new_none(nr_vertices),
         };
-
         sort_neigbors(&mut edges, &vertices);
         Self {
             surface: ConvexHull::empty(),
-            shape,
+            shape: Shape::SquareGrid(Resolution(len), wrap),
             edge_dividing_vertices: Vec::new(),
             inner_vertices: Vec::new(),
             vertices,
@@ -848,7 +841,7 @@ impl Embedding3D {
         }
     }
 
-    fn new_2d_triangulated_regular_polygon(sides: usize, divisions: usize) -> Self {
+    fn new_2d_triangulated_regular_polygon(divisions: Resolution, sides: usize) -> Self {
         let surface_positions = Vec::from_iter({
             let center = std::iter::once(pos3(0.0, 0.0, Z_OFFSET_2D));
             let corners = (0..sides).map(|i| {
@@ -865,12 +858,8 @@ impl Embedding3D {
         }
 
         let surface = ConvexHull::new_from_triangulation(surface_positions, surface_edges);
-        let mut res = Self::subdivide_surface_with_triangles(
-            surface,
-            divisions,
-            false,
-            Shape::RegularPolygon2D(sides as isize),
-        );
+        let shape = Shape::RegularPolygon2D(divisions, sides);
+        let mut res = Self::subdivide_surface_with_triangles(surface, divisions.0, false, shape);
         sort_neigbors(&mut res.edges, &res.vertices);
         res
     }
@@ -1101,8 +1090,8 @@ impl Embedding3D {
         }
     }
 
-    fn new_custom(c: Box<shape::CustomBuild>, res: usize) -> Self {
-        let mut result = Self::new_map_from(&c.basis, res);
+    fn new_custom(c: Box<shape::CustomBuild>) -> Self {
+        let mut result = Self::new_map_from(c.basis.clone());
         result.extend_custom(&c.build_steps);
         result.shape = shape::Shape::Custom(c);
         result
@@ -1121,11 +1110,11 @@ impl Embedding3D {
             !draw_inner_fast
                 || matches!(
                     self.shape,
-                    Shape::Octahedron
-                        | Shape::Tetrahedron
-                        | Shape::Icosahedron
-                        | Shape::DividedIcosahedron(_)
-                        | Shape::RegularPolygon2D(_)
+                    Shape::Octahedron(_)
+                        | Shape::Tetrahedron(_)
+                        | Shape::Icosahedron(_)
+                        | Shape::InflatedIcosahedron(_, _)
+                        | Shape::RegularPolygon2D(_, _)
                 )
         );
 
@@ -1211,7 +1200,7 @@ impl Embedding3D {
     ) {
         debug_assert!(matches!(
             self.shape,
-            Shape::TriangTorus | Shape::SquareTorus | Shape::TriangGrid | Shape::SquareGrid
+            Shape::TriangGrid(_, _) | Shape::SquareGrid(_, _)
         ));
         let nr_vs = self.nr_vertices();
         let side_len = f32::sqrt(nr_vs as f32) as usize;
@@ -1324,33 +1313,35 @@ impl Embedding3D {
         visible: &mut [bool],
     ) {
         let visible_needs_update = match &self.shape {
-            Shape::Octahedron
-            | Shape::Tetrahedron
-            | Shape::Icosahedron
-            | Shape::DividedIcosahedron(_)
-            | Shape::RegularPolygon2D(_) => {
+            Shape::Octahedron(_)
+            | Shape::Tetrahedron(_)
+            | Shape::Icosahedron(_)
+            | Shape::InflatedIcosahedron(_, _)
+            | Shape::RegularPolygon2D(_, _) => {
                 self.draw_visible_hull_edges(to_screen, painter, stroke, visible, true);
                 false
             },
-            Shape::Cube | Shape::FabianHamann | Shape::Football | Shape::Dodecahedron => {
+            Shape::Cube(_)
+            | Shape::FabianHamann(_)
+            | Shape::Football(_)
+            | Shape::Dodecahedron(_) => {
                 self.draw_visible_hull_edges(to_screen, painter, stroke, visible, false);
                 false
             },
-            Shape::TriangTorus | Shape::TriangGrid | Shape::SquareTorus | Shape::SquareGrid => {
-                let draw_diags = matches!(&self.shape, Shape::TriangTorus | Shape::TriangGrid);
-                let make_all_visible =
-                    matches!(&self.shape, Shape::TriangTorus | Shape::SquareTorus);
+            Shape::TriangGrid(_, wrap) | Shape::SquareGrid(_, wrap) => {
+                let draw_diags = matches!(&self.shape, Shape::TriangGrid(_, _));
                 self.draw_torus_edges(to_screen, painter, stroke, draw_diags);
+                let make_all_visible = wrap.0;
                 if make_all_visible {
                     visible.fill(true);
                 }
                 !make_all_visible
             },
-            Shape::SingleVertex | Shape::Random2D(_) => {
+            Shape::SingleVertex | Shape::Random2D(_, _) => {
                 self.draw_all_edges(to_screen, painter, stroke);
                 true
             },
-            Shape::TriangTorusSkewed(_) => {
+            Shape::TriangTorusSkewed(_, _) => {
                 self.draw_short_edges(to_screen, painter, stroke);
                 true
             },
@@ -1394,42 +1385,39 @@ impl Embedding3D {
         }
     }
 
-    pub fn new_map_from(shape: &Shape, res: usize) -> Self {
+    pub fn new_map_from(shape: Shape) -> Self {
         let new_shape = shape.clone();
         let result = match new_shape {
             Shape::SingleVertex => Self::new_single_vertex(),
-            Shape::Icosahedron => Self::new_subdivided_icosahedron(res),
-            Shape::Octahedron => Self::new_subdivided_octahedron(res),
-            Shape::Tetrahedron => Self::new_subdivided_tetrahedron(res),
-            Shape::DividedIcosahedron(pressure) => {
-                let res1 = usize::min(res, pressure as usize);
+            Shape::Icosahedron(res) => Self::new_subdivided_icosahedron(res),
+            Shape::Octahedron(res) => Self::new_subdivided_octahedron(res),
+            Shape::Tetrahedron(res) => Self::new_subdivided_tetrahedron(res),
+            Shape::InflatedIcosahedron(res, pressure) => {
+                let res1 = usize::min(res.0, pressure);
                 let res2 = if res1 == 0 {
-                    res
+                    res.0
                 } else {
-                    (usize::max(res, 1) - 1) / (res1 + 1)
+                    res.0.saturating_sub(1) / (res1 + 1)
                 };
                 Self::new_subdivided_subdivided_icosahedron(res1, res2, new_shape)
             },
-            Shape::RegularPolygon2D(nr_sides) => {
-                let sides = nr_sides as usize;
-                Self::new_2d_triangulated_regular_polygon(sides, res)
+            Shape::RegularPolygon2D(res, sides) => {
+                Self::new_2d_triangulated_regular_polygon(res, sides)
             },
-            Shape::Cube => Self::new_subdivided_cube(res),
-            Shape::Dodecahedron => Self::new_subdivided_dodecahedron(res, false, false),
-            Shape::Football => Self::new_subdivided_football(res, false),
-            Shape::FabianHamann => Self::new_subdivided_football(res, true),
-            Shape::Random2D(seed) => {
-                Self::from_2d(super::random_triangulated(res, 8, seed), new_shape)
+            Shape::Cube(res) => Self::new_subdivided_cube(res),
+            Shape::Dodecahedron(res) => Self::new_subdivided_dodecahedron(res, false, false),
+            Shape::Football(res) => Self::new_subdivided_football(res, false),
+            Shape::FabianHamann(res) => Self::new_subdivided_football(res, true),
+            Shape::Random2D(res, seed) => {
+                Self::from_2d(super::random_triangulated(res.0, 8, seed), new_shape)
             },
-            Shape::TriangTorus => Self::new_subdivided_triangle_grid(res as isize, true),
-            Shape::SquareTorus => Self::new_subdivided_squares_grid(res as isize, true),
-            Shape::TriangGrid => Self::new_subdivided_triangle_grid(res as isize, false),
-            Shape::SquareGrid => Self::new_subdivided_squares_grid(res as isize, false),
-            Shape::TriangTorusSkewed(dy) => Self::new_skewed_torus(res as isize, dy),
-            Shape::Custom(c) => Self::new_custom(c, res),
-            Shape::FromFile(ff) => shape::FromFile::build(ff, res),
+            Shape::TriangGrid(res, w) => Self::new_subdivided_triangle_grid(res, w),
+            Shape::SquareGrid(res, w) => Self::new_subdivided_squares_grid(res, w),
+            Shape::TriangTorusSkewed(dx, dy) => Self::new_skewed_torus(dx, dy),
+            Shape::Custom(c) => Self::new_custom(c),
+            Shape::FromFile(ff) => shape::FromFile::build(ff),
         };
-        assert_eq!(&result.shape, shape);
+        assert_eq!(result.shape, shape);
         result
     }
 
@@ -1497,7 +1485,7 @@ impl Embedding3D {
 
 impl Default for Embedding3D {
     fn default() -> Self {
-        Self::new_subdivided_icosahedron(2)
+        Self::new_subdivided_icosahedron(Resolution(2))
     }
 }
 

@@ -601,8 +601,8 @@ mod test {
         let rules = rules::GeneralEagerCops(10);
         let (_, manager) = thread_manager::build_managers();
         for n in 1..=4 {
-            let shape = shape::Shape::RegularPolygon2D(6);
-            let map = Embedding3D::new_map_from(&shape, n);
+            let shape = Shape::RegularPolygon2D(Resolution(n), 6);
+            let map = Embedding3D::new_map_from(shape);
             let sym = NoSymmetry::new(map.nr_vertices());
             assert_eq!(map.nr_vertices(), 1 + 6 * (((n + 1) * (n + 2)) / 2));
 

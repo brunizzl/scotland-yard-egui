@@ -334,66 +334,66 @@ pub mod test {
 
     #[test]
     fn tetrahedron_automorphisms_are_group() {
-        let g2 = Embedding3D::new_subdivided_tetrahedron(2);
+        let g2 = Embedding3D::new_subdivided_tetrahedron(Resolution(2));
         is_group(g2.sym_group());
         automorphisms_respect_edges(&g2);
 
-        let g10 = Embedding3D::new_subdivided_tetrahedron(10);
+        let g10 = Embedding3D::new_subdivided_tetrahedron(Resolution(10));
         is_group(g10.sym_group());
         automorphisms_respect_edges(&g10);
     }
 
     #[test]
     fn cube_automorphisms_are_group() {
-        let g2 = Embedding3D::new_subdivided_cube(2);
+        let g2 = Embedding3D::new_subdivided_cube(Resolution(2));
         is_group(g2.sym_group());
         automorphisms_respect_edges(&g2);
 
-        let g10 = Embedding3D::new_subdivided_cube(10);
+        let g10 = Embedding3D::new_subdivided_cube(Resolution(10));
         is_group(g10.sym_group());
         automorphisms_respect_edges(&g10);
     }
 
     #[test]
     fn octahedron_automorphisms_are_group() {
-        let g2 = Embedding3D::new_subdivided_octahedron(2);
+        let g2 = Embedding3D::new_subdivided_octahedron(Resolution(2));
         is_group(g2.sym_group());
         automorphisms_respect_edges(&g2);
 
-        let g10 = Embedding3D::new_subdivided_octahedron(10);
+        let g10 = Embedding3D::new_subdivided_octahedron(Resolution(10));
         is_group(g10.sym_group());
         automorphisms_respect_edges(&g10);
     }
 
     #[test]
     fn icosahedron_automorphisms_are_group() {
-        let g2 = Embedding3D::new_subdivided_icosahedron(2);
+        let g2 = Embedding3D::new_subdivided_icosahedron(Resolution(2));
         is_group(g2.sym_group());
         automorphisms_respect_edges(&g2);
 
-        let g10 = Embedding3D::new_subdivided_icosahedron(10);
+        let g10 = Embedding3D::new_subdivided_icosahedron(Resolution(10));
         is_group(g10.sym_group());
         automorphisms_respect_edges(&g10);
     }
 
     #[test]
     fn torus6_automorphisms_are_group() {
-        let g3 = Embedding3D::new_subdivided_triangle_grid(3, true);
+        let g3 = Embedding3D::new_subdivided_triangle_grid(Resolution(3), Wrap(true));
         is_group(g3.sym_group());
         automorphisms_respect_edges(&g3);
 
-        let g5 = Embedding3D::new_subdivided_triangle_grid(6, true);
+        let g5 = Embedding3D::new_subdivided_triangle_grid(Resolution(6), Wrap(true));
         is_group(g5.sym_group());
         automorphisms_respect_edges(&g5);
     }
 
     #[test]
     fn torus4_automorphisms_are_group() {
-        let g3 = Embedding3D::new_subdivided_squares_grid(3, true);
+        let g3 = Embedding3D::new_subdivided_squares_grid(Resolution(3), Wrap(true));
         is_group(g3.sym_group());
         automorphisms_respect_edges(&g3);
 
-        let g5 = Embedding3D::new_subdivided_squares_grid(6, true);
+        let g5 = Embedding3D::new_subdivided_squares_grid(Resolution(6), Wrap(true));
         is_group(g5.sym_group());
         automorphisms_respect_edges(&g5);
     }

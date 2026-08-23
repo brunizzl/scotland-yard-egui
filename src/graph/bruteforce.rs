@@ -455,11 +455,11 @@ impl SafeRobberPositions {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::graph::{Embedding3D, Shape};
+    use crate::graph::{Embedding3D, Resolution, Shape};
 
     #[test]
     fn multiset_index_works() {
-        let graph = Embedding3D::new_map_from(&Shape::SquareGrid, 5);
+        let graph = Embedding3D::new_map_from(Shape::square_grid(Resolution(5)));
         let SymGroup::None(sym) = graph.sym_group() else {
             panic!();
         };
@@ -476,7 +476,7 @@ mod test {
 
     #[test]
     fn test_raw_general_cop_moves_from() {
-        let q10 = Embedding3D::new_map_from(&Shape::SquareGrid, 10);
+        let q10 = Embedding3D::new_map_from(Shape::square_grid(Resolution(10)));
         assert_eq!(q10.nr_vertices(), 100);
         let old_cops = RawCops::new(&[0, 13, 70, 85]);
         let neighborss = old_cops

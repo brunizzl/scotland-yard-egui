@@ -487,37 +487,37 @@ pub mod test {
 
     #[test]
     fn torus4_converts_to_explicit() {
-        let g3 = Embedding3D::new_subdivided_squares_grid(3, true);
+        let g3 = Embedding3D::new_subdivided_squares_grid(Resolution(3), Wrap(true));
         sym_converts_to_explicit(g3.sym_group());
 
-        let g5 = Embedding3D::new_subdivided_squares_grid(6, true);
+        let g5 = Embedding3D::new_subdivided_squares_grid(Resolution(6), Wrap(true));
         sym_converts_to_explicit(g5.sym_group());
 
-        let g9 = Embedding3D::new_subdivided_squares_grid(9, true);
+        let g9 = Embedding3D::new_subdivided_squares_grid(Resolution(9), Wrap(true));
         sym_converts_to_explicit(g9.sym_group());
     }
 
     #[test]
     fn torus6_converts_to_explicit() {
-        let g3 = Embedding3D::new_subdivided_triangle_grid(3, true);
+        let g3 = Embedding3D::new_subdivided_triangle_grid(Resolution(3), Wrap(true));
         sym_converts_to_explicit(g3.sym_group());
 
-        let g5 = Embedding3D::new_subdivided_triangle_grid(6, true);
+        let g5 = Embedding3D::new_subdivided_triangle_grid(Resolution(6), Wrap(true));
         sym_converts_to_explicit(g5.sym_group());
 
-        let g9 = Embedding3D::new_subdivided_triangle_grid(9, true);
+        let g9 = Embedding3D::new_subdivided_triangle_grid(Resolution(9), Wrap(true));
         sym_converts_to_explicit(g9.sym_group());
     }
 
     #[test]
     fn expicit_converts_to_explicit() {
-        let i10 = Embedding3D::new_subdivided_icosahedron(10);
+        let i10 = Embedding3D::new_subdivided_icosahedron(Resolution(10));
         sym_converts_to_explicit(i10.sym_group());
 
-        let o10 = Embedding3D::new_subdivided_octahedron(10);
+        let o10 = Embedding3D::new_subdivided_octahedron(Resolution(10));
         sym_converts_to_explicit(o10.sym_group());
 
-        let c10 = Embedding3D::new_subdivided_cube(10);
+        let c10 = Embedding3D::new_subdivided_cube(Resolution(10));
         sym_converts_to_explicit(c10.sym_group());
     }
 }

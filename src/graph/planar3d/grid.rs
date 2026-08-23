@@ -382,10 +382,8 @@ impl GridGraph {
 
     pub fn try_from(g: &Embedding3D) -> Option<Self> {
         let (norm, wrap) = match g.shape() {
-            Shape::SquareTorus => (Norm::Quad, true),
-            Shape::TriangTorus => (Norm::Hex, true),
-            Shape::SquareGrid => (Norm::Quad, false),
-            Shape::TriangGrid => (Norm::Hex, false),
+            Shape::SquareGrid(_, Wrap(wrap)) => (Norm::Quad, *wrap),
+            Shape::TriangGrid(_, Wrap(wrap)) => (Norm::Hex, *wrap),
             _ => return None,
         };
         let len = f64::sqrt(g.nr_vertices() as f64) as usize;
