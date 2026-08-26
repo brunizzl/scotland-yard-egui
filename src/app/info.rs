@@ -970,24 +970,20 @@ impl Info {
     }
 
     fn update_convex_cop_hull(&mut self, con: &DrawContext<'_>) {
-        let mut temp = [usize::MAX];
-        let vertices_outside_hull = if !con.extreme_vertices.is_empty() {
-            con.extreme_vertices
-        } else {
-            debug_assert_eq!(con.positions.len(), self.min_cop_dist.len());
-            let (furthest_vertex, _) =
-                self.min_cop_dist.iter().enumerate().fold((0, 0), |best, (v, &dist)| {
-                    if dist > best.1 { (v, dist) } else { best }
-                });
-            temp[0] = furthest_vertex;
-            &temp
+        debug_assert_eq!(con.positions.len(), self.min_cop_dist.len());
+        // the vertex furthest from any cop may be a bad guess for a vertex outside the cops convex hull,
+        // but only if the cops are really spread out.
+        let Some((furthest_vertex, _)) =
+            izip!(0.., &self.min_cop_dist).max_by_key(|(_, dist)| **dist)
+        else {
+            return;
         };
 
         self.cop_hull_data.update(
             self.characters.cops(),
             con.edges,
             &mut self.queue,
-            vertices_outside_hull,
+            std::slice::from_ref(&furthest_vertex),
             &self.min_cop_dist,
         );
     }
@@ -1238,53 +1234,72 @@ impl Info {
         }
     }
 
+    #[must_use]
+    fn process_shortcuts(&mut self, ui: &mut Ui, con: &DrawContext<'_>) -> bool {
+        enum Action {
+            Undo,
+            Redo,
+            OptimalMove,
+            PatternMove,
+            None,
+        }
+        let consume_shortcut = || {
+            use crate::app::shortcuts::*;
+            ui.input_mut(|info| match () {
+                () if info.consume_shortcut(&UNDO) => Action::Undo,
+                () if info.consume_shortcut(&REDO) => Action::Redo,
+                () if info.consume_shortcut(&DO_PATTERN_MOVE) => Action::PatternMove,
+                () if info.consume_shortcut(&DO_OPTIMAL_MOVE) => Action::OptimalMove,
+                _ => Action::None,
+            })
+        };
+        if self.tool == MouseTool::Drag {
+            match consume_shortcut() {
+                Action::Undo => {
+                    self.characters.undo_move(con.edges, con.positions, &mut self.queue)
+                },
+                Action::Redo => {
+                    self.characters.redo_move(con.edges, con.positions, &mut self.queue)
+                },
+                Action::PatternMove => {
+                    self.characters
+                        .continue_move_pattern(con.edges, con.positions, &mut self.queue)
+                },
+                Action::OptimalMove
+                    if let Some(strat) =
+                        self.worker.police_strat_for(&self.characters.game_type(con.map)) =>
+                {
+                    self.characters.make_optimal_move(strat, con, &mut self.queue);
+                },
+                _ => return false,
+            };
+            return true;
+        } else if self.tool.used_for_drawing() {
+            match consume_shortcut() {
+                Action::Undo => self.manual_markers.undo(),
+                Action::Redo => self.manual_markers.redo(),
+                _ => {},
+            }
+        } else {
+            // this is handled in Map::modify_custom_graph,
+            // because there we can still modify the graph.
+            debug_assert!(self.tool.used_for_building());
+        }
+        false
+    }
+
     pub fn process_general_input(&mut self, ui: &mut Ui, con: &DrawContext<'_>) {
         use egui::{Key, PointerButton};
         let tool = self.tool;
         let mut change = false;
+        change |= self.process_shortcuts(ui, con);
+
         let held_key = ui.input(|info| {
             if info.key_pressed(Key::F3) {
                 self.characters.show_allowed_next_steps ^= true;
             }
             if info.key_pressed(Key::F4) {
                 self.characters.show_past_steps ^= true;
-            }
-            let drag_active = tool == MouseTool::Drag;
-            if info.modifiers.ctrl && info.key_pressed(Key::Z) {
-                if drag_active {
-                    self.characters.undo_move(con.edges, con.positions, &mut self.queue);
-                    change = true;
-                } else if tool.used_for_drawing() {
-                    self.manual_markers.undo();
-                } else {
-                    // this is handled in Map::modify_custom_graph,
-                    // because there we can still modify the graph.
-                    debug_assert!(tool.used_for_building());
-                }
-            }
-            if info.modifiers.ctrl && info.key_pressed(Key::Y) {
-                if drag_active {
-                    self.characters.redo_move(con.edges, con.positions, &mut self.queue);
-                    change = true;
-                } else if tool.used_for_drawing() {
-                    self.manual_markers.redo();
-                } else {
-                    // this is handled in Map::modify_custom_graph,
-                    // because there we can still modify the graph.
-                    debug_assert!(tool.used_for_building());
-                }
-            }
-            if info.modifiers.ctrl && info.key_pressed(Key::R) && drag_active {
-                self.characters
-                    .continue_move_pattern(con.edges, con.positions, &mut self.queue);
-                change = true;
-            }
-            if (info.modifiers.ctrl && info.key_pressed(Key::O) && drag_active)
-                && let Some(strat) =
-                    self.worker.police_strat_for(&self.characters.game_type(con.map))
-            {
-                self.characters.make_optimal_move(strat, con, &mut self.queue);
-                change = true;
             }
 
             let pointer_pos = info.pointer.latest_pos()?;
@@ -1360,7 +1375,7 @@ impl Info {
                 let keys = &NUMS[..tools.len()];
                 for (&new_tool, &key) in izip!(tools, keys) {
                     if info.key_pressed(key) {
-                        if new_tool == tool && drag_active {
+                        if new_tool == tool && new_tool == MouseTool::Drag {
                             self.options.show_manual_marker_window ^= true;
                         }
                         self.change_tool_to(new_tool);

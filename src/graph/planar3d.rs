@@ -1032,27 +1032,23 @@ impl Embedding3D {
                 }
             };
             match step {
-                BuildStep::FogTestHamPath(ends, vis) => {
-                    self.tranform_to_fog_hamilton_path_test(*ends, true, *vis);
+                &BuildStep::FogTestHamPath(ends, vis) => {
+                    self.tranform_to_fog_hamilton_path_test(ends, true, vis);
                 },
                 BuildStep::FogTestIsGonnected => {
                     self.tranform_to_fog_hamilton_path_test(None, false, 1);
                 },
-                BuildStep::NeighNeighs(n) => {
-                    self.edge_pow(*n);
+                &BuildStep::NeighNeighs(n) => {
+                    self.edge_pow(n);
                 },
-                BuildStep::SubdivEdges(n) => {
-                    self.subdivide_all_edges(*n, false);
+                &BuildStep::SubdivEdges(n) => {
+                    self.subdivide_all_edges(n, false);
                 },
-                BuildStep::Vertex(_, [x_int, y_int, z_int]) => {
-                    let x = *x_int as f32 * 0.001;
-                    let y = *y_int as f32 * 0.001;
-                    let z = *z_int as f32 * 0.001;
-                    let pos = Pos3::new(x, y, z);
-                    self.add_vertex(pos);
+                &BuildStep::Vertex(_, pos) => {
+                    self.add_vertex(shape::custom_to_float(pos).into());
                 },
-                BuildStep::Edge(v1, v2) => {
-                    add_edge_between(*v1, *v2);
+                &BuildStep::Edge(v1, v2) => {
+                    add_edge_between(v1, v2);
                 },
                 BuildStep::CompleteBetween(xs, ys) => {
                     for (&x, &y) in itertools::iproduct!(xs, ys) {
@@ -1076,9 +1072,9 @@ impl Embedding3D {
                         self.edges.remove_vertex(v);
                     }
                 },
-                &BuildStep::MoveVertex(v, [dx, dy, dz]) => {
+                &BuildStep::MoveVertex(v, dv) => {
                     if let Some(pos) = self.vertices.get_mut(v) {
-                        *pos += Vec3::new(dx as f32 * 0.001, dy as f32 * 0.001, dz as f32 * 0.001);
+                        *pos += shape::custom_to_float(dv).into();
                     }
                 },
             }
@@ -1386,8 +1382,13 @@ impl Embedding3D {
     }
 
     pub fn new_map_from(shape: Shape) -> Self {
-        let new_shape = shape.clone();
-        let result = match new_shape {
+        let old_shape = if cfg!(debug_assertions) {
+            shape.clone()
+        } else {
+            Shape::SingleVertex
+        };
+
+        let result = match shape {
             Shape::SingleVertex => Self::new_single_vertex(),
             Shape::Icosahedron(res) => Self::new_subdivided_icosahedron(res),
             Shape::Octahedron(res) => Self::new_subdivided_octahedron(res),
@@ -1399,7 +1400,7 @@ impl Embedding3D {
                 } else {
                     res.0.saturating_sub(1) / (res1 + 1)
                 };
-                Self::new_subdivided_subdivided_icosahedron(res1, res2, new_shape)
+                Self::new_subdivided_subdivided_icosahedron(res1, res2, shape)
             },
             Shape::RegularPolygon2D(res, sides) => {
                 Self::new_2d_triangulated_regular_polygon(res, sides)
@@ -1409,7 +1410,7 @@ impl Embedding3D {
             Shape::Football(res) => Self::new_subdivided_football(res, false),
             Shape::FabianHamann(res) => Self::new_subdivided_football(res, true),
             Shape::Random2D(res, seed) => {
-                Self::from_2d(super::random_triangulated(res.0, 8, seed), new_shape)
+                Self::from_2d(super::random_triangulated(res.0, 8, seed), shape)
             },
             Shape::TriangGrid(res, w) => Self::new_subdivided_triangle_grid(res, w),
             Shape::SquareGrid(res, w) => Self::new_subdivided_squares_grid(res, w),
@@ -1417,7 +1418,7 @@ impl Embedding3D {
             Shape::Custom(c) => Self::new_custom(c),
             Shape::FromFile(ff) => shape::FromFile::build(ff),
         };
-        assert_eq!(result.shape, shape);
+        debug_assert_eq!(result.shape, old_shape);
         result
     }
 

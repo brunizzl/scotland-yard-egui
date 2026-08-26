@@ -253,6 +253,7 @@ impl Camera3D {
         &self.to_screen
     }
 
+    #[allow(dead_code)]
     pub fn screen_normal(&self) -> Vec3 {
         self.to_screen.to_plane.new_z
     }

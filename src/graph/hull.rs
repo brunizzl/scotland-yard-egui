@@ -592,26 +592,6 @@ fn retain_safe_inner_boundary(
                 take_if_unique!(|&&v| keep[v] == Keep::Yes);
 
                 //at this point something went wrong and we try to continue on a best effort basis
-                println!(
-                    "error in hull::retain_safe_inner_boundary at {:?} (indices {:?}): \
-                    bnd = {:?}, n-bnd = {:?}, yes = {:?}, n-yes = {:?}, n-perhaps = {:?}",
-                    check_vals,
-                    check_front..check_end,
-                    check_vals.iter().filter(|&&v| keep[v] == YOB).collect_vec(),
-                    check_vals
-                        .iter()
-                        .filter(|&&v| edges.neighbors_of(v).any(|n| keep[n] == YOB))
-                        .collect_vec(),
-                    check_vals.iter().filter(|&&v| keep[v] == Keep::Yes).collect_vec(),
-                    check_vals
-                        .iter()
-                        .filter(|&&v| edges.neighbors_of(v).any(|n| keep[n] == Keep::Yes))
-                        .collect_vec(),
-                    check_vals
-                        .iter()
-                        .filter(|&&v| edges.neighbors_of(v).all(|n| keep[n] == Keep::Perhaps))
-                        .collect_vec(),
-                );
                 macro_rules! take_largest {
                     ($f:expr) => {{
                         let mut best_nr = 0;
@@ -624,7 +604,6 @@ fn retain_safe_inner_boundary(
                             }
                         }
                         if best_val != usize::MAX {
-                            println!("^ chose {best_val}");
                             break 'next_vertex best_val;
                         }
                     }};
@@ -633,7 +612,6 @@ fn retain_safe_inner_boundary(
                 take_largest!(|v| edges.neighbors_of(v).filter(|&n| keep[n] == Keep::Yes));
                 take_largest!(|v| edges.neighbors_of(v).filter(|&n| keep[n] != Keep::No));
 
-                println!("^ unsolved");
                 if check_vals.is_empty() {
                     break 'check_all;
                 }

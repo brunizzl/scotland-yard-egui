@@ -2,6 +2,16 @@ use std::io::Read;
 
 use serde::{Deserialize, Serialize};
 
+pub fn float_to_custom([x, y, z]: [f32; 3]) -> [i32; 3] {
+    let upscale = |x| (x * 1000.0) as i32;
+    [upscale(x), upscale(y), upscale(z)]
+}
+
+pub fn custom_to_float([x, y, z]: [i32; 3]) -> [f32; 3] {
+    let downscale = |x| x as f32 * 0.001;
+    [downscale(x), downscale(y), downscale(z)]
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum BuildStep {
     /// distinct vertives of up to given distance become neighbors
@@ -127,14 +137,11 @@ impl std::fmt::Display for BuildStep {
     }
 }
 
-fn print_steps(steps: &[BuildStep], single_line: bool) -> String {
+fn print_steps(steps: &[BuildStep]) -> String {
     use std::fmt::Write;
     let mut res = String::new();
     for step in steps {
-        write!(res, "{step}").ok();
-        if !single_line {
-            writeln!(res).ok();
-        }
+        writeln!(res, "{step}").ok();
     }
     res
 }
@@ -451,8 +458,8 @@ impl CustomBuild {
         }
     }
 
-    pub fn print_build_steps(&self, single_line: bool) -> String {
-        print_steps(&self.build_steps, single_line)
+    pub fn print_build_steps(&self) -> String {
+        print_steps(&self.build_steps)
     }
 
     /// returns an identifier. the user must ensure that this is unique.
@@ -476,7 +483,7 @@ impl CustomBuild {
         let size_hint = self.build_steps.len() + 3;
         self.build_steps = parse_steps(data_string, size_hint);
         combine_last_move_operations(&mut self.build_steps);
-        self.build_steps_string = self.print_build_steps(false);
+        self.build_steps_string = self.print_build_steps();
     }
 
     #[must_use]
@@ -591,7 +598,7 @@ impl FromFile {
         }
         let size_hint = file_content.len() / 10 + 10;
         let steps = parse_steps(file_content, size_hint);
-        let steps_string = print_steps(&steps, false);
+        let steps_string = print_steps(&steps);
         self.data = Some((steps, steps_string));
         self.build_error = None;
     }

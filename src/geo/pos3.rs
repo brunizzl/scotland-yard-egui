@@ -117,6 +117,17 @@ impl Pos3 {
     }
 }
 
+impl From<[f32; 3]> for Pos3 {
+    fn from([x, y, z]: [f32; 3]) -> Self {
+        Pos3 { x, y, z }
+    }
+}
+impl From<Pos3> for [f32; 3] {
+    fn from(Pos3 { x, y, z }: Pos3) -> Self {
+        [x, y, z]
+    }
+}
+
 use egui::{Pos2, Vec2};
 #[allow(dead_code)]
 pub fn average(positions: impl ExactSizeIterator<Item = Pos2>) -> Pos2 {

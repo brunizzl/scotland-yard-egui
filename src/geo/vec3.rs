@@ -198,6 +198,17 @@ impl Vec3 {
     }
 }
 
+impl From<[f32; 3]> for Vec3 {
+    fn from([x, y, z]: [f32; 3]) -> Self {
+        Vec3 { x, y, z }
+    }
+}
+impl From<Vec3> for [f32; 3] {
+    fn from(Vec3 { x, y, z }: Vec3) -> Self {
+        [x, y, z]
+    }
+}
+
 impl std::ops::Index<usize> for Vec3 {
     type Output = f32;
 

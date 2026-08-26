@@ -23,7 +23,6 @@ pub const NATIVE: bool = cfg!(not(target_arch = "wasm32"));
 pub struct DrawContext<'a> {
     pub map: &'a map::Map,
     pub cam: Camera3D,
-    pub extreme_vertices: &'a [usize],
     pub edges: &'a EdgeList,
     pub visible: &'a [bool],
     pub positions: &'a [Pos3],
@@ -51,7 +50,7 @@ impl DrawContext<'_> {
     }
 
     pub fn find_closest_vertex(&self, screen_pos: Pos2) -> (usize, f32) {
-        self.map.find_closest_vertex_slow(self.cam(), screen_pos)
+        self.map.find_closest_vertex(self.cam(), screen_pos)
     }
 }
 
@@ -149,6 +148,15 @@ pub fn menu_button_closing_outside<'a, R>(
     egui::InnerResponse::new(inner.map(|i| i.inner), response)
 }
 
+pub mod shortcuts {
+    use egui::{Key, KeyboardShortcut as Ks, Modifiers};
+    pub const UNDO: Ks = Ks::new(Modifiers::CTRL, Key::Z);
+    pub const REDO: Ks = Ks::new(Modifiers::CTRL, Key::Y);
+    pub const DO_OPTIMAL_MOVE: Ks = Ks::new(Modifiers::CTRL, Key::O);
+    pub const DO_PATTERN_MOVE: Ks = Ks::new(Modifiers::CTRL, Key::R);
+    pub const TOGGLE_SIDEBAR: Ks = Ks::new(Modifiers::CTRL, Key::B);
+}
+
 pub struct State {
     map: map::Map,
     info: info::Info,
@@ -241,7 +249,7 @@ impl eframe::App for State {
             self.fullscreen ^= true;
             ui.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
         }
-        if ui.input(|info| info.modifiers.ctrl && info.key_pressed(egui::Key::B)) {
+        if ui.input_mut(|i| i.consume_shortcut(&shortcuts::TOGGLE_SIDEBAR)) {
             self.menu_visible ^= true;
         }
 
