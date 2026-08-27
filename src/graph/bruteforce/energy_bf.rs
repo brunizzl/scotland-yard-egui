@@ -52,7 +52,7 @@ impl Default for EnergyParams {
 pub type UEnergy = u8;
 pub const INFINITY: UEnergy = UEnergy::MAX;
 
-/// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
+/// for each cop configuration in [`CopStates`] this struct stores for each map vertex,
 /// how much energy the robber would need at minimum to win this game state.
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct MinSafeEnergy {
@@ -62,9 +62,9 @@ pub struct MinSafeEnergy {
 
 impl MinSafeEnergy {
     /// construct self if enough memory is available
-    fn new(nr_map_vertices: usize, cop_moves: &CopConfigurations, init: UEnergy) -> Option<Self> {
+    fn new(nr_map_vertices: usize, cop_states: &CopStates, init: UEnergy) -> Option<Self> {
         let mut time = BTreeMap::new();
-        for (&fst_index, indices) in &cop_moves.configurations {
+        for (&fst_index, indices) in &cop_states.configurations {
             let nr_entries = indices.len().checked_mul(nr_map_vertices)?;
 
             let mut data = Vec::new();
@@ -106,7 +106,7 @@ pub struct EnergyRobberStrat {
     /// for each cop arrangement, this stores the minimum energy at each vertex,
     /// that the robber requires to survive.
     pub min_safe_energy: MinSafeEnergy,
-    pub cop_moves: CopConfigurations,
+    pub cop_states: CopStates,
     /// what energy does the robber need in his bank in order to win?
     /// if the robber has no winning strategy, this holds value [`INFINITY`].
     pub min_initial_robber_energy: UEnergy,
@@ -117,15 +117,15 @@ impl EnergyRobberStrat {
         params: EnergyParams,
         symmetry: ExplicitClasses,
         min_safe_energy: MinSafeEnergy,
-        cop_moves: CopConfigurations,
+        cop_states: CopStates,
     ) -> Self {
         let min_against = |cops| min_safe_energy[cops].iter().copied().min().unwrap();
-        let min_initial_robber_energy = cop_moves.all_positions().map(min_against).max().unwrap();
+        let min_initial_robber_energy = cop_states.all_positions().map(min_against).max().unwrap();
         Self {
             params,
             symmetry,
             min_safe_energy,
-            cop_moves,
+            cop_states,
             min_initial_robber_energy,
         }
     }
@@ -135,7 +135,7 @@ impl EnergyRobberStrat {
         &self,
         mut cops: RawCops,
     ) -> impl ExactSizeIterator<Item = UEnergy> {
-        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, &mut cops);
+        let (autos, cop_positions) = self.cop_states.pack(&self.symmetry, &mut cops);
         let energies = &self.min_safe_energy[cop_positions];
         autos[0].forward().map(|v| energies[v])
     }
@@ -192,10 +192,10 @@ where
     }
 
     manager.update("list cop positions")?;
-    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
+    let cop_states = CopStates::new(&edges, &sym, nr_cops, manager)?;
 
     manager.update("reserve storage for queue")?;
-    let Some(mut queue) = RobberStratQueue::new(&cop_moves) else {
+    let Some(mut queue) = RobberStratQueue::new(&cop_states) else {
         return Err("not enough RAM (initial queue too long)".to_owned());
     };
 
@@ -210,16 +210,17 @@ where
     safe_lvls.reserve_exact(bank_capacity + 1);
     {
         let err = || "not enough RAM (robber strategy function too large)".to_string();
-        let mut safe_lvl = SafeRobberPositions::new(nr_map_vertices, &cop_moves).ok_or_else(err)?;
-        for (i, index) in izip!(0.., cop_moves.all_positions()) {
+        let mut safe_lvl =
+            SafeRobberPositions::new(nr_map_vertices, &cop_states).ok_or_else(err)?;
+        for (i, index) in izip!(0.., cop_states.all_positions()) {
             if i % 4096 == 0 {
-                let percent = 100.0 * (i as f32) / (cop_moves.nr_configurations() as f32);
+                let percent = 100.0 * (i as f32) / (cop_states.nr_states() as f32);
                 let msg = format!("initialise robber strategy function: {percent:.2}%");
                 manager.update(msg)?;
             }
 
             let robber_range = safe_lvl.robber_indices_at(index);
-            for v in rules.vertices_in_reach(&edges, cop_moves.unpack(index)) {
+            for v in rules.vertices_in_reach(&edges, cop_states.unpack(index)) {
                 safe_lvl.mark_robber_at(robber_range.at(v), false);
             }
         }
@@ -252,7 +253,7 @@ where
             let nr_safe = safe_lvls[0].robber_safe_when(curr_cop_positions).count_ones();
             manager.update(format!(
                 "compute robber strategy:\n{:.2}% in queue ({}), round {}, {:.2}% safe",
-                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
+                100.0 * (queue.len() as f32) / (cop_states.nr_states() as f32),
                 queue.len(),
                 queue.rounds_complete(),
                 100.0 * (nr_safe as f32) / (nr_map_vertices as f32),
@@ -274,7 +275,7 @@ where
             for prev in &mut safe_should_cops_move_to_curr {
                 prev.set_cleared();
             }
-            let curr_cops = cop_moves.eager_unpack(curr_cop_positions);
+            let curr_cops = cop_states.eager_unpack(curr_cop_positions);
             let mut curr_safe = fog::Fog::new_filled(nr_map_vertices);
             for (curr_balance, safe_lvl_all) in izip!(0.., &safe_lvls) {
                 // i am saddened that i chose two different integer types to store bits in fog vs SafeRobberPositions.
@@ -319,7 +320,7 @@ where
 
         // iterate through all cops states possibly preceeding the current one and intersect
         // what is stored as safe then with the states marked safe when cops move to curr.
-        let all_prev_cops = rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions);
+        let all_prev_cops = rules.cop_moves_from(&cop_states, &edges, &sym, curr_cop_positions);
         for (autos_prev_to_repr, prev_cops_repr) in all_prev_cops {
             // except for additionally looping over the different balances,
             // this structure is the same as in the standard alrorithm.
@@ -356,13 +357,13 @@ where
     }
 
     drop(queue);
-    let Some(mut min_energy) = MinSafeEnergy::new(nr_map_vertices, &cop_moves, INFINITY) else {
+    let Some(mut min_energy) = MinSafeEnergy::new(nr_map_vertices, &cop_states, INFINITY) else {
         return Err("not enough RAM (energy function too big)".to_owned());
     };
 
     manager.update("write energy function")?;
     let mut lvls_at_index = Vec::new();
-    for index in cop_moves.all_positions() {
+    for index in cop_states.all_positions() {
         let energy = &mut min_energy[index];
         lvls_at_index.clear();
         lvls_at_index.extend(safe_lvls.iter().map(|lvl| lvl.robber_safe_when(index)));
@@ -377,7 +378,7 @@ where
         params,
         ExplicitClasses::from(&sym),
         min_energy,
-        cop_moves,
+        cop_states,
     ))
 }
 
@@ -422,15 +423,15 @@ where
     }
 
     manager.update("list police positions")?;
-    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
+    let cop_states = CopStates::new(&edges, &sym, nr_cops, manager)?;
 
     manager.update("reserve storage for energy function")?;
-    let Some(mut min_energy) = MinSafeEnergy::new(edges.nr_vertices(), &cop_moves, 0) else {
+    let Some(mut min_energy) = MinSafeEnergy::new(edges.nr_vertices(), &cop_states, 0) else {
         return Err("not enough RAM (energy function too large)".to_owned());
     };
 
     manager.update("initialise queue")?;
-    let Some(mut queue) = RobberStratQueue::new(&cop_moves) else {
+    let Some(mut queue) = RobberStratQueue::new(&cop_states) else {
         return Err("not enough RAM (initial queue too long)".to_owned());
     };
 
@@ -438,13 +439,13 @@ where
     let mut vertex_queue = std::collections::VecDeque::new();
 
     manager.update("initialise energy function")?;
-    for (i, index) in izip!(0.., cop_moves.all_positions()) {
+    for (i, index) in izip!(0.., cop_states.all_positions()) {
         if i % 4096 == 0 {
             manager.recieve()?;
         }
 
         let energies = &mut min_energy[index];
-        for v in rules.vertices_in_reach(&edges, cop_moves.unpack(index)) {
+        for v in rules.vertices_in_reach(&edges, cop_states.unpack(index)) {
             energies[v] = INFINITY;
         }
     }
@@ -463,7 +464,7 @@ where
                 .count();
             manager.update(format!(
                 "compute robber strategy:\n{:.2}% in queue ({}), round {}, {:.2}% safe",
-                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
+                100.0 * (queue.len() as f32) / (cop_states.nr_states() as f32),
                 queue.len(),
                 queue.rounds_complete(),
                 100.0 * (nr_safe as f32) / (nr_map_vertices as f32),
@@ -500,7 +501,7 @@ where
                     vertex_queue.push_back(v);
                 }
             }
-            let curr_cops = cop_moves.eager_unpack(curr_cop_positions);
+            let curr_cops = cop_states.eager_unpack(curr_cop_positions);
             while let Some(v) = vertex_queue.pop_front() {
                 let prev_at_v = energy_should_cops_move_to_curr[v];
                 debug_assert!(prev_at_v <= bank_capacity);
@@ -523,7 +524,7 @@ where
             debug_assert!(curr_cops.iter().all(energy_is_inf));
         }
 
-        let all_prev_cops = rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions);
+        let all_prev_cops = rules.cop_moves_from(&cop_states, &edges, &sym, curr_cop_positions);
         for (autos_prev_to_repr, prev_cops_repr) in all_prev_cops {
             let mut prev_energy_changed = false;
             for auto_prev_to_repr in autos_prev_to_repr {
@@ -550,7 +551,7 @@ where
         params,
         ExplicitClasses::from(&sym),
         min_energy,
-        cop_moves,
+        cop_states,
     ))
 }
 
@@ -611,7 +612,7 @@ mod test {
 
                 let mut nr_wrong = 0;
                 let mut nr_total = 0;
-                for pos in win_outcome.cop_moves.all_positions() {
+                for pos in win_outcome.cop_states.all_positions() {
                     nr_total += 1;
                     let energy = &win_outcome.min_safe_energy[pos];
                     let energy_naive = &win_outcome_naive.min_safe_energy[pos];

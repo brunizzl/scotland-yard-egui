@@ -233,8 +233,8 @@ fn compute_fog_strategy_impl<R: CopRules, Q: Queue<QueueEntry> + Default>(
         // we want to find the best solution (e.g. shortest move sequence),
         // so we actually need to consider every possible initial state.
         let sym = crate::graph::NoSymmetry::new(nr_vertices);
-        let positions = super::CopConfigurations::new(&edges, &sym, nr_cleaners, manager)?;
-        let nr_initial_states = positions.nr_configurations();
+        let positions = super::CopStates::new(&edges, &sym, nr_cleaners, manager)?;
+        let nr_initial_states = positions.nr_states();
         if states.try_reserve(nr_initial_states).is_err() {
             return Err("not enough RAM for states.".to_string());
         }

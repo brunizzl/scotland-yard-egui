@@ -8,7 +8,7 @@ pub struct RobberWinData {
     #[serde(deserialize_with = "deserialize_explicit")]
     pub symmetry: ExplicitClasses,
     pub safe: SafeRobberPositions,
-    pub cop_moves: CopConfigurations,
+    pub cop_moves: CopStates,
 }
 
 /// the field [`RobberWinData::symmetry`] changed type to [`ExplicitClasses`] from [`SymGroup`].
@@ -90,38 +90,38 @@ where
     }
 
     manager.update("list police positions")?;
-    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
+    let cop_states = CopStates::new(&edges, &sym, nr_cops, manager)?;
 
     manager.update("aquire storage for robber strategy function")?;
-    let Some(mut f) = SafeRobberPositions::new(edges.nr_vertices(), &cop_moves) else {
+    let Some(mut f) = SafeRobberPositions::new(edges.nr_vertices(), &cop_states) else {
         return Err("not enough RAM (robber strategy function too large)".to_owned());
     };
 
     manager.update("aquire storage for queue")?;
-    let Some(mut queue) = RobberStratQueue::new(&cop_moves) else {
+    let Some(mut queue) = RobberStratQueue::new(&cop_states) else {
         return Err("not enoug RAM (initial queue too long)".to_owned());
     };
 
     let max_degree_less_than_nr_cops = edges.max_degree() < nr_cops;
 
-    for (i, index) in izip!(0.., cop_moves.all_positions()) {
+    for (i, index) in izip!(0.., cop_states.all_positions()) {
         if i % 4096 == 0 {
-            let percent = 100.0 * (i as f32) / (cop_moves.nr_configurations() as f32);
+            let percent = 100.0 * (i as f32) / (cop_states.nr_states() as f32);
             let msg = format!("initialise robber strategy function: {percent:.2}%");
             manager.update(msg)?;
         }
 
         // test round trip
         debug_assert!({
-            let mut unpacked = cop_moves.eager_unpack(index);
-            let (_, packed) = cop_moves.pack(&sym, &mut unpacked);
+            let mut unpacked = cop_states.eager_unpack(index);
+            let (_, packed) = cop_states.pack(&sym, &mut unpacked);
             debug_assert_eq!(index, packed);
             true
         });
 
         //line 2
         let robber_range = f.robber_indices_at(index);
-        for v in rules.vertices_in_reach(&edges, cop_moves.unpack(index)) {
+        for v in rules.vertices_in_reach(&edges, cop_states.unpack(index)) {
             f.mark_robber_at(robber_range.at(v), false);
         }
 
@@ -157,7 +157,7 @@ where
             let nr_safe = f.robber_safe_when(curr_cop_positions).count_ones();
             manager.update(format!(
                 "compute robber strategy:\n{:.2}% in queue ({}), round {}, {:.2}% safe",
-                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
+                100.0 * (queue.len() as f32) / (cop_states.nr_states() as f32),
                 queue.len(),
                 queue.rounds_complete(),
                 100.0 * (nr_safe as f32) / (nr_map_vertices as f32),
@@ -182,13 +182,13 @@ where
 
         //line 7
         for (neigh_rotations, rotated_neigh_cop_positions) in
-            rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions)
+            rules.cop_moves_from(&cop_states, &edges, &sym, curr_cop_positions)
         {
             //if it only takes a single move to go from curr_cop_positions to rotated_neigh_cop_positions, so
             //should the other direction.
             debug_assert!(
                 rules
-                    .cop_moves_from(&cop_moves, &edges, &sym, rotated_neigh_cop_positions)
+                    .cop_moves_from(&cop_states, &edges, &sym, rotated_neigh_cop_positions)
                     .any(|(_, pos)| pos == curr_cop_positions)
             );
             debug_assert!(!neigh_rotations.is_empty());
@@ -200,10 +200,10 @@ where
                 //guarantee that rotations do the right thing
                 debug_assert!(
                     !R::IS_LAZY || {
-                        let mut unpacked_curr = cop_moves.eager_unpack(curr_cop_positions);
+                        let mut unpacked_curr = cop_states.eager_unpack(curr_cop_positions);
                         //all positions of current cop configuration.
                         let mut moved_cop_pos = usize::MAX;
-                        for rotated_neigh_pos in cop_moves.unpack(rotated_neigh_cop_positions) {
+                        for rotated_neigh_pos in cop_states.unpack(rotated_neigh_cop_positions) {
                             let unrotated = neigh_rotate.apply_backward(rotated_neigh_pos);
                             let rerotated = neigh_rotate.apply_forward(unrotated);
                             debug_assert_eq!(rerotated, rotated_neigh_pos);
@@ -263,7 +263,7 @@ where
     let result = RobberWinData {
         symmetry: sym.into_enum().into(),
         safe: f,
-        cop_moves,
+        cop_moves: cop_states,
     };
     debug_assert!(verify_continuity_robber(rules, &result, &edges, manager).is_ok());
 
@@ -283,7 +283,7 @@ pub fn verify_continuity_robber(
     manager: &thread_manager::LocalManager,
 ) -> Result<(), String> {
     // logging things
-    let nr_configs = data.cop_moves.nr_configurations();
+    let nr_configs = data.cop_moves.nr_states();
     let mut i_config = 0;
     let mut time_until_log_refresh = 1;
     let log_refresh_interval = (nr_configs / 10_000).clamp(1000, 100_000);
@@ -347,7 +347,7 @@ pub fn verify_continuity_robber(
 
 pub type UTime = u8;
 
-/// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
+/// for each cop configuration in [`CopStates`] this struct stores for each map vertex,
 /// how many more moves the police need at most to catch the robber.
 #[derive(Serialize, Deserialize)]
 pub struct TimeToWin {
@@ -357,9 +357,9 @@ pub struct TimeToWin {
 
 impl TimeToWin {
     /// returns [`Self`] if enough memory is available
-    fn new(nr_map_vertices: usize, cop_moves: &CopConfigurations) -> Option<Self> {
+    fn new(nr_map_vertices: usize, cop_states: &CopStates) -> Option<Self> {
         let mut time = BTreeMap::new();
-        for (&fst_index, indices) in &cop_moves.configurations {
+        for (&fst_index, indices) in &cop_states.configurations {
             let nr_entries = indices.len().checked_mul(nr_map_vertices)?;
 
             let mut data = Vec::new();
@@ -400,7 +400,7 @@ pub struct CopStrategy {
     #[serde(deserialize_with = "deserialize_explicit")]
     pub symmetry: ExplicitClasses,
     pub time_to_win: TimeToWin,
-    pub cop_moves: CopConfigurations,
+    pub cop_moves: CopStates,
     pub max_moves: usize,
     /// selection of at most 20 cop configurations
     /// where there is a vertex which let's the robber loose in maximal many moves
@@ -455,26 +455,26 @@ where
     }
 
     manager.update("list police positions")?;
-    let cop_moves = CopConfigurations::new(&edges, &sym, nr_cops, manager)?;
+    let cop_states = CopStates::new(&edges, &sym, nr_cops, manager)?;
 
     manager.update("aquire storage for cop strategy function")?;
-    let Some(mut time_to_win) = TimeToWin::new(edges.nr_vertices(), &cop_moves) else {
+    let Some(mut time_to_win) = TimeToWin::new(edges.nr_vertices(), &cop_states) else {
         return Err("not enoug RAM (cop strategy function too large)".to_owned());
     };
 
     manager.update("aquire storage for queue")?;
-    let Some(mut queue) = CopStratQueue::new(&cop_moves) else {
+    let Some(mut queue) = CopStratQueue::new(&cop_states) else {
         return Err("not enoug RAM (initial queue too long)".to_owned());
     };
 
     manager.update("initialise queue")?;
-    for (i, index) in izip!(0.., cop_moves.all_positions()) {
+    for (i, index) in izip!(0.., cop_states.all_positions()) {
         if i % 4096 == 0 {
             manager.recieve()?;
         }
 
         let times_at_index = &mut time_to_win[index];
-        for v in rules.vertices_in_reach(&edges, cop_moves.unpack(index)) {
+        for v in rules.vertices_in_reach(&edges, cop_states.unpack(index)) {
             times_at_index[v] = 0;
         }
     }
@@ -490,7 +490,7 @@ where
         if time_until_log_refresh == 0 {
             manager.update(format!(
                 "compute cop strategy:\n{:.2}% in queue ({}), max {}",
-                100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
+                100.0 * (queue.len() as f32) / (cop_states.nr_states() as f32),
                 queue.len(),
                 queue.curr_max()
             ))?;
@@ -522,7 +522,7 @@ where
         }
 
         for (neigh_rotations, rotated_neigh_cop_positions) in
-            rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions)
+            rules.cop_moves_from(&cop_states, &edges, &sym, curr_cop_positions)
         {
             let mut neigh_time_changed = false;
             for neigh_rotate in neigh_rotations {
@@ -560,7 +560,7 @@ where
     let mut res = CopStrategy {
         symmetry: sym.into_enum().into(),
         time_to_win,
-        cop_moves,
+        cop_moves: cop_states,
         max_moves: max_moves as usize,
         extreme_positions: Vec::new(),
         cops_win,
@@ -589,7 +589,7 @@ fn verify_continuity_cops(
     manager: &thread_manager::LocalManager,
 ) -> Result<(), String> {
     // logging things
-    let nr_configs = data.cop_moves.nr_configurations();
+    let nr_configs = data.cop_moves.nr_states();
     let mut i_config = 0;
     let mut time_until_log_refresh = 1;
     let log_refresh_interval = (nr_configs / 10_000).clamp(1000, 100_000);

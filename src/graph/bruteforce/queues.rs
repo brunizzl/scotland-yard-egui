@@ -86,7 +86,7 @@ impl BitQueue {
 /// this is special, as we know exactly what entries could possibly be enqueued.
 /// also: initially, all entries must be present.
 /// we thus don't actually use a queue, but store one bit for each
-/// [`CompactCops`] configuration held in [`CopConfigurations`].
+/// [`CompactCops`] configuration held in [`CopStates`].
 ///
 /// we then remember what the last unqueued [`CompactCops`] value was
 /// and search the next one to unqueue in the following bits.
@@ -107,10 +107,10 @@ pub struct RobberStratQueue {
 
 impl RobberStratQueue {
     /// fails if not enough memory is available
-    pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
+    pub fn new(cop_states: &CopStates) -> Option<Self> {
         let mut bit_queues = Vec::new();
         let mut firsts = Vec::new();
-        for (&fst_index, indices) in &cop_moves.configurations {
+        for (&fst_index, indices) in &cop_states.configurations {
             let queue = BitQueue::new(indices.len())?;
             bit_queues.push(queue);
             firsts.push(fst_index);
@@ -121,7 +121,7 @@ impl RobberStratQueue {
             firsts,
             first_index: 0,
             rounds_complete: 0,
-            length: cop_moves.nr_configurations(),
+            length: cop_states.nr_states(),
         })
     }
 
@@ -176,9 +176,9 @@ pub struct CopStratQueue {
 }
 
 impl CopStratQueue {
-    pub fn new(cop_moves: &CopConfigurations) -> Option<Self> {
+    pub fn new(cop_states: &CopStates) -> Option<Self> {
         let mut contained = BTreeMap::new();
-        for (&fst_index, indices) in &cop_moves.configurations {
+        for (&fst_index, indices) in &cop_states.configurations {
             let nr_entries = indices.len();
 
             let mut data = Vec::new();
@@ -189,8 +189,8 @@ impl CopStratQueue {
         }
 
         let mut queue = VecDeque::new();
-        queue.try_reserve(cop_moves.nr_configurations()).ok()?;
-        queue.extend(cop_moves.all_positions());
+        queue.try_reserve(cop_states.nr_states()).ok()?;
+        queue.extend(cop_states.all_positions());
         Some(Self {
             queue,
             status: contained,
@@ -307,7 +307,7 @@ pub mod test {
 
     #[test]
     fn robber_vs_cop_queue() {
-        let cop_moves = CopConfigurations {
+        let cop_states = CopStates {
             nr_cops: 3,
             nr_map_vertices: 100,
             configurations: BTreeMap::from_iter([
@@ -316,8 +316,8 @@ pub mod test {
                 (90, (90..100).collect_vec()),
             ]),
         };
-        let mut robber_queue = RobberStratQueue::new(&cop_moves).unwrap();
-        let mut cops_queue = CopStratQueue::new(&cop_moves).unwrap();
+        let mut robber_queue = RobberStratQueue::new(&cop_states).unwrap();
+        let mut cops_queue = CopStratQueue::new(&cop_states).unwrap();
         assert_eq!(robber_queue.len(), cops_queue.len());
         loop {
             let r_next = robber_queue.pop();

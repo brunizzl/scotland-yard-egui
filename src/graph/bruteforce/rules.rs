@@ -28,18 +28,18 @@ pub trait CopRules {
     /// that can be reached by the police in a single round.
     ///
     /// The vertices are connected via `edges` and have automorphism group `sym`.
-    /// because these positions stored in [`CopConfigurations`] may be stored in a different rotation and / or flipped,
+    /// because these positions stored in [`CopStates`] may be stored in a different rotation and / or flipped,
     /// that rotation + flip to get from the move as rotated in the input to the output
-    /// is also returned (see [`CopConfigurations::pack`]).
+    /// is also returned (see [`CopStates::pack`]).
     fn cop_moves_from<'a, S: SymmetryGroup>(
         &'a self,
-        cop_configs: &'a CopConfigurations,
+        cop_states: &'a CopStates,
         edges: &'a EdgeList,
         sym: &'a S,
         positions: CompactCopsIndex,
     ) -> impl Iterator<Item = (SmallVec<[&'a S::Auto; 4]>, CompactCopsIndex)> + 'a + Clone {
-        self.raw_cop_moves_from(edges, cop_configs.eager_unpack(positions))
-            .map(|mut cops| cop_configs.pack(sym, &mut cops))
+        self.raw_cop_moves_from(edges, cop_states.eager_unpack(positions))
+            .map(|mut cops| cop_states.pack(sym, &mut cops))
     }
 
     /// for the current mutiset of police positions `cops`,

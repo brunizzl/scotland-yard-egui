@@ -146,7 +146,7 @@ fn multiset_index(universe_size: usize, multiset: &[usize]) -> Option<usize> {
 }
 
 /// [`Self::fst_index`] is expected to be a vertex symmetry class representative and the (rotated / mirrored) position of one of the cops.
-/// [`Self::rest_index`] is an index into the [`CopConfigurations::configurations`] entry at key [`Self::fst_index`].
+/// [`Self::rest_index`] is an index into the [`CopStates::configurations`] entry at key [`Self::fst_index`].
 /// found at that entry is the packed represenation of the rest of the vertices occupied by this cop state.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct CompactCopsIndex {
@@ -156,7 +156,7 @@ pub struct CompactCopsIndex {
 
 /// keeps track of all multisets of size `self.nr_cops` and elements in  `self.nr_original_vertices`
 #[derive(Serialize, Deserialize)]
-pub struct CopConfigurations {
+pub struct CopStates {
     /// stored in usize, but this can in praxis only be veeeery small (exactly [`MAX_COPS`] in fact)
     nr_cops: usize,
     /// this influences how cops are compacted. this essentially is the base in which we store a number.
@@ -180,8 +180,8 @@ fn pack_rest(nr_vertices: usize, other_cops: &[usize]) -> usize {
     positions
 }
 
-impl CopConfigurations {
-    fn nr_configurations(&self) -> usize {
+impl CopStates {
+    fn nr_states(&self) -> usize {
         self.configurations.values().map(|c| c.len()).sum()
     }
 
@@ -339,7 +339,7 @@ impl CopConfigurations {
     }
 }
 
-/// for each cop configuration in [`CopConfigurations`] this struct stores for each map vertex,
+/// for each cop configuration in [`CopStates`] this struct stores for each map vertex,
 /// wether that vertex is safe for the robber to stand on or not.
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct SafeRobberPositions {
@@ -370,9 +370,9 @@ impl RobberPosRange {
 
 impl SafeRobberPositions {
     /// constructs self if enough memory is available
-    fn new(nr_map_vertices: usize, cop_moves: &CopConfigurations) -> Option<Self> {
+    fn new(nr_map_vertices: usize, cop_states: &CopStates) -> Option<Self> {
         let mut safe = BTreeMap::new();
-        for (&fst_index, indices) in &cop_moves.configurations {
+        for (&fst_index, indices) in &cop_states.configurations {
             let nr_entries = indices.len().checked_mul(nr_map_vertices)?;
 
             let vec_data_len = nr_entries.div_ceil(32);
@@ -452,7 +452,7 @@ mod test {
             panic!();
         };
         let (_, manager) = thread_manager::build_managers();
-        let cop_states = CopConfigurations::new(graph.edges(), sym, 5, &manager).unwrap();
+        let cop_states = CopStates::new(graph.edges(), sym, 5, &manager).unwrap();
         let fst_index = 0;
         for rest_index in 0..(cop_states.configurations[&fst_index].len()) {
             let cops_index = CompactCopsIndex { fst_index, rest_index };
