@@ -219,11 +219,8 @@ where
             }
 
             let robber_range = safe_lvl.robber_indices_at(index);
-            for cop_pos in cop_moves.unpack(index) {
-                safe_lvl.mark_robber_at(robber_range.at(cop_pos), false);
-                for n in edges.neighbors_of(cop_pos) {
-                    safe_lvl.mark_robber_at(robber_range.at(n), false);
-                }
+            for v in rules.vertices_in_reach(&edges, cop_moves.unpack(index)) {
+                safe_lvl.mark_robber_at(robber_range.at(v), false);
             }
         }
         for _ in 0..bank_capacity {
@@ -254,7 +251,7 @@ where
         if time_until_log_refresh == 0 {
             let nr_safe = safe_lvls[0].robber_safe_when(curr_cop_positions).count_ones();
             manager.update(format!(
-                "compute robber strategy:\n{:.2}% in queue ({}), runde {}, {:.2}% safe",
+                "compute robber strategy:\n{:.2}% in queue ({}), round {}, {:.2}% safe",
                 100.0 * (queue.len() as f32) / (cop_moves.nr_configurations() as f32),
                 queue.len(),
                 queue.rounds_complete(),
@@ -263,68 +260,67 @@ where
             time_until_log_refresh = 10_000;
         }
 
-        // iterate through all cops states possibly preceeding the current one and intersect
-        // what is stored as safe then with the states marked safe when cops move to curr.
-        let curr_cops = cop_moves.eager_unpack(curr_cop_positions);
-        for mut prev_cops in rules.raw_cop_moves_from(&edges, curr_cops) {
-            // update safe_should_cops_move_to_curr:
-            // in the highest energy state, the robber could only have gotten here by walking at most the allowance,
-            // the energy state below can only be reached by allowance + 1 and so on,
-            // down to the lowest energy state, which perhaps the robber reached
-            // from the (close to) highest energy state previously.
-            // the annoying thing: a given energy e can be reached by any other e' > e
-            // where (e' - e) - allowance is a multiple of energy_per_step.
-            // thus, compared to the standard algorithm, we need to do roughly a factor (bank_capacity / energy_per_step) more.
-            // note: in the standard algorithm this is only computed once for all neighbors of curr_cops.
-            // we can't do that here, because prev_cops is required to do so in the general case.
-            {
-                for prev in &mut safe_should_cops_move_to_curr {
-                    prev.set_cleared();
+        // update safe_should_cops_move_to_curr:
+        // in the highest energy state, the robber could only have gotten here by walking at most the allowance,
+        // the energy state below can only be reached by allowance + 1 and so on,
+        // down to the lowest energy state, which perhaps the robber reached
+        // from the (close to) highest energy state previously.
+        // the annoying thing: a given energy e can be reached by any other e' > e
+        // where (e' - e) - allowance is a multiple of energy_per_step.
+        // thus, compared to the standard algorithm, we need to do roughly a factor (bank_capacity / energy_per_step) more.
+        // note: in the standard algorithm this is only computed once for all neighbors of curr_cops.
+        // we can't do that here, because prev_cops is required to do so in the general case.
+        {
+            for prev in &mut safe_should_cops_move_to_curr {
+                prev.set_cleared();
+            }
+            let curr_cops = cop_moves.eager_unpack(curr_cop_positions);
+            let mut curr_safe = fog::Fog::new_filled(nr_map_vertices);
+            for (curr_balance, safe_lvl_all) in izip!(0.., &safe_lvls) {
+                // i am saddened that i chose two different integer types to store bits in fog vs SafeRobberPositions.
+                // one should fix this when writing the data structure with better cache locality for the current problem.
+                curr_safe
+                    .as_mut_slice(nr_map_vertices)
+                    .clone_from_bitslice(safe_lvl_all.robber_safe_when(curr_cop_positions));
+
+                let max_steps = (bank_capacity + allowance - curr_balance) / energy_per_step;
+                for taken_steps in 0..=max_steps {
+                    let used_energy = taken_steps * energy_per_step;
+
+                    let prev_balance = if used_energy + curr_balance >= allowance {
+                        used_energy + curr_balance - allowance
+                    } else {
+                        // assume last round the robber had balance 0.
+                        // he then got the allowance and used some of it to move (maybe 0).
+                        // at least the rest must now be found in the bank. we thus have
+                        // used_energy + curr_balance >= allowance in every possible scenario.
+                        // the current case can thus be skipped.
+                        continue;
+                    };
+                    let prev = &mut safe_should_cops_move_to_curr[prev_balance];
+
+                    // this is where we need prev_cops:
+                    // note that this step is performed backwards in time. we want to answer the question
+                    // "given the current set of assumed safe vertices, from which positions could the robber reach these?"
+                    // if the maximum number of steps the robber can do in a round is less than i guess 3,
+                    // then prev_cops is not actually required to get the correct intersection below.
+                    robber_step_computation.fog_speed = taken_steps as isize;
+                    let prev_to_curr = robber_step_computation.compute_step(&curr_safe, &curr_cops);
+                    prev.or_assign(&prev_to_curr);
                 }
-                let mut curr_safe = fog::Fog::new_filled(nr_map_vertices);
-                for (curr_balance, safe_lvl_all) in izip!(0.., &safe_lvls) {
-                    // i am saddened that i chose two different integer types to store bits in fog vs SafeRobberPositions.
-                    // one should fix this when writing the data structure with better cache locality for the current problem.
-                    curr_safe
-                        .as_mut_slice(nr_map_vertices)
-                        .clone_from_bitslice(safe_lvl_all.robber_safe_when(curr_cop_positions));
-
-                    let max_steps = (bank_capacity + allowance - curr_balance) / energy_per_step;
-                    for taken_steps in 0..=max_steps {
-                        let used_energy = taken_steps * energy_per_step;
-
-                        let prev_balance = if used_energy + curr_balance >= allowance {
-                            used_energy + curr_balance - allowance
-                        } else {
-                            // assume last round the robber had balance 0.
-                            // he then got the allowance and used some of it to move (maybe 0).
-                            // at least the rest must now be found in the bank. we thus have
-                            // used_energy + curr_balance >= allowance in every possible scenario.
-                            // the current case can thus be skipped.
-                            continue;
-                        };
-                        let prev = &mut safe_should_cops_move_to_curr[prev_balance];
-
-                        // this is where we need prev_cops:
-                        // note that this step is performed backwards in time. we want to answer the question
-                        // "given the current set of assumed safe vertices, from which positions could the robber reach these?"
-                        // if the maximum number of steps the robber can do in a round is less than i guess 3,
-                        // then prev_cops is not actually required to get the correct intersection below.
-                        robber_step_computation.fog_speed = taken_steps as isize;
-                        let prev_to_curr =
-                            robber_step_computation.compute_step(&curr_safe, &prev_cops);
-                        prev.or_assign(&prev_to_curr);
-                    }
-                }
-
-                // whenever an energy is safe for the robber, all energy levels above should be as well.
-                debug_assert!((0..nr_map_vertices).all(|v| {
-                    let to_curr = safe_should_cops_move_to_curr.iter();
-                    to_curr.map(|fog| fog.is_foggy_at(v)).is_sorted()
-                }));
             }
 
-            let (autos_prev_to_repr, prev_cops_repr) = cop_moves.pack(&sym, &mut prev_cops);
+            // whenever an energy is safe for the robber, all energy levels above should be as well.
+            debug_assert!((0..nr_map_vertices).all(|v| {
+                let to_curr = safe_should_cops_move_to_curr.iter();
+                to_curr.map(|fog| fog.is_foggy_at(v)).is_sorted()
+            }));
+        }
+
+        // iterate through all cops states possibly preceeding the current one and intersect
+        // what is stored as safe then with the states marked safe when cops move to curr.
+        let all_prev_cops = rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions);
+        for (autos_prev_to_repr, prev_cops_repr) in all_prev_cops {
             // except for additionally looping over the different balances,
             // this structure is the same as in the standard alrorithm.
             let mut change_at_any_auto_any_balance = false;
@@ -448,12 +444,8 @@ where
         }
 
         let energies = &mut min_energy[index];
-        let raw_cops = RawCops::from_iter(cop_moves.unpack(index));
-        for &cop_pos in raw_cops.iter() {
-            energies[cop_pos] = INFINITY;
-            for n in edges.neighbors_of(cop_pos) {
-                energies[n] = INFINITY;
-            }
+        for v in rules.vertices_in_reach(&edges, cop_moves.unpack(index)) {
+            energies[v] = INFINITY;
         }
     }
 
@@ -479,63 +471,61 @@ where
             time_until_log_refresh = 10_000;
         }
 
-        // we need the raw cops, because we need them to block the paths for the robber.
-        let curr_cops = cop_moves.eager_unpack(curr_cop_positions);
-        for mut prev_cops in rules.raw_cop_moves_from(&edges, curr_cops) {
-            // update energy_should_cops_move_to_curr:
-            // in the highest energy state, the robber could only have gotten here by walking at most the allowance,
-            // the energy state below can only be reached by allowance + 1 and so on,
-            // down to the lowest energy state, which perhaps the robber reached
-            // from the (close to) highest energy state previously.
-            {
-                debug_assert!(vertex_queue.is_empty());
-                for (v, &curr_at_v, prev_at_v) in izip!(
-                    0..,
-                    &min_energy[curr_cop_positions],
-                    &mut energy_should_cops_move_to_curr
-                ) {
-                    // initialise each energy value with the required previous energy,
-                    // assuming the robber was already at v in the last round.
-                    *prev_at_v = match curr_at_v {
-                        // infinity - allowance is still infinity.
-                        INFINITY => INFINITY as isize,
-                        // note that we must allow negative values here.
-                        // in the case where the value is negative, the interpretation is that this
-                        // is not the final computed value, but v is the destination with
-                        // the robber previously standing sufficiently far away.
-                        // these far previous robber positions are discovered in the while loop below.
-                        _ => curr_at_v as isize - allowance,
-                    };
-                    // only enter v into queue if the current value could have been attained by moving to this position.
-                    if *prev_at_v + energy_per_step <= bank_capacity {
-                        vertex_queue.push_back(v);
-                    }
+        // update energy_should_cops_move_to_curr:
+        // in the highest energy state, the robber could only have gotten here by walking at most the allowance,
+        // the energy state below can only be reached by allowance + 1 and so on,
+        // down to the lowest energy state, which perhaps the robber reached
+        // from the (close to) highest energy state previously.
+        {
+            debug_assert!(vertex_queue.is_empty());
+            for (v, &curr_at_v, prev_at_v) in izip!(
+                0..,
+                &min_energy[curr_cop_positions],
+                &mut energy_should_cops_move_to_curr
+            ) {
+                // initialise each energy value with the required previous energy,
+                // assuming the robber was already at v in the last round.
+                *prev_at_v = match curr_at_v {
+                    // infinity - allowance is still infinity.
+                    INFINITY => INFINITY as isize,
+                    // note that we must allow negative values here.
+                    // in the case where the value is negative, the interpretation is that this
+                    // is not the final computed value, but v is the destination with
+                    // the robber previously standing sufficiently far away.
+                    // these far previous robber positions are discovered in the while loop below.
+                    _ => curr_at_v as isize - allowance,
+                };
+                // only enter v into queue if the current value could have been attained by moving to this position.
+                if *prev_at_v + energy_per_step <= bank_capacity {
+                    vertex_queue.push_back(v);
                 }
-                for &cop in prev_cops.iter() {
-                    energy_should_cops_move_to_curr[cop] = INFINITY as isize;
+            }
+            let curr_cops = cop_moves.eager_unpack(curr_cop_positions);
+            while let Some(v) = vertex_queue.pop_front() {
+                let prev_at_v = energy_should_cops_move_to_curr[v];
+                debug_assert!(prev_at_v <= bank_capacity);
+                let prev_to_v = prev_at_v + energy_per_step;
+                if prev_to_v > bank_capacity {
+                    continue;
                 }
-                while let Some(v) = vertex_queue.pop_front() {
-                    let prev_at_v = energy_should_cops_move_to_curr[v];
-                    debug_assert!(prev_at_v <= bank_capacity);
-                    let prev_to_v = prev_at_v + energy_per_step;
-                    if prev_to_v > bank_capacity {
-                        continue;
-                    }
-                    // check for each neighbor n of v, whether it would be better to not end a move there as robber,
-                    // but instead continue the move and walk to v.
-                    // (with the precondition that it makes sense to walk to / start in n in the first place.)
-                    for n in edges.neighbors_of(v) {
-                        let prev_at_n = &mut energy_should_cops_move_to_curr[n];
-                        if *prev_at_n > prev_to_v && !prev_cops.contains(&n) {
-                            *prev_at_n = prev_to_v;
-                            vertex_queue.push_back(n);
-                        }
+                // check for each neighbor n of v, whether it would be better to not end a move there as robber,
+                // but instead continue the move and walk to v.
+                // (with the precondition that it makes sense to walk to / start in n in the first place.)
+                for n in edges.neighbors_of(v) {
+                    let prev_at_n = &mut energy_should_cops_move_to_curr[n];
+                    if *prev_at_n > prev_to_v && !curr_cops.contains(&n) {
+                        *prev_at_n = prev_to_v;
+                        vertex_queue.push_back(n);
                     }
                 }
             }
+            let energy_is_inf = |&c| energy_should_cops_move_to_curr[c] == INFINITY as isize;
+            debug_assert!(curr_cops.iter().all(energy_is_inf));
+        }
 
+        let all_prev_cops = rules.cop_moves_from(&cop_moves, &edges, &sym, curr_cop_positions);
+        for (autos_prev_to_repr, prev_cops_repr) in all_prev_cops {
             let mut prev_energy_changed = false;
-            let (autos_prev_to_repr, prev_cops_repr) = cop_moves.pack(&sym, &mut prev_cops);
             for auto_prev_to_repr in autos_prev_to_repr {
                 for (v, prev_min_energy) in izip!(
                     auto_prev_to_repr.backward(),

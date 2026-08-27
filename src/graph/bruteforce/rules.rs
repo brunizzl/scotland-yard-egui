@@ -42,6 +42,16 @@ pub trait CopRules {
             .map(|mut cops| cop_configs.pack(sym, &mut cops))
     }
 
+    /// for the current mutiset of police positions `cops`,
+    /// enumerate all vertices that can be reached by a cop in a single round.
+    /// note: (except for multiplicities), the same output should be produced by
+    /// [Self::raw_cop_moves_from] combined with flat_map iterating over the vertices of each returned cop state.
+    fn vertices_in_reach<'a>(
+        &'a self,
+        edges: &'a EdgeList,
+        cops: impl Iterator<Item = usize> + 'a,
+    ) -> impl Iterator<Item = usize> + 'a;
+
     /// as this was assumed for some time in the program,
     /// it is important to be able to test for this case.
     const IS_LAZY: bool = false;
@@ -65,6 +75,15 @@ impl CopRules for LazyCops {
                 unpacked_neigh
             })
         })
+    }
+
+    fn vertices_in_reach<'a>(
+        &'a self,
+        edges: &'a EdgeList,
+        cops: impl Iterator<Item = usize> + 'a,
+    ) -> impl Iterator<Item = usize> + 'a {
+        let with_neighs = |c| std::iter::once(c).chain(edges.neighbors_of(c));
+        cops.flat_map(with_neighs)
     }
 
     const IS_LAZY: bool = true;
@@ -146,6 +165,15 @@ impl CopRules for GeneralEagerCops {
 
             std::iter::from_fn(yield_next)
         })
+    }
+
+    fn vertices_in_reach<'a>(
+        &'a self,
+        edges: &'a EdgeList,
+        cops: impl Iterator<Item = usize> + 'a,
+    ) -> impl Iterator<Item = usize> + 'a {
+        let with_neighs = |c| std::iter::once(c).chain(edges.neighbors_of(c));
+        cops.flat_map(with_neighs)
     }
 }
 

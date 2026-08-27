@@ -145,18 +145,9 @@ fn multiset_index(universe_size: usize, multiset: &[usize]) -> Option<usize> {
     Some(res)
 }
 
-/// this corresponds to one entry in CopConfigurations:
-/// [`Self::fst_cop`] is expected to be a vertex symmetry class representative and the (rotated / mirrored) position of one of the cops.
-/// [`Self::rest_cops`] represents the compacted sorted tuple of the other cops positions (obv. rotated the same as fst_cop).
-/// thus `(0..nr_symmetry_classes).contains(&self.fst_cop)`
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct CompactCops {
-    fst_cop: usize,
-    rest_cops: usize,
-}
-
-/// same structure as [`CompactCops`], except [`Self::rest_index`] is an index into the [`CopConfigurations::configurations`] entry
-/// at key [`Self::fst_index`]
+/// [`Self::fst_index`] is expected to be a vertex symmetry class representative and the (rotated / mirrored) position of one of the cops.
+/// [`Self::rest_index`] is an index into the [`CopConfigurations::configurations`] entry at key [`Self::fst_index`].
+/// found at that entry is the packed represenation of the rest of the vertices occupied by this cop state.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct CompactCopsIndex {
     fst_index: usize,
@@ -166,8 +157,15 @@ pub struct CompactCopsIndex {
 /// keeps track of all multisets of size `self.nr_cops` and elements in  `self.nr_original_vertices`
 #[derive(Serialize, Deserialize)]
 pub struct CopConfigurations {
-    nr_cops: usize, //stored in usize, but this can in praxis only be veeeery small
+    /// stored in usize, but this can in praxis only be veeeery small (exactly [`MAX_COPS`] in fact)
+    nr_cops: usize,
+    /// this influences how cops are compacted. this essentially is the base in which we store a number.
+    /// each digit (in this base) of this number then corresponds to a vertex,
+    /// so the number as a whole to a tuple of vertices. this tuple is (part of) our cop state.
     nr_map_vertices: usize,
+    /// this has one entry for the representative of every cop state equivalency class.
+    /// the outher map is indexed by the "lowest" cop, e.g. the cop on the smallest vertex.
+    /// each entry of the inner vec is the compacted form of the other cops. see also [`CompactCopsIndex`].
     configurations: BTreeMap<usize, Vec<usize>>,
 }
 
@@ -193,16 +191,6 @@ impl CopConfigurations {
 
     pub fn nr_cops(&self) -> usize {
         self.nr_cops
-    }
-
-    /// this function exists mostly as an explainer of [`CompactCopsIndex`] and [`CompactCops`]
-    #[allow(dead_code)]
-    fn get(&self, index: CompactCopsIndex) -> CompactCops {
-        let configs_part = self.configurations.get(&index.fst_index).unwrap();
-        CompactCops {
-            fst_cop: index.fst_index,
-            rest_cops: configs_part[index.rest_index],
-        }
     }
 
     /// constructs self if enough memory is available
@@ -301,7 +289,7 @@ impl CopConfigurations {
         configs_part[index.rest_index]
     }
 
-    /// returns the configuration stored at index
+    /// returns the configuration stored at `index`
     pub fn unpack(&self, index: CompactCopsIndex) -> impl Iterator<Item = usize> + Clone + use<> {
         let mut positions = self.rest_positions_at(index);
         let nr_vertices = self.nr_map_vertices();

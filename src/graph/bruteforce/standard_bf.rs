@@ -121,11 +121,8 @@ where
 
         //line 2
         let robber_range = f.robber_indices_at(index);
-        for cop_pos in cop_moves.unpack(index) {
-            f.mark_robber_at(robber_range.at(cop_pos), false);
-            for n in edges.neighbors_of(cop_pos) {
-                f.mark_robber_at(robber_range.at(n), false);
-            }
+        for v in rules.vertices_in_reach(&edges, cop_moves.unpack(index)) {
+            f.mark_robber_at(robber_range.at(v), false);
         }
 
         // special case treatment: if nr cops is larger than nr neighbors of vertex,
@@ -477,11 +474,8 @@ where
         }
 
         let times_at_index = &mut time_to_win[index];
-        for cop_pos in cop_moves.unpack(index) {
-            times_at_index[cop_pos] = 0;
-            for n in edges.neighbors_of(cop_pos) {
-                times_at_index[n] = 0;
-            }
+        for v in rules.vertices_in_reach(&edges, cop_moves.unpack(index)) {
+            times_at_index[v] = 0;
         }
     }
 
