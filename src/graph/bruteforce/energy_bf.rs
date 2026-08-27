@@ -289,7 +289,7 @@ where
                         .as_mut_slice(nr_map_vertices)
                         .clone_from_bitslice(safe_lvl_all.robber_safe_when(curr_cop_positions));
 
-                    let max_steps = (bank_capacity - curr_balance + allowance) / energy_per_step;
+                    let max_steps = (bank_capacity + allowance - curr_balance) / energy_per_step;
                     for taken_steps in 0..=max_steps {
                         let used_energy = taken_steps * energy_per_step;
 
@@ -318,14 +318,10 @@ where
                 }
 
                 // whenever an energy is safe for the robber, all energy levels above should be as well.
-                for v in 0..nr_map_vertices {
-                    debug_assert!(
-                        safe_should_cops_move_to_curr
-                            .iter()
-                            .map(|fog| fog.is_foggy_at(v))
-                            .is_sorted()
-                    );
-                }
+                debug_assert!((0..nr_map_vertices).all(|v| {
+                    let to_curr = safe_should_cops_move_to_curr.iter();
+                    to_curr.map(|fog| fog.is_foggy_at(v)).is_sorted()
+                }));
             }
 
             let (autos_prev_to_repr, prev_cops_repr) = cop_moves.pack(&sym, &mut prev_cops);

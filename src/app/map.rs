@@ -228,7 +228,7 @@ impl Map {
             } else {
                 Shape::SingleVertex
             };
-            
+
             let shape_changed = curr_shape.draw_menu(ui);
             debug_assert!(curr_shape == &old_shape || shape_changed);
             if shape_changed {

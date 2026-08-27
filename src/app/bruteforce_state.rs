@@ -47,6 +47,11 @@ impl GameType {
         // the robber also helps.
         self.nr_cops + 1
     }
+
+    fn print_maybe_resolution(&self) -> String {
+        let res = self.shape.maybe_resolution();
+        res.map_or(String::new(), |r| format!(" with resolution {r}"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -589,10 +594,10 @@ impl BruteforceComputationState {
         };
         ui.add(
             Label::new(format!(
-                "robber {outcome_str} vs {cops_str} ({}) on {} with resolution {} {confidence_str}",
+                "robber {outcome_str} vs {cops_str} ({}) on {}{} {confidence_str}",
                 game_type.cop_rules.name(),
                 game_type.shape.variant_string(),
-                game_type.shape.resolution()
+                game_type.print_maybe_resolution()
             ))
             .extend(),
         );
@@ -614,11 +619,11 @@ impl BruteforceComputationState {
 
         ui.add(
             Label::new(format!(
-                "robber ({}) {outcome_str} vs {cops_str} ({}) on {} with resolution {}",
+                "robber ({}) {outcome_str} vs {cops_str} ({}) on {}{}",
                 strat.params.print_compact(),
                 game_type.cop_rules.name(),
                 game_type.shape.variant_string(),
-                game_type.shape.resolution()
+                game_type.print_maybe_resolution()
             ))
             .extend(),
         );
@@ -636,10 +641,10 @@ impl BruteforceComputationState {
 
         ui.add(
             Label::new(format!(
-                "{cops_str} ({}) {outcome}{outcome_end} on {} with resolution {} (max. {} moves)",
+                "{cops_str} ({}) {outcome}{outcome_end} on {}{} (max. {} moves)",
                 game_type.cop_rules.name(),
                 game_type.shape.variant_string(),
-                game_type.shape.resolution(),
+                game_type.print_maybe_resolution(),
                 strat.max_moves,
             ))
             .extend(),
@@ -651,14 +656,14 @@ impl BruteforceComputationState {
         let rules = game_type.cop_rules.name();
         let not = if sol.is_cleanable() { "" } else { " NOT" };
         let shape = game_type.shape.variant_string();
-        let res = game_type.shape.resolution();
+        let maybe_res = game_type.print_maybe_resolution();
         let vis = sol.visibility;
         let speed = sol.fog_speed;
 
         ui.add(
             Label::new(format!(
                 "{nr_cleaners} cleaner ({rules}, vis-range {vis}, speed {speed}) \
-                can{not} clean {shape} with resolution {res}",
+                can{not} clean {shape}{maybe_res}",
             ))
             .extend(),
         );

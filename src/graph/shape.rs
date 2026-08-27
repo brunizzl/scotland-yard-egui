@@ -486,37 +486,43 @@ impl CustomBuild {
         self.build_steps_string = self.print_build_steps();
     }
 
+    /// returns change as `.0` and the special case where the change is that we don't
+    /// have a custom graph anymore, but return back to [`Self::basis`] as `.1`.
     #[must_use]
-    pub fn draw_menu(&mut self, ui: &mut egui::Ui) -> bool {
+    pub fn draw_menu(&mut self, ui: &mut egui::Ui) -> (bool, Option<Shape>) {
         let mut change = false;
-        crate::app::menu_button_closing_outside(ui, "Build Steps", |ui| {
+        let draw = |ui: &mut egui::Ui| {
             ui.horizontal(|ui| {
                 ui.label("Name:");
                 ui.text_edit_singleline(&mut self.name);
             });
+
             ui.add_space(5.0);
             ui.label(BuildStep::EXPLAINER);
+
             ui.add_space(5.0);
             ui.label(format!("Base: {}", self.basis.name_str()));
+
             ui.add_space(5.0);
-            let (recompute_button, delete_button) = ui
+            let (recompute_button, delete_button, steal_base_button) = ui
                 .horizontal(|ui| {
                     let recompute = ui
                         .button("apply")
                         .on_hover_text("parse text, delete erronious parts, build graph");
-                    ui.add_space(100.0);
+
+                    ui.add_space(80.0);
                     let delete = ui.button(" 🗑 ").on_hover_text("delete graph");
-                    (recompute, delete)
+
+                    ui.add_space(80.0);
+                    let steal_base = (self.basis != Shape::SingleVertex).then(|| {
+                        change = true;
+                        ui.button("return to base")
+                    });
+
+                    (recompute, delete, steal_base)
                 })
                 .inner;
-            if delete_button.clicked() {
-                // important: keep basis.
-                self.build_steps.clear();
-                self.build_steps_string.clear();
-                self.future_build_steps.clear();
-                self.name = CustomBuild::create_new_name();
-                change |= true;
-            }
+
             ui.add_space(5.0);
             let text_edit = egui::ScrollArea::vertical()
                 .min_scrolled_height(ui.content_rect().height() * 0.35)
@@ -525,10 +531,26 @@ impl CustomBuild {
                 });
             if text_edit.inner.lost_focus() || recompute_button.clicked() {
                 self.parse_build_steps();
-                change |= true;
+                change = true;
             }
-        });
-        change
+
+            if delete_button.clicked() {
+                // important: keep basis.
+                self.build_steps.clear();
+                self.build_steps_string.clear();
+                self.future_build_steps.clear();
+                self.name = CustomBuild::create_new_name();
+                change = true;
+            }
+
+            steal_base_button
+                .is_some_and(|button| button.clicked())
+                .then(|| std::mem::replace(&mut self.basis, Shape::SingleVertex))
+        };
+
+        let menu_response = crate::app::menu_button_closing_outside(ui, "Build Steps", draw);
+        let stolen_base = menu_response.inner.flatten();
+        (change, stolen_base)
     }
 }
 
@@ -746,7 +768,8 @@ impl Shape {
         }
     }
 
-    pub fn resolution(&self) -> usize {
+    /// only returns a resolution where it makes sense
+    pub fn maybe_resolution(&self) -> Option<usize> {
         match self {
             Self::Tetrahedron(r)
             | Self::Octahedron(r)
@@ -759,13 +782,17 @@ impl Shape {
             | Self::TriangGrid(r, _)
             | Self::SquareGrid(r, _)
             | Self::RegularPolygon2D(r, _)
-            | Self::Random2D(r, _) => r.0,
+            | Self::Random2D(r, _) => Some(r.0),
 
-            Self::SingleVertex => 0,
-            Self::TriangTorusSkewed(dx, _) => *dx as usize,
-            Self::Custom(c) => c.basis.resolution(),
-            Self::FromFile(ff) => ff.resolution.0,
+            Self::SingleVertex => None,
+            Self::TriangTorusSkewed(dx, _) => Some(*dx as usize),
+            Self::Custom(c) => c.basis.maybe_resolution(),
+            Self::FromFile(ff) => Some(ff.resolution.0),
         }
+    }
+
+    pub fn resolution(&self) -> usize {
+        self.maybe_resolution().unwrap_or(0)
     }
 
     /// these are the names used for file names etc. we thus want to keep them stable.
@@ -847,11 +874,12 @@ impl Shape {
                 s if s.is_pure_custom()
             );
 
-            if crate::app::NATIVE && !matches!(self, Self::Custom(_)) {
+            if !matches!(self, Self::Custom(_)) {
                 let extend_msg = "Extend Current Graph";
                 let extend_radio = egui::RadioButton::new(false, extend_msg);
                 if ui.add(extend_radio).clicked() {
-                    *self = Self::Custom(Box::new(CustomBuild::new(self.clone())));
+                    let base = std::mem::replace(self, Self::SingleVertex);
+                    *self = Self::Custom(Box::new(CustomBuild::new(base)));
                     change = true;
                 }
             }
@@ -902,7 +930,14 @@ impl Shape {
                 wrap.0 ^= flip;
                 flip
             },
-            Shape::Custom(c) => c.draw_menu(ui),
+            Shape::Custom(c) => {
+                let (change, basis) = c.draw_menu(ui);
+                if let Some(shape) = basis {
+                    *self = shape;
+                    assert!(change);
+                }
+                change
+            },
             Shape::FromFile(ff) => ff.update(ui),
         };
 
@@ -1013,7 +1048,6 @@ pub mod v1 {
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
     pub enum Shape {
-        /// only (intendet to be) used as [`CustomBuild::basis`].
         SingleVertex,
         Tetrahedron,
         Octahedron,
@@ -1030,12 +1064,7 @@ pub mod v1 {
         SquareGrid,
         RegularPolygon2D(isize),
         Random2D(u32),
-        /// really plays two roles:
-        /// either with basis shape [`Shape::SingleVertex`] as completely custom graph
-        /// or with a different shape as extension of this (then non-trivial) base graph.
-        /// (the second role is -currently- only available if compiled natively)
         Custom(Box<CustomBuild>),
-        /// for obvious reasons only available if compiled natively.
         FromFile(Box<FromFile>),
     }
 

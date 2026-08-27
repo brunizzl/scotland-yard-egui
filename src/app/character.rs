@@ -1388,9 +1388,17 @@ impl State {
     /// is a cop and if he already moved in the current round.
     fn mark_cops_moved_this_turn(&self) -> (Id, Box<[bool]>) {
         let mut moved_this_turn = Box::from(vec![false; self.characters.len()]);
-        // if no moves where made so far, we assume the robber was just set on the board, thereby moving last.
-        let robber_moved_last = self.last_moved().is_none_or(|c| c.id.is_robber());
-        if robber_moved_last {
+
+        let robber_moved_last = self.last_moved().is_some_and(|c| c.id.is_robber());
+        if robber_moved_last && let bf::DynRobberRules::Energy(e) = self.robber_rules {
+            // if the last robber move was via clicking at menu point "end move and stay put", we respect that.
+            let moved_in_place = matches!(&self.past_moves[..], [.., (0, u), (0, v)] if u == v);
+            if !moved_in_place && self.curr_robber_energy() >= e.energy_per_step {
+                return (Id::Robber, moved_this_turn);
+            }
+        }
+        // if no moves where made so far, we assume the robber was just set on the board, so it's the cops turn.
+        if robber_moved_last || self.last_moved().is_none() {
             return (Id::DEFAULT_COP, moved_this_turn);
         }
         let max_moving_cops = match self.cop_rules {
@@ -1426,9 +1434,7 @@ impl State {
         if !self.show_allowed_next_steps {
             return;
         }
-        if self.past_moves.is_empty() && !draw_all {
-            return;
-        }
+
         let (current_turn, moved_this_turn) = self.mark_cops_moved_this_turn();
         let radius = style.size() * con.scale * 6.5;
         for (ch_i, ch) in izip!(0.., self.all()) {
@@ -1519,7 +1525,7 @@ impl State {
         let params = self.energy_params();
         let mut bank = self.init_robber_energy;
         let mut who_moved_where = self.who_moved_where().peekable();
-        let mut robber_v = None;
+        let mut robber_v = usize::MAX;
         loop {
             bank = usize::min(bank, params.bank_capacity);
             while let Some((Id::Cop(_), _)) = who_moved_where.peek() {
@@ -1527,8 +1533,8 @@ impl State {
             }
             let mut nr_robber_steps = 0;
             while let Some(&(Id::Robber, v)) = who_moved_where.peek() {
-                nr_robber_steps += robber_v.is_some_and(|rv| rv != v) as usize;
-                robber_v = Some(v);
+                nr_robber_steps += (robber_v != v) as usize;
+                robber_v = v;
                 who_moved_where.next();
             }
 
