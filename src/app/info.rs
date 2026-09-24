@@ -937,7 +937,7 @@ impl Info {
     /// but instead an equilavent formulation which gives rise to a linear time algorithm:
     /// the function `f: vertices -> N` is computed as follows.
     ///
-    /// ```
+    /// ```compile_fail (this is pseudocode)
     /// f(v) := if not v in cop hull interior {
     ///     -min dist(v, cop) over all cops
     /// } else {

@@ -288,23 +288,20 @@ where
                 for taken_steps in 0..=max_steps {
                     let used_energy = taken_steps * energy_per_step;
 
-                    let prev_balance = if used_energy + curr_balance >= allowance {
-                        used_energy + curr_balance - allowance
-                    } else {
+                    if bank_capacity >= allowance && used_energy + curr_balance < allowance {
                         // assume last round the robber had balance 0.
                         // he then got the allowance and used some of it to move (maybe 0).
+                        // this branch assumes the bank can hold at least the allowance.
                         // at least the rest must now be found in the bank. we thus have
                         // used_energy + curr_balance >= allowance in every possible scenario.
                         // the current case can thus be skipped.
                         continue;
-                    };
+                    }
+                    let prev_balance = (used_energy + curr_balance).saturating_sub(allowance);
                     let prev = &mut safe_should_cops_move_to_curr[prev_balance];
 
-                    // this is where we need prev_cops:
                     // note that this step is performed backwards in time. we want to answer the question
                     // "given the current set of assumed safe vertices, from which positions could the robber reach these?"
-                    // if the maximum number of steps the robber can do in a round is less than i guess 3,
-                    // then prev_cops is not actually required to get the correct intersection below.
                     robber_step_computation.fog_speed = taken_steps as isize;
                     let prev_to_curr = robber_step_computation.compute_step(&curr_safe, &curr_cops);
                     prev.or_assign(&prev_to_curr);
