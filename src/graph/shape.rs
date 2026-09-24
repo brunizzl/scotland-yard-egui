@@ -1,5 +1,6 @@
 use std::io::Read;
 
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 pub fn float_to_custom([x, y, z]: [f32; 3]) -> [i32; 3] {
@@ -554,6 +555,14 @@ impl CustomBuild {
     }
 }
 
+/// the payload of the [`FromFile`] type.
+#[derive(Debug, Default, Clone)]
+struct FromFileData {
+    steps: Vec<BuildStep>,
+    steps_string: String,
+    is_3d: bool,
+}
+
 /// in folder "custom-graphs", one can eighter store a single [`FromFile::class_name`].txt
 /// or a folder with name [`FromFile::class_name`] with entries `0.txt`, `1.txt`, `2.txt`, ...
 /// the respective files must contain the text representation of [`BuildStep`]'s.
@@ -563,7 +572,7 @@ pub struct FromFile {
     class_name: String,
     resolution: Resolution,
     #[serde(skip)]
-    data: Option<(Vec<BuildStep>, String)>,
+    data: Option<FromFileData>,
     #[serde(skip)]
     build_error: Option<String>,
 }
@@ -621,7 +630,18 @@ impl FromFile {
         let size_hint = file_content.len() / 10 + 10;
         let steps = parse_steps(file_content, size_hint);
         let steps_string = print_steps(&steps);
-        self.data = Some((steps, steps_string));
+        let z_is_const = steps
+            .iter()
+            .filter_map(|step| match step {
+                BuildStep::Vertex(_, [_, _, z]) => Some(*z),
+                _ => None,
+            })
+            .all_equal();
+        self.data = Some(FromFileData {
+            steps,
+            steps_string,
+            is_3d: !z_is_const,
+        });
         self.build_error = None;
     }
 
@@ -638,11 +658,12 @@ impl FromFile {
                 crate::app::menu_button_closing_outside(ui, boom, |ui| {
                     ui.label(err);
                 });
-            } else if let Some((_, steps_str)) = &self.data {
+            } else if let Some(FromFileData { steps_string, .. }) = &self.data {
                 crate::app::menu_button_closing_outside(ui, "☺", |ui| {
                     ui.label("parsed data:");
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.add(egui::Label::new(steps_str).wrap_mode(egui::TextWrapMode::Extend));
+                        let label = egui::Label::new(steps_string);
+                        ui.add(label.wrap_mode(egui::TextWrapMode::Extend));
                     });
                 });
             }
@@ -667,7 +688,7 @@ impl FromFile {
             single_vertex
         };
 
-        if let Some((steps, _)) = &this.data {
+        if let Some(FromFileData { steps, .. }) = &this.data {
             let empty = super::Embedding2D::empty();
             let mut result = super::Embedding3D::from_2d(empty, Shape::SingleVertex);
             result.extend_custom(steps);
@@ -1029,7 +1050,7 @@ impl Shape {
             | Self::Random2D(_, _) => false,
 
             Self::Custom(c) => c.basis.is_3d(),
-            Self::FromFile(_) => false,
+            Self::FromFile(ff) => ff.data.as_ref().is_some_and(|d| d.is_3d),
         }
     }
 }

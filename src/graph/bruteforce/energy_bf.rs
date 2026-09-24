@@ -607,19 +607,6 @@ mod test {
                     compute_robber_energy_strat_naive(rules, win_params, 1, edges, sym, &manager)
                         .unwrap();
 
-                let mut nr_wrong = 0;
-                let mut nr_total = 0;
-                for pos in win_outcome.cop_states.all_positions() {
-                    nr_total += 1;
-                    let energy = &win_outcome.min_safe_energy[pos];
-                    let energy_naive = &win_outcome_naive.min_safe_energy[pos];
-                    if energy != energy_naive {
-                        nr_wrong += 1;
-                        println!("{pos:?}\n{energy:?}\n{energy_naive:?}\n");
-                    }
-                }
-                println!(" -> {nr_wrong} / {nr_total} wrong\n\n");
-                // TODO: investigate why this fails for n == 4 and n == 5 (but oooonly in edge cases)
                 assert!(win_outcome.min_safe_energy == win_outcome_naive.min_safe_energy);
                 assert!(win_outcome_naive.min_initial_robber_energy == 0);
                 assert!(win_outcome.min_initial_robber_energy == 0);
