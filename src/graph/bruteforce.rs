@@ -211,7 +211,7 @@ impl CopStates {
         }
 
         if (nr_map_vertices - 1).checked_pow((nr_cops - 1) as u32).is_none() {
-            return Err("Polizeipositionen passen nicht in usize".to_string());
+            return Err("police positions don't fit into usize".to_string());
         }
 
         // logging info + management
@@ -237,7 +237,7 @@ impl CopStates {
                 time_until_log_refresh -= 1;
                 if time_until_log_refresh == 0 {
                     manager.update(format!(
-                        "liste Coppositionen:\n{:.2}%, aktuell {curr_config:?}",
+                        "list cop states:\n{:.2}%, currently {curr_config:?}",
                         (i_configuration as f64) / (nr_configurations as f64) * 100.0
                     ))?;
                     time_until_log_refresh = log_refresh_interval;
@@ -249,7 +249,7 @@ impl CopStates {
                 if curr_config == repr {
                     let packed = pack_rest(nr_map_vertices, &curr_config[1..]);
                     if configurations_section.try_reserve(1).is_err() {
-                        return Err("Zu wenig Speicherplatz für Polizeipositionen".to_string());
+                        return Err("not enough memory to fit cop states".to_string());
                     }
                     configurations_section.push(packed);
                 }

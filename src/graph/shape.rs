@@ -679,7 +679,6 @@ impl FromFile {
 
     pub fn build(mut this: Box<Self>) -> super::Embedding3D {
         if this.data.is_none() && this.build_error.is_none() {
-            println!("rebuild");
             this.reload();
         }
         let fallback = |this| {
