@@ -69,6 +69,7 @@ enum WorkResultData {
     Robber(GameOutcome),
     RobberWithEnergy(bf::EnergyRobberStrat),
     Cops(bf::CopStrategy),
+    CopsWithEnergy(bf::EnergyCopStrat),
     Fog(bf::FogSolution),
     None,
 }
@@ -160,6 +161,16 @@ impl From<Result<bf::EnergyRobberStrat, String>> for WorkResult {
     }
 }
 
+impl From<Result<bf::EnergyCopStrat, String>> for WorkResult {
+    fn from(value: Result<bf::EnergyCopStrat, String>) -> Self {
+        let (data, error) = match value {
+            Ok(sol) => (WorkResultData::CopsWithEnergy(sol), None),
+            Err(err) => (WorkResultData::None, Some(err)),
+        };
+        Self { data, error }
+    }
+}
+
 use bf::thread_manager::Command;
 use bf::thread_manager::ExternManager as Manager;
 struct Worker {
@@ -209,6 +220,7 @@ pub struct BruteforceComputationState {
     robber_strats: BTreeMap<GameType, GameOutcome>,
     robber_energy_stats: BTreeMap<GameType, bf::EnergyRobberStrat>,
     cop_strats: BTreeMap<GameType, bf::CopStrategy>,
+    cop_energy_strats: BTreeMap<GameType, bf::EnergyCopStrat>,
     fog_strats: BTreeMap<GameType, bf::FogSolution>,
     errors: Vec<(GameType, String)>,
 }
@@ -223,6 +235,7 @@ impl BruteforceComputationState {
             robber_strats: BTreeMap::new(),
             robber_energy_stats: BTreeMap::new(),
             cop_strats: BTreeMap::new(),
+            cop_energy_strats: BTreeMap::new(),
             fog_strats: BTreeMap::new(),
             errors: Vec::new(),
         }
@@ -232,8 +245,21 @@ impl BruteforceComputationState {
         self.robber_strats.get(game_type).map(|o| &o.outcome)
     }
 
-    pub fn police_strat_for(&self, game_type: &GameType) -> Option<&bf::CopStrategy> {
-        self.cop_strats.get(game_type)
+    pub fn police_strat_for<'a>(
+        &'a self,
+        game_type: &GameType,
+        bank: Option<usize>,
+    ) -> Option<bf::CopStrategyRef<'a>> {
+        match game_type.robber_rules {
+            bf::DynRobberRules::Normal => {
+                self.cop_strats.get(game_type).map(bf::CopStrategy::as_ref)
+            },
+            bf::DynRobberRules::Energy(_) => {
+                let strat = self.cop_energy_strats.get(game_type);
+                strat.and_then(|s| bank.and_then(|b| s.as_ref(b)))
+            },
+            bf::DynRobberRules::Fog(_) => None,
+        }
     }
 
     pub fn energy_strat_for(&self, game_type: &GameType) -> Option<&bf::EnergyRobberStrat> {
@@ -257,6 +283,9 @@ impl BruteforceComputationState {
             },
             WorkResultData::RobberWithEnergy(data) => {
                 self.robber_energy_stats.insert(game_type, data);
+            },
+            WorkResultData::CopsWithEnergy(data) => {
+                self.cop_energy_strats.insert(game_type, data);
             },
             WorkResultData::None => {},
         }
@@ -369,6 +398,43 @@ impl BruteforceComputationState {
                     WorkResult::from(res)
                 };
                 self.employ_worker(game_type, work, here, WorkTask::ComputeRobber);
+            };
+        }
+        match sym {
+            SymGroup::Explicit(equiv) => {
+                employ!(equiv, |x| x);
+            },
+            SymGroup::Torus6(torus) => {
+                employ!(torus, |t| ExplicitClasses::from(&t));
+            },
+            SymGroup::Torus4(torus) => {
+                employ!(torus, |t| ExplicitClasses::from(&t));
+            },
+            SymGroup::None(none) => {
+                employ!(none, |x| x);
+            },
+        }
+    }
+
+    fn start_cops_energy_computation_for(&mut self, game_type: GameType) {
+        let bf::DynRobberRules::Energy(params) = game_type.robber_rules else {
+            return;
+        };
+        let rules = game_type.cop_rules;
+        let nr_cops = game_type.nr_cops;
+        let (edges, sym) = game_type.build_graph().into_parts();
+        let (here, mut there) = bf::thread_manager::build_managers();
+        let here = Some(here);
+        macro_rules! employ {
+            ($sym: expr, $transform_sym: expr) => {
+                let cloned_sym = $sym.clone();
+                let work = move || {
+                    let sym = $transform_sym(cloned_sym);
+                    let res =
+                        rules.compute_cop_energy_strategy(params, nr_cops, edges, sym, &mut there);
+                    WorkResult::from(res)
+                };
+                self.employ_worker(game_type, work, here, WorkTask::ComputeCops);
             };
         }
         match sym {
@@ -629,6 +695,36 @@ impl BruteforceComputationState {
         );
     }
 
+    fn draw_cops_energy_result(ui: &mut Ui, game_type: &GameType, strat: &bf::EnergyCopStrat) {
+        let one_cop = game_type.nr_cops == 1;
+        let outcome = {
+            let outcome_end = if one_cop { "s" } else { "" };
+            let min_initial = strat.min_initial_robber_energy;
+            if min_initial < bf::INFINITY {
+                format!("lose{outcome_end} with initial bank ≥ {min_initial}")
+            } else {
+                format!("win{outcome_end}")
+            }
+        };
+
+        let cops_str = if game_type.nr_cops == 1 {
+            "one cop".to_owned()
+        } else {
+            game_type.nr_cops.to_string() + " cops"
+        };
+
+        ui.add(
+            Label::new(format!(
+                "{cops_str} ({}) {outcome} against robber ({}) on {}{}",
+                game_type.cop_rules.name(),
+                strat.params.print_compact(),
+                game_type.shape.variant_string(),
+                game_type.print_maybe_resolution()
+            ))
+            .extend(),
+        );
+    }
+
     fn draw_cops_result(ui: &mut Ui, game_type: &GameType, strat: &bf::CopStrategy) {
         let one_cop = game_type.nr_cops == 1;
         let cops_str = if one_cop {
@@ -785,6 +881,23 @@ impl BruteforceComputationState {
                 Action::Delete | Action::Verify | Action::Store => {},
             }
         }
+
+        let mut action = None;
+        for (game_type, strat) in &self.cop_energy_strats {
+            Self::draw_cops_energy_result(ui, game_type, strat);
+            ui.horizontal(|ui| {
+                if ui.button("delete").clicked() {
+                    action = Some((Action::Delete, game_type.clone()));
+                }
+            });
+            ui.add_space(5.0);
+        }
+        if let Some((a, key)) = action {
+            let _strat = self.cop_energy_strats.remove(&key).unwrap();
+            match a {
+                Action::Delete | Action::Verify | Action::Store => {},
+            }
+        }
     }
 
     fn draw_workers(&mut self, ui: &mut Ui) {
@@ -912,6 +1025,7 @@ impl BruteforceComputationState {
                 let nr_done = self.robber_strats.len()
                     + self.robber_energy_stats.len()
                     + self.cop_strats.len()
+                    + self.cop_energy_strats.len()
                     + self.fog_strats.len();
                 if nr_done > 0 {
                     menu_button_closing_outside(ui, format!("{nr_done} done"), |ui| {
@@ -1027,7 +1141,8 @@ impl BruteforceComputationState {
                     let solution = self.fog_strats.get(&game_type);
                     let enable_apply = solution.is_some_and(|sol| sol.is_cleanable());
                     let apply_button = Button::new("apply to ♟");
-                    let explainer = "the pieces on screen forget what they did until now and get the winnig move sequence as their future moves";
+                    let explainer = "the pieces on screen forget what they did until now \
+                        and get the winnig move sequence as their future moves";
                     if ui
                         .add_enabled(enable_apply, apply_button)
                         .on_hover_text(explainer)
@@ -1037,7 +1152,20 @@ impl BruteforceComputationState {
                     }
                 },
                 bf::DynRobberRules::Energy(_) => {
-                    ui.label("no algorithm implemented (yet)");
+                    let computing_cop_strat = self.workers.iter().any(|worker| {
+                        worker.game_type == game_type && worker.task == WorkTask::ComputeCops
+                    });
+
+                    let curr_known = self.cop_energy_strats.contains_key(&game_type);
+                    let enable_compute = !computing_cop_strat && !curr_known;
+                    let compute_button = Button::new("compute (energy)");
+                    if ui
+                        .add_enabled(enable_compute, compute_button)
+                        .on_hover_text(disclaimer)
+                        .clicked()
+                    {
+                        self.start_cops_energy_computation_for(game_type.clone());
+                    }
                 },
             });
             ui.add_space(5.0);

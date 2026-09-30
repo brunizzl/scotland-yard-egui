@@ -709,7 +709,7 @@ impl State {
     /// other than all best cop moves, this further returns the cop state at the start of this round.
     pub fn best_cop_moves<'a>(
         &'a self,
-        strat: &'a bf::CopStrategy,
+        strat: bf::CopStrategyRef<'a>,
         con: &'a DrawContext<'a>,
     ) -> Option<(impl Iterator<Item = bf::RawCops> + 'a, bf::RawCops)> {
         let robber_v = self.active_robber().map(Character::vertex)?;
@@ -762,7 +762,7 @@ impl State {
     /// if the police have a winning strategy, _both sides_ have interesting optimal moves, not just the robber.
     pub fn make_optimal_move(
         &mut self,
-        strat: &bf::CopStrategy,
+        strat: bf::CopStrategyRef<'_>,
         con: &DrawContext<'_>,
         queue: &mut VecDeque<usize>,
     ) -> Option<()> {
@@ -1259,15 +1259,13 @@ impl State {
 
             ui.add_space(5.0);
             ui.horizontal(|ui| {
-                let (with_bank, curr_bank) = match &self.robber_rules {
-                    bf::DynRobberRules::Energy(_) => (true, self.curr_robber_energy()),
-                    _ => (false, 0),
-                };
+                let robber_energy = self.maybe_curr_robber_energy();
+                let curr_bank = robber_energy.unwrap_or(0);
                 ui.label(format!("robber bank (b) now: {curr_bank}  init:"))
                     .on_hover_text("makes sense when the robber rules are set to \"Energy\".");
 
                 let drag = egui::DragValue::new(&mut self.init_robber_energy);
-                ui.add_enabled(with_bank, drag);
+                ui.add_enabled(robber_energy.is_some(), drag);
             });
 
             ui.add_space(8.0);
@@ -1531,18 +1529,27 @@ impl State {
             while let Some((Id::Cop(_), _)) = who_moved_where.peek() {
                 who_moved_where.next();
             }
-            let mut nr_robber_steps = 0;
+            bank += params.allowance;
             while let Some(&(Id::Robber, v)) = who_moved_where.peek() {
-                nr_robber_steps += (robber_v != v) as usize;
-                robber_v = v;
                 who_moved_where.next();
+                if robber_v != v {
+                    bank = bank.saturating_sub(params.energy_per_step);
+                } else if who_moved_where.peek().is_none() {
+                    // the robber ended his turn by moving in place
+                    // -> make the bank reflect that
+                    bank = usize::min(bank, params.bank_capacity);
+                }
+                robber_v = v;
             }
 
-            bank += params.allowance;
-            bank = bank.saturating_sub(nr_robber_steps * params.energy_per_step);
             if who_moved_where.peek().is_none() {
                 return bank;
             }
         }
+    }
+
+    pub fn maybe_curr_robber_energy(&self) -> Option<usize> {
+        matches!(&self.robber_rules, bf::DynRobberRules::Energy(_))
+            .then(|| self.curr_robber_energy())
     }
 }

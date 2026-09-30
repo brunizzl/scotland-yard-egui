@@ -349,7 +349,7 @@ pub type UTime = u8;
 
 /// for each cop configuration in [`CopStates`] this struct stores for each map vertex,
 /// how many more moves the police need at most to catch the robber.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub struct TimeToWin {
     time: BTreeMap<usize, Vec<UTime>>,
     nr_map_vertices: usize,
@@ -357,7 +357,7 @@ pub struct TimeToWin {
 
 impl TimeToWin {
     /// returns [`Self`] if enough memory is available
-    fn new(nr_map_vertices: usize, cop_states: &CopStates) -> Option<Self> {
+    pub fn new(nr_map_vertices: usize, cop_states: &CopStates) -> Option<Self> {
         let mut time = BTreeMap::new();
         for (&fst_index, indices) in &cop_states.configurations {
             let nr_entries = indices.len().checked_mul(nr_map_vertices)?;
@@ -374,6 +374,25 @@ impl TimeToWin {
 
     pub fn nr_map_vertices(&self) -> usize {
         self.nr_map_vertices
+    }
+
+    /// clones self, except because these values can be absurdly large,
+    /// we take caution to not crash the program on allocation failure.
+    pub fn try_clone(&self) -> Option<Self> {
+        let mut time = BTreeMap::new();
+        let nr_map_vertices = self.nr_map_vertices;
+        for (&fst_index, old_data) in &self.time {
+            let mut new_data = Vec::new();
+            new_data.try_reserve_exact(old_data.len()).ok()?;
+            new_data.resize(old_data.len(), 0);
+            new_data.clone_from_slice(old_data);
+
+            let old = time.insert(fst_index, new_data);
+            debug_assert!(old.is_none());
+        }
+        let new = Self { time, nr_map_vertices };
+        debug_assert!(&new == self);
+        Some(new)
     }
 }
 
@@ -392,6 +411,23 @@ impl std::ops::IndexMut<CompactCopsIndex> for TimeToWin {
         let start = index.rest_index * self.nr_map_vertices();
         let stop = start + self.nr_map_vertices();
         &mut self.time.get_mut(&index.fst_index).unwrap()[start..stop]
+    }
+}
+
+/// unifies some functionality of [`CopStrategy`] and [`EnergyCopStrat`].
+#[derive(Clone, Copy)]
+pub struct CopStrategyRef<'a> {
+    pub symmetry: &'a ExplicitClasses,
+    pub cop_states: &'a CopStates,
+    pub time_to_win: &'a TimeToWin,
+}
+
+impl<'a> CopStrategyRef<'a> {
+    /// the equivalent of [`RobberWinData::safe_vertices`]
+    pub fn times_for(self, mut cops: RawCops) -> impl ExactSizeIterator<Item = UTime> {
+        let (autos, cop_positions) = self.cop_states.pack(self.symmetry, &mut cops);
+        let time_left = &self.time_to_win[cop_positions];
+        autos[0].forward().map(|v| time_left[v])
     }
 }
 
@@ -426,11 +462,17 @@ impl CopStrategy {
         }
     }
 
+    pub fn as_ref<'a>(&'a self) -> CopStrategyRef<'a> {
+        CopStrategyRef {
+            symmetry: &self.symmetry,
+            cop_states: &self.cop_moves,
+            time_to_win: &self.time_to_win,
+        }
+    }
+
     /// the equivalent of [`RobberWinData::safe_vertices`]
-    pub fn times_for(&self, mut cops: RawCops) -> impl ExactSizeIterator<Item = UTime> {
-        let (autos, cop_positions) = self.cop_moves.pack(&self.symmetry, &mut cops);
-        let time_left = &self.time_to_win[cop_positions];
-        autos[0].forward().map(|v| time_left[v])
+    pub fn times_for(&self, cops: RawCops) -> impl ExactSizeIterator<Item = UTime> {
+        self.as_ref().times_for(cops)
     }
 }
 
@@ -503,10 +545,8 @@ where
             let max_neigh_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
             const OVERFLOW_NEIGH_TIME: UTime = UTime::MAX - 1;
             if max_neigh_time == OVERFLOW_NEIGH_TIME {
-                return Err(format!(
-                    "cops require more moves than fit into {}",
-                    std::any::type_name::<UTime>()
-                ));
+                let u_time = std::any::type_name::<UTime>();
+                return Err(format!("cops require more moves than fit into {u_time}",));
             }
             let new_time = max_neigh_time.saturating_add(1);
             times_should_cops_move_to_curr[v] = if new_time == queue.curr_max() {
@@ -670,8 +710,16 @@ mod test {
         loop {
             let rs = rules.clone();
             let es = g.edges().clone();
-            let cops_strat = compute_cop_strategy(rs, nr, es, sym.clone(), &manager).ok()?;
-            if cops_strat.cops_win {
+            let cop_strat = compute_cop_strategy(rs, nr, es, sym.clone(), &manager).ok()?;
+
+            let rs = rules.clone();
+            let es = g.edges().clone();
+            let p = EnergyParams::STANDARD_GAME;
+            let cop_energy_strat =
+                compute_cop_energy_strat(rs, p, nr, es, sym.clone(), &manager).ok()?;
+            assert!(cop_strat.time_to_win == cop_energy_strat.times_to_capture[0]);
+
+            if cop_strat.cops_win {
                 return Some(nr);
             }
             nr += 1;

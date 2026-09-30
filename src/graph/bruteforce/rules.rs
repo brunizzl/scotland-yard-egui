@@ -277,6 +277,30 @@ impl DynCopRules {
         }
     }
 
+    pub fn compute_cop_energy_strategy<S: SymmetryGroup + Serialize>(
+        self,
+        params: EnergyParams,
+        nr_cops: usize,
+        edges: EdgeList,
+        sym: S,
+        manager: &thread_manager::LocalManager,
+    ) -> Result<EnergyCopStrat, String> {
+        match self {
+            Self::Lazy => {
+                let rs = LazyCops;
+                compute_cop_energy_strat(rs, params, nr_cops, edges, sym, manager)
+            },
+            Self::Eager => {
+                let rs = GeneralEagerCops(nr_cops as u32);
+                compute_cop_energy_strat(rs, params, nr_cops, edges, sym, manager)
+            },
+            Self::GeneralEagerCops(n) => {
+                let rs = GeneralEagerCops(n);
+                compute_cop_energy_strat(rs, params, nr_cops, edges, sym, manager)
+            },
+        }
+    }
+
     pub fn compute_fog_strategy(
         self,
         params: FogParams,

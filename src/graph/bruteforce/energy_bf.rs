@@ -146,6 +146,7 @@ impl EnergyRobberStrat {
 /// combination of piece positions and bank level between 0 and [`EnergyParams::bank_capacity`],
 /// whereas the other only stores the minimum energy required for the robber to win for every combination of pieces.
 /// we keep this implementation around to verify the improved version.
+/// also: the the police strategy is found in the same manner.
 #[cfg(test)]
 fn compute_robber_energy_strat_naive<R, S>(
     rules: R,
@@ -177,10 +178,8 @@ where
         ));
     }
     if bank_capacity >= INFINITY as usize {
-        return Err(format!(
-            "bank capacity (+1) must fit in {}",
-            std::any::type_name::<UEnergy>()
-        ));
+        let u_energy = std::any::type_name::<UEnergy>();
+        return Err(format!("bank capacity (+1) must fit in {u_energy}"));
     }
 
     let nr_map_vertices = edges.nr_vertices();
@@ -269,8 +268,6 @@ where
         // the annoying thing: a given energy e can be reached by any other e' > e
         // where (e' - e) - allowance is a multiple of energy_per_step.
         // thus, compared to the standard algorithm, we need to do roughly a factor (bank_capacity / energy_per_step) more.
-        // note: in the standard algorithm this is only computed once for all neighbors of curr_cops.
-        // we can't do that here, because prev_cops is required to do so in the general case.
         {
             for prev in &mut safe_should_cops_move_to_curr {
                 prev.set_cleared();
@@ -552,6 +549,339 @@ where
     ))
 }
 
+pub struct EnergyCopStrat {
+    pub params: EnergyParams,
+    pub symmetry: ExplicitClasses,
+    /// for each possible energy state of the robber, this holds the usual [`TimeToWin`] of [`CopStrategy`].
+    pub times_to_capture: Vec<TimeToWin>,
+    pub cop_states: CopStates,
+    /// what energy does the robber need in his bank in order to win?
+    /// if the robber has no winning strategy, this holds value [`INFINITY`].
+    pub min_initial_robber_energy: UEnergy,
+}
+
+impl EnergyCopStrat {
+    fn new(
+        params: EnergyParams,
+        symmetry: ExplicitClasses,
+        times_to_capture: Vec<TimeToWin>,
+        cop_states: CopStates,
+    ) -> Self {
+        let min_against = |cops: CompactCopsIndex| {
+            (0..=params.bank_capacity)
+                .map(|b: usize| times_to_capture[b][cops].iter().max().unwrap())
+                .position(|&ttc| ttc == UTime::MAX)
+                .map_or(UEnergy::MAX, |energy| energy as UEnergy)
+        };
+        let min_initial_robber_energy = cop_states.all_positions().map(min_against).max().unwrap();
+        Self {
+            params,
+            symmetry,
+            times_to_capture,
+            cop_states,
+            min_initial_robber_energy,
+        }
+    }
+
+    pub fn as_ref<'a>(&'a self, bank: usize) -> Option<CopStrategyRef<'a>> {
+        (bank <= self.params.bank_capacity).then(|| CopStrategyRef {
+            symmetry: &self.symmetry,
+            cop_states: &self.cop_states,
+            time_to_win: &self.times_to_capture[bank],
+        })
+    }
+}
+
+pub fn compute_cop_energy_strat<R, S>(
+    rules: R,
+    params: EnergyParams,
+    nr_cops: usize,
+    edges: EdgeList,
+    sym: S,
+    manager: &thread_manager::LocalManager,
+) -> Result<EnergyCopStrat, String>
+where
+    S: SymmetryGroup + Serialize,
+    R: CopRules,
+{
+    let EnergyParams {
+        energy_per_step,
+        allowance,
+        bank_capacity,
+    } = params;
+
+    if energy_per_step == 0 {
+        return Err("infinite robber energy is not considered.".to_string());
+    }
+    if allowance < energy_per_step {
+        return Err(format!(
+            "robber has {allowance}/{energy_per_step} < 1 steps per round."
+        ));
+    }
+    if bank_capacity >= INFINITY as usize {
+        let u_energy = std::any::type_name::<UEnergy>();
+        return Err(format!("bank capacity (+1) must fit in {u_energy}"));
+    }
+    let max_energy_max_steps = (bank_capacity + allowance) / energy_per_step;
+    if max_energy_max_steps >= USteps::MAX as usize {
+        let max = USteps::MAX;
+        return Err(format!(
+            "robber may only do fewer than {max} steps per round"
+        ));
+    }
+
+    let nr_map_vertices = edges.nr_vertices();
+    if nr_map_vertices == 0 {
+        return Err("map must be nonempty".to_string());
+    }
+    if !edges.is_connected() {
+        return Err("map must be connected".to_string());
+    }
+
+    manager.update("list cop positions")?;
+    let cop_states = CopStates::new(&edges, &sym, nr_cops, manager)?;
+
+    manager.update("reserve storage for queue")?;
+    let Some(mut queue) = CopStratQueue::new(&cop_states) else {
+        return Err("not enough RAM (initial queue too long)".to_owned());
+    };
+
+    // a game state is a tuple (C, r, e), where C is a cop positions multiset (the cop state),
+    // r the robber position and e the current robber energy.
+    // the usual TimeToWin stores for each usual game state (C, r),
+    // how many more rounds the cops need at least to capture the robber.
+    // we thus store this number for each possible energy level.
+    // note: it may be unoptimal cache-wise to do it in this order,
+    // but this was the easiest to hack together for now.
+    let mut times_to_capture = Vec::new();
+    times_to_capture.reserve_exact(bank_capacity + 1);
+    {
+        let err = || "not enough RAM (time-to-capture function too large)".to_string();
+        let mut time_to_capture = TimeToWin::new(nr_map_vertices, &cop_states).ok_or_else(err)?;
+        for (i, index) in izip!(0.., cop_states.all_positions()) {
+            if i % 4096 == 0 {
+                let percent = 100.0 * (i as f32) / (cop_states.nr_states() as f32);
+                let msg = format!("initialise time-to-capture function: {percent:.2}%");
+                manager.update(msg)?;
+            }
+
+            let times_at_index = &mut time_to_capture[index];
+            for v in rules.vertices_in_reach(&edges, cop_states.unpack(index)) {
+                times_at_index[v] = 0;
+            }
+        }
+        for _ in 0..bank_capacity {
+            let cloned_time_to_capture = time_to_capture.try_clone().ok_or_else(err)?;
+            times_to_capture.push(cloned_time_to_capture);
+        }
+        times_to_capture.push(time_to_capture);
+    }
+
+    type USteps = UTime;
+    // local variables used deep donw in the big loop. allocated here to only be allocated once.
+    let mut robber_steps = vec![(USteps::MIN, UTime::MAX); nr_map_vertices];
+    let mut robber_steps_queue = std::collections::VecDeque::new();
+
+    // same role as in the standard bruteforce algorithm, except a copy for each possible bank level exists.
+    // role of a single entry (e.g. the role of the thing for a given energy level):
+    //if the current game state has cop configuration `curr`, this contains the time for cops to win
+    //for each possible robber position, given that the cops move to `curr`.
+    let mut times_should_cops_move_to_curr_storage =
+        vec![UTime::MAX; nr_map_vertices * (bank_capacity + 1)];
+    let mut times_should_cops_move_to_curr = times_should_cops_move_to_curr_storage
+        .chunks_mut(nr_map_vertices)
+        .collect_vec();
+
+    let mut iters_until_log_refresh: usize = 1;
+    while let Some(curr_cop_positions) = queue.pop() {
+        iters_until_log_refresh -= 1;
+        if iters_until_log_refresh == 0 {
+            let nr_safe = |ttw: &[_]| ttw.iter().filter(|&&t| t == UTime::MAX).count() as f32;
+            manager.update(format!(
+                "compute cop strategy:\n{:.2}% in queue ({}), round {}, {:.2}% unreached",
+                100.0 * (queue.len() as f32) / (cop_states.nr_states() as f32),
+                queue.len(),
+                queue.curr_max(),
+                100.0 * nr_safe(&times_to_capture[0][curr_cop_positions])
+                    / (nr_map_vertices as f32),
+            ))?;
+            iters_until_log_refresh = 1_000;
+        }
+
+        // update times_should_cops_move_to_curr:
+        // in the highest energy state, the robber could only have gotten here by walking at most the allowance,
+        // the energy state below can only be reached by allowance + 1 and so on,
+        // down to the lowest energy state, which perhaps the robber reached
+        // from the (close to) highest energy state previously.
+        // the annoying thing: a given energy e can be reached by any other e' > e
+        // where (e' - e) - allowance is a multiple of energy_per_step.
+        // thus, compared to the standard algorithm, we need to do roughly a factor (bank_capacity / energy_per_step) more.
+        {
+            for time_to_curr in &mut times_should_cops_move_to_curr {
+                time_to_curr.fill(0);
+            }
+            let curr_cops = cop_states.eager_unpack(curr_cop_positions);
+            for (curr_balance, time_to_capture) in izip!(0.., &times_to_capture) {
+                let max_steps = (bank_capacity + allowance - curr_balance) / energy_per_step;
+
+                let curr_times = &time_to_capture[curr_cop_positions];
+
+                // robber_steps (hereafter) contains for each vertex v, what the largest time to capture (ttc) is,
+                // that can be reached in curr_times by at most max_steps.
+                robber_steps.fill((USteps::MAX, UTime::MIN));
+
+                // we spread each time to capture to all reachable vertices.
+                // by doing this with increasing ttc's, we ensure the lower ttc's where already spread
+                // when spreading the current one above them.
+                for ttc in (1..=queue.curr_max()).chain(std::iter::once(UTime::MAX)) {
+                    debug_assert!(robber_steps_queue.is_empty());
+                    for (v, robber_step, &v_curr_ttc) in izip!(0.., &mut robber_steps, curr_times) {
+                        if v_curr_ttc == ttc {
+                            *robber_step = (0, ttc);
+                            robber_steps_queue.push_back(v);
+                        }
+                    }
+                    while let Some(v) = robber_steps_queue.pop_front() {
+                        let (curr_steps, _curr_ttc) = robber_steps[v];
+                        debug_assert_eq!(_curr_ttc, ttc);
+                        let next_steps = curr_steps + 1;
+                        for neigh in edges.neighbors_of(v) {
+                            if curr_cops.contains(&neigh) {
+                                continue;
+                            }
+                            let (neigh_steps, neigh_ttc) = robber_steps[neigh];
+                            debug_assert!(neigh_ttc <= ttc);
+                            if neigh_ttc < ttc || neigh_steps > next_steps {
+                                robber_steps[neigh] = (next_steps, ttc);
+                                if (next_steps as usize) < max_steps {
+                                    robber_steps_queue.push_back(neigh);
+                                }
+                            }
+                        }
+                    }
+                }
+                for (v, &(taken_steps, ttc)) in izip!(0.., &robber_steps) {
+                    if taken_steps as usize > max_steps {
+                        debug_assert_eq!(taken_steps, USteps::MAX);
+                        continue;
+                    }
+                    let used_energy = taken_steps as usize * energy_per_step;
+                    if bank_capacity >= allowance && used_energy + curr_balance < allowance {
+                        // assume last round the robber had balance 0.
+                        // he then got the allowance and used some of it to move (maybe 0).
+                        // this branch assumes the bank can hold at least the allowance.
+                        // at least the rest must now be found in the bank. we thus have
+                        // used_energy + curr_balance >= allowance in every possible scenario.
+                        // the current case can thus be skipped.
+                        continue;
+                    }
+                    let prev_balance = (used_energy + curr_balance).saturating_sub(allowance);
+                    for time_to_curr in &mut times_should_cops_move_to_curr[prev_balance..] {
+                        time_to_curr[v] = UTime::max(time_to_curr[v], ttc);
+                    }
+                }
+            }
+
+            // whenever an energy is safe for the robber, all energy levels above should be as well.
+            // more generally, whenever the robber can live ttc many more rounds with a given energy,
+            // he can live at least as many rounds with a higher energy.
+            debug_assert!((0..nr_map_vertices).all(|v| {
+                let to_curr = times_should_cops_move_to_curr.iter();
+                to_curr.map(|time| time[v]).is_sorted()
+            }));
+        }
+        {
+            let mut curr_is_at_max = false;
+            for time_to_curr in &mut times_should_cops_move_to_curr {
+                for ttc in time_to_curr.iter_mut() {
+                    const OVERFLOW_NEIGH_TIME: UTime = UTime::MAX - 1;
+                    if *ttc == OVERFLOW_NEIGH_TIME {
+                        let u_time = std::any::type_name::<UTime>();
+                        return Err(format!("cops require more moves than fit into {u_time}",));
+                    }
+                    let new_time = ttc.saturating_add(1);
+                    *ttc = if new_time == queue.curr_max() {
+                        curr_is_at_max = true;
+                        UTime::MAX
+                    } else {
+                        debug_assert!(new_time < queue.curr_max() || new_time == UTime::MAX);
+                        new_time
+                    }
+                }
+            }
+            if curr_is_at_max {
+                queue.mark_as_at_max(curr_cop_positions);
+            }
+        }
+
+        // iterate through all cops states possibly preceeding the current one and intersect
+        // what is stored as safe then with the states marked safe when cops move to curr.
+        for (autos_prev_to_repr, prev_cops_repr) in
+            rules.cop_moves_from(&cop_states, &edges, &sym, curr_cop_positions)
+        {
+            // except for additionally looping over the different balances,
+            // this structure is the same as in the standard alrorithm.
+            let mut change_at_any_auto_any_balance = false;
+            for auto_prev_to_repr in autos_prev_to_repr {
+                for (_balance, time_to_curr, time_to_capture) in
+                    izip!(0.., &times_should_cops_move_to_curr, &mut times_to_capture)
+                {
+                    for (v, neigh_time) in izip!(
+                        auto_prev_to_repr.backward(),
+                        &mut time_to_capture[prev_cops_repr]
+                    ) {
+                        let this_time = time_to_curr[v];
+                        if *neigh_time > this_time {
+                            debug_assert!(this_time < queue.curr_max());
+                            change_at_any_auto_any_balance = true;
+                            *neigh_time = this_time;
+                        }
+                    }
+                }
+            }
+            if change_at_any_auto_any_balance {
+                queue.push(prev_cops_repr);
+            }
+        }
+    }
+
+    Ok(EnergyCopStrat::new(
+        params,
+        ExplicitClasses::from(&sym),
+        times_to_capture,
+        cop_states,
+    ))
+}
+
+#[cfg(test)]
+fn cmp_results(cop_strat: &EnergyCopStrat, robber_strat: &EnergyRobberStrat) -> Result<(), String> {
+    assert_eq!(cop_strat.params, robber_strat.params);
+
+    for cops in cop_strat.cop_states.all_positions() {
+        for v in 0..cop_strat.symmetry.nr_vertices() {
+            let robber_min_robber_energy = robber_strat.min_safe_energy[cops][v];
+            let cops_min_robber_energy = (0..=(cop_strat.params.bank_capacity))
+                .position(|bank| cop_strat.times_to_capture[bank][cops][v] == UTime::MAX)
+                .map_or(UEnergy::MAX, |energy| energy as UEnergy);
+
+            if robber_min_robber_energy != cops_min_robber_energy {
+                let raw_cops = cop_strat.cop_states.eager_unpack(cops);
+                return Err(format!(
+                    "difference at cops {raw_cops:?} with vertex {v}. \
+                    cop strat: {cops_min_robber_energy}, robber strat: {robber_min_robber_energy}"
+                ));
+            }
+        }
+    }
+    if cop_strat.min_initial_robber_energy != robber_strat.min_initial_robber_energy {
+        return Err(format!(
+            "computed min inital robber energy via cops: {}, via robber: {}",
+            cop_strat.min_initial_robber_energy, robber_strat.min_initial_robber_energy
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub fn cop_number(rules: impl CopRules + Clone, p: EnergyParams, g: &Embedding3D) -> Option<usize> {
     let mut nr = 1;
@@ -567,8 +897,13 @@ pub fn cop_number(rules: impl CopRules + Clone, p: EnergyParams, g: &Embedding3D
         let strat_v2 =
             compute_robber_energy_strat_naive(rs, p, nr, es, sym.clone(), &manager).unwrap();
 
+        let rs = rules.clone();
+        let es = g.edges().clone();
+        let strat_v3 = compute_cop_energy_strat(rs, p, nr, es, sym.clone(), &manager).unwrap();
+
         assert!(strat_v1.min_safe_energy == strat_v2.min_safe_energy);
         assert!(strat_v1.min_initial_robber_energy == strat_v2.min_initial_robber_energy);
+        assert_eq!(cmp_results(&strat_v3, &strat_v1), Ok(()));
         if strat_v1.min_initial_robber_energy == INFINITY {
             return Some(nr);
         }
@@ -610,6 +945,11 @@ mod test {
                 assert!(win_outcome.min_safe_energy == win_outcome_naive.min_safe_energy);
                 assert!(win_outcome_naive.min_initial_robber_energy == 0);
                 assert!(win_outcome.min_initial_robber_energy == 0);
+
+                let edges = map.edges().clone();
+                let cop_strat =
+                    compute_cop_energy_strat(rules, win_params, 1, edges, sym, &manager).unwrap();
+                assert_eq!(cmp_results(&cop_strat, &win_outcome), Ok(()));
             }
 
             // sad case: robber loses
@@ -618,18 +958,23 @@ mod test {
             {
                 let lose_params = EnergyParams::STANDARD_GAME;
                 let edges = map.edges().clone();
-                let lose_outcome_a =
+                let lose_outcome =
                     compute_robber_energy_strat(rules, lose_params, 1, edges, sym, &manager)
                         .unwrap();
 
                 let edges = map.edges().clone();
-                let lose_outcome_b =
+                let lose_outcome_naive =
                     compute_robber_energy_strat_naive(rules, lose_params, 1, edges, sym, &manager)
                         .unwrap();
 
-                assert!(lose_outcome_a.min_safe_energy == lose_outcome_b.min_safe_energy);
-                assert!(lose_outcome_b.min_initial_robber_energy == INFINITY);
-                assert!(lose_outcome_a.min_initial_robber_energy == INFINITY);
+                assert!(lose_outcome.min_safe_energy == lose_outcome_naive.min_safe_energy);
+                assert!(lose_outcome_naive.min_initial_robber_energy == INFINITY);
+                assert!(lose_outcome.min_initial_robber_energy == INFINITY);
+
+                let edges = map.edges().clone();
+                let cop_strat =
+                    compute_cop_energy_strat(rules, lose_params, 1, edges, sym, &manager).unwrap();
+                assert_eq!(cmp_results(&cop_strat, &lose_outcome), Ok(()));
             }
         }
     }

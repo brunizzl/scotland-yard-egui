@@ -1265,11 +1265,12 @@ impl Info {
                     self.characters
                         .continue_move_pattern(con.edges, con.positions, &mut self.queue)
                 },
-                Action::OptimalMove
-                    if let Some(strat) =
-                        self.worker.police_strat_for(&self.characters.game_type(con.map)) =>
-                {
-                    self.characters.make_optimal_move(strat, con, &mut self.queue);
+                Action::OptimalMove => {
+                    let game_type = self.characters.game_type(con.map);
+                    let bank = self.characters.maybe_curr_robber_energy();
+                    if let Some(strat) = self.worker.police_strat_for(&game_type, bank) {
+                        self.characters.make_optimal_move(strat, con, &mut self.queue);
+                    }
                 },
                 _ => return false,
             };
@@ -1877,7 +1878,8 @@ impl Info {
             },
             VertexSymbolInfo::BruteforceCopMoves => {
                 let game_type = self.characters.game_type(con.map);
-                if let Some(strat) = self.worker.police_strat_for(&game_type)
+                let bank = self.characters.maybe_curr_robber_energy();
+                if let Some(strat) = self.worker.police_strat_for(&game_type, bank)
                     && let Some(cops) = self.characters.raw_cops()
                 {
                     let show = |&m: &_| m != bf::UTime::MAX;
@@ -1981,7 +1983,8 @@ impl Info {
             return;
         }
         let game_type = self.characters.game_type(con.map);
-        let Some(strat) = self.worker.police_strat_for(&game_type) else {
+        let bank = self.characters.maybe_curr_robber_energy();
+        let Some(strat) = self.worker.police_strat_for(&game_type, bank) else {
             return;
         };
         let Some((best_cop_moves, cops_rs)) = self.characters.best_cop_moves(strat, con) else {
