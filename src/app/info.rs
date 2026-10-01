@@ -886,6 +886,12 @@ impl Info {
         self.change_tool_to(new_tool);
     }
 
+    fn police_strat<'a>(&'a self, map: &map::Map) -> Option<bf::CopStrategyRef<'a>> {
+        let game_type = self.characters.game_type(map);
+        let bank = self.characters.maybe_curr_robber_energy();
+        self.worker.police_strat_for(&game_type, bank)
+    }
+
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
         let mut min_cop_dist = std::mem::take(&mut self.min_cop_dist);
         min_cop_dist.clear();
@@ -1886,9 +1892,7 @@ impl Info {
                 draw!(0..);
             },
             VertexSymbolInfo::BruteforceCopMoves => {
-                let game_type = self.characters.game_type(con.map);
-                let bank = self.characters.maybe_curr_robber_energy();
-                if let Some(strat) = self.worker.police_strat_for(&game_type, bank)
+                if let Some(strat) = self.police_strat(con.map)
                     && let Some(cops) = self.characters.raw_cops()
                 {
                     let show = |&m: &_| m != bf::UTime::MAX;
@@ -1902,14 +1906,14 @@ impl Info {
                     && let Some(cops) = self.characters.raw_cops()
                     && let bf::DynRobberRules::Energy(params) = self.characters.robber_rules()
                 {
-                    let energy_per_step = params.energy_per_step;
                     let dist_avoid = &self.robber_dist_avoid_cops;
                     for (v, &robber_dist, &pos, &vis) in
                         izip!(0.., dist_avoid, con.positions, con.visible)
                     {
                         let remaining_energy = (robber_dist as usize)
-                            .checked_mul(energy_per_step)
-                            .and_then(|used| bank.checked_sub(used));
+                            .checked_mul(params.energy_per_step)
+                            .and_then(|used| bank.checked_sub(used))
+                            .map(|val| usize::min(val, params.bank_capacity));
 
                         if vis
                             && remaining_energy.is_some()
@@ -1918,7 +1922,7 @@ impl Info {
                         {
                             let ttl = time_to_live.times_for(cops).nth(v).unwrap();
                             let ttl_sym = match ttl {
-                                bf::UTime::MAX => "∞".to_string(),
+                                bf::UTime::MAX => "♾️".to_string(),
                                 _ => ttl.to_string(),
                             };
                             draw_text_at(pos, ttl_sym);
@@ -2022,9 +2026,7 @@ impl Info {
         if !self.options.show_cop_strat {
             return;
         }
-        let game_type = self.characters.game_type(con.map);
-        let bank = self.characters.maybe_curr_robber_energy();
-        let Some(strat) = self.worker.police_strat_for(&game_type, bank) else {
+        let Some(strat) = self.police_strat(con.map) else {
             return;
         };
         let Some((best_cop_moves, cops_rs)) = self.characters.best_cop_moves(strat, con) else {

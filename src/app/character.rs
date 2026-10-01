@@ -441,6 +441,8 @@ pub struct State {
     #[serde(default)]
     init_robber_energy: usize,
     #[serde(default)]
+    manual_robber_bank: Option<usize>,
+    #[serde(default)]
     robber_rules: bf::DynRobberRules,
 }
 
@@ -478,6 +480,7 @@ impl State {
             robber_fog_params: bf::FogParams::default(),
             robber_energy_params: bf::EnergyParams::STANDARD_GAME,
             init_robber_energy: 0,
+            manual_robber_bank: None,
             robber_rules: bf::DynRobberRules::Normal,
         }
     }
@@ -1257,22 +1260,39 @@ impl State {
                     .on_hover_text("number of cop moves preceeded by robber moves");
             }
 
-            ui.add_space(5.0);
-            ui.horizontal(|ui| {
-                let robber_energy = self.maybe_curr_robber_energy();
-                let curr_bank = robber_energy.unwrap_or(0);
-                ui.label(format!("robber bank (b) now: {curr_bank}  init:"))
-                    .on_hover_text("makes sense when the robber rules are set to \"Energy\".");
-
-                let drag = egui::DragValue::new(&mut self.init_robber_energy);
-                ui.add_enabled(robber_energy.is_some(), drag);
-            });
-
             ui.add_space(8.0);
             if ui.button(" 🗑 ").on_hover_text("forget current game").clicked() {
                 self.forget_move_history();
                 change = true;
             }
+
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                let energy_active = matches!(self.robber_rules, bf::DynRobberRules::Energy(_));
+                if !energy_active {
+                    ui.set_invisible();
+                }
+                let mut manual_active = self.manual_robber_bank.is_some();
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut manual_active, true, "manual bank");
+                    ui.radio_value(&mut manual_active, false, "computed bank");
+                });
+                if manual_active != self.manual_robber_bank.is_some() {
+                    self.manual_robber_bank = manual_active.then(|| self.curr_robber_energy());
+                }
+                ui.horizontal(|ui| {
+                    let params = self.robber_energy_params;
+                    if let Some(bank) = &mut self.manual_robber_bank {
+                        let max_bank = params.bank_capacity + params.allowance;
+                        add_drag_value(ui, bank, "bank value", 0..=max_bank, 1);
+                    } else {
+                        let curr_bank = self.maybe_curr_robber_energy().unwrap_or(0);
+                        let label = format!("inital ➡ {curr_bank} now");
+                        let val = &mut self.init_robber_energy;
+                        add_drag_value(ui, val, &label, 0..=params.bank_capacity, 1);
+                    }
+                });
+            });
 
             ui.add_space(8.0);
             let mut make_random_steps = self.random_steps.is_some();
@@ -1550,6 +1570,6 @@ impl State {
 
     pub fn maybe_curr_robber_energy(&self) -> Option<usize> {
         matches!(&self.robber_rules, bf::DynRobberRules::Energy(_))
-            .then(|| self.curr_robber_energy())
+            .then(|| self.manual_robber_bank.unwrap_or(self.curr_robber_energy()))
     }
 }
