@@ -201,6 +201,7 @@ pub enum VertexSymbolInfo {
     VertexEquivalenceClass,
     BruteforceCopMoves,
     BruteforceRobberEnergy,
+    BruteforceCopsEnergyRobberTime,
     Debugging,
 }
 
@@ -239,6 +240,12 @@ impl VertexSymbolInfo {
                 "robber has a winning strategy, if he ends his move on a vertex with \
                 number at most as high as the leftover bank after the move."
             },
+            Self::BruteforceCopsEnergyRobberTime => {
+                "shown relative to the current robber position. If robber moves to a vertex, \
+                he has as many rounds left to live, as shown at that position. \
+                Note: setting \"Bruteforce Cop Moves\" shows the same data indepentent from robber position, \
+                but for a fixed energy level."
+            },
             Self::Debugging => "surprise information",
         }
     }
@@ -259,6 +266,7 @@ impl VertexSymbolInfo {
             Self::RobberDist => "Robber Distance",
             Self::RobberDistAvoidCops => "Robber Distance avoid Cops",
             Self::BruteforceCopMoves => "Bruteforce Cop Moves",
+            Self::BruteforceCopsEnergyRobberTime => "Bruteforce Cops Robber Time",
             Self::BruteforceRobberEnergy => "Bruteforce Robber Energy",
             Self::Debugging => "Debugging",
         }
@@ -1122,6 +1130,7 @@ impl Info {
             || color == Color::MaxCopDist;
 
         let update_robber_dist_avoid_cops = symbol == Symbol::RobberDistAvoidCops
+            || symbol == Symbol::BruteforceCopsEnergyRobberTime
             || (color == Color::BruteForceRes
                 && matches!(
                     self.characters.robber_rules(),
@@ -1884,6 +1893,37 @@ impl Info {
                 {
                     let show = |&m: &_| m != bf::UTime::MAX;
                     draw!(strat.times_for(cops), show);
+                }
+            },
+            VertexSymbolInfo::BruteforceCopsEnergyRobberTime => {
+                let game_type = self.characters.game_type(con.map);
+                if self.worker.police_strat_for(&game_type, Some(0)).is_some()
+                    && let Some(bank) = self.characters.maybe_curr_robber_energy()
+                    && let Some(cops) = self.characters.raw_cops()
+                    && let bf::DynRobberRules::Energy(params) = self.characters.robber_rules()
+                {
+                    let energy_per_step = params.energy_per_step;
+                    let dist_avoid = &self.robber_dist_avoid_cops;
+                    for (v, &robber_dist, &pos, &vis) in
+                        izip!(0.., dist_avoid, con.positions, con.visible)
+                    {
+                        let remaining_energy = (robber_dist as usize)
+                            .checked_mul(energy_per_step)
+                            .and_then(|used| bank.checked_sub(used));
+
+                        if vis
+                            && remaining_energy.is_some()
+                            && let Some(time_to_live) =
+                                self.worker.police_strat_for(&game_type, remaining_energy)
+                        {
+                            let ttl = time_to_live.times_for(cops).nth(v).unwrap();
+                            let ttl_sym = match ttl {
+                                bf::UTime::MAX => "∞".to_string(),
+                                _ => ttl.to_string(),
+                            };
+                            draw_text_at(pos, ttl_sym);
+                        }
+                    }
                 }
             },
             VertexSymbolInfo::BruteforceRobberEnergy => {
