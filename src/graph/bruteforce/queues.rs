@@ -273,6 +273,29 @@ impl CopStratQueue {
     pub fn curr_max(&self) -> UTime {
         self.curr_max_nr_moves
     }
+
+    /// a value of [`UTime`] can have to logical states. either [`UTime::MAX`], representing infinity,
+    /// or any other value, representing that value.
+    /// due to complexity reasons, we only want to consider finite times up to [`Self::curr_max`].
+    /// this function thus tries to add 1 to the passed `time` with two failure modes.
+    /// - either adding 1 to a finite value creates "infinity", which is a hard error and results in [`Err`].
+    /// - or adding 1 creates the maximum value we can currently handle, which is a soft error
+    ///   and returns infinity.
+    ///
+    /// returned alongside `time + 1` is, whether the soft error occured.
+    /// if this is the case, the caller must call [`Self::mark_as_at_max`].
+    #[inline(always)]
+    pub fn clamp_successor(&self, time: UTime) -> Result<(UTime, bool), String> {
+        debug_assert!(time < self.curr_max() || time == UTime::MAX);
+        if time == UTime::MAX - 1 {
+            let name = std::any::type_name::<UTime>();
+            return Err(format!("cops require more moves than fit into {name}"));
+        }
+        let new_raw = time.saturating_add(1);
+        let at_max = new_raw == self.curr_max();
+        let clamped = if at_max { UTime::MAX } else { new_raw };
+        Ok((clamped, at_max))
+    }
 }
 
 #[cfg(test)]

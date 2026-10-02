@@ -13,3 +13,5 @@ mod geo;
 mod rand;
 
 mod rle;
+
+pub mod timer;

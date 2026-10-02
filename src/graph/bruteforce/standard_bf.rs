@@ -510,14 +510,14 @@ where
     };
 
     manager.update("initialise queue")?;
-    for (i, index) in izip!(0.., cop_states.all_positions()) {
+    for (i, cops_index) in izip!(0.., cop_states.all_positions()) {
         if i % 4096 == 0 {
             manager.recieve()?;
         }
 
-        let times_at_index = &mut time_to_win[index];
-        for v in rules.vertices_in_reach(&edges, cop_states.unpack(index)) {
-            times_at_index[v] = 0;
+        let times_at_cops = &mut time_to_win[cops_index];
+        for v in rules.vertices_in_reach(&edges, cop_states.unpack(cops_index)) {
+            times_at_cops[v] = 0;
         }
     }
 
@@ -539,47 +539,39 @@ where
             time_until_log_refresh = 2000;
         }
 
-        let curr_times = &time_to_win[curr_cop_positions];
-        let mut curr_is_at_max = false;
-        for (v, neighs) in izip!(0.., edges.neighbors()) {
-            let max_neigh_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
-            const OVERFLOW_NEIGH_TIME: UTime = UTime::MAX - 1;
-            if max_neigh_time == OVERFLOW_NEIGH_TIME {
-                let u_time = std::any::type_name::<UTime>();
-                return Err(format!("cops require more moves than fit into {u_time}",));
+        {
+            let curr_times = &time_to_win[curr_cop_positions];
+            let mut curr_is_at_max = false;
+            for (v, neighs) in izip!(0.., edges.neighbors()) {
+                let max_neigh_time = neighs.fold(curr_times[v], |acc, n| acc.max(curr_times[n]));
+                let (new_time, at_max) = queue.clamp_successor(max_neigh_time)?;
+                times_should_cops_move_to_curr[v] = new_time;
+                curr_is_at_max |= at_max;
             }
-            let new_time = max_neigh_time.saturating_add(1);
-            times_should_cops_move_to_curr[v] = if new_time == queue.curr_max() {
-                curr_is_at_max = true;
-                UTime::MAX
-            } else {
-                debug_assert!(new_time < queue.curr_max() || new_time == UTime::MAX);
-                new_time
-            };
-        }
-        if curr_is_at_max {
-            queue.mark_as_at_max(curr_cop_positions);
+            if curr_is_at_max {
+                queue.mark_as_at_max(curr_cop_positions);
+            }
         }
 
-        for (neigh_rotations, rotated_neigh_cop_positions) in
+        for (autos_prev_to_repr, prev_cops_repr) in
             rules.cop_moves_from(&cop_states, &edges, &sym, curr_cop_positions)
         {
             let mut neigh_time_changed = false;
-            for neigh_rotate in neigh_rotations {
-                for (v, neigh_time) in izip!(
-                    neigh_rotate.backward(),
-                    &mut time_to_win[rotated_neigh_cop_positions]
+            for auto_prev_to_repr in autos_prev_to_repr {
+                for (v, prev_time) in izip!(
+                    auto_prev_to_repr.backward(),
+                    &mut time_to_win[prev_cops_repr]
                 ) {
-                    let this_time = times_should_cops_move_to_curr[v];
-                    if *neigh_time > this_time {
-                        debug_assert!(this_time < queue.curr_max());
+                    let to_curr_time = times_should_cops_move_to_curr[v];
+                    if *prev_time > to_curr_time {
+                        debug_assert!(to_curr_time < queue.curr_max());
                         neigh_time_changed = true;
-                        *neigh_time = this_time;
+                        *prev_time = to_curr_time;
                     }
                 }
             }
             if neigh_time_changed {
-                queue.push(rotated_neigh_cop_positions);
+                queue.push(prev_cops_repr);
             }
         }
     }
@@ -717,7 +709,7 @@ mod test {
             let p = EnergyParams::STANDARD_GAME;
             let cop_energy_strat =
                 compute_cop_energy_strat(rs, p, nr, es, sym.clone(), &manager).ok()?;
-            assert!(cop_strat.time_to_win == cop_energy_strat.times_to_capture[0]);
+            assert!(cop_strat.time_to_win == cop_energy_strat.times_to_live[0]);
 
             if cop_strat.cops_win {
                 return Some(nr);
