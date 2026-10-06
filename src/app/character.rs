@@ -715,7 +715,7 @@ impl State {
         strat: bf::CopStrategyRef<'a>,
         con: &'a DrawContext<'a>,
     ) -> Option<(impl Iterator<Item = bf::RawCops> + 'a, bf::RawCops)> {
-        let robber_v = self.active_robber().map(Character::vertex)?;
+        let robber_v = self.active_robber().map(Character::last_resting_vertex)?;
         let cops_now = {
             // unlike `Character::raw_cops`, we do not want the active vertex, but the last resting vertex.
             let resting = self.active_cops().map(Character::last_resting_vertex);
@@ -726,7 +726,8 @@ impl State {
         // this is the starting point from which the currently progressing cop move is computed.
         let cops_rs = self.police_state_round_start()?;
 
-        let curr_nr_rounds_left = strat.times_for(cops_rs).nth(robber_v)?;
+        let curr_bank = self.maybe_curr_robber_energy();
+        let curr_nr_rounds_left = strat.time_for(cops_rs, curr_bank.unwrap_or(0), robber_v);
         if matches!(curr_nr_rounds_left, 0 | bf::UTime::MAX) {
             return None;
         }
@@ -737,8 +738,11 @@ impl State {
         // this could be done by passing a mask to `raw_cop_moves_from`, encoding which cops may still be moved.
         let all_cop_moves = self.cop_rules.raw_cop_moves_from(con.edges, cops_rs);
 
-        let mut neigh_times = Vec::new();
-        let best_cop_moves = all_cop_moves.into_iter().filter(move |&neigh_cops| {
+        let params = self.energy_params();
+        let next_bank = curr_bank.map(|b| b.min(params.bank_capacity) + params.allowance);
+        let mut robber_step = bf::ComputeBestRobberMove::new(con.edges.nr_vertices(), params);
+
+        let best_valid_cop_moves = all_cop_moves.into_iter().filter(move |&neigh_cops| {
             // filter out moves that where valid at round start, but require some already moved cop to move differently
             if !izip!(&*cops_rs, &*neigh_cops, &*cops_now)
                 .all(|(rs, neigh, now)| now == rs || now == neigh)
@@ -747,23 +751,18 @@ impl State {
             }
 
             // filter out moves that don't decrease the number of rounds the robber has left
-            neigh_times.clear();
-            neigh_times.extend(strat.times_for(neigh_cops));
-            let best_robber_response = con
-                .edges
-                .neighbors_of(robber_v)
-                .map(|v| neigh_times[v])
-                .fold(neigh_times[robber_v], bf::UTime::max);
-            debug_assert!(best_robber_response >= curr_nr_rounds_left - 1);
-            best_robber_response == curr_nr_rounds_left - 1
+            let (_, longest_time_to_live) =
+                robber_step.compute(strat, con.edges, neigh_cops, robber_v, next_bank);
+            debug_assert!(longest_time_to_live >= curr_nr_rounds_left - 1);
+            longest_time_to_live == curr_nr_rounds_left - 1
         });
 
-        Some((best_cop_moves, cops_rs))
+        Some((best_valid_cop_moves, cops_rs))
     }
 
     /// at least an optimal robber move could also be chosen if the robber has a winning startegy, but this is boring.
     /// if the police have a winning strategy, _both sides_ have interesting optimal moves, not just the robber.
-    pub fn make_optimal_move(
+    pub fn make_optimal_step(
         &mut self,
         strat: bf::CopStrategyRef<'_>,
         con: &DrawContext<'_>,
@@ -772,13 +771,14 @@ impl State {
         let (current_turn, moved_this_turn) = self.mark_cops_moved_this_turn();
         let (character_index, next_v) = match current_turn {
             Id::Robber => {
-                let robber_v = self.active_robber().map(Character::vertex)?;
-                let ttl = strat.times_for(self.raw_cops()?).collect_vec();
-                let max_time_to_live = |v, n| if ttl[n] > ttl[v] { n } else { v };
-                let robber_neighs = con.edges.neighbors_of(robber_v);
-                // it may be optimal for the robber to do nothing -> start with robber_v.
-                let best_move = robber_neighs.fold(robber_v, max_time_to_live);
-
+                let best_move = bf::ComputeBestRobberMove::next_step(
+                    strat,
+                    con.edges,
+                    self.raw_cops()?,
+                    self.active_robber().map(Character::vertex)?,
+                    self.maybe_curr_robber_energy(),
+                    self.energy_params(),
+                );
                 debug_assert!(self.characters[0].id.is_robber());
                 (0, best_move)
             },
@@ -1539,12 +1539,12 @@ impl State {
     /// first, whenever a piece is not moving in a round, it must "move in place".
     /// second, a robber move along multiple edges is split into one step per edge.
     /// returned is the energy the robber has in his bank in the current situation.
-    pub fn curr_robber_energy(&self) -> usize {
+    fn curr_robber_energy(&self) -> usize {
         let params = self.energy_params();
         let mut bank = self.init_robber_energy;
         let mut who_moved_where = self.who_moved_where().peekable();
         let mut robber_v = usize::MAX;
-        loop {
+        while who_moved_where.peek().is_some() {
             bank = usize::min(bank, params.bank_capacity);
             while let Some((Id::Cop(_), _)) = who_moved_where.peek() {
                 who_moved_where.next();
@@ -1556,16 +1556,13 @@ impl State {
                     bank = bank.saturating_sub(params.energy_per_step);
                 } else if who_moved_where.peek().is_none() {
                     // the robber ended his turn by moving in place
-                    // -> make the bank reflect that
-                    bank = usize::min(bank, params.bank_capacity);
+                    // -> only return the energy that can be kept
+                    return usize::min(bank, params.bank_capacity);
                 }
                 robber_v = v;
             }
-
-            if who_moved_where.peek().is_none() {
-                return bank;
-            }
         }
+        bank
     }
 
     pub fn maybe_curr_robber_energy(&self) -> Option<usize> {

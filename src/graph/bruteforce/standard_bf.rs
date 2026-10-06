@@ -419,15 +419,26 @@ impl std::ops::IndexMut<CompactCopsIndex> for TimeToWin {
 pub struct CopStrategyRef<'a> {
     pub symmetry: &'a ExplicitClasses,
     pub cop_states: &'a CopStates,
-    pub time_to_win: &'a TimeToWin,
+    pub time_to_win: &'a [TimeToWin],
 }
 
 impl<'a> CopStrategyRef<'a> {
-    /// the equivalent of [`RobberWinData::safe_vertices`]
-    pub fn times_for(self, mut cops: RawCops) -> impl ExactSizeIterator<Item = UTime> {
+    #[inline(always)]
+    fn at(&self, mut cops: RawCops, bank: usize) -> (&'a ExplicitAutomorphism, &'a [UTime]) {
         let (autos, cop_positions) = self.cop_states.pack(self.symmetry, &mut cops);
-        let time_left = &self.time_to_win[cop_positions];
-        autos[0].forward().map(|v| time_left[v])
+        let time_index = bank.min(self.time_to_win.len() - 1);
+        let time_left = &self.time_to_win[time_index][cop_positions];
+        (autos[0], time_left)
+    }
+    /// the equivalent of [`RobberWinData::safe_vertices`]
+    pub fn times_for(self, cops: RawCops, bank: usize) -> impl ExactSizeIterator<Item = UTime> {
+        let (auto, time_left) = self.at(cops, bank);
+        auto.forward().map(|v| time_left[v])
+    }
+    #[inline(always)]
+    pub fn time_for(self, cops: RawCops, bank: usize, robber_v: usize) -> UTime {
+        let (auto, time_left) = self.at(cops, bank);
+        time_left[auto.apply_forward(robber_v)]
     }
 }
 
@@ -466,13 +477,13 @@ impl CopStrategy {
         CopStrategyRef {
             symmetry: &self.symmetry,
             cop_states: &self.cop_moves,
-            time_to_win: &self.time_to_win,
+            time_to_win: std::slice::from_ref(&self.time_to_win),
         }
     }
 
     /// the equivalent of [`RobberWinData::safe_vertices`]
     pub fn times_for(&self, cops: RawCops) -> impl ExactSizeIterator<Item = UTime> {
-        self.as_ref().times_for(cops)
+        self.as_ref().times_for(cops, 0)
     }
 }
 

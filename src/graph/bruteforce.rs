@@ -440,6 +440,107 @@ impl SafeRobberPositions {
     }
 }
 
+/// this struct exists to allow better interpretation of a computed [`EnergyCopStrat`].
+/// all data stored here are just to allow reuse of allocations.
+#[derive(Debug)]
+pub struct ComputeBestRobberMove {
+    /// distances to a single given robber position, using vertices not occupied by any cop.
+    distances: Vec<usize>,
+    queue: VecDeque<usize>,
+    /// every vertex the robber can reach within the current move
+    /// (note: exactly the vertices listed here have a finite distance value in [`Self::distances`])
+    in_reach: Vec<usize>,
+    params: EnergyParams,
+}
+
+impl ComputeBestRobberMove {
+    pub fn new(nr_map_vertices: usize, params: EnergyParams) -> Self {
+        Self {
+            distances: vec![usize::MAX; nr_map_vertices],
+            queue: VecDeque::new(),
+            in_reach: Vec::new(),
+            params,
+        }
+    }
+
+    /// find next step in the full best move
+    pub fn next_step(
+        strat: CopStrategyRef<'_>,
+        edges: &EdgeList,
+        cops: RawCops,
+        robber_v: usize,
+        current_bank: Option<usize>,
+        params: EnergyParams,
+    ) -> usize {
+        let mut this = Self::new(edges.nr_vertices(), params);
+        let (mut best_v, _) = this.compute(strat, edges, cops, robber_v, current_bank);
+        this.distances[robber_v] = 0;
+        loop {
+            let closer_v = std::iter::once(best_v)
+                .chain(edges.neighbors_of(best_v))
+                .min_by_key(|&v| this.distances[v])
+                .unwrap();
+            if closer_v == robber_v {
+                return best_v;
+            }
+            assert_ne!(closer_v, best_v);
+            best_v = closer_v;
+        }
+    }
+
+    /// returns a best vertex to move to as `.0`
+    /// and how much longer the robber can live if that move is chosen as `.1`
+    pub fn compute(
+        &mut self,
+        strat: CopStrategyRef<'_>,
+        edges: &EdgeList,
+        cops: RawCops,
+        robber_v: usize,
+        current_bank: Option<usize>,
+    ) -> (usize, UTime) {
+        // choose the move that maximises the time to live (second value of both a and b)
+        let better_move = |a: (usize, UTime), b: (usize, UTime)| if a.1 >= b.1 { a } else { b };
+        match current_bank {
+            None => {
+                let as_move = |v: usize| (v, strat.time_for(cops, 0, v));
+                let stay = as_move(robber_v);
+                edges.neighbors_of(robber_v).map(as_move).fold(stay, better_move)
+            },
+            Some(current_bank) => {
+                let dists = &mut self.distances[..];
+                for v in self.in_reach.drain(..) {
+                    debug_assert_ne!(dists[v], usize::MAX);
+                    dists[v] = usize::MAX;
+                }
+                debug_assert!(dists.iter().all(|&d| d == usize::MAX));
+                debug_assert_eq!(dists.len(), edges.nr_vertices());
+
+                let max_steps = current_bank / self.params.energy_per_step;
+                let mut write = |dists: &mut [_], q: &mut VecDeque<_>, v: usize, dist_v: usize| {
+                    dists[v] = dist_v;
+                    self.in_reach.push(v);
+                    q.extend((dist_v < max_steps).then_some(v));
+                };
+                write(dists, &mut self.queue, robber_v, 0);
+                while let Some(v) = self.queue.pop_front() {
+                    let next_dist = dists[v] + 1;
+                    for neigh in edges.neighbors_of(v) {
+                        if !cops.contains(&neigh) && dists[neigh] > next_dist {
+                            write(dists, &mut self.queue, neigh, next_dist);
+                        }
+                    }
+                }
+
+                let as_move = |&v: &usize| {
+                    let b = current_bank - dists[v] * self.params.energy_per_step;
+                    (v, strat.time_for(cops, b, v))
+                };
+                self.in_reach.iter().map(as_move).reduce(better_move).unwrap()
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

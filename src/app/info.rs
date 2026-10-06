@@ -888,8 +888,7 @@ impl Info {
 
     fn police_strat<'a>(&'a self, map: &map::Map) -> Option<bf::CopStrategyRef<'a>> {
         let game_type = self.characters.game_type(map);
-        let bank = self.characters.maybe_curr_robber_energy();
-        self.worker.police_strat_for(&game_type, bank)
+        self.worker.police_strat_for(&game_type)
     }
 
     fn update_min_cop_dist(&mut self, edges: &EdgeList) {
@@ -1254,7 +1253,7 @@ impl Info {
         enum Action {
             Undo,
             Redo,
-            OptimalMove,
+            OptimalStep,
             PatternMove,
             None,
         }
@@ -1264,7 +1263,7 @@ impl Info {
                 () if info.consume_shortcut(&UNDO) => Action::Undo,
                 () if info.consume_shortcut(&REDO) => Action::Redo,
                 () if info.consume_shortcut(&DO_PATTERN_MOVE) => Action::PatternMove,
-                () if info.consume_shortcut(&DO_OPTIMAL_MOVE) => Action::OptimalMove,
+                () if info.consume_shortcut(&DO_OPTIMAL_MOVE) => Action::OptimalStep,
                 _ => Action::None,
             })
         };
@@ -1280,11 +1279,10 @@ impl Info {
                     self.characters
                         .continue_move_pattern(con.edges, con.positions, &mut self.queue)
                 },
-                Action::OptimalMove => {
+                Action::OptimalStep => {
                     let game_type = self.characters.game_type(con.map);
-                    let bank = self.characters.maybe_curr_robber_energy();
-                    if let Some(strat) = self.worker.police_strat_for(&game_type, bank) {
-                        self.characters.make_optimal_move(strat, con, &mut self.queue);
+                    if let Some(strat) = self.worker.police_strat_for(&game_type) {
+                        self.characters.make_optimal_step(strat, con, &mut self.queue);
                     }
                 },
                 _ => return false,
@@ -1645,14 +1643,14 @@ impl Info {
                     }
                 } else if let Some(data) = &self.worker.energy_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
+                    && let Some(bank) = self.characters.maybe_curr_robber_energy()
                 {
                     let params = self.characters.energy_params();
-                    let robber_energy = self.characters.curr_robber_energy();
                     let safe_vertices = data.safe_vertex_energies(cops);
                     let dists = &self.robber_dist_avoid_cops;
                     for (required_bank, &dist, util) in izip!(safe_vertices, dists, utils_iter) {
                         let route_cost = (dist as usize).saturating_mul(params.energy_per_step);
-                        let bank_left = robber_energy.checked_sub(route_cost);
+                        let bank_left = bank.checked_sub(route_cost);
                         draw_if!(Some(required_bank as usize) <= bank_left, util);
                     }
                 }
@@ -1895,13 +1893,13 @@ impl Info {
                 if let Some(strat) = self.police_strat(con.map)
                     && let Some(cops) = self.characters.raw_cops()
                 {
+                    let bank = self.characters.maybe_curr_robber_energy().unwrap_or(0);
                     let show = |&m: &_| m != bf::UTime::MAX;
-                    draw!(strat.times_for(cops), show);
+                    draw!(strat.times_for(cops, bank), show);
                 }
             },
             VertexSymbolInfo::BruteforceCopsEnergyRobberTime => {
-                let game_type = self.characters.game_type(con.map);
-                if self.worker.police_strat_for(&game_type, Some(0)).is_some()
+                if let Some(strat) = self.police_strat(con.map)
                     && let Some(bank) = self.characters.maybe_curr_robber_energy()
                     && let Some(cops) = self.characters.raw_cops()
                     && let bf::DynRobberRules::Energy(params) = self.characters.robber_rules()
@@ -1912,18 +1910,12 @@ impl Info {
                     {
                         let remaining_energy = (robber_dist as usize)
                             .checked_mul(params.energy_per_step)
-                            .and_then(|used| bank.checked_sub(used))
-                            .map(|val| usize::min(val, params.bank_capacity));
+                            .and_then(|used| bank.checked_sub(used));
 
-                        if vis
-                            && remaining_energy.is_some()
-                            && let Some(time_to_live) =
-                                self.worker.police_strat_for(&game_type, remaining_energy)
-                        {
-                            let ttl = time_to_live.times_for(cops).nth(v).unwrap();
-                            let ttl_sym = match ttl {
+                        if vis && let Some(rem_energy) = remaining_energy {
+                            let ttl_sym = match strat.time_for(cops, rem_energy, v) {
                                 bf::UTime::MAX => "♾️".to_string(),
-                                _ => ttl.to_string(),
+                                ttl => ttl.to_string(),
                             };
                             draw_text_at(pos, ttl_sym);
                         }

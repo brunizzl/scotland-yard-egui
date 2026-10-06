@@ -245,18 +245,13 @@ impl BruteforceComputationState {
         self.robber_strats.get(game_type).map(|o| &o.outcome)
     }
 
-    pub fn police_strat_for<'a>(
-        &'a self,
-        game_type: &GameType,
-        bank: Option<usize>,
-    ) -> Option<bf::CopStrategyRef<'a>> {
+    pub fn police_strat_for<'a>(&'a self, game_type: &GameType) -> Option<bf::CopStrategyRef<'a>> {
         match game_type.robber_rules {
             bf::DynRobberRules::Normal => {
                 self.cop_strats.get(game_type).map(bf::CopStrategy::as_ref)
             },
             bf::DynRobberRules::Energy(_) => {
-                let strat = self.cop_energy_strats.get(game_type);
-                strat.and_then(|s| bank.and_then(|b| s.as_ref(b)))
+                self.cop_energy_strats.get(game_type).map(bf::EnergyCopStrat::as_ref)
             },
             bf::DynRobberRules::Fog(_) => None,
         }

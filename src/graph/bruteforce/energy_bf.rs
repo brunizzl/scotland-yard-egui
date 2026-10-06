@@ -583,12 +583,12 @@ impl EnergyCopStrat {
         }
     }
 
-    pub fn as_ref<'a>(&'a self, bank: usize) -> Option<CopStrategyRef<'a>> {
-        (bank <= self.params.bank_capacity).then(|| CopStrategyRef {
+    pub fn as_ref<'a>(&'a self) -> CopStrategyRef<'a> {
+        CopStrategyRef {
             symmetry: &self.symmetry,
             cop_states: &self.cop_states,
-            time_to_win: &self.times_to_live[bank],
-        })
+            time_to_win: &self.times_to_live,
+        }
     }
 }
 
@@ -609,12 +609,12 @@ impl BestRobberMove {
 
 /// keeps all memory required to compute the (relevant parameters of) an ideal robber move for each vertex.
 /// inputs are a given assignment of time to live to each vertex and a maximum number of robber steps allowed in the current move.
-struct BestRobberMoves {
+struct BatchedBestRobberMoves {
     data: Vec<BestRobberMove>,
     queue: std::collections::VecDeque<usize>,
 }
 
-impl BestRobberMoves {
+impl BatchedBestRobberMoves {
     fn new(nr_map_vertices: usize, ps: EnergyParams) -> Result<Self, String> {
         if (ps.bank_capacity + ps.allowance) / ps.energy_per_step >= USteps::MAX as usize {
             let max = USteps::MAX;
@@ -631,7 +631,7 @@ impl BestRobberMoves {
     fn compute(
         &mut self,
         edges: &EdgeList,
-        curr_cops: &[usize],
+        curr_cops: &RawCops,
         curr_times: &[UTime],
         max_robber_steps: usize,
         max_ttl: UTime,
@@ -665,7 +665,9 @@ impl BestRobberMoves {
                     }
                     let neigh = &self.data[neigh_v];
                     debug_assert!(neigh.time_to_live <= time_to_live);
-                    if neigh.time_to_live < time_to_live || neigh.nr_steps > next_steps {
+                    if neigh.time_to_live < time_to_live
+                        || (neigh.time_to_live == time_to_live && neigh.nr_steps > next_steps)
+                    {
                         self.data[neigh_v] = BestRobberMove::new(time_to_live, next_steps);
                         if (next_steps as usize) < max_robber_steps {
                             self.queue.push_back(neigh_v);
@@ -720,7 +722,7 @@ where
     // local variable used deep down in the big loop.
     // initialised here to check the preconditions before more complex things are build.
     // initialised outside any loop, because this is only it's own type to recycle heap memory.
-    let mut best_robber_moves = BestRobberMoves::new(nr_map_vertices, params)?;
+    let mut best_robber_moves = BatchedBestRobberMoves::new(nr_map_vertices, params)?;
 
     manager.update("list cop positions")?;
     let cop_states = CopStates::new(&edges, &sym, nr_cops, manager)?;
