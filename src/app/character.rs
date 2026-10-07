@@ -43,6 +43,10 @@ impl Id {
         matches!(self, Self::Robber)
     }
 
+    pub fn is_cop(self) -> bool {
+        matches!(self, Self::Cop(_))
+    }
+
     pub fn same_job(self, other: Self) -> bool {
         self.is_robber() == other.is_robber()
     }
@@ -182,6 +186,10 @@ impl Character {
 
     pub fn last_resting_vertex(&self) -> usize {
         *self.past_vertices.last().unwrap_or(&self.nearest_vertex)
+    }
+
+    pub fn initial_vertex(&self) -> usize {
+        *self.past_vertices.first().unwrap_or(&self.nearest_vertex)
     }
 
     pub fn is_active(&self) -> bool {
@@ -1517,7 +1525,7 @@ impl State {
             (Id::Cop(_), moved) => moved,
         };
         let cops_round_start = izip!(&self.characters, &cops_moved_this_turn)
-            .filter(|(c, _)| !c.id.is_robber() && c.is_active())
+            .filter(|(c, _)| c.id.is_cop() && c.is_active())
             .map(|(c, &moved)| {
                 if moved {
                     let past = c.past_vertices();
@@ -1543,12 +1551,22 @@ impl State {
         let params = self.energy_params();
         let mut bank = self.init_robber_energy;
         let mut who_moved_where = self.who_moved_where().peekable();
-        let mut robber_v = self.active_robber().map_or(0, |r| r.past_vertices[0]);
+        let mut robber_v = self.characters.first().map(Character::initial_vertex).unwrap_or(0);
+        let cop_steps_per_round = match self.cop_rules {
+            bf::DynCopRules::Eager => self.active_cops().count(),
+            bf::DynCopRules::GeneralEagerCops(nr) => nr as usize,
+            bf::DynCopRules::Lazy => 1,
+        };
+
         while who_moved_where.peek().is_some() {
             bank = usize::min(bank, params.bank_capacity);
-            while let Some((Id::Cop(_), _)) = who_moved_where.peek() {
-                who_moved_where.next();
+            let nr_cop_steps = who_moved_where.peeking_take_while(|m| m.0.is_cop()).count();
+            // note that we can't call [`Self::mark_cops_moved_this_turn`] here,
+            // as that function calls us.
+            if nr_cop_steps < cop_steps_per_round && who_moved_where.peek().is_none() {
+                return bank;
             }
+
             bank += params.allowance;
             while let Some(&(Id::Robber, v)) = who_moved_where.peek() {
                 who_moved_where.next();
@@ -1568,5 +1586,77 @@ impl State {
     pub fn maybe_curr_robber_energy(&self) -> Option<usize> {
         matches!(&self.robber_rules, bf::DynRobberRules::Energy(_))
             .then(|| self.manual_robber_bank.unwrap_or(self.curr_robber_energy()))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_robber_energy() {
+        const POSITIONS: &[Pos3] = &[Pos3::ZERO; 10];
+
+        let mut state = State::new();
+        state.characters.push(Character::new(Id::Cop(2), Pos2::ZERO));
+        assert_eq!(state.characters.len(), 3);
+        let robber = 0;
+        let cop_a = 1;
+        let cop_b = 2;
+        state.characters[robber].set_vertex_no_dist_update(0, POSITIONS);
+        state.characters[cop_a].set_vertex_no_dist_update(1, POSITIONS);
+        state.characters[cop_b].set_vertex_no_dist_update(2, POSITIONS);
+
+        state.init_robber_energy = 1312;
+        state.robber_energy_params = bf::EnergyParams {
+            energy_per_step: 10,
+            allowance: 15,
+            bank_capacity: 5,
+        };
+        state.robber_rules = bf::DynRobberRules::Energy(state.robber_energy_params);
+        state.cop_rules = bf::DynCopRules::Eager;
+
+        fn apply_step_assert_energy(state: &mut State, step: (usize, usize), energy: usize) {
+            state.future_moves.push(step);
+            state.redo_move_without_update(POSITIONS);
+            assert_eq!(state.curr_robber_energy(), energy);
+        }
+
+        assert_eq!(state.curr_robber_energy(), 1312);
+
+        apply_step_assert_energy(&mut state, (cop_a, 2), 5);
+        apply_step_assert_energy(&mut state, (cop_b, 2), 20);
+
+        assert_eq!(state.characters[robber].vertex(), 0);
+        apply_step_assert_energy(&mut state, (robber, 0), 5);
+
+        apply_step_assert_energy(&mut state, (cop_b, 1), 5);
+        apply_step_assert_energy(&mut state, (cop_a, 2), 20);
+
+        apply_step_assert_energy(&mut state, (robber, 1), 10);
+        apply_step_assert_energy(&mut state, (robber, 2), 0);
+
+        apply_step_assert_energy(&mut state, (cop_b, 1), 0);
+        // we don't differenitate which cop moved in the robber energy computation.
+        apply_step_assert_energy(&mut state, (cop_b, 1), 15);
+
+        assert_eq!(state.characters[robber].vertex(), 2);
+        apply_step_assert_energy(&mut state, (robber, 2), 5);
+
+        state.cop_rules = bf::DynCopRules::Lazy;
+        state.forget_move_history();
+        state.characters[robber].set_vertex_no_dist_update(0, POSITIONS);
+        state.characters[cop_a].set_vertex_no_dist_update(1, POSITIONS);
+        state.characters[cop_b].set_vertex_no_dist_update(2, POSITIONS);
+
+        assert_eq!(state.curr_robber_energy(), 1312);
+
+        apply_step_assert_energy(&mut state, (cop_a, 7), 20);
+        state.init_robber_energy = 3;
+        assert_eq!(state.curr_robber_energy(), 18);
+        apply_step_assert_energy(&mut state, (robber, 3), 8);
+        // this is an illegal move: the robber has less than energy_per_step units left.
+        apply_step_assert_energy(&mut state, (robber, 2), 0);
+        apply_step_assert_energy(&mut state, (cop_b, 6), 15);
     }
 }
