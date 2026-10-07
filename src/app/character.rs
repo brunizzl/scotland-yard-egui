@@ -1543,7 +1543,7 @@ impl State {
         let params = self.energy_params();
         let mut bank = self.init_robber_energy;
         let mut who_moved_where = self.who_moved_where().peekable();
-        let mut robber_v = usize::MAX;
+        let mut robber_v = self.active_robber().map_or(0, |r| r.past_vertices[0]);
         while who_moved_where.peek().is_some() {
             bank = usize::min(bank, params.bank_capacity);
             while let Some((Id::Cop(_), _)) = who_moved_where.peek() {
