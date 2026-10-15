@@ -1116,18 +1116,18 @@ impl State {
                     self.robber_fog_params = *params;
                 },
                 bf::DynRobberRules::Energy(params) => {
-                    add_drag_value(ui, &mut params.energy_per_step, "denominator 💧", 1..=100, 1)
+                    add_drag_value(ui, &mut params.energy_per_step, "denominator 💧", 1..=1000, 1)
                         .name_label
                         .on_hover_text("required number of energy units to cross a single edge");
 
-                    add_drag_value(ui, &mut params.allowance, "allowance ⛽ (a)", 1..=100, 1)
+                    add_drag_value(ui, &mut params.allowance, "allowance ⛽ (a)", 1..=1000, 1)
                         .name_label
                         .on_hover_text(
                             "charge rate (allowance): number of energy units newly recieved each round",
                         );
 
                     let capacity = &mut params.bank_capacity;
-                    add_drag_value(ui, capacity, "capacity 🍺 (c)", 0..=100, 1)
+                    add_drag_value(ui, capacity, "capacity 🍺 (c)", 0..=254, 1)
                         .name_label
                         .on_hover_text(
                             "the maximum ammount of energy that can be carried over a round boundary",
