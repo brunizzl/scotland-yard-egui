@@ -568,7 +568,7 @@ where
         for (autos_prev_to_repr, prev_cops_repr) in
             rules.cop_moves_from(&cop_states, &edges, &sym, curr_cop_positions)
         {
-            let mut neigh_time_changed = false;
+            let mut prev_time_changed = false;
             for auto_prev_to_repr in autos_prev_to_repr {
                 for (v, prev_time) in izip!(
                     auto_prev_to_repr.backward(),
@@ -578,12 +578,12 @@ where
                     if *prev_time > to_curr_time {
                         debug_assert_eq!(*prev_time, INF_TIME);
                         debug_assert_eq!(to_curr_time, queue.curr_limit() - 1);
-                        neigh_time_changed = true;
+                        prev_time_changed = true;
                         *prev_time = to_curr_time;
                     }
                 }
             }
-            if neigh_time_changed {
+            if prev_time_changed {
                 queue.push(prev_cops_repr);
             }
         }
