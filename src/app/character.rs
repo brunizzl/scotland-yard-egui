@@ -736,7 +736,7 @@ impl State {
 
         let curr_bank = self.maybe_curr_robber_energy();
         let curr_nr_rounds_left = strat.time_for(cops_rs, curr_bank.unwrap_or(0), robber_v);
-        if matches!(curr_nr_rounds_left, 0 | bf::UTime::MAX) {
+        if matches!(curr_nr_rounds_left, 0 | bf::INF_TIME) {
             return None;
         }
 

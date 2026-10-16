@@ -346,6 +346,7 @@ pub fn verify_continuity_robber(
 }
 
 pub type UTime = u8;
+pub const INF_TIME: UTime = UTime::MAX;
 
 /// for each cop configuration in [`CopStates`] this struct stores for each map vertex,
 /// how many more moves the police need at most to catch the robber.
@@ -364,7 +365,7 @@ impl TimeToWin {
 
             let mut data = Vec::new();
             data.try_reserve(nr_entries).ok()?;
-            data.resize(nr_entries, UTime::MAX);
+            data.resize(nr_entries, INF_TIME);
             let old = time.insert(fst_index, data);
             debug_assert!(old.is_none());
         }
@@ -535,7 +536,7 @@ where
     let nr_map_vertices = edges.nr_vertices();
     //if the current game state has cop configuration `curr`, this contains the time for cops to win
     //for each possible robber position, given that the cops move to `curr`.
-    let mut times_should_cops_move_to_curr = vec![UTime::MAX; nr_map_vertices];
+    let mut times_should_cops_move_to_curr = vec![INF_TIME; nr_map_vertices];
 
     let mut time_until_log_refresh: usize = 1;
     while let Some(curr_cop_positions) = queue.pop() {
@@ -545,7 +546,7 @@ where
                 "compute cop strategy:\n{:.2}% in queue ({}), max {}",
                 100.0 * (queue.len() as f32) / (cop_states.nr_states() as f32),
                 queue.len(),
-                queue.curr_max()
+                queue.curr_limit()
             ))?;
             time_until_log_refresh = 2000;
         }
@@ -575,7 +576,8 @@ where
                 ) {
                     let to_curr_time = times_should_cops_move_to_curr[v];
                     if *prev_time > to_curr_time {
-                        debug_assert!(to_curr_time < queue.curr_max());
+                        debug_assert_eq!(*prev_time, INF_TIME);
+                        debug_assert_eq!(to_curr_time, queue.curr_limit() - 1);
                         neigh_time_changed = true;
                         *prev_time = to_curr_time;
                     }
@@ -592,7 +594,7 @@ where
     let mut cops_win = true;
     for vals in time_to_win.time.values() {
         for &val in vals {
-            if val == UTime::MAX {
+            if val == INF_TIME {
                 cops_win = false;
             } else if val > max_moves {
                 max_moves = val;
@@ -638,7 +640,7 @@ fn verify_continuity_cops(
     let log_refresh_interval = (nr_configs / 10_000).clamp(1000, 100_000);
 
     let nr_map_vertices = data.cop_moves.nr_map_vertices();
-    let mut max_rounds_left_cops_to_neigh = vec![UTime::MAX; nr_map_vertices];
+    let mut max_rounds_left_cops_to_neigh = vec![INF_TIME; nr_map_vertices];
     let mut found_move = vec![false; nr_map_vertices];
     for cops_index in data.cop_moves.all_positions() {
         let cops = data.cop_moves.eager_unpack(cops_index);

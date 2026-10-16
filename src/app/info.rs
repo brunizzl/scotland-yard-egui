@@ -1894,7 +1894,7 @@ impl Info {
                     && let Some(cops) = self.characters.raw_cops()
                 {
                     let bank = self.characters.maybe_curr_robber_energy().unwrap_or(0);
-                    let show = |&m: &_| m != bf::UTime::MAX;
+                    let show = |&m: &_| m != bf::INF_TIME;
                     draw!(strat.times_for(cops, bank), show);
                 }
             },
@@ -1914,7 +1914,7 @@ impl Info {
 
                         if vis && let Some(rem_energy) = remaining_energy {
                             let ttl_sym = match strat.time_for(cops, rem_energy, v) {
-                                bf::UTime::MAX => "♾️".to_string(),
+                                bf::INF_TIME => "♾️".to_string(),
                                 ttl => ttl.to_string(),
                             };
                             draw_text_at(pos, ttl_sym);
@@ -1927,7 +1927,7 @@ impl Info {
                 if let Some(strat) = self.worker.energy_strat_for(&game_type)
                     && let Some(cops) = self.characters.raw_cops()
                 {
-                    let show = |&m: &_| m != bf::UEnergy::MAX;
+                    let show = |&m: &_| m != bf::INF_ENERGY;
                     draw!(strat.safe_vertex_energies(cops), show);
                 }
             },

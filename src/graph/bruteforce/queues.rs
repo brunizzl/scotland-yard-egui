@@ -172,7 +172,7 @@ enum InQueue {
 pub struct CopStratQueue {
     queue: VecDeque<CompactCopsIndex>,
     status: BTreeMap<usize, Vec<InQueue>>,
-    curr_max_nr_moves: UTime,
+    curr_too_many_moves: UTime,
 }
 
 impl CopStratQueue {
@@ -194,7 +194,7 @@ impl CopStratQueue {
         Some(Self {
             queue,
             status: contained,
-            curr_max_nr_moves: 1,
+            curr_too_many_moves: 1,
         })
     }
 
@@ -234,7 +234,7 @@ impl CopStratQueue {
         }
     }
 
-    fn pop_and_mark_popped(&mut self) -> Option<CompactCopsIndex> {
+    fn pop_in_this_round(&mut self) -> Option<CompactCopsIndex> {
         let res = self.queue.pop_front();
         if let Some(entry) = res {
             let entry_status = self.status_mut_of(entry);
@@ -248,10 +248,10 @@ impl CopStratQueue {
     }
 
     pub fn pop(&mut self) -> Option<CompactCopsIndex> {
-        if let Some(entry) = self.pop_and_mark_popped() {
+        if let Some(entry) = self.pop_in_this_round() {
             return Some(entry);
         }
-        self.curr_max_nr_moves += 1;
+        self.curr_too_many_moves += 1;
         for (&fst_index, part) in &mut self.status {
             for (rest_index, entry_status) in part.iter_mut().enumerate() {
                 if *entry_status == InQueue::NoAndAtMax {
@@ -263,20 +263,20 @@ impl CopStratQueue {
                 }
             }
         }
-        self.pop_and_mark_popped()
+        self.pop_in_this_round()
     }
 
     pub fn len(&self) -> usize {
         self.queue.len()
     }
 
-    pub fn curr_max(&self) -> UTime {
-        self.curr_max_nr_moves
+    pub fn curr_limit(&self) -> UTime {
+        self.curr_too_many_moves
     }
 
-    /// a value of [`UTime`] can have to logical states. either [`UTime::MAX`], representing infinity,
+    /// a value of [`UTime`] can have to logical states. either [`INF_TIME`], representing infinity,
     /// or any other value, representing that value.
-    /// due to complexity reasons, we only want to consider finite times up to [`Self::curr_max`].
+    /// due to complexity reasons, we only want to consider finite times up to [`Self::curr_limit`].
     /// this function thus tries to add 1 to the passed `time` with two failure modes.
     /// - either adding 1 to a finite value creates "infinity", which is a hard error and results in [`Err`].
     /// - or adding 1 creates the maximum value we can currently handle, which is a soft error
@@ -286,15 +286,15 @@ impl CopStratQueue {
     /// if this is the case, the caller must call [`Self::mark_as_at_max`].
     #[inline(always)]
     pub fn clamp_successor(&self, time: UTime) -> Result<(UTime, bool), String> {
-        debug_assert!(time < self.curr_max() || time == UTime::MAX);
-        if time == UTime::MAX - 1 {
+        debug_assert!(time < self.curr_limit() || time == INF_TIME);
+        if time == INF_TIME - 1 {
             let name = std::any::type_name::<UTime>();
             return Err(format!("cops require more moves than fit into {name}"));
         }
         let new_raw = time.saturating_add(1);
-        let at_max = new_raw == self.curr_max();
-        let clamped = if at_max { UTime::MAX } else { new_raw };
-        Ok((clamped, at_max))
+        let at_limit = new_raw == self.curr_limit();
+        let clamped = if at_limit { INF_TIME } else { new_raw };
+        Ok((clamped, at_limit))
     }
 }
 
