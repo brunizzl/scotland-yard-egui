@@ -596,13 +596,13 @@ type USteps = UTime;
 const INF_STEPS: USteps = USteps::MAX;
 /// this is stored per vertex.
 #[derive(Clone, Copy)]
-struct BestRobberMove {
+struct RobberMove {
     /// to vertex of what time to live can robber go in this round from current vertex
     time_to_live: UTime,
     /// how far away is the reachable vertex of highest time to live
     nr_steps: USteps,
 }
-impl BestRobberMove {
+impl RobberMove {
     const fn new(time_to_live: UTime, nr_steps: USteps) -> Self {
         Self { time_to_live, nr_steps }
     }
@@ -610,21 +610,24 @@ impl BestRobberMove {
 
 /// keeps all memory required to compute the (relevant parameters of) an ideal robber move for each vertex.
 /// inputs are a given assignment of time to live to each vertex and a maximum number of robber steps allowed in the current move.
-struct BatchedBestRobberMoves {
-    data: Vec<BestRobberMove>,
+/// the work is done by [`Self::compute`]. this is a struct and not just a fuction to only allocate once.
+struct BatchedRobberMoves {
+    /// one entry per vertex. contains the currently best known robber move.
+    /// the value may change multiple times for each vertex in [`Self::compute`].
+    data: Vec<RobberMove>,
     queue: std::collections::VecDeque<usize>,
     /// contains the range `0..nr_map_vertices` in unspecified order.
     vertices: Vec<usize>,
 }
 
-impl BatchedBestRobberMoves {
+impl BatchedRobberMoves {
     fn new(nr_map_vertices: usize, ps: EnergyParams) -> Result<Self, String> {
         if (ps.bank_capacity + ps.allowance) / ps.energy_per_step >= INF_STEPS as usize {
             let msg = format!("robber may only do fewer than {INF_STEPS} steps per round");
             return Err(msg);
         }
         Ok(Self {
-            data: vec![BestRobberMove::new(0, INF_STEPS); nr_map_vertices],
+            data: vec![RobberMove::new(0, INF_STEPS); nr_map_vertices],
             queue: std::collections::VecDeque::new(),
             vertices: (0..nr_map_vertices).collect_vec(),
         })
@@ -632,22 +635,20 @@ impl BatchedBestRobberMoves {
 
     /// parameter `update` is called for every possible move the robber has.
     /// this means in particular, that the same vertex can be updated many times.
-    /// arguments of `update` are the vertex that is updated, together with what the robbers move to get there was.
-    /// assumes every entry in curr_times to be either [`INF_TIME`] or strictly less than `max_ttl`.
-    fn compute(
+    /// arguments of `update` are the vertex that is updated, together with an
+    /// option for a move the robber has starting from this vertex.
+    fn compute_moves_to(
         &mut self,
         edges: &EdgeList,
         curr_cops: &RawCops,
         curr_times: &[UTime],
         max_robber_steps: usize,
-        ttl_limit: UTime,
-        mut update: impl FnMut(usize, BestRobberMove),
+        mut update: impl FnMut(usize, RobberMove),
     ) {
         debug_assert_eq!(edges.nr_vertices(), self.data.len());
         debug_assert_eq!(edges.nr_vertices(), self.vertices.len());
         debug_assert_eq!(edges.nr_vertices(), curr_times.len());
-        debug_assert!(curr_times.iter().all(|&ttl| ttl < ttl_limit || ttl == INF_TIME));
-        self.data.fill(BestRobberMove::new(0, INF_STEPS));
+        self.data.fill(RobberMove::new(0, INF_STEPS));
 
         self.vertices.sort_by_key(|&v| curr_times[v]);
         let ttl_chunks = self.vertices.iter().chunk_by(|&&v| curr_times[v]);
@@ -655,38 +656,37 @@ impl BatchedBestRobberMoves {
         // we spread each time-to-live to all reachable vertices.
         // by doing this with increasing ttl's, we ensure the lower ttl's where already spread
         // when spreading the current one above them.
+        debug_assert_eq!(curr_times[self.vertices[0]], 0);
         for (time_to_live, vertices_with_ttl) in ttl_chunks.into_iter().dropping(1) {
             debug_assert!(time_to_live > 0);
-            debug_assert!(time_to_live < ttl_limit || time_to_live == INF_TIME);
             {
                 debug_assert!(self.queue.is_empty());
-                let stand_still = BestRobberMove { time_to_live, nr_steps: 0 };
+                let stand_still = RobberMove { time_to_live, nr_steps: 0 };
                 for &v in vertices_with_ttl {
+                    debug_assert_eq!(time_to_live, curr_times[v]);
                     update(v, stand_still);
                     self.data[v] = stand_still;
                     self.queue.push_back(v);
                 }
             }
             while let Some(v) = self.queue.pop_front() {
-                let at_v = &self.data[v];
+                let at_v = self.data[v];
                 debug_assert_eq!(at_v.time_to_live, time_to_live);
                 debug_assert!((at_v.nr_steps as usize) < max_robber_steps);
                 let neigh_steps = at_v.nr_steps + 1;
-                let neigh_move = BestRobberMove::new(time_to_live, neigh_steps);
-                for neigh_v in edges.neighbors_of(v) {
-                    if curr_cops.contains(&neigh_v) {
-                        // don't allow robber to walk through cops.
-                        continue;
-                    }
-                    let neigh = &self.data[neigh_v];
-                    debug_assert!(neigh.time_to_live <= time_to_live);
-                    if neigh.time_to_live < time_to_live
-                        || (neigh.time_to_live == time_to_live && neigh.nr_steps > neigh_steps)
-                    {
-                        update(neigh_v, neigh_move);
-                        self.data[neigh_v] = neigh_move;
+                let to_v = RobberMove::new(time_to_live, neigh_steps);
+
+                // don't allow robber to walk through cops -> skip cop positions
+                for n in edges.neighbors_of(v).filter(|n| !curr_cops.contains(n)) {
+                    let at_n = self.data[n];
+                    // self.data is initialised with 0. we write the "stand still"
+                    // time only, when this becomes the currently iterated time_to_live.
+                    debug_assert!(at_n.time_to_live <= time_to_live);
+                    if at_n.time_to_live < time_to_live || at_n.nr_steps > neigh_steps {
+                        update(n, to_v);
+                        self.data[n] = to_v;
                         if (neigh_steps as usize) < max_robber_steps {
-                            self.queue.push_back(neigh_v);
+                            self.queue.push_back(n);
                         }
                     }
                 }
@@ -737,7 +737,7 @@ where
     // local variable used deep down in the big loop.
     // initialised here to check the preconditions before more complex things are build.
     // initialised outside any loop, because this is only it's own type to recycle heap memory.
-    let mut best_robber_moves = BatchedBestRobberMoves::new(nr_map_vertices, params)?;
+    let mut robber_moves = BatchedRobberMoves::new(nr_map_vertices, params)?;
 
     manager.update("list cop positions")?;
     let cop_states = CopStates::new(&edges, &sym, nr_cops, manager)?;
@@ -818,7 +818,7 @@ where
             let curr_cops = cop_states.eager_unpack(curr_cop_positions);
             for (curr_balance, time_to_live) in izip!(0.., &times_to_live) {
                 let max_robber_steps = (bank_capacity + allowance - curr_balance) / energy_per_step;
-                let update = |v: usize, robber_move: BestRobberMove| {
+                let update = |v: usize, robber_move: RobberMove| {
                     debug_assert!(robber_move.nr_steps as usize <= max_robber_steps);
 
                     let used_energy = robber_move.nr_steps as usize * energy_per_step;
@@ -826,12 +826,11 @@ where
                     let entry = &mut times_should_cops_move_to_curr[prev_balance][v];
                     *entry = UTime::max(*entry, robber_move.time_to_live);
                 };
-                best_robber_moves.compute(
+                robber_moves.compute_moves_to(
                     &edges,
                     &curr_cops,
                     &time_to_live[curr_cop_positions],
                     max_robber_steps,
-                    queue.curr_limit(),
                     update,
                 );
             }
@@ -847,8 +846,10 @@ where
                     *long_ttl = UTime::max(*short_ttl, *long_ttl);
                 }
             }
-        }
-        {
+
+            // times_should_cops_move_to_curr takes place one round earlier than the current one,
+            // but so far we have "smeared" times_to_live[curr_cop_positions] into it.
+            // -> increase every time by 1, as the robber had one more round to live back then.
             let mut curr_is_at_max = false;
             for time_to_curr in &mut times_should_cops_move_to_curr {
                 for ttl in time_to_curr.iter_mut() {
