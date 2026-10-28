@@ -1022,9 +1022,165 @@ impl Embedding3D {
         }
     }
 
+    /// turns self into a graph that we assume inshallah to be cleanable by one
+    /// visibility-1 cleaner from speed-1 fog iff the orinal graph has a hamilton path between `ends`.
+    /// see [`shape::BuildStep::FogTestHamPath`] or [`shape::BuildStep::FogTestIsGonnected`], which
+    /// ends the construction a bit earlier, turning the test for the hamiltion path into a test if the graph is connected.
+    /// note: a shortest route will still walk a hamilton path if it exists.
+    fn tranform_to_fog_hamilton_path_test_sym(
+        &mut self,
+        ends: Option<[usize; 2]>,
+        visibility: usize,
+    ) {
+        if self.positions().is_empty() {
+            return;
+        }
+        // most edges the cleaner doesn't cross are subdivided into this many parts.
+        let nr_subdivs = visibility.saturating_sub(1);
+
+        let og_nr_vertices = self.nr_vertices();
+
+        // (assuming visibility == 1), the fuse has twice the length of the original nr of vertices,
+        // as the expected clearing route alternates between original vertices and edge_vertices.
+        let fuse_len = 2 * og_nr_vertices + 1 + nr_subdivs;
+
+        let (copies_off, (zs_pos, zt_pos), (s_pos, t_pos), fuse_start, fuse_step) = {
+            let mut og_bounding_box = egui::Rect::NOTHING;
+            for pos in self.positions() {
+                og_bounding_box.extend_with(pos.xy());
+            }
+            // let the region stretch a bit beyond the extreme vertices
+            let size = f32::max(og_bounding_box.width(), og_bounding_box.height());
+            og_bounding_box = og_bounding_box.expand(size / 4.0);
+
+            let og_center = Pos3::from_xy_z(og_bounding_box.center(), Z_OFFSET_2D);
+            let egui::Vec2 { x: dx, y: dy } = og_bounding_box.size();
+            let copies_off = Vec3::new(0.0, -dy, 0.0);
+            let zs_pos = og_center + Vec3::new(-1.2 * dx, -dy * 0.5, 0.0);
+            let zt_pos = og_center + Vec3::new(1.2 * dx, -dy * 0.5, 0.0);
+            let s_pos = og_center + Vec3::new(-0.6 * dx, 0.0, 0.0);
+            let t_pos = og_center + Vec3::new(0.6 * dx, 0.0, 0.0);
+            let fuse_start = og_center + Vec3::new(-dx, 1.5 * dy, 0.0);
+            let fuse_step = Vec3::new(dx / (fuse_len as f32) * 2.0, 0.0, 0.0);
+            (
+                copies_off,
+                (zs_pos, zt_pos),
+                (s_pos, t_pos),
+                fuse_start,
+                fuse_step,
+            )
+        };
+
+        let s = self.add_vertex(s_pos);
+        let t = self.add_vertex(t_pos);
+
+        if let Some([u, v]) = ends {
+            self.edges.add_edge(s, u);
+            self.edges.add_edge(t, v);
+        } else {
+            // s and t are connected to every original vertex
+            for v in 0..og_nr_vertices {
+                self.edges.add_edge(v, s);
+                self.edges.add_edge(v, t);
+            }
+        }
+
+        // add a copy for every original vertex and for s and t
+        let vertex_vertices = (0..og_nr_vertices)
+            .map(|v| self.add_vertex(self.positions()[v] + copies_off))
+            .collect_vec();
+
+        let (s_edge_vertices, t_edge_vertices, og_edge_vertices) = {
+            let mut s_edge_vertices = Vec::new();
+            let mut t_edge_vertices = Vec::new();
+            let mut og_edge_vertices = Vec::new();
+            let pre_subdiv_edges = self.edges.clone();
+            pre_subdiv_edges.for_each_edge(|u, v| {
+                self.edges.remove_edge(u, v);
+                let edge_v_pos = Pos3::average([self.vertices[u], self.vertices[v]]);
+                let edge_v = self.add_vertex(edge_v_pos);
+                self.edges.add_edge(u, edge_v);
+                self.edges.add_edge(v, edge_v);
+
+                (if [u, v].contains(&s) {
+                    &mut s_edge_vertices
+                } else if [u, v].contains(&t) {
+                    &mut t_edge_vertices
+                } else {
+                    &mut og_edge_vertices
+                })
+                .push(edge_v);
+            });
+
+            (s_edge_vertices, t_edge_vertices, og_edge_vertices)
+        };
+
+        // connect the vertex copies to the original vertices and to s and t
+        for (og_v, &copy_v) in izip!(0..(og_nr_vertices + 2), &vertex_vertices) {
+            self.edges.add_edge(og_v, copy_v);
+        }
+
+        // turn original vertices into a clique (except the clique edges may be subdivided)
+        for [u, v] in (0..(og_nr_vertices + 2)).array_combinations() {
+            self.add_subdivided_edge(u, v, nr_subdivs);
+        }
+
+        let zs = self.add_vertex(zs_pos);
+        let zt = self.add_vertex(zt_pos);
+
+        for &v in s_edge_vertices
+            .iter()
+            .chain(og_edge_vertices.iter())
+            .chain(vertex_vertices.iter())
+        {
+            self.add_subdivided_edge(v, zt, nr_subdivs);
+        }
+        for &v in t_edge_vertices
+            .iter()
+            .chain(og_edge_vertices.iter())
+            .chain(vertex_vertices.iter())
+        {
+            self.add_subdivided_edge(v, zs, nr_subdivs);
+        }
+
+        let fuse = (0..fuse_len)
+            .map(|i| self.add_vertex(fuse_start + (i as f32) * fuse_step))
+            .collect_vec();
+        self.edges.add_path_edges(fuse.iter().copied());
+
+        // the fuse is connected to fuse_watcher to allow clearing.
+        // only the ends however are connected directly, to guarantee that clearing takes time.
+        if let [fuse_start, fuse_inner @ .., fuse_end] = &fuse[..] {
+            self.add_subdivided_edge(*fuse_start, s, nr_subdivs);
+            self.add_subdivided_edge(*fuse_end, t, nr_subdivs);
+            self.add_subdivided_edge(*fuse_start, t, nr_subdivs);
+            self.add_subdivided_edge(*fuse_end, s, nr_subdivs);
+
+            self.edges.add_edge(*fuse_start, zs);
+            self.edges.add_edge(*fuse_end, zt);
+
+            for (&inner_left, &inner_right) in fuse_inner.iter().tuple_windows() {
+                let lpos = self.positions()[inner_left];
+                let rpos = self.positions()[inner_right];
+                // connector connects to two consecutive fuse vertices and to fuse_watcher.
+                // this way the fuse can be cleared by alternating between fuse_watcher and the
+                // connector vertices.
+                // note that this only works, because fuse_start and fuse_end are connected to
+                // fuse_watcher directly, thereby guaranteeing no seepage from the ends.
+                let connector_pos =
+                    Pos3::average([Pos3::average([s_pos, t_pos]), lpos, lpos, rpos, rpos]);
+                let connector = self.add_vertex(connector_pos);
+                self.add_subdivided_edge(connector, s, nr_subdivs);
+                self.add_subdivided_edge(connector, t, nr_subdivs);
+                self.edges.add_edge(connector, inner_left);
+                self.edges.add_edge(connector, inner_right);
+            }
+        }
+    }
+
     /// note: this function will not update [`Self::shape`]. this must be done separately.
     pub fn extend_custom(&mut self, steps: &[shape::BuildStep]) {
-        use shape::BuildStep;
+        use shape::{BuildStep, HamTestVersion};
         for step in steps {
             let mut add_edge_between = |v1: usize, v2: usize| {
                 if v1 != v2 && v1.max(v2) < self.nr_vertices() && !self.edges.has_edge(v1, v2) {
@@ -1032,8 +1188,11 @@ impl Embedding3D {
                 }
             };
             match step {
-                &BuildStep::FogTestHamPath(ends, vis) => {
+                &BuildStep::FogTestHamPath(ends, vis, HamTestVersion::Classic) => {
                     self.tranform_to_fog_hamilton_path_test(ends, true, vis);
+                },
+                &BuildStep::FogTestHamPath(ends, vis, HamTestVersion::Symmetric) => {
+                    self.tranform_to_fog_hamilton_path_test_sym(ends, vis);
                 },
                 BuildStep::FogTestIsGonnected => {
                     self.tranform_to_fog_hamilton_path_test(None, false, 1);

@@ -13,6 +13,21 @@ pub fn custom_to_float([x, y, z]: [i32; 3]) -> [f32; 3] {
     [downscale(x), downscale(y), downscale(z)]
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Default)]
+pub enum HamTestVersion {
+    #[default]
+    Classic,
+    Symmetric,
+}
+impl HamTestVersion {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Classic => "HamTest",
+            Self::Symmetric => "SymHamTest",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum BuildStep {
     /// distinct vertives of up to given distance become neighbors
@@ -46,15 +61,17 @@ pub enum BuildStep {
     /// visibility-1 cleaner iff the original graph has a hamilton path between the optonally given vertices.
     /// leaving the first argument empty builds everything except the final two edges, thereby leaving this part configurable.
     /// the second argument is the visibility of the cleaner. note that 0 is forbidden, so we bump 0 to 1.
-    FogTestHamPath(Option<[usize; 2]>, #[serde(default)] usize),
+    FogTestHamPath(
+        Option<[usize; 2]>,
+        #[serde(default)] usize,
+        #[serde(default)] HamTestVersion,
+    ),
 }
 
 /// operator that separates first and last element of a sequence of consecutive integers.
 const SEQUENCE_SEP: &str = "..=";
 /// name of [`BuildStep::FogTestIsGonnected`]
 const FOG_TEST_IS_CONNECTED_NAME: &str = "ZsgTest";
-/// name of [`BuildStep::FogTestHamPath`]
-const FOG_TEST_HAM_PATH_NAME: &str = "HamTest";
 
 impl BuildStep {
     pub const EXPLAINER: &str = "\
@@ -64,7 +81,8 @@ impl BuildStep {
             note that indices must be in order and no index skipped.\n\
         E<u>,<v>: edge between vertices with indices <u> and <v>.\n\
         K(<X>)(<Y>): all edges between sequences <X> and <Y>\n\
-        HamTest<u>,<v>: (new is 1-cleanable) <=> (<u>-<v> hamilton path in old)\n\n\
+        HamTest<u>,<v>: (new is 1-cleanable) <=> (<u>-<v> hamilton path in old)\n\
+        SymHamTest: (new is 1-cleanable) <=> (hamilton path in old)\n\n\
         a sequence has the form <a1>, ..., <an> and is made up of indices.\n\
         ALSO CONSIDER MOUSE TOOLS [±v] AND [±e]\
         ";
@@ -128,11 +146,14 @@ impl std::fmt::Display for BuildStep {
                 write_sequence(f, xs)
             },
             Self::FogTestIsGonnected => write!(f, "{FOG_TEST_IS_CONNECTED_NAME}"),
-            Self::FogTestHamPath(None, 0) => write!(f, "{FOG_TEST_HAM_PATH_NAME}"),
-            Self::FogTestHamPath(None, vis) => write!(f, "{FOG_TEST_HAM_PATH_NAME}({vis})"),
-            Self::FogTestHamPath(Some([a, b]), 0) => write!(f, "{FOG_TEST_HAM_PATH_NAME}{a},{b}"),
-            Self::FogTestHamPath(Some([a, b]), vis) => {
-                write!(f, "{FOG_TEST_HAM_PATH_NAME}{a},{b}({vis})")
+            Self::FogTestHamPath(ends, vis, version) => {
+                let name = version.name();
+                let ends_txt = ends.map(|[a, b]| format!("{a},{b}")).unwrap_or_default();
+                let vis_txt = match vis {
+                    0 => String::new(),
+                    v => format!("({v})"),
+                };
+                write!(f, "{name}{ends_txt}{vis_txt}")
             },
         }
     }
@@ -209,8 +230,8 @@ fn parse_steps(mut input: String, size_hint: usize) -> Vec<BuildStep> {
 
     let mut result = Vec::with_capacity(size_hint);
     while !data.is_empty() {
-        if data.starts_with(FOG_TEST_HAM_PATH_NAME) {
-            data = &data[(FOG_TEST_HAM_PATH_NAME.len())..];
+        if data.starts_with(HamTestVersion::Classic.name()) {
+            data = &data[(HamTestVersion::Classic.name().len())..];
             let ends = parse_usize(&mut data).and_then(|a| {
                 remove_comma(&mut data);
                 parse_usize(&mut data).map(|b| [a, b])
@@ -218,7 +239,25 @@ fn parse_steps(mut input: String, size_hint: usize) -> Vec<BuildStep> {
             remove_exact(&mut data, '(');
             let vis = parse_usize(&mut data).unwrap_or_default();
             remove_exact(&mut data, ')');
-            result.push(BuildStep::FogTestHamPath(ends, vis));
+            result.push(BuildStep::FogTestHamPath(
+                ends,
+                vis,
+                HamTestVersion::Classic,
+            ));
+        } else if data.starts_with(HamTestVersion::Symmetric.name()) {
+            data = &data[(HamTestVersion::Symmetric.name().len())..];
+            let ends = parse_usize(&mut data).and_then(|a| {
+                remove_comma(&mut data);
+                parse_usize(&mut data).map(|b| [a, b])
+            });
+            remove_exact(&mut data, '(');
+            let vis = parse_usize(&mut data).unwrap_or_default();
+            remove_exact(&mut data, ')');
+            result.push(BuildStep::FogTestHamPath(
+                ends,
+                vis,
+                HamTestVersion::Symmetric,
+            ));
         } else if data.starts_with(FOG_TEST_IS_CONNECTED_NAME) {
             data = &data[(FOG_TEST_IS_CONNECTED_NAME.len())..];
             result.push(BuildStep::FogTestIsGonnected);

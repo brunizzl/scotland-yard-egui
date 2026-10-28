@@ -223,7 +223,7 @@ fn compute_fog_strategy_impl<R: CopRules, Q: Queue<QueueEntry> + Default>(
     let mut queue = Q::default();
 
     // enters an initial state into both states and queue.
-    let add_initial = |unpacked: &[usize], states: &mut States, queue: &mut Q| {
+    let add_initial = |unpacked: &RawCleaners, states: &mut States, queue: &mut Q| {
         let cleaners = PackedCleaners::from_raw(nr_vertices, unpacked);
         let fog = Fog::new_initial(unpacked, &visible);
         queue.push(QueueEntry { fog: fog.clone(), cleaners });

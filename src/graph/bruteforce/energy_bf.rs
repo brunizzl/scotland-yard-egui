@@ -715,8 +715,8 @@ impl SmearedTimes {
         })
     }
 
-    /// for each balance, returns values of each vertex
-    fn iter_by_balance(&self) -> std::slice::Chunks<'_, UTime> {
+    /// for each balance, returns value of each vertex
+    fn iter(&self) -> std::slice::Chunks<'_, UTime> {
         self.flat.chunks(self.nr_map_vertices)
     }
 
@@ -927,10 +927,9 @@ where
             // this structure is the same as in the standard alrorithm.
             let mut prev_time_changed = false;
             for auto_prev_to_repr in autos_prev_to_repr {
-                for (time_to_curr, time_to_live) in izip!(
-                    times_if_cops_move_to_curr.iter_by_balance(),
-                    &mut times_to_live
-                ) {
+                for (time_to_curr, time_to_live) in
+                    izip!(times_if_cops_move_to_curr.iter(), &mut times_to_live)
+                {
                     for (v, prev_time) in izip!(
                         auto_prev_to_repr.backward(),
                         &mut time_to_live[prev_cops_repr_index]
