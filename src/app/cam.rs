@@ -59,10 +59,10 @@ impl Camera3D {
 
     pub fn update_to_screen(&mut self, screen: Rect) {
         //it is important to use the current zoom to compute the influence of self.position,
-        //not the zoom of the last frame. thus we never read the last self.to_streen.
+        //not the zoom of the last frame. thus we never read the last self.to_screen.
         let scale_rect = {
             let ratio = screen.aspect_ratio();
-            //shapes are centered around zero, with extreme vertices having length 1.0
+            //shapes are centered around zero, with extreme vertices having distance 1.0
             let mut from_size = Vec2::splat(2.05 / self.zoom);
             if ratio < 1.0 {
                 from_size.y /= ratio;

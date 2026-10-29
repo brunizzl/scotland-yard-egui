@@ -26,6 +26,15 @@ impl HamTestVersion {
             Self::Symmetric => "SymHamTest",
         }
     }
+    fn remove_name(data: &mut &str) -> Option<Self> {
+        for this in [Self::Classic, Self::Symmetric] {
+            if data.starts_with(this.name()) {
+                *data = &data[(this.name().len())..];
+                return Some(this);
+            }
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -230,8 +239,7 @@ fn parse_steps(mut input: String, size_hint: usize) -> Vec<BuildStep> {
 
     let mut result = Vec::with_capacity(size_hint);
     while !data.is_empty() {
-        if data.starts_with(HamTestVersion::Classic.name()) {
-            data = &data[(HamTestVersion::Classic.name().len())..];
+        if let Some(ver) = HamTestVersion::remove_name(&mut data) {
             let ends = parse_usize(&mut data).and_then(|a| {
                 remove_comma(&mut data);
                 parse_usize(&mut data).map(|b| [a, b])
@@ -239,25 +247,7 @@ fn parse_steps(mut input: String, size_hint: usize) -> Vec<BuildStep> {
             remove_exact(&mut data, '(');
             let vis = parse_usize(&mut data).unwrap_or_default();
             remove_exact(&mut data, ')');
-            result.push(BuildStep::FogTestHamPath(
-                ends,
-                vis,
-                HamTestVersion::Classic,
-            ));
-        } else if data.starts_with(HamTestVersion::Symmetric.name()) {
-            data = &data[(HamTestVersion::Symmetric.name().len())..];
-            let ends = parse_usize(&mut data).and_then(|a| {
-                remove_comma(&mut data);
-                parse_usize(&mut data).map(|b| [a, b])
-            });
-            remove_exact(&mut data, '(');
-            let vis = parse_usize(&mut data).unwrap_or_default();
-            remove_exact(&mut data, ')');
-            result.push(BuildStep::FogTestHamPath(
-                ends,
-                vis,
-                HamTestVersion::Symmetric,
-            ));
+            result.push(BuildStep::FogTestHamPath(ends, vis, ver));
         } else if data.starts_with(FOG_TEST_IS_CONNECTED_NAME) {
             data = &data[(FOG_TEST_IS_CONNECTED_NAME.len())..];
             result.push(BuildStep::FogTestIsGonnected);

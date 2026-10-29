@@ -32,6 +32,11 @@ impl Vec3 {
         Self { x, y, z }
     }
 
+    #[inline(always)]
+    pub const fn from_xy(x: f32, y: f32) -> Self {
+        Self { x, y, z: 0.0 }
+    }
+
     /// set x, y, z to the given value
     #[inline(always)]
     pub const fn splat(v: f32) -> Self {

@@ -1024,9 +1024,7 @@ impl Embedding3D {
 
     /// turns self into a graph that we assume inshallah to be cleanable by one
     /// visibility-1 cleaner from speed-1 fog iff the orinal graph has a hamilton path between `ends`.
-    /// see [`shape::BuildStep::FogTestHamPath`] or [`shape::BuildStep::FogTestIsGonnected`], which
-    /// ends the construction a bit earlier, turning the test for the hamiltion path into a test if the graph is connected.
-    /// note: a shortest route will still walk a hamilton path if it exists.
+    /// see [`shape::BuildStep::FogTestHamPath`].
     fn tranform_to_fog_hamilton_path_test_sym(
         &mut self,
         ends: Option<[usize; 2]>,
@@ -1055,13 +1053,13 @@ impl Embedding3D {
 
             let og_center = Pos3::from_xy_z(og_bounding_box.center(), Z_OFFSET_2D);
             let egui::Vec2 { x: dx, y: dy } = og_bounding_box.size();
-            let copies_off = Vec3::new(0.0, -dy, 0.0);
-            let zs_pos = og_center + Vec3::new(-1.2 * dx, -dy * 0.5, 0.0);
-            let zt_pos = og_center + Vec3::new(1.2 * dx, -dy * 0.5, 0.0);
-            let s_pos = og_center + Vec3::new(-0.6 * dx, 0.0, 0.0);
-            let t_pos = og_center + Vec3::new(0.6 * dx, 0.0, 0.0);
-            let fuse_start = og_center + Vec3::new(-dx, 1.5 * dy, 0.0);
-            let fuse_step = Vec3::new(dx / (fuse_len as f32) * 2.0, 0.0, 0.0);
+            let copies_off = Vec3::from_xy(0.0, -dy);
+            let zs_pos = og_center + Vec3::from_xy(-1.2 * dx, -0.5 * dy);
+            let zt_pos = og_center + Vec3::from_xy(1.2 * dx, -0.5 * dy);
+            let s_pos = og_center + Vec3::from_xy(-0.6 * dx, 0.0);
+            let t_pos = og_center + Vec3::from_xy(0.6 * dx, 0.0);
+            let fuse_start = og_center + Vec3::from_xy(-dx, 1.5 * dy);
+            let fuse_step = Vec3::from_xy(dx / (fuse_len as f32) * 2.0, 0.0);
             (
                 copies_off,
                 (zs_pos, zt_pos),
@@ -1128,18 +1126,10 @@ impl Embedding3D {
         let zs = self.add_vertex(zs_pos);
         let zt = self.add_vertex(zt_pos);
 
-        for &v in s_edge_vertices
-            .iter()
-            .chain(og_edge_vertices.iter())
-            .chain(vertex_vertices.iter())
-        {
+        for &v in itertools::chain!(&s_edge_vertices, &og_edge_vertices, &vertex_vertices) {
             self.add_subdivided_edge(v, zt, nr_subdivs);
         }
-        for &v in t_edge_vertices
-            .iter()
-            .chain(og_edge_vertices.iter())
-            .chain(vertex_vertices.iter())
-        {
+        for &v in itertools::chain!(&t_edge_vertices, &og_edge_vertices, &vertex_vertices) {
             self.add_subdivided_edge(v, zs, nr_subdivs);
         }
 
@@ -1152,9 +1142,9 @@ impl Embedding3D {
         // only the ends however are connected directly, to guarantee that clearing takes time.
         if let [fuse_start, fuse_inner @ .., fuse_end] = &fuse[..] {
             self.add_subdivided_edge(*fuse_start, s, nr_subdivs);
-            self.add_subdivided_edge(*fuse_end, t, nr_subdivs);
             self.add_subdivided_edge(*fuse_start, t, nr_subdivs);
             self.add_subdivided_edge(*fuse_end, s, nr_subdivs);
+            self.add_subdivided_edge(*fuse_end, t, nr_subdivs);
 
             self.edges.add_edge(*fuse_start, zs);
             self.edges.add_edge(*fuse_end, zt);
@@ -1439,9 +1429,10 @@ impl Embedding3D {
         stroke: egui::Stroke,
         visible: &mut [bool],
     ) {
+        let vis_end = -0.8;
         let screen_dist = |p: Pos3| to_screen.to_plane.signed_dist(p.to_vec3());
         for (p, vis) in izip!(&self.vertices, visible.iter_mut()) {
-            *vis = screen_dist(*p) > -0.2;
+            *vis = screen_dist(*p) >= vis_end;
         }
         self.edges.for_each_edge(|v1, v2| {
             if !visible[v1] && !visible[v2] {
@@ -1452,7 +1443,7 @@ impl Embedding3D {
             let points = [to_screen.apply(p1), to_screen.apply(p2)];
 
             let p_avg = Pos3::average([p1, p2]);
-            let opacity = (screen_dist(p_avg).clamp(-0.8, 1.0) + 0.8) / 1.8;
+            let opacity = (screen_dist(p_avg).clamp(vis_end, 1.0) - vis_end) / (1.0 - vis_end);
             let mut stroke = stroke;
             stroke.color = stroke.color.gamma_multiply(opacity);
 
