@@ -1052,14 +1052,14 @@ impl Embedding3D {
             og_bounding_box = og_bounding_box.expand(size / 4.0);
 
             let og_center = Pos3::from_xy_z(og_bounding_box.center(), Z_OFFSET_2D);
-            let egui::Vec2 { x: dx, y: dy } = og_bounding_box.size();
-            let copies_off = Vec3::from_xy(0.0, -dy);
-            let zs_pos = og_center + Vec3::from_xy(-1.2 * dx, -0.5 * dy);
-            let zt_pos = og_center + Vec3::from_xy(1.2 * dx, -0.5 * dy);
-            let s_pos = og_center + Vec3::from_xy(-0.6 * dx, 0.0);
-            let t_pos = og_center + Vec3::from_xy(0.6 * dx, 0.0);
-            let fuse_start = og_center + Vec3::from_xy(-dx, 1.5 * dy);
-            let fuse_step = Vec3::from_xy(dx / (fuse_len as f32) * 2.0, 0.0);
+            let len = og_bounding_box.size().max_elem();
+            let copies_off = Vec3::from_xy(0.0, -len);
+            let zs_pos = og_center + Vec3::from_xy(-1.2 * len, -0.5 * len);
+            let zt_pos = og_center + Vec3::from_xy(1.2 * len, -0.5 * len);
+            let s_pos = og_center + Vec3::from_xy(-0.6 * len, 0.0);
+            let t_pos = og_center + Vec3::from_xy(0.6 * len, 0.0);
+            let fuse_start = og_center + Vec3::from_xy(-len, 1.5 * len);
+            let fuse_step = Vec3::from_xy(len / (fuse_len as f32) * 2.0, 0.0);
             (
                 copies_off,
                 (zs_pos, zt_pos),
@@ -1083,7 +1083,7 @@ impl Embedding3D {
             }
         }
 
-        // add a copy for every original vertex and for s and t
+        // add a copy for every original vertex
         let vertex_vertices = (0..og_nr_vertices)
             .map(|v| self.add_vertex(self.positions()[v] + copies_off))
             .collect_vec();

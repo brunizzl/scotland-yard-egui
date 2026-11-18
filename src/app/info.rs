@@ -1414,8 +1414,9 @@ impl Info {
                 };
                 match key {
                     Key::Q => {
-                        for n in 0..7 {
-                            let s = opts.last_selected_vertex_color_infos[n].name_str();
+                        let last_infos = &opts.last_selected_vertex_color_infos;
+                        for (n, info) in izip!(0.., last_infos) {
+                            let s = info.name_str();
                             if n == 0 {
                                 add_unwrapped(ui, s.to_string());
                                 ui.separator();
@@ -1425,8 +1426,9 @@ impl Info {
                         }
                     },
                     Key::W => {
-                        for n in 0..7 {
-                            let s = opts.last_selected_vertex_number_infos[n].name_str();
+                        let last_infos = &opts.last_selected_vertex_number_infos;
+                        for (n, info) in izip!(0.., last_infos) {
+                            let s = info.name_str();
                             if n == 0 {
                                 add_unwrapped(ui, s.to_string());
                                 ui.separator();
