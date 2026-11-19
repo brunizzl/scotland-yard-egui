@@ -1,6 +1,6 @@
 //! this module does the bruteforce computation part for [`crate::graph::planar3d::fog`].
 //! there are no longer two parties (cops vs robber), but just a single cleaning party.
-//! we say a graph is _m-visibility-k-clenable_, if `k` cleaners with visibility `m` have
+//! we say a graph is _m-visibility-k-cleanable_, if `k` cleaners with visibility `m` have
 //! a strategy to remove all fog. should such a strategy exist, it will be found here.
 
 use std::collections::{BinaryHeap, TryReserveError, VecDeque};
